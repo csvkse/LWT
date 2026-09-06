@@ -1,0 +1,13 @@
+bin/
+obj/
+logs/
+data/
+data-custom/
+*.user
+.vs/
+.zcode/
+node_modules/
+publish/
+*.db
+*.db-shm
+*.db-wal

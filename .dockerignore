@@ -1,0 +1,23 @@
+# 构建上下文瘦身 + 防止本地数据/凭据进入镜像。
+# 注意必须用 **/ 前缀：裸 obj/ 只匹配根目录，子项目 obj 内的 project.assets.json
+# （Windows restore 产物，含宿主 fallback 路径）混入会导致容器内 publish 失败。
+**/bin/
+**/obj/
+**/publish/
+**/logs/
+**/data/
+**/node_modules/
+*.db
+*.db-shm
+*.db-wal
+*.user
+.vs/
+.zcode/
+.git/
+tests/
+docs/
+scripts/
+deploy/
+start.bat
+README.md
+LinuxWebTool.slnx

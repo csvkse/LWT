@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- SystemStatusProvider 的 Windows 降级 P/Invoke 使用 LibraryImport 源生成，需要 unsafe -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Quartz.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="SqlSugarCore" />
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LinuxWebTool.Contracts\LinuxWebTool.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

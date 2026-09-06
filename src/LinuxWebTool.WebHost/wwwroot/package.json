@@ -1,0 +1,15 @@
+{
+  "name": "linuxwebtool-frontend",
+  "private": true,
+  "description": "LinuxWebTool 前端（零构建，devDependencies 仅用于门禁 lint）",
+  "type": "module",
+  "scripts": {
+    "gate": "node frontend-gate.cjs",
+    "lint": "eslint app"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "eslint": "^9.18.0",
+    "globals": "^15.14.0"
+  }
+}

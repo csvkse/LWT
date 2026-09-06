@@ -1,0 +1,20 @@
+[Unit]
+Description=LinuxWebTool - Linux 指令控制台
+After=network.target
+
+[Service]
+Type=exec
+# 部署目录：把 publish 产物放在 /opt/linuxwebtool（见 scripts/publish.ps1）
+WorkingDirectory=/opt/linuxwebtool
+ExecStart=/usr/bin/dotnet /opt/linuxwebtool/LinuxWebTool.WebHost.dll
+Restart=always
+RestartSec=5
+Environment=ASPNETCORE_URLS=http://0.0.0.0:8080
+Environment=DOTNET_ENVIRONMENT=Production
+
+# 默认以 www-data 运行；若需要执行 systemctl/docker 等特权指令，改为 User=root
+# User=root
+User=www-data
+
+[Install]
+WantedBy=multi-user.target

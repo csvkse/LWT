@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LinuxWebTool.Contracts/LinuxWebTool.Contracts.csproj" />
+    <Project Path="src/LinuxWebTool.Infrastructure/LinuxWebTool.Infrastructure.csproj" />
+    <Project Path="src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LinuxWebTool.ArchitectureTests/LinuxWebTool.ArchitectureTests.csproj" />
+  </Folder>
+</Solution>
