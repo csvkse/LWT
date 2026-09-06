@@ -14,7 +14,7 @@ namespace LinuxWebTool.Infrastructure.SystemInfo;
 /// - Windows 开发降级：GetSystemTimes / GlobalMemoryStatusEx / DriveInfo（网卡与进程列表不采集）。
 /// CPU 与网卡速率基于采样窗口差值，内部持有上次基准；即时 API 与后台采样共用同一基准。
 /// </summary>
-public sealed partial class SystemStatusProvider(ILogger<SystemStatusProvider> logger) : ISystemStatusProvider
+public sealed partial class SystemStatusProvider : ISystemStatusProvider
 {
     private const int SampleWindowMs = 300;
 
