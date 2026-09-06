@@ -167,16 +167,21 @@ docker run -d --restart unless-stopped \
 **宿主机磁盘自动采集 —— 完整示例**（三个参数缺一不可，作用：`--privileged` 授予 nsenter 权限；`--pid=host` 让容器看到宿主 PID 1 以定位其命名空间；`--user root` 非 root 无权切换命名空间）：
 
 ```bash
+# 更新镜像（已有容器：pull 后 docker rm -f linuxwebtool，再重新运行下方 docker run；data 卷数据保留）
+docker pull ghcr.io/csvkse/lwt:latest
+
 docker run -d --restart unless-stopped \
   -p 5270:5270 \
   -v linuxwebtool-data:/app/data \
+  -v /usr/local/bin:/usr/local/bin:ro \
   --name linuxwebtool \
   --privileged --pid=host --user root \
   ghcr.io/csvkse/lwt:latest
 # 打开 http://localhost:5270/app/ 系统状态页，磁盘列表即宿主机全部磁盘与挂载点
+# /usr/local/bin 只读映射：宿主安装的工具脚本在容器内直接可用（alpine 容器注意动态链接兼容性）
 ```
 
-compose 等价完整写法：
+compose 等价完整写法（更新镜像：`docker compose pull && docker compose up -d`）：
 
 ```yaml
 services:
@@ -190,6 +195,7 @@ services:
       - "5270:5270"
     volumes:
       - linuxwebtool-data:/app/data
+      - /usr/local/bin:/usr/local/bin:ro
     environment:
       - TZ=Asia/Shanghai
     restart: unless-stopped
