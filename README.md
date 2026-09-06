@@ -35,7 +35,9 @@ LinuxWebTool.slnx
 ├── tests/LinuxWebTool.ArchitectureTests/  # 后端架构门禁（6 条规则）
 ├── scripts/verify-fast.ps1             # 一键门禁：build + test + 前端 gate
 ├── scripts/publish.ps1                 # 发布 linux-x64 自包含产物
-├── Dockerfile                          # Docker 部署
+├── .github/workflows/ci.yml            # CI：构建+门禁+GHCR 镜像（push/PR 触发）
+├── .github/workflows/desktop-release.yml  # 桌面端多平台构建发布（tag v* 触发 GitHub Release）
+├── Dockerfile                          # Docker 部署（三阶段，alpine）
 └── docs/dev/architecture-gates.md      # 门禁规则文档
 ```
 
@@ -65,24 +67,76 @@ docker run -e Admin__UserName=ops -e Admin__Password=你的密码 linuxwebtool
 
 **网页修改凭据**：登录后点右上角用户名旁的 ⚙，可修改用户名 / 密码（需验证当前密码，改完自动登出用新凭据重登）。同时支持 `Data__Directory` 指定数据根目录（默认应用根下 `data/`）。
 
-## 部署到 Linux
+## 部署与使用
 
-```powershell
-# 方式一：systemd（自包含发布，目标机无需 .NET）
-./scripts/publish.ps1
-# 按输出提示上传 /opt/linuxwebtool 并启用 linuxwebtool.service
+三种方式任选：**桌面端（Releases 下载，免装 .NET）** / **Docker** / **systemd 自包含发布**。
 
-# 方式二：Docker（已实测：alpine + bash/procps，脚本与状态采集容器内可用）
-docker build -t linuxwebtool .
-docker run -d -p 8080:8080 -v linuxwebtool-data:/app/data --name linuxwebtool linuxwebtool
-# 镜像特性：TZ=Asia/Shanghai、非 root(appuser) 运行、内置 HEALTHCHECK；
+### 方式一：桌面端（推荐，开箱即用）
+
+从 [Releases](https://github.com/csvkse/LWT/releases) 下载对应平台压缩包——均为**自包含发布，目标机无需安装 .NET 运行时**，解压即可运行：
+
+| 平台 | 包 | 运行方式 |
+|---|---|---|
+| Linux x64 / ARM64 | `linuxwebtool-linux-*.tar.gz` | `tar -xzf linuxwebtool-*.tar.gz && ./start.sh`（或直接运行 `LinuxWebTool.WebHost`） |
+| Windows x64 | `linuxwebtool-win-x64.zip` | 解压后双击 `start.bat`（或 `LinuxWebTool.WebHost.exe`）；首次运行如遇 SmartScreen 提示，点「更多信息 → 仍要运行」 |
+
+- 默认地址 `http://localhost:5270/app/`（可用 `--urls http://0.0.0.0:5270` 参数或环境变量 `ASPNETCORE_URLS` 修改）
+- 首次启动自动生成管理员密码：见**控制台启动日志**或 `data/admin.json` 的 `generatedPassword` 字段
+- Linux 注册系统服务：使用包内自带的 `linuxwebtool.service`（`sudo cp linuxwebtool.service /etc/systemd/system/ && sudo systemctl enable --now linuxwebtool`，注意按需修改 `User` 与路径）
+- **升级**：下载新版本包覆盖程序文件，**保留 `data/` 文件夹**即可保留全部数据
+
+### 方式二：Docker
+
+**直接使用 CI 发布的镜像**（每次推送 main 自动构建发布）：
+
+```bash
+docker run -d -p 8080:8080 -v linuxwebtool-data:/app/data --name linuxwebtool ghcr.io/csvkse/lwt:latest
 # 首次密码: docker exec linuxwebtool cat /app/data/admin.json
-# 需要执行 systemctl/docker 等特权指令时，run 加 --user root（或改 Dockerfile 的 USER）
 ```
 
-**持久化（单卷即可）**：全部可持久化数据聚合在数据目录 `data/`（可用 `Data__Directory` 改位置）——`linuxweb.db`（SQLite）、`admin.json`（管理员凭据）、`jwt-secret.key`（签名密钥）、`logs/`（按天滚动日志）。备份 = 备份这一个文件夹；Docker 挂载一个卷即完整持久化。
+> 注：GHCR 包首次发布默认 private。拉取时先 `docker login ghcr.io`（用户名 GitHub 账号、密码为 PAT，需 `read:packages` 权限）；或将仓库 Packages 页中 lwt 的 visibility 改为 public 后免登录拉取。
 
-数据落点：`data/linuxweb.db`（SQLite）、`data/admin.json`（管理员凭据）、`data/jwt-secret.key`（签名密钥）——建议挂卷持久化。
+**docker compose 示例**：
+
+```yaml
+services:
+  linuxwebtool:
+    image: ghcr.io/csvkse/lwt:latest
+    container_name: linuxwebtool
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data          # 单卷持久化：数据库+凭据+密钥+日志
+    environment:
+      - Admin__UserName=admin
+      - Admin__Password=修改我     # 不设则自动生成，见容器日志
+      - TZ=Asia/Shanghai
+    restart: unless-stopped
+```
+
+**本地构建镜像**：
+
+```bash
+docker build -t linuxwebtool .
+docker run -d -p 8080:8080 -v linuxwebtool-data:/app/data linuxwebtool
+```
+
+镜像特性（已实测）：`TZ=Asia/Shanghai`、非 root（appuser）运行、内置 HEALTHCHECK、alpine 内已装 `bash`/`procps`（脚本执行与状态采集容器内可用）。
+
+**容器内执行特权指令**（systemctl、docker 等）：`run` 加 `--user root`（或改 Dockerfile 的 `USER`）；普通内网运维指令无需特权。
+
+### 方式三：systemd（自包含发布）
+
+```powershell
+./scripts/publish.ps1
+# 按输出提示上传 /opt/linuxwebtool 并启用 linuxwebtool.service
+```
+
+### 持久化与数据目录（三种方式通用）
+
+全部可持久化数据聚合在**数据目录 `data/`**（单文件夹备份即可）：`linuxweb.db`（SQLite）、`admin.json`（管理员凭据）、`jwt-secret.key`（签名密钥）、`logs/`（按天滚动日志）。位置可用 `Data__Directory` 环境变量修改（绝对路径或相对应用根的路径）。
+
+管理员凭据优先级：`Admin__UserName`/`Admin__Password` 环境变量或 appsettings 显式配置 **>** `data/admin.json`（记录最后一次生效的凭据）**>** 首次启动随机生成（打印在启动日志）。网页右上角 ⚙ 可随时修改用户名 / 密码。
 
 ## 开发约定（门禁强制）
 
