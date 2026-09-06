@@ -64,6 +64,10 @@ FROM base AS final
 WORKDIR /app
 COPY --from=build --chown=appuser:appgroup /app/publish .
 
+# 容器必须绑定 0.0.0.0:8080：appsettings 的 "Urls"(localhost:5270，面向桌面端) 在 .NET 8+ hosting 中
+# 优先级高于 ASPNETCORE_URLS 环境变量（实测），因此发布后直接改写该值，否则端口映射完全失效。
+RUN sed -i 's|"Urls": "http://localhost:5270"|"Urls": "http://0.0.0.0:8080"|' /app/appsettings.json
+
 # data/ 聚合全部持久化数据：SQLite、admin.json、jwt 密钥、logs/ —— 单卷挂载即可完整持久化
 VOLUME ["/app/data"]
 
