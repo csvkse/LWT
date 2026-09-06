@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 using LinuxWebTool.Contracts.Interfaces;
 using LinuxWebTool.Contracts.Models;
@@ -156,6 +157,7 @@ public sealed partial class SystemStatusProvider(ILogger<SystemStatusProvider> l
         return match.Success ? match.Groups[1].Value.Trim() : "unknown";
     }
 
+    [SupportedOSPlatform("windows")]
     private CpuStatus SampleCpuWindows()
     {
         var current = ReadCpuTimesWindows();
@@ -182,6 +184,7 @@ public sealed partial class SystemStatusProvider(ILogger<SystemStatusProvider> l
         };
     }
 
+    [SupportedOSPlatform("windows")]
     private static (DateTime Time, long Idle, long Total) ReadCpuTimesWindows()
     {
         NativeMethods.GetSystemTimes(out var idle, out var kernel, out var user);
@@ -215,6 +218,7 @@ public sealed partial class SystemStatusProvider(ILogger<SystemStatusProvider> l
         };
     }
 
+    [SupportedOSPlatform("windows")]
     private static MemoryStatus SampleMemoryWindows()
     {
         var buffer = new NativeMethods.MemoryStatusEx { dwLength = (uint)Marshal.SizeOf<NativeMethods.MemoryStatusEx>() };
