@@ -14,9 +14,9 @@ public class GroupStore(ISqlSugarClient db)
             .ToListAsync();
     }
 
-    public Task<CommandGroup?> GetByIdAsync(Guid id)
+    public async Task<CommandGroup?> GetByIdAsync(Guid id)
     {
-        return db.Queryable<CommandGroup>().FirstAsync(g => g.Id == id);
+        return (CommandGroup?)await db.Queryable<CommandGroup>().FirstAsync();
     }
 
     public Task<bool> ExistsNameAsync(string name, GroupBizType bizType, Guid? excludeId)

@@ -12,9 +12,9 @@ public class ExecutionStore(ISqlSugarClient db)
         return record.Id;
     }
 
-    public Task<ExecutionRecord?> GetByIdAsync(Guid id)
+    public async Task<ExecutionRecord?> GetByIdAsync(Guid id)
     {
-        return db.Queryable<ExecutionRecord>().FirstAsync(r => r.Id == id);
+        return (ExecutionRecord?)await db.Queryable<ExecutionRecord>().FirstAsync(r => r.Id == id);
     }
 
     public async Task<PagedResult<ExecutionRecord>> QueryAsync(ExecuteHistoryQuery query)

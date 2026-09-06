@@ -14,9 +14,9 @@ public class CommandStore(ISqlSugarClient db)
             .ToListAsync();
     }
 
-    public Task<LinuxCommand?> GetByIdAsync(Guid id)
+    public async Task<LinuxCommand?> GetByIdAsync(Guid id)
     {
-        return db.Queryable<LinuxCommand>().FirstAsync(c => c.Id == id);
+        return (LinuxCommand?)await db.Queryable<LinuxCommand>().FirstAsync(c => c.Id == id);
     }
 
     public Task<bool> ExistsNameAsync(string name, Guid? excludeId)

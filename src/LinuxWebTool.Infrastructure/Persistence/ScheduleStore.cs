@@ -19,9 +19,9 @@ public class ScheduleStore(ISqlSugarClient db)
         return db.Queryable<ScheduleTask>().Where(t => t.Enabled).ToListAsync();
     }
 
-    public Task<ScheduleTask?> GetByIdAsync(Guid id)
+    public async Task<ScheduleTask?> GetByIdAsync(Guid id)
     {
-        return db.Queryable<ScheduleTask>().FirstAsync(t => t.Id == id);
+        return (ScheduleTask?)await db.Queryable<ScheduleTask>().FirstAsync(t => t.Id == id);
     }
 
     public async Task InsertAsync(ScheduleTask task)
