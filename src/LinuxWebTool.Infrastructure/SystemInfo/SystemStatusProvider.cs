@@ -21,6 +21,8 @@ public sealed partial class SystemStatusProvider : ISystemStatusProvider
     private readonly object _sync = new();
     private (DateTime Time, long Idle, long Total)? _lastCpuSample;
     private Dictionary<string, (DateTime Time, long Recv, long Sent)>? _lastNetSample;
+    // 宿主 df 采集模式探测缓存（Provider 为单例）：true=nsenter 可用（--privileged --pid=host）；false=回退容器自身视图
+    private static bool? _hostDfMode;
 
     public Task<SystemStatusResult> GetStatusAsync(CancellationToken cancellationToken = default) =>
         Task.Run(Collect, cancellationToken);
@@ -239,8 +241,31 @@ public sealed partial class SystemStatusProvider : ISystemStatusProvider
 
     private static List<DiskStatus> CollectDisksLinux()
     {
-        var output = RunCapture("df", "-kP", 5000);
-        if (output is null)
+        // 宿主采集模式：容器以 --privileged --pid=host --user root 运行时，
+        // nsenter 进入宿主 mount namespace 执行 df，自动获得宿主全部磁盘（无需逐盘挂载）。
+        // 探测失败（非特权/无 nsenter/受限运行时）则永久回退到容器自身视图，直至下次重启。
+        if (_hostDfMode != false)
+        {
+            // nsenter 位于容器 /usr/bin（alpine util-linux-misc）；df 在宿主文件系统内解析（多数发行版为 /usr/bin/df）。
+            string? hostDf = RunCapture("/usr/bin/nsenter", "-t 1 -m -- /usr/bin/df -kP", 5000);
+            if (string.IsNullOrWhiteSpace(hostDf) || hostDf.Split('\n').Length <= 1)
+            {
+                hostDf = RunCapture("nsenter", "-t 1 -m -- df -kP", 5000);
+            }
+            if (!string.IsNullOrWhiteSpace(hostDf) && hostDf.Split('\n').Length > 1)
+            {
+                _hostDfMode = true;
+                return ParseDfOutput(hostDf);
+            }
+            _hostDfMode = false;
+        }
+
+        return ParseDfOutput(RunCapture("df", "-kP", 5000) ?? string.Empty);
+    }
+
+    private static List<DiskStatus> ParseDfOutput(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
         {
             return [];
         }
@@ -262,9 +287,9 @@ public sealed partial class SystemStatusProvider : ISystemStatusProvider
             {
                 continue;
             }
-            // 排除容器环境注入的 /etc 单文件绑定与虚拟目录挂载。
+            // 排除容器环境注入的 /etc 单文件绑定与虚拟目录挂载；保留 /mnt（WSL 的 Windows 盘、宿主常规挂载点）。
             if (mount.StartsWith("/etc/", StringComparison.Ordinal) || mount.StartsWith("/proc/", StringComparison.Ordinal)
-                || mount.StartsWith("/sys/", StringComparison.Ordinal) || mount.StartsWith("/dev/", StringComparison.Ordinal))
+                || mount.StartsWith("/sys/", StringComparison.Ordinal) || (mount.StartsWith("/dev/", StringComparison.Ordinal) && mount != "/"))
             {
                 continue;
             }

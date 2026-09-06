@@ -160,7 +160,8 @@ docker run -d --restart unless-stopped \
 | **GPU（NVIDIA）** | `--gpus all` | 宿主需已装 NVIDIA 驱动 + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)；容器内 `nvidia-smi` 可用。WSL2 需 Windows 侧装 NVIDIA 驱动（驱动自带 WSL 支持） |
 | **GPU（Intel/AMD 核显）** | `--device=/dev/dri` | 挂载 DRI 设备（VA-API/Vulkan 硬件加速），容器内按需补用户态库 |
 | **全部要（省事）** | `--privileged --user root` | 接近宿主完整权限，含 USB/所有设备。方便但权限最大，请仅在信任内网使用 |
-| **查看宿主机磁盘** | 逐盘挂载：`-v /mnt/c:/host-c:ro`（WSL2 的 Windows 盘）/ `-v /:/hostroot:ro`（Linux 宿主根） | 容器文件系统与宿主隔离，`df` 天然只看到容器自身（如 `/dev/loop2` 虚拟盘）；把宿主分区/盘挂进来后，系统状态页的磁盘列表会出现对应条目（真实容量）。Windows 盘逐个挂（`/mnt/c`、`/mnt/d`…）；Linux 宿主可挂根目录。已实测：WSL2 下挂 `/mnt/c` 后容器内 `df` 正确显示 Windows C 盘容量（790GB·70%） |
+| **查看宿主机磁盘（自动，推荐）** | `--privileged --pid=host --user root` | 采集器经 `nsenter` 进入宿主挂载命名空间执行 `df`，系统状态页**自动显示宿主全部磁盘与挂载点**，新增磁盘自动出现，无需任何手写。需标准 Linux 宿主 Docker（WSL2 的 wslc 不支持 privileged，见下行） |
+| **查看宿主机磁盘（手动）** | 逐盘挂载：`-v /mnt/c:/host-c:ro`（WSL2 的 Windows 盘）等 | 受限运行时（wslc）或不想给特权时的替代：容器文件系统与宿主隔离，`df` 天然只看到容器自身（如 `/dev/loop2` 虚拟盘）；挂进来的盘会出现在磁盘列表（真实容量）。已实测：WSL2 下挂 `/mnt/c` 后容器内 `df` 正确显示 Windows C 盘容量（790GB·70%） |
 
 compose 等价写法（节选）：
 

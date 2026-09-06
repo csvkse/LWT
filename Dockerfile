@@ -19,8 +19,9 @@ ENV TZ=Asia/Shanghai \
 # bash      —— 脚本类型执行依赖 /bin/bash
 # procps    —— 系统状态页的 ps 采集（alpine 自带 busybox ps 不支持 -eo）
 # usbutils/pciutils/kmod —— 硬件查看工具（lsusb / lspci / lsmod）
+# util-linux-misc —— nsenter：配合 --privileged --pid=host --user root 自动采集宿主全部磁盘
 # tzdata/icu —— 时区与中文全球化
-RUN apk add --no-cache bash procps usbutils pciutils kmod tzdata icu-libs && \
+RUN apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc tzdata icu-libs && \
     cp /usr/share/zoneinfo/$TZ /etc/localtime && \
     echo $TZ > /etc/timezone
 
