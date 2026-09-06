@@ -90,8 +90,14 @@ docker run -e Admin__UserName=ops -e Admin__Password=你的密码 linuxwebtool
 **直接使用 CI 发布的镜像**（每次推送 main 自动构建发布）：
 
 ```bash
-docker run -d -p 8080:8080 -v linuxwebtool-data:/app/data --name linuxwebtool ghcr.io/csvkse/lwt:latest
+# --restart unless-stopped: 容器随 Docker 服务自动启动（即开机自启）；手动 docker stop 后不会被拉起
+docker run -d --restart unless-stopped -p 8080:8080 -v linuxwebtool-data:/app/data --name linuxwebtool ghcr.io/csvkse/lwt:latest
 # 首次密码: docker exec linuxwebtool cat /app/data/admin.json
+
+# 容器开机自启的前提是宿主机 Docker 服务本身自启：
+#   Linux:   sudo systemctl enable docker
+#   Windows: Docker Desktop 设置中勾选 "Start Docker Desktop when you sign in"
+# 已在运行的容器补加自启策略: docker update --restart unless-stopped linuxwebtool
 ```
 
 > 注：GHCR 包首次发布默认 private。拉取时先 `docker login ghcr.io`（用户名 GitHub 账号、密码为 PAT，需 `read:packages` 权限）；或将仓库 Packages 页中 lwt 的 visibility 改为 public 后免登录拉取。
