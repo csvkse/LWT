@@ -133,9 +133,47 @@ docker build -t linuxwebtool .
 docker run -d -p 8080:8080 -v linuxwebtool-data:/app/data linuxwebtool
 ```
 
-镜像特性（已实测）：`TZ=Asia/Shanghai`、非 root（appuser）运行、内置 HEALTHCHECK、alpine 内已装 `bash`/`procps`（脚本执行与状态采集容器内可用）。
+镜像特性（已实测）：`TZ=Asia/Shanghai`、非 root（appuser）运行、内置 HEALTHCHECK、alpine 内已装 `bash`/`procps`/`usbutils`/`pciutils`/`kmod`（脚本执行、状态采集、lsusb/lspci/lsmod 硬件查看容器内可用）。
 
 **容器内执行特权指令**（systemctl、docker 等）：`run` 加 `--user root`（或改 Dockerfile 的 `USER`）；普通内网运维指令无需特权。
+
+### 进阶：USB / 宿主工具目录 / GPU 直通（按需添加）
+
+容器默认**无法访问宿主外设**。以下配置让网页中的指令能操作宿主硬件（仅标准 Linux 宿主；WSL2 环境见各项备注）。需要多项时直接在 `docker run` 上堆叠参数：
+
+```bash
+docker run -d --restart unless-stopped \
+  -p 5270:5270 \
+  -v linuxwebtool-data:/app/data \
+  --name linuxwebtool \
+  --user root \
+  -v /usr/local/bin:/usr/local/bin:ro \
+  -v /dev/bus/usb:/dev/bus/usb \
+  --device=/dev/dri \
+  ghcr.io/csvkse/lwt:latest
+```
+
+| 需求 | 配置 | 说明 |
+|---|---|---|
+| **USB 控制** | `-v /dev/bus/usb:/dev/bus/usb` + `--user root` | 挂载整个 USB 总线（热插拔设备动态可见）；特定串口/TTY 设备另加 `--device=/dev/ttyUSB0`；`lsusb` 已内置。**WSL2**：先用 [usbipd-win](https://github.com/dorssel/usbipd-win) 把 Windows USB 设备 attach 到 WSL（`usbipd bind` / `usbipd attach --wsl`），容器再按上面配置 |
+| **宿主机 /usr/local/bin** | `-v /usr/local/bin:/usr/local/bin:ro` | 宿主安装的工具脚本直接在容器内使用（`:ro` 只读更安全）。⚠ 镜像是 alpine(musl)：宿主 Debian/Ubuntu 编译的**动态链接程序无法运行**，脚本与静态编译的二进制不受影响 |
+| **GPU（NVIDIA）** | `--gpus all` | 宿主需已装 NVIDIA 驱动 + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)；容器内 `nvidia-smi` 可用。WSL2 需 Windows 侧装 NVIDIA 驱动（驱动自带 WSL 支持） |
+| **GPU（Intel/AMD 核显）** | `--device=/dev/dri` | 挂载 DRI 设备（VA-API/Vulkan 硬件加速），容器内按需补用户态库 |
+| **全部要（省事）** | `--privileged --user root` | 接近宿主完整权限，含 USB/所有设备。方便但权限最大，请仅在信任内网使用 |
+
+compose 等价写法（节选）：
+
+```yaml
+    user: root
+    devices:
+      - /dev/bus/usb
+      - /dev/dri
+    volumes:
+      - /usr/local/bin:/usr/local/bin:ro
+    # 或全部要: privileged: true
+```
+
+> ⚠️ 这些配置授予容器宿主硬件控制权，与「不暴露公网」原则叠加使用；非 NVIDIA 环境去掉 `--gpus all`（无 toolkit 时该参数会直接报错）。
 
 ### 方式三：systemd（自包含发布）
 
