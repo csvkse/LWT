@@ -75,24 +75,24 @@ export default defineComponent({
     };
   },
   template: `
-    <div class="min-h-screen flex flex-col">
+    <div class="min-h-screen flex flex-col max-w-full overflow-x-hidden">
       <header v-if="!isPublic" class="sticky top-0 z-40 border-b border-cyber-line bg-cyber-bg/85 backdrop-blur">
-        <div class="max-w-7xl mx-auto px-4 h-14 flex items-center gap-6">
-          <div class="flex items-center gap-2.5">
+        <div class="max-w-7xl mx-auto px-3 sm:px-4 h-14 flex items-center gap-2 sm:gap-6">
+          <div class="flex items-center gap-2.5 shrink-0">
             <div class="w-8 h-8 rounded-lg border border-neon/40 flex items-center justify-center font-display text-neon-soft text-xs">LWT</div>
-            <span class="font-display text-sm tracking-widest text-slate-200">LinuxWebTool</span>
+            <span class="hidden md:inline font-display text-sm tracking-widest text-slate-200">LinuxWebTool</span>
           </div>
-          <nav class="flex items-center gap-1 flex-1">
+          <nav class="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto no-scrollbar">
             <router-link
               v-for="item in NAV_ITEMS"
               :key="item.path"
               :to="item.path"
-              class="nav-link"
+              class="nav-link shrink-0 whitespace-nowrap"
               :class="{ active: isActive(item.path) }"
             >{{ item.label }}</router-link>
           </nav>
-          <div class="flex items-center gap-3 text-sm text-slate-400">
-            <span class="hidden sm:inline">
+          <div class="flex items-center gap-2 shrink-0 text-sm text-slate-400">
+            <span class="hidden lg:inline">
               <span class="text-emerald-400 mr-1">●</span>{{ auth.userName || 'admin' }}
             </span>
             <button class="btn btn-xs" title="修改用户名 / 密码" @click="openCredential()">⚙</button>
@@ -101,11 +101,11 @@ export default defineComponent({
         </div>
       </header>
 
-      <main class="flex-1 max-w-7xl w-full mx-auto px-4 py-5 w-full">
+      <main class="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-5 overflow-x-hidden">
         <router-view />
       </main>
 
-      <footer class="text-center text-xs text-slate-600 py-3">
+      <footer class="text-center text-xs text-slate-600 py-3 px-3">
         LinuxWebTool · 个人 Linux 运维指令台 · 请勿暴露至公网
       </footer>
 

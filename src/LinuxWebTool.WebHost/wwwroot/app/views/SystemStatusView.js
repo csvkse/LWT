@@ -141,14 +141,21 @@ export default defineComponent({
 
     watch(autoRefresh, (enabled) => toggleAutoRefresh(enabled));
 
+    // 窗口宽度变化（手机旋转 / 缩放）时按新宽度重绘图表
+    function handleResize() {
+      if (usageChart || netChart) loadHistory();
+    }
+
     onMounted(async () => {
       await load();
       await loadHistory();
       toggleAutoRefresh(autoRefresh.value);
+      window.addEventListener('resize', handleResize);
     });
 
     onUnmounted(() => {
       if (refreshTimer) window.clearInterval(refreshTimer);
+      window.removeEventListener('resize', handleResize);
       if (usageChart) usageChart.destroy();
       if (netChart) netChart.destroy();
     });

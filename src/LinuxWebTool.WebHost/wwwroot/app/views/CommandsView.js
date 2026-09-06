@@ -287,29 +287,29 @@ export default defineComponent({
   },
   template: `
     <div class="grid grid-cols-1 lg:grid-cols-[230px_1fr] gap-4 items-start">
-      <aside class="panel p-3 flex flex-col gap-1">
-        <div class="text-xs text-slate-500 px-1 pb-1">分组</div>
-        <button class="text-left text-sm rounded-lg px-3 py-1.5 transition"
+      <aside class="panel p-3 flex flex-row lg:flex-col gap-1.5 lg:gap-1 items-center lg:items-stretch overflow-x-auto no-scrollbar">
+        <div class="hidden lg:block text-xs text-slate-500 px-1 pb-1 shrink-0">分组</div>
+        <button class="shrink-0 text-left text-sm rounded-lg px-3 py-1.5 transition whitespace-nowrap"
                 :class="!activeGroupId ? 'bg-neon/10 text-neon-soft' : 'text-slate-400 hover:text-slate-200'"
                 @click="selectGroup('')">全部指令</button>
-        <div v-for="group in groups" :key="group.id" class="flex items-center gap-1">
+        <div v-for="group in groups" :key="group.id" class="flex items-center gap-1 shrink-0">
           <template v-if="renamingId === group.id">
-            <input class="input !py-1 text-xs" v-model="renameText" @keyup.enter="submitRename()" @blur="submitRename()" />
+            <input class="input !py-1 text-xs !w-28" v-model="renameText" @keyup.enter="submitRename()" @blur="submitRename()" />
           </template>
           <template v-else>
-            <button class="flex-1 text-left text-sm rounded-lg px-3 py-1.5 transition flex items-center justify-between"
+            <button class="text-left text-sm rounded-lg px-3 py-1.5 transition flex items-center justify-between gap-2 whitespace-nowrap"
                     :class="activeGroupId === group.id ? 'bg-neon/10 text-neon-soft' : 'text-slate-400 hover:text-slate-200'"
                     @click="selectGroup(group.id)">
-              <span class="truncate">{{ group.name }}</span>
+              <span class="truncate max-w-[8rem] lg:max-w-none">{{ group.name }}</span>
               <span class="text-xs text-slate-600">{{ group.usageCount }}</span>
             </button>
-            <button class="text-slate-600 hover:text-cyan-300 text-xs" title="重命名" @click="startRename(group)">✎</button>
-            <button class="text-slate-600 hover:text-rose-300 text-xs" title="删除" @click="removeGroup(group)">✕</button>
+            <button class="text-slate-600 hover:text-cyan-300 text-xs shrink-0" title="重命名" @click="startRename(group)">✎</button>
+            <button class="text-slate-600 hover:text-rose-300 text-xs shrink-0" title="删除" @click="removeGroup(group)">✕</button>
           </template>
         </div>
-        <div class="flex gap-1 mt-2 pt-2 border-t border-cyber-line/60">
-          <input class="input !py-1 text-xs" v-model="renameText" placeholder="新建分组…" @keyup.enter="createGroup()" />
-          <button class="btn btn-xs" @click="createGroup()">＋</button>
+        <div class="flex gap-1 shrink-0 lg:mt-2 lg:pt-2 lg:border-t lg:border-cyber-line/60 lg:w-full">
+          <input class="input !py-1 text-xs !w-36 lg:!w-auto" v-model="renameText" placeholder="新建分组…" @keyup.enter="createGroup()" />
+          <button class="btn btn-xs shrink-0" @click="createGroup()">＋</button>
         </div>
       </aside>
 
@@ -321,7 +321,7 @@ export default defineComponent({
           </div>
           <textarea class="input font-mono !text-[0.8rem]" rows="2" v-model="quickText"
                     placeholder="例如：df -h /home  或  tail -n 50 /var/log/syslog"></textarea>
-          <div class="flex items-center gap-2 mt-2">
+          <div class="flex items-center gap-2 mt-2 flex-wrap">
             <label class="text-xs text-slate-500">超时(秒)</label>
             <input class="input !w-20 !py-1" type="number" min="1" max="86400" v-model="quickTimeout" />
             <button class="btn btn-primary" :disabled="quickRunning" @click="runQuick()">
@@ -335,10 +335,10 @@ export default defineComponent({
           <div v-if="quickResult" class="output-block mt-2">{{ quickResult.standardOutput }}{{ quickResult.errorOutput }}</div>
         </div>
 
-        <div class="flex items-center gap-2">
-          <input class="input !w-64" v-model="keyword" placeholder="搜索名称 / 指令 / 脚本…" @keyup.enter="loadCommands()" />
+        <div class="flex items-center gap-2 flex-wrap">
+          <input class="input !w-full sm:!w-64" v-model="keyword" placeholder="搜索名称 / 指令 / 脚本…" @keyup.enter="loadCommands()" />
           <button class="btn" @click="loadCommands()">搜索</button>
-          <button class="btn btn-primary ml-auto" @click="openCreate()">＋ 新建</button>
+          <button class="btn btn-primary sm:ml-auto" @click="openCreate()">＋ 新建</button>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">

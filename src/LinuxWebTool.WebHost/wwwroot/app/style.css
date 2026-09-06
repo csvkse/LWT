@@ -143,3 +143,7 @@ select.input option { background: #0d1526; }
 ::-webkit-scrollbar-thumb { background: #1d2c4a; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #2a3d63; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* 移动端：隐藏滚动条的横向滑动容器 */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
