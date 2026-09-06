@@ -24,12 +24,13 @@ public static class PipelineExtensions
         app.UseDefaultFiles();
         app.UseStaticFiles(new StaticFileOptions
         {
+            // 前端资源全部 no-cache：内网工具性能足够，保证版本更新后浏览器立即拿到新文件
             OnPrepareResponse = context =>
             {
                 var path = context.Context.Request.Path;
-                if (path.StartsWithSegments("/app") && path.Value?.EndsWith("index.html", StringComparison.OrdinalIgnoreCase) == true)
+                if (path.StartsWithSegments("/app"))
                 {
-                    context.Context.Response.Headers.CacheControl = "no-cache, must-revalidate";
+                    context.Context.Response.Headers.CacheControl = "no-cache";
                 }
             },
         });

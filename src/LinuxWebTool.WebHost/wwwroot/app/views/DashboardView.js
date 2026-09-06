@@ -64,35 +64,39 @@ export default defineComponent({
             <h3 class="text-sm text-slate-300 font-medium">最近执行</h3>
             <button class="btn btn-xs" @click="goHistory()">全部历史</button>
           </div>
-          <table class="data-table">
-            <thead><tr><th>时间</th><th>名称</th><th>来源</th><th>状态</th><th>耗时</th></tr></thead>
-            <tbody>
-              <tr v-if="!data.recentExecutions.length"><td colspan="5" class="text-slate-600">暂无执行记录</td></tr>
-              <tr v-for="item in data.recentExecutions" :key="item.id">
-                <td class="whitespace-nowrap text-slate-400">{{ formatTime(item.startTime) }}</td>
-                <td class="max-w-[10rem] truncate" :title="item.commandText">{{ item.commandName }}</td>
-                <td><span class="badge" :class="sourceMeta(item.source).class">{{ sourceMeta(item.source).label }}</span></td>
-                <td><span class="badge" :class="statusMeta(item.status).class">{{ statusMeta(item.status).label }}</span></td>
-                <td class="whitespace-nowrap text-slate-400">{{ formatDuration(item.durationMs) }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="overflow-x-auto">
+            <table class="data-table min-w-[28rem]">
+              <thead><tr><th>时间</th><th>名称</th><th>来源</th><th>状态</th><th>耗时</th></tr></thead>
+              <tbody>
+                <tr v-if="!data.recentExecutions.length"><td colspan="5" class="text-slate-600">暂无执行记录</td></tr>
+                <tr v-for="item in data.recentExecutions" :key="item.id">
+                  <td class="whitespace-nowrap text-slate-400">{{ formatTime(item.startTime) }}</td>
+                  <td class="max-w-[8rem] truncate" :title="item.commandText">{{ item.commandName }}</td>
+                  <td><span class="badge" :class="sourceMeta(item.source).class">{{ sourceMeta(item.source).label }}</span></td>
+                  <td><span class="badge" :class="statusMeta(item.status).class">{{ statusMeta(item.status).label }}</span></td>
+                  <td class="whitespace-nowrap text-slate-400">{{ formatDuration(item.durationMs) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div class="panel p-4">
           <h3 class="text-sm text-slate-300 font-medium mb-3">最近失败</h3>
-          <table class="data-table">
-            <thead><tr><th>时间</th><th>名称</th><th>状态</th><th>退出码</th></tr></thead>
-            <tbody>
-              <tr v-if="!data.recentFailures.length"><td colspan="4" class="text-slate-600">没有失败记录 👍</td></tr>
-              <tr v-for="item in data.recentFailures" :key="item.id">
-                <td class="whitespace-nowrap text-slate-400">{{ formatTime(item.startTime) }}</td>
-                <td class="max-w-[10rem] truncate" :title="item.commandText">{{ item.commandName }}</td>
-                <td><span class="badge" :class="statusMeta(item.status).class">{{ statusMeta(item.status).label }}</span></td>
-                <td class="text-slate-400">{{ item.exitCode ?? '—' }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="overflow-x-auto">
+            <table class="data-table min-w-[24rem]">
+              <thead><tr><th>时间</th><th>名称</th><th>状态</th><th>退出码</th></tr></thead>
+              <tbody>
+                <tr v-if="!data.recentFailures.length"><td colspan="4" class="text-slate-600">没有失败记录 👍</td></tr>
+                <tr v-for="item in data.recentFailures" :key="item.id">
+                  <td class="whitespace-nowrap text-slate-400">{{ formatTime(item.startTime) }}</td>
+                  <td class="max-w-[8rem] truncate" :title="item.commandText">{{ item.commandName }}</td>
+                  <td><span class="badge" :class="statusMeta(item.status).class">{{ statusMeta(item.status).label }}</span></td>
+                  <td class="text-slate-400">{{ item.exitCode ?? '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -101,10 +105,10 @@ export default defineComponent({
         <div class="flex flex-col gap-2">
           <p v-if="!data.nextRuns.length" class="text-slate-600 text-sm">没有启用中的定时任务</p>
           <div v-for="item in data.nextRuns" :key="item.id"
-               class="flex items-center gap-3 text-sm border border-cyber-line/60 rounded-lg px-3 py-2">
+               class="flex items-center gap-2 sm:gap-3 text-sm border border-cyber-line/60 rounded-lg px-3 py-2 flex-wrap">
             <span class="badge border-violet-500/50 text-violet-300 font-mono">{{ item.cronExpression }}</span>
             <span class="text-slate-300">{{ item.name }}</span>
-            <span class="ml-auto text-slate-400 font-mono text-xs">{{ formatTime(item.nextRunTime) }}</span>
+            <span class="ml-auto text-slate-400 font-mono text-xs whitespace-nowrap">{{ formatTime(item.nextRunTime) }}</span>
           </div>
         </div>
       </div>
