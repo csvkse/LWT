@@ -50,7 +50,8 @@ public class AuthController(
     }
 
     /// <summary>
-    /// 修改管理员用户名 / 口令（需验证当前口令）。改用户名后旧 Token 中的身份失效，前端应引导重新登录。
+    /// 修改管理员用户名 / 口令（单管理员个人工具：登录会话内直接修改，无需验证当前口令）。
+    /// 改用户名后旧 Token 中的身份失效，前端应引导重新登录。
     /// </summary>
     [HttpPost("ChangeCredential")]
     [Authorize]
@@ -69,11 +70,6 @@ public class AuthController(
         if (newUserName is { Length: > 100 })
         {
             return BadRequest(new { message = "用户名不能超过 100 个字符" });
-        }
-        if (!adminCredential.Validate(User.Identity?.Name ?? string.Empty, request.CurrentPassword ?? string.Empty))
-        {
-            await operationLogger.LogAsync("修改凭据", "认证", User.Identity?.Name ?? string.Empty, "当前口令验证失败", success: false, clientIp: HttpContext.GetClientIp());
-            return BadRequest(new { message = "当前口令错误" });
         }
 
         adminCredential.UpdateCredential(newUserName, newPassword);

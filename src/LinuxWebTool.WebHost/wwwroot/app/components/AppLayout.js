@@ -27,15 +27,14 @@ export default defineComponent({
     // 修改凭据弹窗
     const showCredential = ref(false);
     const credSaving = ref(false);
-    const credForm = reactive({ currentPassword: '', newUserName: '', newPassword: '', confirm: '' });
+    const credForm = reactive({ newUserName: '', newPassword: '', confirm: '' });
 
     function openCredential() {
-      Object.assign(credForm, { currentPassword: '', newUserName: '', newPassword: '', confirm: '' });
+      Object.assign(credForm, { newUserName: '', newPassword: '', confirm: '' });
       showCredential.value = true;
     }
 
     async function saveCredential() {
-      if (!credForm.currentPassword) return toast.error('请输入当前口令');
       if (!credForm.newUserName && !credForm.newPassword) return toast.error('新用户名与新口令至少填写一项');
       if (credForm.newPassword && credForm.newPassword.length < 6) return toast.error('新口令至少 6 位');
       if (credForm.newPassword && credForm.newPassword !== credForm.confirm) return toast.error('两次输入的新口令不一致');
@@ -44,7 +43,6 @@ export default defineComponent({
         const result = await http(API.auth.changeCredential, {
           method: 'POST',
           body: {
-            currentPassword: credForm.currentPassword,
             newUserName: credForm.newUserName || null,
             newPassword: credForm.newPassword || null,
           },
@@ -117,10 +115,6 @@ export default defineComponent({
           <h3 class="font-display text-base text-neon-soft mb-4">修改用户名 / 口令</h3>
           <div class="flex flex-col gap-3">
             <label class="block">
-              <span class="text-xs text-slate-500 mb-1 block">当前口令 *</span>
-              <input class="input" type="password" v-model="credForm.currentPassword" autocomplete="current-password" />
-            </label>
-            <label class="block">
               <span class="text-xs text-slate-500 mb-1 block">新用户名（留空则不修改，当前：{{ auth.userName }}）</span>
               <input class="input" v-model="credForm.newUserName" autocomplete="off" />
             </label>
@@ -132,6 +126,9 @@ export default defineComponent({
               <span class="text-xs text-slate-500 mb-1 block">确认新口令</span>
               <input class="input" type="password" v-model="credForm.confirm" autocomplete="new-password" @keyup.enter="saveCredential()" />
             </label>
+            <p class="text-[11px] text-slate-600 leading-relaxed">
+              忘记当前口令？查看程序启动日志或 data\admin.json 的 generatedPassword 字段；也可用环境变量 Admin__Password 直接覆盖。
+            </p>
           </div>
           <div class="flex justify-end gap-2 mt-5">
             <button class="btn" @click="showCredential = false">取消</button>
