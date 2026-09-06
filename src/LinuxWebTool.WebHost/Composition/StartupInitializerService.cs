@@ -4,8 +4,8 @@ using LinuxWebTool.Infrastructure.Support;
 namespace LinuxWebTool.WebHost.Composition;
 
 /// <summary>
-/// 启动初始化：在端口监听前强制构建管理员凭据（生成 / 加载 admin.json 并打印口令日志），
-/// 避免懒加载导致「启动后 data 目录为空、找不到口令」的困惑。
+/// 启动初始化：在端口监听前强制构建管理员凭据（生成 / 加载 admin.json 并打印密码日志），
+/// 避免懒加载导致「启动后 data 目录为空、找不到密码」的困惑。
 /// </summary>
 public sealed class StartupInitializerService(AdminCredentialService adminCredential, DataPaths dataPaths, ILogger<StartupInitializerService> logger) : IHostedService
 {

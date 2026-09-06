@@ -35,10 +35,10 @@ export default defineComponent({
     }
 
     async function saveCredential() {
-      if (!credForm.currentPassword) return toast.error('请输入当前口令');
-      if (!credForm.newUserName && !credForm.newPassword) return toast.error('新用户名与新口令至少填写一项');
-      if (credForm.newPassword && credForm.newPassword.length < 6) return toast.error('新口令至少 6 位');
-      if (credForm.newPassword && credForm.newPassword !== credForm.confirm) return toast.error('两次输入的新口令不一致');
+      if (!credForm.currentPassword) return toast.error('请输入当前密码');
+      if (!credForm.newUserName && !credForm.newPassword) return toast.error('新用户名与新密码至少填写一项');
+      if (credForm.newPassword && credForm.newPassword.length < 6) return toast.error('新密码至少 6 位');
+      if (credForm.newPassword && credForm.newPassword !== credForm.confirm) return toast.error('两次输入的新密码不一致');
       credSaving.value = true;
       try {
         const result = await http(API.auth.changeCredential, {
@@ -95,7 +95,7 @@ export default defineComponent({
             <span class="hidden sm:inline">
               <span class="text-emerald-400 mr-1">●</span>{{ auth.userName || 'admin' }}
             </span>
-            <button class="btn btn-xs" title="修改用户名 / 口令" @click="openCredential()">⚙</button>
+            <button class="btn btn-xs" title="修改用户名 / 密码" @click="openCredential()">⚙</button>
             <button class="btn btn-xs" @click="handleLogout()">退出</button>
           </div>
         </div>
@@ -114,22 +114,23 @@ export default defineComponent({
 
       <div v-if="showCredential" class="fixed inset-0 z-[85] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="panel w-full max-w-sm p-5" style="background: rgba(13, 21, 38, 0.97)">
-          <h3 class="font-display text-base text-neon-soft mb-4">修改用户名 / 口令</h3>
+          <h3 class="font-display text-base text-neon-soft mb-4">修改用户名 / 密码</h3>
           <div class="flex flex-col gap-3">
             <label class="block">
-              <span class="text-xs text-slate-500 mb-1 block">当前口令 *</span>
+              <span class="text-xs text-slate-500 mb-1 block">当前密码 *</span>
               <input class="input" type="password" v-model="credForm.currentPassword" autocomplete="current-password" />
             </label>
+            <p class="text-[11px] text-slate-600 leading-relaxed">忘记当前密码？查看程序启动日志或 datadmin.json 的 generatedPassword 字段；也可用环境变量 Admin__Password 直接覆盖。</p>
             <label class="block">
               <span class="text-xs text-slate-500 mb-1 block">新用户名（留空则不修改，当前：{{ auth.userName }}）</span>
               <input class="input" v-model="credForm.newUserName" autocomplete="off" />
             </label>
             <label class="block">
-              <span class="text-xs text-slate-500 mb-1 block">新口令（留空则不修改，至少 6 位）</span>
+              <span class="text-xs text-slate-500 mb-1 block">新密码（留空则不修改，至少 6 位）</span>
               <input class="input" type="password" v-model="credForm.newPassword" autocomplete="new-password" />
             </label>
             <label class="block">
-              <span class="text-xs text-slate-500 mb-1 block">确认新口令</span>
+              <span class="text-xs text-slate-500 mb-1 block">确认新密码</span>
               <input class="input" type="password" v-model="credForm.confirm" autocomplete="new-password" @keyup.enter="saveCredential()" />
             </label>
           </div>

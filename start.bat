@@ -14,7 +14,7 @@ echo ============================================
 echo   LinuxWebTool 快速启动
 echo   地址: http://localhost:5270/app/
 echo   数据目录: src\LinuxWebTool.WebHost\data （数据库/凭据/日志）
-echo   管理员口令: 首次启动自动生成并打印于下方；已生成过的见 data\admin.json
+echo   管理员密码: 首次启动自动生成并打印于下方；已生成过的见 data\admin.json
 echo   停止服务: 在本窗口按 Ctrl+C
 echo ============================================
 echo.
@@ -24,7 +24,7 @@ if not "%LWT_NO_BROWSER%"=="1" (
     start "" cmd /c "timeout /t 6 >nul & start http://localhost:5270/app/"
 )
 
-rem dotnet run 自带增量编译；首次启动会自动建库并生成管理员口令
+rem dotnet run 自带增量编译；首次启动会自动建库并生成管理员密码
 dotnet run --project src\LinuxWebTool.WebHost --urls http://localhost:5270
 
 echo.

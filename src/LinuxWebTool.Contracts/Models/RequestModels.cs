@@ -2,7 +2,7 @@ namespace LinuxWebTool.Contracts.Models;
 
 public sealed record LoginRequest(string UserName, string Password);
 
-/// <summary>修改管理员凭据请求：新用户名 / 新口令至少提供一项。</summary>
+/// <summary>修改管理员凭据请求：新用户名 / 新密码至少提供一项。</summary>
 public sealed record ChangeCredentialRequest
 {
     public required string CurrentPassword { get; init; }

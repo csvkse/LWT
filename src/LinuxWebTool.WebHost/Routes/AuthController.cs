@@ -32,8 +32,8 @@ public class AuthController(
         if (userName.Length == 0 || !adminCredential.Validate(userName, request.Password ?? string.Empty))
         {
             RecordFailure(ip);
-            await operationLogger.LogAsync("登录", "认证", userName, "用户名或口令错误", success: false, clientIp: ip);
-            return Unauthorized(new { message = "用户名或口令错误" });
+            await operationLogger.LogAsync("登录", "认证", userName, "用户名或密码错误", success: false, clientIp: ip);
+            return Unauthorized(new { message = "用户名或密码错误" });
         }
 
         Failures.TryRemove(ip, out _);
@@ -50,7 +50,7 @@ public class AuthController(
     }
 
     /// <summary>
-    /// 修改管理员用户名 / 口令（需验证当前口令）。改用户名后旧 Token 中的身份失效，前端应引导重新登录。
+    /// 修改管理员用户名 / 密码（需验证当前密码）。改用户名后旧 Token 中的身份失效，前端应引导重新登录。
     /// </summary>
     [HttpPost("ChangeCredential")]
     [Authorize]
@@ -60,11 +60,11 @@ public class AuthController(
         var newPassword = request.NewPassword;
         if (string.IsNullOrWhiteSpace(newUserName) && string.IsNullOrWhiteSpace(newPassword))
         {
-            return BadRequest(new { message = "新用户名与新口令至少填写一项" });
+            return BadRequest(new { message = "新用户名与新密码至少填写一项" });
         }
         if (newPassword is { Length: < 6 })
         {
-            return BadRequest(new { message = "新口令至少 6 位" });
+            return BadRequest(new { message = "新密码至少 6 位" });
         }
         if (newUserName is { Length: > 100 })
         {
@@ -72,13 +72,13 @@ public class AuthController(
         }
         if (!adminCredential.Validate(User.Identity?.Name ?? string.Empty, request.CurrentPassword ?? string.Empty))
         {
-            await operationLogger.LogAsync("修改凭据", "认证", User.Identity?.Name ?? string.Empty, "当前口令验证失败", success: false, clientIp: HttpContext.GetClientIp());
-            return BadRequest(new { message = "当前口令错误" });
+            await operationLogger.LogAsync("修改凭据", "认证", User.Identity?.Name ?? string.Empty, "当前密码验证失败", success: false, clientIp: HttpContext.GetClientIp());
+            return BadRequest(new { message = "当前密码错误" });
         }
 
         adminCredential.UpdateCredential(newUserName, newPassword);
         await operationLogger.LogAsync("修改凭据", "认证", adminCredential.Account.UserName,
-            (newUserName is { Length: > 0 } ? "修改用户名 " : string.Empty) + (newPassword is { Length: > 0 } ? "修改口令" : string.Empty),
+            (newUserName is { Length: > 0 } ? "修改用户名 " : string.Empty) + (newPassword is { Length: > 0 } ? "修改密码" : string.Empty),
             clientIp: HttpContext.GetClientIp());
         return Ok(new { message = "凭据已更新，请使用新凭据重新登录", requireRelogin = true });
     }

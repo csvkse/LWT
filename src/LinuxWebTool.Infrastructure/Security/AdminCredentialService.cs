@@ -14,8 +14,8 @@ public sealed class AdminAccount
 
 /// <summary>
 /// 单管理员账户。
-/// 凭据优先级：显式口令（appsettings 的 Admin:Password 或环境变量 Admin__Password，每次启动生效并覆盖文件）
-/// > data/admin.json（自动生成口令的持久化）> 首次启动随机生成（口令打印到程序日志）。
+/// 凭据优先级：显式密码（appsettings 的 Admin:Password 或环境变量 Admin__Password，每次启动生效并覆盖文件）
+/// > data/admin.json（自动生成密码的持久化）> 首次启动随机生成（密码打印到程序日志）。
 /// </summary>
 public sealed class AdminCredentialService
 {
@@ -37,7 +37,7 @@ public sealed class AdminCredentialService
             && PasswordHasher.Verify(password, Account.PasswordHash);
     }
 
-    /// <summary>修改管理员凭据（Web 端改密入口）：只传新用户名则仅改名，只传新口令则仅改密，互不干扰。</summary>
+    /// <summary>修改管理员凭据（Web 端改密入口）：只传新用户名则仅改名，只传新密码则仅改密，互不干扰。</summary>
     public void UpdateCredential(string? newUserName, string? newPassword)
     {
         if (!string.IsNullOrWhiteSpace(newUserName))
@@ -54,9 +54,9 @@ public sealed class AdminCredentialService
 
     private void Initialize(IConfiguration configuration)
     {
-        // 优先级：显式口令（appsettings 的 Admin:Password 或环境变量 Admin__Password，ASP.NET Core 配置系统自动合并）
-        //       > data/admin.json（自动生成口令的持久化）> 首次启动随机生成。
-        // 显式配置每次启动都生效：修改环境变量后重启即可换号/换口令（会同步覆盖 admin.json 的 hash）。
+        // 优先级：显式密码（appsettings 的 Admin:Password 或环境变量 Admin__Password，ASP.NET Core 配置系统自动合并）
+        //       > data/admin.json（自动生成密码的持久化）> 首次启动随机生成。
+        // 显式配置每次启动都生效：修改环境变量后重启即可换号/换密码（会同步覆盖 admin.json 的 hash）。
         var configuredUserName = configuration["Admin:UserName"];
         var configuredPassword = configuration["Admin:Password"];
         if (!string.IsNullOrEmpty(configuredPassword))
@@ -84,7 +84,7 @@ public sealed class AdminCredentialService
             PasswordHash = PasswordHasher.Hash(generatedPassword),
         };
         Persist(generatedPassword);
-        _logger.LogWarning("首次启动已生成管理员账户：用户名 {UserName}，口令 {Password}（已保存到 {File}，请尽快登录并修改配置）",
+        _logger.LogWarning("首次启动已生成管理员账户：用户名 {UserName}，密码 {Password}（已保存到 {File}，请尽快登录并修改配置）",
             Account.UserName, generatedPassword, _filePath);
     }
 
@@ -121,15 +121,15 @@ public sealed class AdminCredentialService
 
             Account = new AdminAccount { UserName = userName, PasswordHash = hash };
 
-            // 自动生成口令的场景：文件里保留了明文，每次启动都回显，避免用户忘记口令后无处可查。
+            // 自动生成密码的场景：文件里保留了明文，每次启动都回显，避免用户忘记密码后无处可查。
             if (json.TryGetValue("generatedPassword", out var generated))
             {
-                _logger.LogWarning("当前管理员凭据（自动生成，文件 {File}）：用户名 {UserName}，口令 {Password}。可通过网页右上角 ⚙ 修改，或用环境变量 Admin__Password 覆盖",
+                _logger.LogWarning("当前管理员凭据（自动生成，文件 {File}）：用户名 {UserName}，密码 {Password}。可通过网页右上角 ⚙ 修改，或用环境变量 Admin__Password 覆盖",
                     _filePath, userName, generated);
             }
             else
             {
-                _logger.LogInformation("管理员账户已从 {File} 加载（用户名 {UserName}，口令来自显式配置或网页修改）", _filePath, userName);
+                _logger.LogInformation("管理员账户已从 {File} 加载（用户名 {UserName}，密码来自显式配置或网页修改）", _filePath, userName);
             }
             return true;
         }
@@ -142,7 +142,7 @@ public sealed class AdminCredentialService
 
     private static string GenerateRandomPassword()
     {
-        // 去掉易混淆字符的 16 位口令。
+        // 去掉易混淆字符的 16 位密码。
         const string chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
         var bytes = RandomNumberGenerator.GetBytes(16);
         return new string(bytes.Select(b => chars[b % chars.Length]).ToArray());

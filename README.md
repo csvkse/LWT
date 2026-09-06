@@ -47,23 +47,23 @@ dotnet run --project src/LinuxWebTool.WebHost
 # 浏览器打开 http://localhost:5270/app/
 ```
 
-首次启动自动生成管理员：用户名 `admin`，随机口令打印在程序日志并写入 `src/LinuxWebTool.WebHost/data/admin.json`。也可在 `appsettings.json` 预置：
+首次启动自动生成管理员：用户名 `admin`，随机密码打印在程序日志并写入 `src/LinuxWebTool.WebHost/data/admin.json`。也可在 `appsettings.json` 预置：
 
 ```json
-{ "Admin": { "UserName": "admin", "Password": "你的口令" } }
+{ "Admin": { "UserName": "admin", "Password": "你的密码" } }
 ```
 
-**支持环境变量注入凭据**（优先级最高，每次启动生效，修改后重启即换号/换口令）：
+**支持环境变量注入凭据**（优先级最高，每次启动生效，修改后重启即换号/换密码）：
 
 ```powershell
 # Windows（PowerShell: $env:Admin__Password="xxx"）/ Linux systemd: Environment=Admin__Password=xxx
-Admin__UserName=ops Admin__Password=你的口令 dotnet run
-docker run -e Admin__UserName=ops -e Admin__Password=你的口令 linuxwebtool
+Admin__UserName=ops Admin__Password=你的密码 dotnet run
+docker run -e Admin__UserName=ops -e Admin__Password=你的密码 linuxwebtool
 ```
 
-凭据优先级：`Admin__UserName`/`Admin__Password` 环境变量或 appsettings 显式配置 **>** `data/admin.json`（自动生成口令的持久化，记录最后一次生效的凭据）**>** 首次启动随机生成。
+凭据优先级：`Admin__UserName`/`Admin__Password` 环境变量或 appsettings 显式配置 **>** `data/admin.json`（自动生成密码的持久化，记录最后一次生效的凭据）**>** 首次启动随机生成。
 
-**网页修改凭据**：登录后点右上角用户名旁的 ⚙，可修改用户名 / 口令（需验证当前口令，改完自动登出用新凭据重登）。同时支持 `Data__Directory` 指定数据根目录（默认应用根下 `data/`）。
+**网页修改凭据**：登录后点右上角用户名旁的 ⚙，可修改用户名 / 密码（需验证当前密码，改完自动登出用新凭据重登）。同时支持 `Data__Directory` 指定数据根目录（默认应用根下 `data/`）。
 
 ## 部署到 Linux
 
@@ -76,7 +76,7 @@ docker run -e Admin__UserName=ops -e Admin__Password=你的口令 linuxwebtool
 docker build -t linuxwebtool .
 docker run -d -p 8080:8080 -v linuxwebtool-data:/app/data --name linuxwebtool linuxwebtool
 # 镜像特性：TZ=Asia/Shanghai、非 root(appuser) 运行、内置 HEALTHCHECK；
-# 首次口令: docker exec linuxwebtool cat /app/data/admin.json
+# 首次密码: docker exec linuxwebtool cat /app/data/admin.json
 # 需要执行 systemctl/docker 等特权指令时，run 加 --user root（或改 Dockerfile 的 USER）
 ```
 

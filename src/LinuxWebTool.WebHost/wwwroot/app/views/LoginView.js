@@ -12,7 +12,7 @@ export default defineComponent({
 
     async function submit() {
       if (!form.userName || !form.password) {
-        error.value = '请输入用户名与口令';
+        error.value = '请输入用户名与密码';
         return;
       }
       loading.value = true;
@@ -43,7 +43,7 @@ export default defineComponent({
             <input class="input" v-model="form.userName" autocomplete="username" />
           </label>
           <label class="block">
-            <span class="text-xs text-slate-500 mb-1 block">口令</span>
+            <span class="text-xs text-slate-500 mb-1 block">密码</span>
             <input class="input" type="password" v-model="form.password" autocomplete="current-password" placeholder="••••••••" />
           </label>
           <p v-if="error" class="text-xs text-rose-400">{{ error }}</p>
@@ -53,7 +53,7 @@ export default defineComponent({
         </form>
 
         <p class="text-[11px] text-slate-600 mt-5 leading-relaxed">
-          首次启动的口令由服务自动生成，见程序日志或 data/admin.json；也可在 appsettings.json 的 Admin:Password 配置。
+          首次启动的密码由服务自动生成，见程序日志或 data/admin.json；也可在 appsettings.json 的 Admin:Password 配置。
         </p>
       </div>
     </div>

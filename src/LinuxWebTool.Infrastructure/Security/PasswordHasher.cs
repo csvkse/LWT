@@ -3,7 +3,7 @@ using System.Text;
 
 namespace LinuxWebTool.Infrastructure.Security;
 
-/// <summary>管理员口令校验：支持 SHA256(Salt+password) 十六进制哈希，或配置文件中的明文口令直接比对。</summary>
+/// <summary>管理员密码校验：支持 SHA256(Salt+password) 十六进制哈希，或配置文件中的明文密码直接比对。</summary>
 public static class PasswordHasher
 {
     private const string Salt = "LinuxWebTool::v1::";
@@ -28,7 +28,7 @@ public static class PasswordHasher
             return CryptographicOperations.FixedTimeEquals(candidate, expected);
         }
 
-        // 允许在 appsettings 里直接放明文口令（个人工具便利性），比对同样走固定时间。
+        // 允许在 appsettings 里直接放明文密码（个人工具便利性），比对同样走固定时间。
         var plain = Encoding.UTF8.GetBytes(stored);
         var input = Encoding.UTF8.GetBytes(password);
         return input.Length == plain.Length && CryptographicOperations.FixedTimeEquals(input, plain);
