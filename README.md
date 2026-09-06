@@ -90,9 +90,15 @@ docker run -e Admin__UserName=ops -e Admin__Password=你的密码 linuxwebtool
 **直接使用 CI 发布的镜像**（每次推送 main 自动构建发布）：
 
 ```bash
+# 更新镜像（已运行过的容器更新方式见下方）
+docker pull ghcr.io/csvkse/lwt:latest
+
 # --restart unless-stopped: 容器随 Docker 服务自动启动（即开机自启）；手动 docker stop 后不会被拉起
-docker run -d --restart unless-stopped -p 8080:8080 -v linuxwebtool-data:/app/data --name linuxwebtool ghcr.io/csvkse/lwt:latest
+docker run -d --restart unless-stopped -p 5270:5270 -v linuxwebtool-data:/app/data --name linuxwebtool ghcr.io/csvkse/lwt:latest
 # 首次密码: docker exec linuxwebtool cat /app/data/admin.json
+
+# 端口映射 -p 宿主端口:容器端口：容器内固定监听 5270（全链路与桌面端一致），宿主端口可自选（如 -p 80:5270）。
+# 已运行容器更新镜像：docker pull 后执行 docker rm -f linuxwebtool，再重新运行上面的 docker run（data 卷保留数据）。
 
 # 容器开机自启的前提是宿主机 Docker 服务本身自启：
 #   Linux:   sudo systemctl enable docker
@@ -102,7 +108,7 @@ docker run -d --restart unless-stopped -p 8080:8080 -v linuxwebtool-data:/app/da
 
 > 注：GHCR 包首次发布默认 private。拉取时先 `docker login ghcr.io`（用户名 GitHub 账号、密码为 PAT，需 `read:packages` 权限）；或将仓库 Packages 页中 lwt 的 visibility 改为 public 后免登录拉取。
 
-**docker compose 示例**：
+**docker compose 示例**（更新镜像：`docker compose pull && docker compose up -d`）：
 
 ```yaml
 services:
@@ -110,7 +116,7 @@ services:
     image: ghcr.io/csvkse/lwt:latest
     container_name: linuxwebtool
     ports:
-      - "8080:8080"
+      - "5270:5270"
     volumes:
       - ./data:/app/data          # 单卷持久化：数据库+凭据+密钥+日志
     environment:
