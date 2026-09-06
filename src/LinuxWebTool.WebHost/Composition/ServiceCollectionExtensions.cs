@@ -48,10 +48,11 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<SystemStatusStore>();
         builder.Services.AddHostedService<SystemStatusSampleService>();
 
-        // 认证：单管理员 + JWT
+        // 认证：单管理员 + JWT（凭据在启动阶段即初始化，见 StartupInitializerService）
         var jwtIssuer = new JwtIssuer(configuration, dataPaths);
         builder.Services.AddSingleton(jwtIssuer);
         builder.Services.AddSingleton<AdminCredentialService>();
+        builder.Services.AddHostedService<StartupInitializerService>();
         builder.Services
             .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
@@ -63,7 +64,6 @@ public static class ServiceCollectionExtensions
 
         // Quartz 定时调度
         builder.Services.AddScheduling();
-
         // MVC + Swagger
         builder.Services.AddControllers();
         builder.Services.AddHttpContextAccessor();

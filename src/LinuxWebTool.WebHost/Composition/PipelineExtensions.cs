@@ -8,9 +8,6 @@ public static class PipelineExtensions
     /// <summary>中间件管线：异常 → 静态前端 → Swagger → 认证 → API → SPA 回退。</summary>
     public static WebApplication UseApplicationPipeline(this WebApplication app)
     {
-        var dataPaths = app.Services.GetRequiredService<DataPaths>();
-        app.Logger.LogInformation("数据目录（数据库 / 凭据 / 密钥 / 日志）: {DataDir}", dataPaths.Root);
-
         app.UseMiddleware<ExceptionHandlingMiddleware>();
 
         // 根路径跳转到前端入口
