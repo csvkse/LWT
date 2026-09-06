@@ -13,7 +13,8 @@ if errorlevel 1 (
 echo ============================================
 echo   LinuxWebTool 快速启动
 echo   地址: http://localhost:5270/app/
-echo   首次口令: src\LinuxWebTool.WebHost\data\admin.json
+echo   数据目录: src\LinuxWebTool.WebHost\data （数据库/凭据/日志）
+echo   管理员口令: 首次启动自动生成并打印于下方；已生成过的见 data\admin.json
 echo   停止服务: 在本窗口按 Ctrl+C
 echo ============================================
 echo.

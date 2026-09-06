@@ -120,7 +120,17 @@ public sealed class AdminCredentialService
             }
 
             Account = new AdminAccount { UserName = userName, PasswordHash = hash };
-            _logger.LogInformation("管理员账户已从 {File} 加载（用户名 {UserName}）", _filePath, userName);
+
+            // 自动生成口令的场景：文件里保留了明文，每次启动都回显，避免用户忘记口令后无处可查。
+            if (json.TryGetValue("generatedPassword", out var generated))
+            {
+                _logger.LogWarning("当前管理员凭据（自动生成，文件 {File}）：用户名 {UserName}，口令 {Password}。可通过网页右上角 ⚙ 修改，或用环境变量 Admin__Password 覆盖",
+                    _filePath, userName, generated);
+            }
+            else
+            {
+                _logger.LogInformation("管理员账户已从 {File} 加载（用户名 {UserName}，口令来自显式配置或网页修改）", _filePath, userName);
+            }
             return true;
         }
         catch (Exception ex)
