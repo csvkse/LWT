@@ -12,7 +12,7 @@
 | **Bash 脚本** | 支持多行脚本类型：写临时文件 `bash script.sh $1 $2...` 执行（位置参数、引号感知拆分、不经二次 shell 解释）；Windows 开发机自动探测 Git Bash |
 | 快速执行 | 临时指令不保存直接跑，自动记入调用历史 |
 | 定时任务 | 引用已保存指令/脚本 + Cron（支持 Unix 5 段 / Quartz 6 段，自动归一化）；启停 / 立即运行 / 下次执行时间；常用 Cron 预设 |
-| **系统状态** | 即时查看：CPU / 内存 / 磁盘挂载点 / 网卡速率 / 进程 TOP / 主机内核信息；10s 自动刷新；历史曲线（后台 60s 采样入 SQLite，保留 7 天，uPlot 渲染，1h~7d 区间切换） |
+| **系统状态** | 即时查看：CPU / 内存 / 磁盘挂载点 / 网卡速率 / 进程 TOP / 主机内核信息；10s 自动刷新；历史曲线（后台 60s 采样入 SQLite，保留 7 天，uPlot 渲染，1h~7d 区间切换）；Docker 部署加 `--privileged --pid=host --user root` 可自动采集宿主机全部磁盘 |
 | 执行历史 | 手动 / 定时 / 快速三类记录；状态筛选、关键字搜索、分页；失败详情（stdout/stderr/退出码/耗时） |
 | 日志 | 操作日志（DB，全行为审计）+ 程序日志（`logs/app-*.txt`）+ 调试日志（`logs/debug-*.txt`，网页 tail 查看） |
 | 门禁 | 单管理员登录签发 JWT（HS256，默认 12h）；登录失败 10 次锁 IP 5 分钟；全部 API 需认证 |
@@ -38,6 +38,7 @@ LinuxWebTool.slnx
 ├── .github/workflows/ci.yml            # CI：构建+门禁+GHCR 镜像（push/PR 触发）
 ├── .github/workflows/desktop-release.yml  # 桌面端多平台构建发布（tag v* 触发 GitHub Release）
 ├── Dockerfile                          # Docker 部署（三阶段，alpine）
+├── start.bat                           # Windows 开发机一键启动（dotnet run + 自动开浏览器）
 └── docs/dev/architecture-gates.md      # 门禁规则文档
 ```
 
@@ -60,7 +61,7 @@ dotnet run --project src/LinuxWebTool.WebHost
 ```powershell
 # Windows（PowerShell: $env:Admin__Password="xxx"）/ Linux systemd: Environment=Admin__Password=xxx
 Admin__UserName=ops Admin__Password=你的密码 dotnet run
-docker run -e Admin__UserName=ops -e Admin__Password=你的密码 linuxwebtool
+docker run -e Admin__UserName=ops -e Admin__Password=你的密码 ghcr.io/csvkse/lwt:latest
 ```
 
 凭据优先级：`Admin__UserName`/`Admin__Password` 环境变量或 appsettings 显式配置 **>** `data/admin.json`（自动生成密码的持久化，记录最后一次生效的凭据）**>** 首次启动随机生成。
@@ -130,7 +131,7 @@ services:
 
 ```bash
 docker build -t linuxwebtool .
-docker run -d -p 8080:8080 -v linuxwebtool-data:/app/data linuxwebtool
+docker run -d -p 5270:5270 -v linuxwebtool-data:/app/data linuxwebtool
 ```
 
 镜像特性（已实测）：`TZ=Asia/Shanghai`、非 root（appuser）运行、内置 HEALTHCHECK、alpine 内已装 `bash`/`procps`/`usbutils`/`pciutils`/`kmod`（脚本执行、状态采集、lsusb/lspci/lsmod 硬件查看容器内可用）。
@@ -205,8 +206,12 @@ compose 等价写法（节选）：
 
 | 配置 | 默认 | 说明 |
 |---|---|---|
+| `Urls` | `http://localhost:5270` | 监听地址（appsettings.json 顶层；Docker 镜像内已改写为 `0.0.0.0:5270`，勿在容器内依赖此值） |
+| `Data:Directory` | `data` | 数据根目录（相对路径锚定应用根；环境变量 `Data__Directory`） |
 | `Shell:DefaultTimeoutSeconds` | 60 | 指令默认超时 |
 | `Shell:MaxOutputBytes` | 65536 | stdout/stderr 截断上限 |
 | `Shell:MaxConcurrent` | 4 | 并发执行上限（排队等待） |
+| `Shell:WorkingDirectory` | 空 | 指令执行工作目录（空=继承进程目录） |
 | `Jwt:ExpireHours` | 12 | 登录有效期 |
+| `FileLog:Directory` | `logs` | 日志目录（相对路径锚定到数据目录） |
 | `Logging:LogFile:LinuxWebTool` | Debug | 调试日志开关（写入 debug-*.txt） |
