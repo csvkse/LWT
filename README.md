@@ -164,16 +164,48 @@ docker run -d --restart unless-stopped \
 | **查看宿主机磁盘（自动，推荐）** | `--privileged --pid=host --user root` | 采集器经 `nsenter` 进入宿主挂载命名空间执行 `df`，系统状态页**自动显示宿主全部磁盘与挂载点**，新增磁盘自动出现，无需任何手写。需标准 Linux 宿主 Docker（WSL2 的 wslc 不支持 privileged，见下行） |
 | **查看宿主机磁盘（手动）** | 逐盘挂载：`-v /mnt/c:/host-c:ro`（WSL2 的 Windows 盘）等 | 受限运行时（wslc）或不想给特权时的替代：容器文件系统与宿主隔离，`df` 天然只看到容器自身（如 `/dev/loop2` 虚拟盘）；挂进来的盘会出现在磁盘列表（真实容量）。已实测：WSL2 下挂 `/mnt/c` 后容器内 `df` 正确显示 Windows C 盘容量（790GB·70%） |
 
-compose 等价写法（节选）：
+**宿主机磁盘自动采集 —— 完整示例**（三个参数缺一不可，作用：`--privileged` 授予 nsenter 权限；`--pid=host` 让容器看到宿主 PID 1 以定位其命名空间；`--user root` 非 root 无权切换命名空间）：
+
+```bash
+docker run -d --restart unless-stopped \
+  -p 5270:5270 \
+  -v linuxwebtool-data:/app/data \
+  --name linuxwebtool \
+  --privileged --pid=host --user root \
+  ghcr.io/csvkse/lwt:latest
+# 打开 http://localhost:5270/app/ 系统状态页，磁盘列表即宿主机全部磁盘与挂载点
+```
+
+compose 等价完整写法：
 
 ```yaml
-    user: root
+services:
+  linuxwebtool:
+    image: ghcr.io/csvkse/lwt:latest
+    container_name: linuxwebtool
+    privileged: true      # 必需：授予 nsenter 权限
+    pid: host             # 必需：共享宿主 PID 命名空间（nsenter -t 1 定位宿主）
+    user: root            # 必需：非 root 无权切换命名空间
+    ports:
+      - "5270:5270"
+    volumes:
+      - linuxwebtool-data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+    restart: unless-stopped
+
+volumes:
+  linuxwebtool-data:
+```
+
+USB / GPU 直通的 compose 节选（叠加到上方任一示例的对应位置）：
+
+```yaml
     devices:
       - /dev/bus/usb
       - /dev/dri
     volumes:
       - /usr/local/bin:/usr/local/bin:ro
-    # 或全部要: privileged: true
 ```
 
 > ⚠️ 这些配置授予容器宿主硬件控制权，与「不暴露公网」原则叠加使用；非 NVIDIA 环境去掉 `--gpus all`（无 toolkit 时该参数会直接报错）。
