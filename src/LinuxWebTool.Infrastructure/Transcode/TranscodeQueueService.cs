@@ -77,6 +77,15 @@ public sealed class TranscodeQueueService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // 等数据库就绪，避免启动早期 IsAutoCloseConnection 连接未初始化时恢复查询失败
+        try
+        {
+            await Task.Delay(2000, stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
         try
         {
             await RecoverAsync(stoppingToken);

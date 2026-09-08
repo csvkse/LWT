@@ -41,6 +41,15 @@ public sealed class WatchFolderService(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         queueService.OutputCompleted += OnOutputCompleted;
+        // 等数据库 / 宿主就绪，避免启动早期 SqlSugar 连接未完成初始化时查询失败
+        try
+        {
+            await Task.Delay(2000, stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
         try
         {
             while (!stoppingToken.IsCancellationRequested)
