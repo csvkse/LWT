@@ -60,16 +60,29 @@ export default defineComponent({
     });
 
     const loading = ref(false);
+    const loadError = ref('');
     let timer = null;
 
     async function loadFfmpeg() {
       const result = await http(API.transcode.detectFfmpeg);
-      if (result.ok) Object.assign(ffmpeg, result.data);
+      if (result.ok && result.data && typeof result.data.available === 'boolean') {
+        Object.assign(ffmpeg, result.data);
+      } else if (!result.ok) {
+        throw new Error(result.message || 'ffmpeg 状态检测失败');
+      } else {
+        throw new Error('ffmpeg 检测响应格式异常');
+      }
     }
 
     async function loadPresets() {
       const result = await http(API.transcode.presets);
-      if (result.ok) presets.value = result.data;
+      if (result.ok && Array.isArray(result.data)) {
+        presets.value = result.data;
+      } else if (!result.ok) {
+        throw new Error(result.message || '转码预设加载失败');
+      } else {
+        throw new Error('转码预设响应格式异常');
+      }
     }
 
     async function loadJobs() {
@@ -81,10 +94,16 @@ export default defineComponent({
             status: jobQuery.status, watchRuleId: undefined,
           },
         });
-        if (result.ok) {
+        if (result.ok && result.data && Array.isArray(result.data.items) && Number.isFinite(Number(result.data.total))) {
           jobs.value = result.data.items;
-          jobTotal.value = result.data.total;
+          jobTotal.value = Number(result.data.total);
+        } else if (!result.ok) {
+          throw new Error(result.message || '转码任务加载失败');
+        } else {
+          throw new Error('转码任务响应格式异常');
         }
+      } catch (error) {
+        loadError.value = error?.message || '转码任务加载失败';
       } finally {
         jobLoading.value = false;
       }
@@ -92,13 +111,26 @@ export default defineComponent({
 
     async function loadWatch() {
       const result = await http(API.transcode.watchRules);
-      if (result.ok) watchRules.value = result.data;
+      if (result.ok && Array.isArray(result.data)) {
+        watchRules.value = result.data;
+      } else if (!result.ok) {
+        throw new Error(result.message || '监听规则加载失败');
+      } else {
+        throw new Error('监听规则响应格式异常');
+      }
     }
 
     async function loadAll() {
       loading.value = true;
+      loadError.value = '';
       try {
-        await Promise.all([loadFfmpeg(), loadPresets(), loadJobs(), loadWatch()]);
+        const results = await Promise.allSettled([loadFfmpeg(), loadPresets(), loadJobs(), loadWatch()]);
+        const failed = results.find((item) => item.status === 'rejected');
+        if (failed) {
+          loadError.value = failed.reason?.message || '转码页面初始化失败';
+        }
+      } catch (error) {
+        loadError.value = error?.message || '转码页面初始化失败';
       } finally {
         loading.value = false;
       }
@@ -359,7 +391,7 @@ export default defineComponent({
       presetCodecOptions, presetAudioOptions,
       watchRules, showWatchEditor, editingWatchId, watchSaving, watchForm, openWatchCreate, openWatchEdit, saveWatch, toggleWatch, removeWatch,
       presetById, isPathActive, watchStatus,
-      formatBytes, formatDuration, formatTime, transcodeStatusMeta, transcodeModeLabel, transcodeTriggerLabel, loading,
+      formatBytes, formatDuration, formatTime, transcodeStatusMeta, transcodeModeLabel, transcodeTriggerLabel, loading, loadError,
     };
   },
   template: `
@@ -379,6 +411,10 @@ export default defineComponent({
         Docker 镜像已内置；桌面部署请安装 ffmpeg（<code class="font-mono">apt install ffmpeg</code>/<code class="font-mono">brew install ffmpeg</code>/<code class="font-mono">winget install ffmpeg</code>）
         或通过环境变量 <code class="font-mono">Media__FfmpegPath</code> 指定绝对路径。<br />
         <span v-if="ffmpeg.message" class="text-rose-300/70">{{ ffmpeg.message }}</span>
+      </div>
+      <div v-if="loadError" class="panel !border-amber-500/40 bg-amber-500/5 text-amber-200/90 text-xs px-4 py-3 flex items-center gap-3">
+        <span>{{ loadError }}</span>
+        <button class="btn btn-xs ml-auto" @click="loadAll()">重试</button>
       </div>
 
       <!-- ============ 一次性转码 ============ -->
@@ -492,8 +528,8 @@ export default defineComponent({
           <span></span>
           <div class="flex items-center gap-2">
             <button class="btn btn-xs" :disabled="jobQuery.page <= 1" @click="goPage(-1)">上一页</button>
-            <span>{{ jobQuery.page }} / {{ totalPages.value }}</span>
-            <button class="btn btn-xs" :disabled="jobQuery.page >= totalPages.value" @click="goPage(1)">下一页</button>
+            <span>{{ jobQuery.page }} / {{ totalPages }}</span>
+            <button class="btn btn-xs" :disabled="jobQuery.page >= totalPages" @click="goPage(1)">下一页</button>
           </div>
         </div>
       </div>

@@ -40,10 +40,13 @@ export async function http(url, { method = 'GET', params, body } = {}) {
   }
 
   const text = await response.text();
+  const contentType = response.headers.get('content-type') || '';
   let data = null;
+  let parsedJson = true;
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
+    parsedJson = false;
     data = text;
   }
 
@@ -60,6 +63,13 @@ export async function http(url, { method = 'GET', params, body } = {}) {
     const message = (data && (data.message || data.Message)) || `请求失败（${response.status}）`;
     toast.error(message);
     return { ok: false, status: response.status, data, message };
+  }
+
+  // 2xx 也必须是 JSON；未知 API 被旧服务的 SPA fallback 接管时，不能把 index.html 当业务数据。
+  if (!parsedJson || !contentType.toLowerCase().includes('application/json')) {
+    const message = '服务器返回了非 JSON 响应，请确认服务版本与 API 地址一致';
+    toast.error(message);
+    return { ok: false, status: response.status, data: null, message };
   }
 
   return { ok: true, status: response.status, data };

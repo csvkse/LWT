@@ -24,6 +24,7 @@ export default defineComponent({
     const loading = ref(false);
     const actingId = ref(null);
     const unsupported = ref(false);
+    const loadError = ref('');
 
     const showEditor = ref(false);
     const editingId = ref(null);
@@ -32,13 +33,26 @@ export default defineComponent({
 
     async function load() {
       loading.value = true;
+      loadError.value = '';
       try {
         const [supportResult, listResult] = await Promise.all([
           http(API.smbMounts.support),
           http(API.smbMounts.list),
         ]);
-        if (supportResult.ok) unsupported.value = !supportResult.data.supported;
-        if (listResult.ok) items.value = listResult.data;
+        if (supportResult.ok && supportResult.data && typeof supportResult.data.supported === 'boolean') {
+          unsupported.value = !supportResult.data.supported;
+        } else if (!supportResult.ok) {
+          loadError.value = supportResult.message || '挂载能力检测失败';
+        }
+        if (listResult.ok && Array.isArray(listResult.data)) {
+          items.value = listResult.data;
+        } else if (!listResult.ok) {
+          loadError.value = loadError.value || listResult.message || '挂载列表加载失败';
+        } else {
+          loadError.value = '挂载列表响应格式异常';
+        }
+      } catch (error) {
+        loadError.value = error?.message || '挂载页初始化失败';
       } finally {
         loading.value = false;
       }
@@ -157,7 +171,7 @@ export default defineComponent({
     });
 
     return {
-      items, loading, actingId, unsupported, showEditor, editingId, saving, form,
+      items, loading, actingId, unsupported, loadError, showEditor, editingId, saving, form,
       load, openCreate, openEdit, save, remove, mountNow, unmount, statusMeta, formatTime,
     };
   },
@@ -171,6 +185,10 @@ export default defineComponent({
       <div v-if="unsupported" class="panel !border-amber-500/40 bg-amber-500/5 text-amber-200/90 text-xs leading-relaxed px-4 py-3">
         当前系统不支持挂载管理（需 Linux 环境）。桌面 Windows 部署仅可维护配置；Docker 部署请以
         <code class="font-mono text-amber-100">--privileged --user root</code> 运行（镜像含 cifs-utils）。
+      </div>
+      <div v-if="loadError" class="panel !border-rose-500/40 bg-rose-500/5 text-rose-200/90 text-xs px-4 py-3 flex items-center gap-3">
+        <span>{{ loadError }}</span>
+        <button class="btn btn-xs ml-auto" @click="load()">重试</button>
       </div>
 
       <div class="panel overflow-x-auto">

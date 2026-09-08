@@ -45,6 +45,16 @@ public static class PipelineExtensions
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapControllers();
+
+        // 未匹配的 API 必须返回 JSON 404，不能被 SPA fallback 返回 index.html（否则前端会把 HTML 当业务数据）。
+        // 以 /api/{*path} 作为较具体的 fallback endpoint：正常 Controller 路由优先，未知 API 才落到这里。
+        app.MapFallback("/api/{*path}", async context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            context.Response.ContentType = "application/json; charset=utf-8";
+            await context.Response.WriteAsJsonAsync(new { message = "API endpoint not found" });
+        });
+
         app.MapFallbackToFile("app/index.html");
         return app;
     }
