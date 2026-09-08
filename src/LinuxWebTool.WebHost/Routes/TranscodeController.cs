@@ -333,6 +333,104 @@ public class TranscodeController(
         return Ok(new { message = "已删除" });
     }
 
+    /// <summary>导出全部预设为 JSON 文件（含内置），供备份 / 迁移 / 导入。</summary>
+    [HttpGet("Presets/Export")]
+    public async Task<IActionResult> ExportPresets()
+    {
+        var presets = await presetStore.GetAllAsync();
+        var items = presets.Select(p => new
+        {
+            name = p.Name,
+            container = p.Container,
+            videoCodec = p.VideoCodec,
+            videoQuality = p.VideoQuality,
+            audioCodec = p.AudioCodec,
+            audioBitrate = p.AudioBitrate,
+            extraArgs = p.ExtraArgs,
+            description = p.Description,
+            isBuiltin = p.IsBuiltin,
+        });
+        var json = System.Text.Json.JsonSerializer.Serialize(items, new System.Text.Json.JsonSerializerOptions
+        {
+            WriteIndented = true,
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
+        var fileName = $"transcode-presets-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+        var bytes = System.Text.Encoding.UTF8.GetBytes(json);
+        return File(bytes, "application/json; charset=utf-8", fileName);
+    }
+
+    /// <summary>从 JSON 数组导入预设。同名预设跳过（含内置，不覆盖）；内置标记按文件还原。</summary>
+    [HttpPost("Presets/Import")]
+    public async Task<IActionResult> ImportPresets([FromBody] List<PresetImportItem> items)
+    {
+        if (items is null)
+        {
+            return BadRequest(new { message = "导入内容为空" });
+        }
+        if (items.Count > 500)
+        {
+            return BadRequest(new { message = "单次最多导入 500 个预设" });
+        }
+
+        var imported = 0;
+        var skipped = 0;
+        var messages = new List<string>();
+        foreach (var item in items)
+        {
+            var name = item.Name?.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                skipped++;
+                messages.Add("存在一项缺少名称，已跳过");
+                continue;
+            }
+            if (await presetStore.ExistsNameAsync(name, excludeId: null))
+            {
+                skipped++;
+                messages.Add($"「{name}」已存在同名，已跳过");
+                continue;
+            }
+            var container = (item.Container ?? string.Empty).Trim().TrimStart('.');
+            if (container.Length == 0)
+            {
+                skipped++;
+                messages.Add($"「{name}」缺少输出格式，已跳过");
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(item.VideoCodec) && string.IsNullOrWhiteSpace(item.AudioCodec))
+            {
+                skipped++;
+                messages.Add($"「{name}」视频 / 音频至少保留一项，已跳过");
+                continue;
+            }
+            if (item.VideoQuality is < 0 or > 51)
+            {
+                skipped++;
+                messages.Add($"「{name}」CRF 必须在 0~51 之间，已跳过");
+                continue;
+            }
+
+            var preset = new TranscodePreset
+            {
+                Name = name,
+                Container = container,
+                VideoCodec = item.VideoCodec?.Trim(),
+                VideoQuality = item.VideoQuality,
+                AudioCodec = item.AudioCodec?.Trim(),
+                AudioBitrate = item.AudioBitrate?.Trim(),
+                ExtraArgs = item.ExtraArgs?.Trim(),
+                Description = item.Description?.Trim(),
+                IsBuiltin = item.IsBuiltin,
+            };
+            await presetStore.InsertAsync(preset);
+            imported++;
+        }
+
+        await operationLogger.LogAsync("导入转码预设", "转码预设", $"导入 {imported} 个 / 跳过 {skipped} 个", string.Empty, clientIp: HttpContext.GetClientIp());
+        return Ok(new { imported, skipped, messages });
+    }
+
     private async Task<(bool Valid, string Message)> ValidatePresetAsync(SavePresetRequest request, Guid? excludeId = null)
     {
         if (string.IsNullOrWhiteSpace(request.Name))

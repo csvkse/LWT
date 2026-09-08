@@ -96,6 +96,31 @@ public sealed record SavePresetRequest
     public string? Description { get; init; }
 }
 
+/// <summary>转码预设导入条目（用于预设导出/导入 JSON，排除 Id/CreateTime/UpdateTime 等运行时字段）。</summary>
+public sealed record PresetImportItem
+{
+    public required string Name { get; init; }
+
+    /// <summary>目标容器 / 输出扩展名：mp4、mkv、mp3…</summary>
+    public required string Container { get; init; }
+
+    public string? VideoCodec { get; init; }
+
+    /// <summary>视频质量 CRF（0~51）。</summary>
+    public int? VideoQuality { get; init; }
+
+    public string? AudioCodec { get; init; }
+
+    public string? AudioBitrate { get; init; }
+
+    public string? ExtraArgs { get; init; }
+
+    public string? Description { get; init; }
+
+    /// <summary>是否内置预设：导入时按文件还原（同名已存在则跳过，不覆盖）。</summary>
+    public bool IsBuiltin { get; init; }
+}
+
 /// <summary>保存监听规则请求：监听文件夹并自动转码新增文件。</summary>
 public sealed record SaveWatchRuleRequest
 {

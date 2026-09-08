@@ -115,3 +115,59 @@ export async function httpUpload(url, { params, file } = {}) {
   }
   return { ok: true, status: response.status, data };
 }
+
+/// 下载文件（Blob）。从 Content-Disposition 解析文件名并触发浏览器下载。返回 { ok, blob, filename, data }；失败 { ok:false }。
+export async function httpDownload(url, { params } = {}) {
+  const headers = { Accept: 'application/json' };
+  const token = localStorage.getItem(LS_KEYS.token);
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let response;
+  try {
+    response = await fetch(buildUrl(url, params), { headers });
+  } catch {
+    toast.error('网络请求失败，请检查服务是否可达');
+    return { ok: false, status: 0, blob: null, filename: '', data: null, message: '网络请求失败' };
+  }
+
+  if (response.status === 401) {
+    clearSession();
+    if (!window.location.hash.startsWith('#/login')) {
+      window.location.hash = '#/login';
+    }
+    toast.error('登录已失效，请重新登录');
+    return { ok: false, status: 401, blob: null, filename: '', data: null, message: '未授权' };
+  }
+
+  if (!response.ok) {
+    let data = null;
+    try { data = await response.json(); } catch { /* 非 JSON */ }
+    const message = (data && (data.message || data.Message)) || `下载失败（${response.status}）`;
+    toast.error(message);
+    return { ok: false, status: response.status, blob: null, filename: '', data, message };
+  }
+
+  const blob = await response.blob();
+  const filename = parseFilename(response.headers.get('Content-Disposition')) || 'download';
+  triggerDownload(blob, filename);
+  return { ok: true, status: response.status, blob, filename, data: null };
+}
+
+function parseFilename(disposition) {
+  if (!disposition) return '';
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+  if (utf8) return decodeURIComponent(utf8[1].trim());
+  const plain = /filename="?([^";]+)"?/i.exec(disposition);
+  return plain ? plain[1].trim() : '';
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}

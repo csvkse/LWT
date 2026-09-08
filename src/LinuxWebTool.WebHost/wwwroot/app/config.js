@@ -68,6 +68,8 @@ export const API = {
     submit: '/Transcode/Submit',
     presets: '/Transcode/Presets',
     presetItem: (id) => `/Transcode/Presets/${id}`,
+    presetExport: '/Transcode/Presets/Export',
+    presetImport: '/Transcode/Presets/Import',
     watchRules: '/Transcode/WatchRules',
     watchRuleItem: (id) => `/Transcode/WatchRules/${id}`,
     watchRuleToggle: (id) => `/Transcode/WatchRules/${id}/Toggle`,

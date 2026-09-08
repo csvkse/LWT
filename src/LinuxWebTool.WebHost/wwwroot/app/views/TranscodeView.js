@@ -1,5 +1,5 @@
 import { computed, defineComponent, onMounted, onUnmounted, reactive, ref } from 'vue';
-import { http } from '../api/client.js';
+import { http, httpDownload } from '../api/client.js';
 import { API } from '../config.js';
 import { openConfirm } from '../store/modal.js';
 import { toast } from '../store/toast.js';
@@ -25,6 +25,7 @@ export default defineComponent({
     const tab = ref('submit');
     const ffmpeg = reactive({ available: false, version: '', message: '' });
     const presets = ref([]);
+    const importInput = ref(null);
 
     // ---- 一次性提交表单 ----
     const submitForm = reactive({
@@ -105,6 +106,46 @@ export default defineComponent({
       } else {
         throw new Error('转码预设响应格式异常');
       }
+    }
+
+    async function exportPresets() {
+      const result = await httpDownload(API.transcode.presetExport);
+      if (result.ok) {
+        toast.success(`已导出 ${presets.value.length} 个预设（${result.filename}）`);
+      }
+    }
+
+    function triggerImport() {
+      const input = importInput.value;
+      if (input) input.click();
+    }
+
+    async function onImportFile(event) {
+      const file = event.target.files && event.target.files[0];
+      event.target.value = ''; // 允许重复选择同一文件
+      if (!file) return;
+      if (!file.name.toLowerCase().endsWith('.json')) {
+        toast.error('请选择 .json 预设文件');
+        return;
+      }
+      let items;
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        if (!Array.isArray(parsed)) throw new Error('文件内容不是预设数组');
+        items = parsed;
+      } catch (e) {
+        toast.error(`预设文件解析失败：${e.message}`);
+        return;
+      }
+      const result = await http(API.transcode.presetImport, { method: 'POST', body: items });
+      if (!result.ok) return;
+      if (result.data.imported > 0) {
+        toast.success(`导入 ${result.data.imported} 个预设，跳过 ${result.data.skipped} 个`);
+      } else {
+        toast.info(result.data.skipped > 0 ? '无新预设可导入（已存在同名）' : '文件里没有可导入的预设');
+      }
+      await loadPresets();
     }
 
     async function loadJobs() {
@@ -412,6 +453,7 @@ export default defineComponent({
       jobs, jobTotal, jobQuery, jobLoading, actJobId, cancelJob, retryJob, clearFinished, goPage, totalPages,
       showPresetEditor, editingPresetId, presetSaving, presetForm, openPresetCreate, openPresetEdit, savePreset, removePreset,
       presetCodecOptions, presetAudioOptions,
+      exportPresets, triggerImport, onImportFile, importInput,
       watchRules, showWatchEditor, editingWatchId, watchSaving, watchForm, openWatchCreate, openWatchEdit, saveWatch, toggleWatch, removeWatch,
       presetById, isPathActive, watchStatus,
       formatBytes, formatDuration, formatTime, transcodeStatusMeta, transcodeModeLabel, transcodeTriggerLabel, loading, loadError,
@@ -577,9 +619,14 @@ export default defineComponent({
 
       <!-- ============ 转码预设 ============ -->
       <div v-show="tab === 'presets'" class="flex flex-col gap-3">
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 flex-wrap">
           <span class="text-xs text-slate-500">预设用于一键配置 ffmpeg 参数；内置预设可编辑、可删除。</span>
-          <button class="btn btn-primary ml-auto" @click="openPresetCreate()">＋ 新建预设</button>
+          <div class="ml-auto flex gap-1.5">
+            <button class="btn btn-xs" title="导出全部预设为 JSON 文件" @click="exportPresets()">⬇ 导出</button>
+            <button class="btn btn-xs" title="从 JSON 文件导入预设" @click="triggerImport()">⬆ 导入</button>
+            <button class="btn btn-primary" @click="openPresetCreate()">＋ 新建预设</button>
+            <input ref="importInput" type="file" accept=".json" class="hidden" @change="onImportFile" />
+          </div>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div v-for="p in presets" :key="p.id" class="panel p-4 flex flex-col gap-2">
