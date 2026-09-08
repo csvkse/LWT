@@ -57,6 +57,54 @@ public static class TranscodePresetSeeder
                 Description = "从视频中提取音频轨为 MP3",
                 IsBuiltin = true,
             },
+            new()
+            {
+                Name = "MP4 H.264 高码率",
+                Container = "mp4",
+                VideoCodec = "libx264",
+                VideoQuality = 18,
+                AudioCodec = "aac",
+                AudioBitrate = "192k",
+                ExtraArgs = "-preset slow",
+                Description = "画质优先的 H.264，适合存档 / 大屏播放（体积较大）",
+                IsBuiltin = true,
+            },
+            new()
+            {
+                Name = "MP4 H.264 低码率",
+                Container = "mp4",
+                VideoCodec = "libx264",
+                VideoQuality = 28,
+                AudioCodec = "aac",
+                AudioBitrate = "96k",
+                ExtraArgs = "-preset medium",
+                Description = "体积优先的 H.264，适合移动端 / 在线分发",
+                IsBuiltin = true,
+            },
+            new()
+            {
+                Name = "MP4 H.265 高码率",
+                Container = "mp4",
+                VideoCodec = "libx265",
+                VideoQuality = 20,
+                AudioCodec = "aac",
+                AudioBitrate = "160k",
+                ExtraArgs = "-tag:v hvc1 -preset slow",
+                Description = "画质优先的 H.265，同码率下画质优于 H.264，编码较慢",
+                IsBuiltin = true,
+            },
+            new()
+            {
+                Name = "MP4 屏幕录制 / 动画",
+                Container = "mp4",
+                VideoCodec = "libx264",
+                VideoQuality = 23,
+                AudioCodec = "aac",
+                AudioBitrate = "128k",
+                ExtraArgs = "-preset ultrafast -movflags +faststart -pix_fmt yuv420p",
+                Description = "低编码延迟，适合屏幕录制 / 动画 / 教程（流畅优先）",
+                IsBuiltin = true,
+            },
         };
 
         foreach (var preset in presets)

@@ -423,6 +423,10 @@ export default defineComponent({
         <h2 class="text-sm text-slate-400">FFmpeg 媒体转码</h2>
         <span v-if="ffmpeg.available" class="badge border-emerald-500/50 text-emerald-300">● ffmpeg 可用</span>
         <span v-else class="badge border-rose-500/50 text-rose-300">○ ffmpeg 不可用</span>
+        <span v-if="ffmpeg.available && ffmpeg.hwEncoders && ffmpeg.hwEncoders.length"
+              class="badge border-cyan-500/50 text-cyan-300" title="已检测到硬件视频编码器">⚡ 硬件加速可用</span>
+        <span v-if="ffmpeg.available && (!ffmpeg.hwEncoders || !ffmpeg.hwEncoders.length)"
+              class="badge border-slate-500/40 text-slate-400" title="未检测到可用的硬件视频编码器（需 GPU 直通，见文档）">○ 未检测到硬件加速</span>
         <div class="ml-auto flex gap-1">
           <button v-for="t in TABS" :key="t.key" class="btn btn-xs"
                   :class="tab === t.key ? 'btn-primary' : ''" @click="tab = t.key">{{ t.label }}</button>
@@ -434,6 +438,17 @@ export default defineComponent({
         Docker 镜像已内置；桌面部署请安装 ffmpeg（<code class="font-mono">apt install ffmpeg</code>/<code class="font-mono">brew install ffmpeg</code>/<code class="font-mono">winget install ffmpeg</code>）
         或通过环境变量 <code class="font-mono">Media__FfmpegPath</code> 指定绝对路径。<br />
         <span v-if="ffmpeg.message" class="text-rose-300/70">{{ ffmpeg.message }}</span>
+      </div>
+
+      <div v-if="ffmpeg.available" class="panel p-3 text-xs text-slate-400">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-slate-500">硬件加速：</span>
+          <template v-if="ffmpeg.hwEncoders && ffmpeg.hwEncoders.length">
+            <span class="text-cyan-300 font-mono">{{ ffmpeg.hwEncoders.join(' · ') }}</span>
+            <span class="text-slate-600">（需 GPU 直通，转码预设可选对应编码器）</span>
+          </template>
+          <span v-else class="text-slate-600">当前环境未检测到硬件编码器，将使用软件编码（libx264/libx265）。GPU 直通见 README「GPU（NVIDIA/Intel/AMD）」节。</span>
+        </div>
       </div>
       <div v-if="loadError" class="panel !border-amber-500/40 bg-amber-500/5 text-amber-200/90 text-xs px-4 py-3 flex items-center gap-3">
         <span>{{ loadError }}</span>
@@ -636,10 +651,12 @@ export default defineComponent({
             </label>
             <div class="grid grid-cols-2 gap-3">
               <label class="block">
-                <span class="text-xs text-slate-500 mb-1 block">视频编解码（空=去视频提取音频）</span>
-                <select class="input" v-model="presetForm.videoCodec">
+                <span class="text-xs text-slate-500 mb-1 block">视频编解码（空=去视频提取音频；可填硬件编码器如 h264_nvenc）</span>
+                <input class="input font-mono" list="preset-codec-list" v-model="presetForm.videoCodec"
+                       placeholder="libx264 / h264_nvenc / copy / 空" />
+                <datalist id="preset-codec-list">
                   <option v-for="c in presetCodecOptions" :key="c" :value="c">{{ c || '（去视频）' }}</option>
-                </select>
+                </datalist>
               </label>
               <label v-if="presetForm.videoCodec && presetForm.videoCodec !== 'copy'" class="block">
                 <span class="text-xs text-slate-500 mb-1 block">CRF 质量（0~51）</span>

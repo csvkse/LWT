@@ -334,6 +334,25 @@ export default defineComponent({
               <span class="text-slate-500">内核</span><span class="text-slate-200 font-mono truncate">{{ status.host.kernelVersion }}</span>
               <span class="text-slate-500">架构</span><span class="text-slate-200">{{ status.host.architecture }}</span>
             </div>
+            <div v-if="status.hardware && status.hardware.length" class="mt-3 border-t border-cyber-line/40 pt-3">
+              <div class="text-xs text-slate-500 mb-2" style="display:flex;align-items:center;gap:0.4rem">
+                硬件设备
+                <span class="badge border-rose-500/50 text-rose-300">{{ status.hardware.filter(h => h.isGpu).length }} GPU</span>
+                <span class="badge border-slate-500/40 text-slate-400">{{ status.hardware.length }} 项</span>
+              </div>
+              <div class="flex flex-col gap-1 max-h-56 overflow-y-auto pr-1">
+                <div v-for="h in status.hardware" :key="h.type + h.name"
+                     class="flex items-center gap-2 text-xs py-0.5 border-b border-cyber-line/20"
+                     :class="h.isGpu ? 'text-rose-300 bg-rose-500/5 rounded px-1' : 'text-slate-400'">
+                  <span class="font-mono truncate" :title="h.name">{{ h.isGpu ? '🖥' : (h.type === 'usb' ? '🔌' : '🧩') }}</span>
+                  <span class="font-mono truncate" :title="h.description">{{ h.name }}</span>
+                  <span class="ml-auto text-[11px] truncate max-w-[45%]" :title="h.description">
+                    <span v-if="h.isGpu" class="text-rose-300">{{ h.description }}</span>
+                    <template v-else>{{ h.description }}</template>
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 

@@ -80,6 +80,19 @@ public sealed record ProcessStatus
     public long NetRecvBps { get; init; }
 }
 
+/// <summary>硬件设备（PCI / USB / 加载内核模块），GPU 重点标记。</summary>
+public sealed record HardwareDevice
+{
+    /// <summary>设备类型：gpu / pci / usb / kernel_module。</summary>
+    public string Type { get; init; } = string.Empty;
+    /// <summary>设备名称 / 标识。</summary>
+    public string Name { get; init; } = string.Empty;
+    /// <summary>设备描述。</summary>
+    public string Description { get; init; } = string.Empty;
+    /// <summary>是否为显卡 / GPU（VGA、3D、Display Controller 类）。</summary>
+    public bool IsGpu { get; init; }
+}
+
 /// <summary>一次系统状态快照（即时全量）。</summary>
 public sealed record SystemStatusResult
 {
@@ -90,6 +103,7 @@ public sealed record SystemStatusResult
     public IReadOnlyList<NetworkStatus> Networks { get; init; } = [];
     public IReadOnlyList<ProcessStatus> TopCpuProcesses { get; init; } = [];
     public IReadOnlyList<ProcessStatus> TopMemProcesses { get; init; } = [];
+    public IReadOnlyList<HardwareDevice> Hardware { get; init; } = [];
     public DateTime SampledAt { get; init; }
 }
 

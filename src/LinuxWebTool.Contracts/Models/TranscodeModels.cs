@@ -132,4 +132,10 @@ public sealed record FfmpegDetection
     public string Version { get; init; } = string.Empty;
     /// <summary>不可用时的安装 / 配置指引。</summary>
     public string Message { get; init; } = string.Empty;
+
+    /// <summary>支持的解码硬件加速方式（ffmpeg -hwaccels），如 cuda / vaapi / qsv / videotoolbox。</summary>
+    public List<string> HardwareAccels { get; init; } = [];
+
+    /// <summary>可用的硬件视频编码器（ffmpeg -encoders 过滤 nvenc / vaapi / qsv / videotoolbox），如 h264_nvenc / hevc_vaapi。</summary>
+    public List<string> HwEncoders { get; init; } = [];
 }

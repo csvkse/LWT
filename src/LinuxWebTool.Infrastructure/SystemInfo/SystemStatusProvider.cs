@@ -61,6 +61,7 @@ public sealed partial class SystemStatusProvider : ISystemStatusProvider
                 Networks = OperatingSystem.IsWindows() ? [] : SampleNetworkLinux(),
                 TopCpuProcesses = OperatingSystem.IsWindows() ? [] : CollectTopProcessesLinux(byCpu: true, _options.TopProcessCount, netByPid),
                 TopMemProcesses = OperatingSystem.IsWindows() ? [] : CollectTopProcessesLinux(byCpu: false, _options.TopProcessCount, netByPid),
+                Hardware = OperatingSystem.IsWindows() ? [] : CollectHardwareLinux(),
                 SampledAt = DateTime.Now,
             };
         }
@@ -595,6 +596,115 @@ public sealed partial class SystemStatusProvider : ISystemStatusProvider
             result[pid] = ((long)(sentKb * 1024), (long)(recvKb * 1024));
         }
         return result;
+    }
+
+    // ---------- 硬件 ----------
+
+    /// <summary>
+    /// 采集硬件设备（PCI / USB / 加载内核模块），GPU 重点标记。
+    /// 全部经 RunCapture 容错降级：非特权容器内 lspci/lsusb 看宿主设备受限时返回空，绝不抛异常。
+    /// </summary>
+    private static List<HardwareDevice> CollectHardwareLinux()
+    {
+        var devices = new List<HardwareDevice>();
+        CollectPciDevices(devices);
+        CollectUsbDevices(devices);
+        CollectLoadedModules(devices);
+        return devices;
+    }
+
+    /// <summary>lspci 输出形如 "00:02.0 VGA compatible controller: Intel Corporation ..."；VGA/3D/Display 类视为 GPU。</summary>
+    private static void CollectPciDevices(List<HardwareDevice> devices)
+    {
+        var output = RunCapture("lspci", "-nn", 5000);
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return;
+        }
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var spaceIdx = line.IndexOf(' ', StringComparison.Ordinal);
+            if (spaceIdx <= 0)
+            {
+                continue;
+            }
+            var classAndDesc = line[(spaceIdx + 1)..].TrimStart();
+            var isGpu = classAndDesc.StartsWith("VGA compatible", StringComparison.OrdinalIgnoreCase)
+                || classAndDesc.StartsWith("3D controller", StringComparison.OrdinalIgnoreCase)
+                || classAndDesc.StartsWith("Display controller", StringComparison.OrdinalIgnoreCase);
+            devices.Add(new HardwareDevice
+            {
+                Type = isGpu ? "gpu" : "pci",
+                Name = line[..spaceIdx],
+                Description = classAndDesc,
+                IsGpu = isGpu,
+            });
+        }
+    }
+
+    /// <summary>lsusb 输出形如 "Bus 001 Device 002: ID 1d6b:0002 Linux Foundation 2.0 root hub"。</summary>
+    private static void CollectUsbDevices(List<HardwareDevice> devices)
+    {
+        var output = RunCapture("lsusb", "", 5000);
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return;
+        }
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var desc = line.Trim();
+            if (desc.Length == 0)
+            {
+                continue;
+            }
+            var name = ExtractUsbId(desc);
+            devices.Add(new HardwareDevice
+            {
+                Type = "usb",
+                Name = name.Length > 0 ? name : "USB 设备",
+                Description = desc,
+                IsGpu = false,
+            });
+        }
+    }
+
+    /// <summary>从 lsusb 行提取 ID 后的人类可读设备名（如 "Linux Foundation 2.0 root hub"）。</summary>
+    private static string ExtractUsbId(string line)
+    {
+        var idx = line.IndexOf(':', StringComparison.Ordinal);
+        return idx >= 0 ? line[(idx + 1)..].Trim() : string.Empty;
+    }
+
+    /// <summary>lsmod 首列模块名；取前若干个，避免海量模块撑爆展示。</summary>
+    private static void CollectLoadedModules(List<HardwareDevice> devices)
+    {
+        var output = RunCapture("lsmod", "", 5000);
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return;
+        }
+        // 首行是表头 "Module  Size  Used by"，跳过。
+        var count = 0;
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Skip(1))
+        {
+            if (count >= 40)
+            {
+                break;
+            }
+            var name = line.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+            count++;
+            devices.Add(new HardwareDevice
+            {
+                Type = "kernel_module",
+                Name = name,
+                Description = string.Empty,
+                IsGpu = false,
+            });
+        }
     }
 
     // ---------- 工具 ----------
