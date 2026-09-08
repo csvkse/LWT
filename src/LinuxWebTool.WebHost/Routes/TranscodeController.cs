@@ -80,7 +80,8 @@ public class TranscodeController(
             {
                 return BadRequest(new { message });
             }
-            var job = await CreateJobAsync(source, preset: null, presetName: null, request.CustomArgs,
+            var preset = request.PresetId is { } presetId ? await presetStore.GetByIdAsync(presetId) : null;
+            var job = await CreateJobAsync(source, preset, preset?.Name, request.CustomArgs,
                 request.OutputContainer, request.OutputMode, TranscodeTrigger.Manual, request.OutputDir, watchRuleId: null);
             await operationLogger.LogAsync("提交转码", "转码任务", Path.GetFileName(source),
                 $"{source}（预设: {request.PresetId?.ToString() ?? "自定义参数"}）", clientIp: HttpContext.GetClientIp());
@@ -95,6 +96,7 @@ public class TranscodeController(
                 return BadRequest(new { message });
             }
             var extensions = MediaExtensions.Parse(request.FilePatterns);
+            var preset = request.PresetId is { } presetId ? await presetStore.GetByIdAsync(presetId) : null;
             var count = 0;
             var queueTime = DateTime.Now;
             foreach (var (path, _) in MediaExtensions.WalkFiles(source, request.Recursive))
@@ -112,7 +114,7 @@ public class TranscodeController(
                 {
                     break;
                 }
-                var job = await CreateJobAsync(path, preset: null, presetName: null, request.CustomArgs,
+                var job = await CreateJobAsync(path, preset, preset?.Name, request.CustomArgs,
                     request.OutputContainer, request.OutputMode, TranscodeTrigger.Manual, request.OutputDir, watchRuleId: null);
                 count++;
             }
