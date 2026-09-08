@@ -107,6 +107,46 @@ public static class TranscodePresetSeeder
                 Description = "低编码延迟，适合屏幕录制 / 动画 / 教程（流畅优先）",
                 IsBuiltin = true,
             },
+            new()
+            {
+                Name = "MP4 H.265 低码率",
+                Container = "mp4",
+                VideoCodec = "libx265",
+                VideoQuality = 30,
+                AudioCodec = "aac",
+                AudioBitrate = "96k",
+                ExtraArgs = "-tag:v hvc1 -preset medium",
+                Description = "体积优先的 H.265，适合移动端 / 在线分发（编码较慢，兼容性弱于 H.264）",
+                IsBuiltin = true,
+            },
+            new()
+            {
+                Name = "MKV H.265 无损重封装",
+                Container = "mkv",
+                VideoCodec = "copy",
+                AudioCodec = "copy",
+                Description = "不重编码直接换为 MKV 容器，秒级完成；适合 H.265 源转封装（兼容性弱于 MP4）",
+                IsBuiltin = true,
+            },
+            new()
+            {
+                Name = "M4A AAC 音频提取",
+                Container = "m4a",
+                VideoCodec = "",
+                AudioCodec = "aac",
+                AudioBitrate = "192k",
+                Description = "从视频中提取音频轨为 AAC（M4A），比 MP3 同码率音质更好、体积更小",
+                IsBuiltin = true,
+            },
+            new()
+            {
+                Name = "FLAC 无损音频提取",
+                Container = "flac",
+                VideoCodec = "",
+                AudioCodec = "flac",
+                Description = "从视频中提取音频轨为 FLAC 无损格式，适合音乐 / 音频保真存档",
+                IsBuiltin = true,
+            },
         };
 
         // 增量补齐：只插入缺失的内置预设（按 Name 判定），已存在的跳过，避免重复。
