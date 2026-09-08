@@ -38,6 +38,22 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<OperationLogStore>();
         builder.Services.AddSingleton<IOperationLogger, OperationLogger>();
 
+        // SMB 挂载管理
+        builder.Services.AddSingleton<SmbMountStore>();
+        builder.Services.AddSingleton<SmbMountService>();
+        builder.Services.AddHostedService<SmbMountStartupService>();
+
+        // FFmpeg 转码：预设 / 队列执行 / 监听自动转码
+        TranscodePresetSeeder.Seed(db); // 内置预设播种（表为空时）
+        builder.Services.AddSingleton<TranscodePresetStore>();
+        builder.Services.AddSingleton<TranscodeJobStore>();
+        builder.Services.AddSingleton<WatchRuleStore>();
+        var transcodeOptions = configuration.GetSection(TranscodeOptions.SectionName).Get<TranscodeOptions>() ?? new TranscodeOptions();
+        builder.Services.AddSingleton(transcodeOptions);
+        builder.Services.AddSingleton<FfmpegLocator>();
+        builder.Services.AddHostedService<TranscodeQueueService>();
+        builder.Services.AddHostedService<WatchFolderService>();
+
         // Shell 执行器
         var shellOptions = configuration.GetSection(ShellOptions.SectionName).Get<ShellOptions>() ?? new ShellOptions();
         builder.Services.AddSingleton(shellOptions);

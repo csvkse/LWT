@@ -13,6 +13,8 @@
 | 快速执行 | 临时指令不保存直接跑，自动记入调用历史 |
 | 定时任务 | 引用已保存指令/脚本 + Cron（支持 Unix 5 段 / Quartz 6 段，自动归一化）；启停 / 立即运行 / 下次执行时间；常用 Cron 预设 |
 | **系统状态** | 即时查看：CPU / 内存 / 磁盘挂载点 / 网卡速率 / 进程 TOP / 主机内核信息；10s 自动刷新；历史曲线（后台 60s 采样入 SQLite，保留 7 天，uPlot 渲染，1h~7d 区间切换）；Docker 部署加 `--privileged --pid=host --user root` 可自动采集宿主机全部磁盘 |
+| **SMB 挂载** | 配置并管理 `mount -t cifs` 网络共享：完整 CRUD、挂载 / 卸载 / 懒卸载、实时状态探测、启动自动重挂（不写 /etc/fstab）、凭据落盘 `data/mount-creds`（600 权限，密码不进命令行）、系统状态页自动展示 SMB 挂载点；需 Linux 特权环境 |
+| **FFmpeg 转码** | 视频 / 音频格式处理：一次性文件或文件夹批量入队；转码预设（内置 MP4/H.265/MKV 重封装/MP3）+ 自定义 ffmpeg 参数；替换（先写临时文件成功后才删源）与并存两种输出模式；实时进度 / 速度 / 取消 / 重试；监听文件夹自动转码（网络盘轮询 / 本地盘文件事件两种方式）；桌面部署需安装 ffmpeg，Docker 镜像已内置 |
 | 执行历史 | 手动 / 定时 / 快速三类记录；状态筛选、关键字搜索、分页；失败详情（stdout/stderr/退出码/耗时） |
 | 日志 | 操作日志（DB，全行为审计）+ 程序日志（`logs/app-*.txt`）+ 调试日志（`logs/debug-*.txt`，网页 tail 查看） |
 | 门禁 | 单管理员登录签发 JWT（HS256，默认 12h）；登录失败 10 次锁 IP 5 分钟；全部 API 需认证 |
@@ -228,6 +230,12 @@ USB / GPU 直通的 compose 节选（叠加到上方任一示例的对应位置�
 全部可持久化数据聚合在**数据目录 `data/`**（单文件夹备份即可）：`linuxweb.db`（SQLite）、`admin.json`（管理员凭据）、`jwt-secret.key`（签名密钥）、`logs/`（按天滚动日志）。位置可用 `Data__Directory` 环境变量修改（绝对路径或相对应用根的路径）。
 
 管理员凭据优先级：`Admin__UserName`/`Admin__Password` 环境变量或 appsettings 显式配置 **>** `data/admin.json`（记录最后一次生效的凭据）**>** 首次启动随机生成（打印在启动日志）。网页右上角 ⚙ 可随时修改用户名 / 密码。
+
+### 挂载 / 转码的运行要求
+
+- **SMB 挂载**：仅 Linux 生效。Docker 部署需在以 `--privileged --user root` 运行时挂载（特权不足会返回 EPERM，UI 有明确提示）；镜像已内置 `cifs-utils`。挂载点需在容器内可访问（`/mnt/*`），凭据写入 `data/mount-creds/<id>`（600 权限），密码不经命令行。
+- **媒体转码**：依赖 ffmpeg。Docker 镜像已内置；桌面 / systemd 部署需自行安装 ffmpeg（或 `Media__FfmpegPath` 指定路径），转码页顶部显示检测状态。媒体目录建议映射进容器以便网页直接访问（如 SMB 挂载 `/mnt/media` 或 `-v /media:/media:ro`）。
+
 
 ## 开发约定（门禁强制）
 

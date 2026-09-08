@@ -24,6 +24,13 @@ public sealed partial class SystemStatusProvider : ISystemStatusProvider
     // 宿主 df 采集模式探测缓存（Provider 为单例）：true=nsenter 可用（--privileged --pid=host）；false=回退容器自身视图
     private static bool? _hostDfMode;
 
+    /// <summary>
+    /// 应用内 SMB 挂载点白名单（SmbMountService 挂载成功 / 启动重挂时注册）。
+    /// 命中白名单的挂载点绕过虚拟文件系统过滤，状态页磁盘明细即可展示 SMB/CIFS 挂载。
+    /// </summary>
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> ManagedMountPoints =
+        new(System.StringComparer.Ordinal);
+
     public Task<SystemStatusResult> GetStatusAsync(CancellationToken cancellationToken = default) =>
         Task.Run(Collect, cancellationToken);
 
@@ -281,15 +288,19 @@ public sealed partial class SystemStatusProvider : ISystemStatusProvider
             }
             var filesystem = parts[0];
             var mount = parts[5];
+            // 应用内挂载点（SMB 管理）优先放行：cifs 的文件系统列为 //host/share，不在 /dev/ 下。
+            var isManaged = ManagedMountPoints.ContainsKey(mount.TrimEnd('/'));
             // 只保留真实块设备，排除 tmpfs/overlay/loop 等虚拟文件系统。
-            if ((!filesystem.StartsWith("/dev/", StringComparison.Ordinal) || filesystem.StartsWith("/dev/loop", StringComparison.Ordinal))
+            if (!isManaged
+                && (!filesystem.StartsWith("/dev/", StringComparison.Ordinal) || filesystem.StartsWith("/dev/loop", StringComparison.Ordinal))
                 && mount != "/")
             {
                 continue;
             }
             // 排除容器环境注入的 /etc 单文件绑定与虚拟目录挂载；保留 /mnt（WSL 的 Windows 盘、宿主常规挂载点）。
-            if (mount.StartsWith("/etc/", StringComparison.Ordinal) || mount.StartsWith("/proc/", StringComparison.Ordinal)
-                || mount.StartsWith("/sys/", StringComparison.Ordinal) || (mount.StartsWith("/dev/", StringComparison.Ordinal) && mount != "/"))
+            if (!isManaged
+                && (mount.StartsWith("/etc/", StringComparison.Ordinal) || mount.StartsWith("/proc/", StringComparison.Ordinal)
+                || mount.StartsWith("/sys/", StringComparison.Ordinal) || (mount.StartsWith("/dev/", StringComparison.Ordinal) && mount != "/")))
             {
                 continue;
             }

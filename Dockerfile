@@ -20,8 +20,10 @@ ENV TZ=Asia/Shanghai \
 # procps    —— 系统状态页的 ps 采集（alpine 自带 busybox ps 不支持 -eo）
 # usbutils/pciutils/kmod —— 硬件查看工具（lsusb / lspci / lsmod）
 # util-linux-misc —— nsenter：配合 --privileged --pid=host --user root 自动采集宿主全部磁盘
+# cifs-utils —— SMB 挂载管理（mount -t cifs；需 --privileged --user root 运行）
+# ffmpeg    —— 媒体转码（含 ffprobe，一次 一次性转码 / 队列 / 监听自动转码全依赖它）
 # tzdata/icu —— 时区与中文全球化
-RUN apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc tzdata icu-libs && \
+RUN apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc cifs-utils ffmpeg tzdata icu-libs && \
     cp /usr/share/zoneinfo/$TZ /etc/localtime && \
     echo $TZ > /etc/timezone
 
@@ -74,6 +76,6 @@ RUN sed -i 's|"Urls": "http://localhost:5270"|"Urls": "http://0.0.0.0:5270"|' /a
 VOLUME ["/app/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD wget -q --spider http://127.0.0.1:8080/app/ || exit 1
+    CMD wget -q --spider http://127.0.0.1:5270/app/ || exit 1
 
 ENTRYPOINT ["dotnet", "LinuxWebTool.WebHost.dll"]

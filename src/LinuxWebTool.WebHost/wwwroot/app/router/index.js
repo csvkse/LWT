@@ -6,8 +6,10 @@ const routes = [
   { path: '/', name: 'dashboard', component: () => import('../views/DashboardView.js') },
   { path: '/commands', name: 'commands', component: () => import('../views/CommandsView.js') },
   { path: '/schedules', name: 'schedules', component: () => import('../views/SchedulesView.js') },
-  { path: '/history', name: 'history', component: () => import('../views/HistoryView.js') },
   { path: '/system', name: 'system', component: () => import('../views/SystemStatusView.js') },
+  { path: '/mounts', name: 'mounts', component: () => import('../views/SmbMountsView.js') },
+  { path: '/transcode', name: 'transcode', component: () => import('../views/TranscodeView.js') },
+  { path: '/history', name: 'history', component: () => import('../views/HistoryView.js') },
   { path: '/logs', name: 'logs', component: () => import('../views/LogsView.js') },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ];

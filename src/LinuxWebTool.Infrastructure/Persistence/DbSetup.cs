@@ -24,9 +24,10 @@ public static class DbSetup
 
     public static void Initialize(ISqlSugarClient db)
     {
-        // InitTables 泛型重载最多 5 个类型参数，分两次注册。
+        // InitTables 泛型重载最多 5 个类型参数，分多次注册。
         db.CodeFirst.InitTables<LinuxCommand, CommandGroup, ScheduleTask, ExecutionRecord, OperationLog>();
         db.CodeFirst.InitTables<SystemStatusSnapshot>();
+        db.CodeFirst.InitTables<SmbMount, TranscodePreset, TranscodeJob, WatchRule>();
     }
 
     /// <summary>把连接串里的相对 SQLite 文件路径锚定到应用根目录，避免受进程工作目录影响。</summary>

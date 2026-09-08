@@ -66,6 +66,27 @@ export const SOURCE_OPTIONS = [
   { value: 2, label: '快速' },
 ];
 
+export const TRANSCODE_JOB_META = {
+  0: { label: '排队', class: 'border-slate-500/50 text-slate-300' },
+  1: { label: '转码中', class: 'border-cyan-500/50 text-cyan-300' },
+  2: { label: '成功', class: 'border-emerald-500/50 text-emerald-300' },
+  3: { label: '失败', class: 'border-rose-500/50 text-rose-300' },
+  4: { label: '已取消', class: 'border-orange-500/50 text-orange-300' },
+  5: { label: '中断', class: 'border-amber-500/50 text-amber-300' },
+};
+
+export function transcodeStatusMeta(status) {
+  return TRANSCODE_JOB_META[status] || { label: '未知', class: 'border-slate-600/60 text-slate-500' };
+}
+
+export function transcodeModeLabel(mode) {
+  return mode === 0 ? '替换源文件' : '并存';
+}
+
+export function transcodeTriggerLabel(trigger) {
+  return trigger === 1 ? '监听触发' : '手动';
+}
+
 export const STATUS_OPTIONS = [
   { value: '', label: '全部状态' },
   { value: 0, label: '成功' },
