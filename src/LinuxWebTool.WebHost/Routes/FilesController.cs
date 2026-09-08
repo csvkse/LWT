@@ -123,6 +123,10 @@ public class FilesController(
     public async Task<IActionResult> WriteContent([FromBody] SaveTextRequest request)
     {
         var normalized = NormalizePosix(request.Path);
+        if (IsProtected(normalized))
+        {
+            return BadRequest(new { message = "程序数据目录禁止写入" });
+        }
         var parent = Path.GetDirectoryName(normalized);
         if (string.IsNullOrEmpty(parent) || !Directory.Exists(parent))
         {
