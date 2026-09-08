@@ -625,7 +625,7 @@ export default defineComponent({
             <button class="btn btn-xs" title="导出全部预设为 JSON 文件" @click="exportPresets()">⬇ 导出</button>
             <button class="btn btn-xs" title="从 JSON 文件导入预设" @click="triggerImport()">⬆ 导入</button>
             <button class="btn btn-primary" @click="openPresetCreate()">＋ 新建预设</button>
-            <input ref="importInput" type="file" accept=".json" class="hidden" @change="onImportFile" />
+            <input ref="importInput" type="file" accept=".json" class="hidden" @change="onImportFile($event)" />
           </div>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
