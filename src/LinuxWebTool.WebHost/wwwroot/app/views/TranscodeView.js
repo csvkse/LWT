@@ -446,7 +446,7 @@ export default defineComponent({
           <span class="text-xs text-slate-500 mb-1 block">源文件 / 源文件夹（服务器本地可访问路径）*</span>
           <div class="flex gap-2">
             <input class="input font-mono flex-1" v-model="submitForm.sourcePath" placeholder="/mnt/media/movies 或 /mnt/media/file.mkv" />
-            <button class="btn btn-xs" title="可视化选择" @click="openPicker('folder', 'source', submitForm.sourcePath || '/')">📂 选择</button>
+            <button class="btn btn-xs" title="可视化选择文件或文件夹" @click="openPicker('any', 'source', submitForm.sourcePath || '/')">📂 选择</button>
           </div>
           <p class="text-[11px] text-slate-600 mt-1">文件 → 单任务；文件夹 → 按扩展名过滤批量入队。路径直接在运行该服务的机器上解析。</p>
         </label>

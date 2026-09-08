@@ -67,7 +67,7 @@ export default defineComponent({
       if (entry.isDirectory) {
         selectedFile.value = '';
         goPath(entry.path);
-      } else if (props.mode === 'file') {
+      } else if (props.mode === 'file' || props.mode === 'any') {
         selectedFile.value = entry.path;
       }
     }
@@ -76,10 +76,26 @@ export default defineComponent({
       selectedFile.value = entry.path;
     }
 
+    // any 模式：直接把子文件夹作为所选路径返回。
+    function pickDir(entry) {
+      emit('select', entry.path);
+      selectedFile.value = '';
+      currentPath.value = props.startPath;
+    }
+
+    // any 模式：选中文件则返回文件；未选中文件时返回当前目录（作为文件夹路径）。
     function confirmSelect() {
       if (props.mode === 'file') {
         if (!selectedFile.value) return toast.error('请选择一个文件');
         emit('select', selectedFile.value);
+        return;
+      }
+      if (props.mode === 'any') {
+        if (selectedFile.value) {
+          emit('select', selectedFile.value);
+        } else {
+          emit('select', currentPath.value);
+        }
         return;
       }
       // folder 模式：选当前目录
@@ -111,14 +127,16 @@ export default defineComponent({
 
     return {
       currentPath, entries, loading, error, selectedFile, breadcrumbs,
-      load, goPath, goUp, openEntry, confirmSelect, close, pickFile, formatBytes, formatTime,
+      load, goPath, goUp, openEntry, confirmSelect, close, pickFile, pickDir, formatBytes, formatTime,
     };
   },
   template: `
     <div v-if="show" class="fixed inset-0 z-[85] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div class="panel w-full max-w-2xl p-5 max-h-[88vh] flex flex-col" style="background: rgba(13, 21, 38, 0.97)">
         <div class="flex items-center gap-2 mb-3">
-          <h3 class="font-display text-base text-neon-soft">{{ mode === 'file' ? '选择文件' : '选择文件夹' }}</h3>
+          <h3 class="font-display text-base text-neon-soft">
+            {{ mode === 'file' ? '选择文件' : mode === 'any' ? '选择文件 / 文件夹' : '选择文件夹' }}
+          </h3>
           <span class="text-xs text-slate-500 ml-2">{{ currentPath }}</span>
           <button class="btn btn-xs ml-auto" @click="close()">✕</button>
         </div>
@@ -150,7 +168,9 @@ export default defineComponent({
                 <td class="text-xs text-slate-500">{{ entry.isDirectory ? '—' : formatBytes(entry.size) }}</td>
                 <td class="text-xs text-slate-500">{{ formatTime(entry.modified) }}</td>
                 <td class="text-right text-xs">
-                  <span v-if="mode === 'file' && !entry.isDirectory" class="badge border-emerald-500/50 text-emerald-300"
+                  <span v-if="mode === 'any' && entry.isDirectory" class="badge border-amber-500/50 text-amber-300"
+                        @click.stop="pickDir(entry)">选文件夹</span>
+                  <span v-if="(mode === 'file' || mode === 'any') && !entry.isDirectory" class="badge border-emerald-500/50 text-emerald-300"
                         @click.stop="pickFile(entry)">选择</span>
                 </td>
               </tr>
@@ -159,11 +179,14 @@ export default defineComponent({
         </div>
 
         <div class="flex items-center justify-end gap-2 mt-4">
-          <span v-if="mode === 'file' && selectedFile" class="text-xs text-emerald-300 truncate mr-auto">{{ selectedFile }}</span>
+          <span v-if="(mode === 'file' || mode === 'any') && selectedFile" class="text-xs text-emerald-300 truncate mr-auto">{{ selectedFile }}</span>
           <button class="btn" @click="close()">取消</button>
-          <button class="btn btn-primary" :disabled="mode === 'file' && !selectedFile" @click="confirmSelect()">
-            选择{{ mode === 'file' ? (selectedFile ? '' : '文件') : '当前文件夹' }}
+          <button class="btn btn-primary"
+                  :disabled="mode === 'file' && !selectedFile"
+                  @click="confirmSelect()">
+            选择{{ mode === 'file' ? (selectedFile ? '' : '文件') : mode === 'any' ? (selectedFile ? '文件' : '当前文件夹') : '当前文件夹' }}
           </button>
+        </div>
         </div>
       </div>
     </div>
