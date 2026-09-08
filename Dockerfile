@@ -21,9 +21,10 @@ ENV TZ=Asia/Shanghai \
 # usbutils/pciutils/kmod —— 硬件查看工具（lsusb / lspci / lsmod）
 # util-linux-misc —— nsenter：配合 --privileged --pid=host --user root 自动采集宿主全部磁盘
 # cifs-utils —— SMB 挂载管理（mount -t cifs；需 --privileged --user root 运行）
+# nethogs   —— 每进程网络速率采集（tracemode；仅 --privileged --user root 运行时生效，非特权则探测跳过）
 # ffmpeg    —— 媒体转码（含 ffprobe，一次 一次性转码 / 队列 / 监听自动转码全依赖它）
 # tzdata/icu —— 时区与中文全球化
-RUN apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc cifs-utils ffmpeg tzdata icu-libs && \
+RUN apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc cifs-utils nethogs ffmpeg tzdata icu-libs && \
     cp /usr/share/zoneinfo/$TZ /etc/localtime && \
     echo $TZ > /etc/timezone
 

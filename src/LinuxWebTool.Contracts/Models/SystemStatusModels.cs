@@ -70,6 +70,14 @@ public sealed record ProcessStatus
     /// <summary>内存占用（0~100）。</summary>
     public double MemPercent { get; init; }
     public long MemBytes { get; init; }
+    /// <summary>磁盘读取速率（字节/秒）。</summary>
+    public long DiskReadBps { get; init; }
+    /// <summary>磁盘写入速率（字节/秒）。</summary>
+    public long DiskWriteBps { get; init; }
+    /// <summary>网络发送速率（字节/秒）。</summary>
+    public long NetSentBps { get; init; }
+    /// <summary>网络接收速率（字节/秒）。</summary>
+    public long NetRecvBps { get; init; }
 }
 
 /// <summary>一次系统状态快照（即时全量）。</summary>
@@ -99,5 +107,45 @@ public sealed record StatusSnapshotPoint
     /// <summary>全网卡发送速率（字节/秒）。</summary>
     public long NetSentBps { get; init; }
     /// <summary>全网卡接收速率（字节/秒）。</summary>
+    public long NetRecvBps { get; init; }
+}
+
+/// <summary>历史磁盘挂载点序列点（与磁盘快照表列对应）。</summary>
+public sealed record DiskSnapshotPoint
+{
+    public DateTime Time { get; init; }
+    public string Mount { get; init; } = string.Empty;
+    public string FileSystem { get; init; } = string.Empty;
+    public double UsagePercent { get; init; }
+    public long TotalBytes { get; init; }
+    public long UsedBytes { get; init; }
+    public long FreeBytes { get; init; }
+}
+
+/// <summary>历史网卡序列点（与网络快照表列对应）。</summary>
+public sealed record NetSnapshotPoint
+{
+    public DateTime Time { get; init; }
+    public string Name { get; init; } = string.Empty;
+    public long SentBytesPerSec { get; init; }
+    public long RecvBytesPerSec { get; init; }
+}
+
+/// <summary>历史进程序列点（与进程快照表列对应）。</summary>
+public sealed record ProcessSnapshotPoint
+{
+    public DateTime Time { get; init; }
+    public int Pid { get; init; }
+    public string Name { get; init; } = string.Empty;
+    public double CpuPercent { get; init; }
+    public double MemPercent { get; init; }
+    public long MemBytes { get; init; }
+    /// <summary>磁盘读取速率（字节/秒）。</summary>
+    public long DiskReadBps { get; init; }
+    /// <summary>磁盘写入速率（字节/秒）。</summary>
+    public long DiskWriteBps { get; init; }
+    /// <summary>网络发送速率（字节/秒）。</summary>
+    public long NetSentBps { get; init; }
+    /// <summary>网络接收速率（字节/秒）。</summary>
     public long NetRecvBps { get; init; }
 }

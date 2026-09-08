@@ -61,8 +61,13 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<IShellExecutor, ShellExecutor>();
 
         // 系统状态采集与历史采样
+        var systemStatusOptions = configuration.GetSection(SystemStatusOptions.SectionName).Get<SystemStatusOptions>() ?? new SystemStatusOptions();
+        builder.Services.AddSingleton(systemStatusOptions);
         builder.Services.AddSingleton<ISystemStatusProvider, SystemStatusProvider>();
         builder.Services.AddSingleton<SystemStatusStore>();
+        builder.Services.AddSingleton<SystemStatusDiskStore>();
+        builder.Services.AddSingleton<SystemStatusNetStore>();
+        builder.Services.AddSingleton<SystemStatusProcessStore>();
         builder.Services.AddHostedService<SystemStatusSampleService>();
 
         // 认证：单管理员 + JWT（凭据在启动阶段即初始化，见 StartupInitializerService）

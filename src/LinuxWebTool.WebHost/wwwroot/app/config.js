@@ -43,6 +43,7 @@ export const API = {
   systemStatus: {
     current: '/SystemStatus',
     history: '/SystemStatus/History',
+    resourceHistory: '/SystemStatus/ResourceHistory',
   },
   smbMounts: {
     list: '/SmbMounts',
@@ -50,6 +51,14 @@ export const API = {
     item: (id) => `/SmbMounts/${id}`,
     mount: (id) => `/SmbMounts/${id}/Mount`,
     unmount: (id) => `/SmbMounts/${id}/Unmount`,
+  },
+  files: {
+    list: '/Files',
+    content: '/Files/Content',
+    mkdir: '/Files/Mkdir',
+    rename: '/Files/Rename',
+    remove: () => '/Files',
+    upload: () => '/Files/Upload',
   },
   transcode: {
     jobs: '/Transcode/Jobs',

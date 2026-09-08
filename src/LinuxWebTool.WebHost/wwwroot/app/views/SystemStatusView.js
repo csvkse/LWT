@@ -23,6 +23,17 @@ const NET_SERIES = [
   { label: '上传', stroke: '#fbbf24', width: 1.5 },
 ];
 
+const DISK_COLORS = ['#34d399', '#fbbf24', '#22d3ee', '#a78bfa', '#fb7185', '#38bdf8', '#f97316', '#a3e635'];
+
+const PROCESS_SORTS = [
+  { value: 'cpu', label: '按 CPU' },
+  { value: 'mem', label: '按内存' },
+  { value: 'diskRead', label: '磁盘读' },
+  { value: 'diskWrite', label: '磁盘写' },
+  { value: 'netSend', label: '网络发' },
+  { value: 'netRecv', label: '网络收' },
+];
+
 const CHART_OPTIONS = {
   width: 600,
   height: 220,
@@ -44,8 +55,14 @@ export default defineComponent({
     const historyRange = ref(6);
     const usageChartEl = ref(null);
     const netChartEl = ref(null);
+    const diskChartEl = ref(null);
+    const processPoints = ref([]);
+    const selectedPoint = ref(null);
+    const processSort = ref('cpu');
+    const overviewProcessSort = ref('cpu');
     let usageChart = null;
     let netChart = null;
+    let diskChart = null;
     let refreshTimer = null;
 
     async function load() {
@@ -82,9 +99,7 @@ export default defineComponent({
           { ...CHART_OPTIONS.axes[1], values: (_u, vals) => vals.map((v) => `${Math.round(v)}%`) },
         ],
       };
-      if (usageChart) {
-        usageChart.destroy();
-      }
+      if (usageChart) usageChart.destroy();
       usageChart = new window.uPlot(options, data, el);
     }
 
@@ -94,8 +109,8 @@ export default defineComponent({
       const times = toPoints(rows);
       const data = [
         times,
-        rows.map((r) => r.netRecvBps / 1024),
-        rows.map((r) => r.netSentBps / 1024),
+        rows.map((r) => r.recvBytesPerSec / 1024),
+        rows.map((r) => r.sentBytesPerSec / 1024),
       ];
       const options = {
         ...CHART_OPTIONS,
@@ -106,18 +121,102 @@ export default defineComponent({
           { ...CHART_OPTIONS.axes[1], values: (_u, vals) => vals.map((v) => `${v.toFixed(0)} KB/s`) },
         ],
       };
-      if (netChart) {
-        netChart.destroy();
-      }
+      if (netChart) netChart.destroy();
       netChart = new window.uPlot(options, data, el);
     }
 
+    // 磁盘：每个挂载点一条使用率曲线（按名称分组取最新值）
+    function renderDiskChart(rows) {
+      const el = diskChartEl.value;
+      if (!el || typeof window.uPlot === 'undefined') return;
+      const mounts = [...new Set(rows.map((r) => r.mount))];
+      if (!mounts.length) {
+        if (diskChart) diskChart.destroy();
+        return;
+      }
+      const times = [...new Set(rows.map((r) => new Date(r.time).getTime() / 1000))].sort((a, b) => a - b);
+      const series = [{}, ...mounts.map((m, i) => ({ label: m, stroke: DISK_COLORS[i % DISK_COLORS.length], width: 1.5 }))];
+      const data = [times];
+      for (const mount of mounts) {
+        const byTime = new Map(rows.filter((r) => r.mount === mount).map((r) => [new Date(r.time).getTime() / 1000, r.usagePercent]));
+        data.push(times.map((t) => byTime.get(t) ?? null));
+      }
+      const options = {
+        ...CHART_OPTIONS,
+        width: el.clientWidth || 600,
+        series,
+        axes: [
+          CHART_OPTIONS.axes[0],
+          { ...CHART_OPTIONS.axes[1], values: (_u, vals) => vals.map((v) => `${Math.round(v)}%`) },
+        ],
+      };
+      if (diskChart) diskChart.destroy();
+      diskChart = new window.uPlot(options, data, el);
+    }
+
+    // 采样点：按时间戳对齐 进程/磁盘/网络/整机 四类数据，每个点可展开查看当时的进程、磁盘、网络。
+    function buildPoints(systemRows, diskRows, netRows, processRows) {
+      const byTime = new Map();
+      const group = (rows) => {
+        for (const r of rows) {
+          const key = new Date(r.time).getTime();
+          if (!byTime.has(key)) byTime.set(key, { time: r.time, processes: [], disks: [], networks: [], system: null });
+          const point = byTime.get(key);
+          if (r.mount !== undefined) point.disks.push(r);
+          else if (r.name !== undefined && r.sentBytesPerSec !== undefined && r.recvBytesPerSec !== undefined) point.networks.push(r);
+          else if (r.cpuUsage !== undefined) point.system = r;
+          else point.processes.push(r);
+        }
+      };
+      group(systemRows || []);
+      group(diskRows || []);
+      group(netRows || []);
+      group(processRows || []);
+      // 仅保留有进程数据的点（进程采样点即资源采样时点），时间正序。
+      return [...byTime.values()]
+        .filter((p) => p.processes.length > 0)
+        .sort((a, b) => new Date(a.time) - new Date(b.time));
+    }
+
+    function sortedProcesses(procs, sort) {
+      const list = [...procs];
+      if (sort === 'cpu') list.sort((a, b) => b.cpuPercent - a.cpuPercent);
+      else if (sort === 'mem') list.sort((a, b) => b.memBytes - a.memBytes);
+      else if (sort === 'diskRead') list.sort((a, b) => b.diskReadBps - a.diskReadBps);
+      else if (sort === 'diskWrite') list.sort((a, b) => b.diskWriteBps - a.diskWriteBps);
+      else if (sort === 'netSend') list.sort((a, b) => b.netSentBps - a.netSentBps);
+      else if (sort === 'netRecv') list.sort((a, b) => b.netRecvBps - a.netRecvBps);
+      return list;
+    }
+
+    // 即时进程 TOP：合并 CPU / 内存两个 Top 列表（去重），按所选维度排序展示。
+    function overviewProcesses(status, sort) {
+      if (!status) return [];
+      const seen = new Map();
+      for (const p of [...(status.topCpuProcesses || []), ...(status.topMemProcesses || [])]) {
+        if (!seen.has(p.pid)) seen.set(p.pid, p);
+      }
+      return sortedProcesses([...seen.values()], sort);
+    }
+
+    function selectPoint(p) {
+      selectedPoint.value = p;
+    }
+
     async function loadHistory() {
-      const result = await http(API.systemStatus.history, { params: { hours: historyRange.value } });
+      const result = await http(API.systemStatus.resourceHistory, { params: { hours: historyRange.value } });
       if (result.ok) {
+        const data = result.data;
         await nextTick();
-        renderUsageChart(result.data);
-        renderNetChart(result.data);
+        renderUsageChart(data.system || []);
+        renderNetChart(data.networks || []);
+        renderDiskChart(data.disks || []);
+        processPoints.value = buildPoints(data.system, data.disks, data.networks, data.processes);
+        if (selectedPoint.value) {
+          const found = processPoints.value.find((p) => new Date(p.time).getTime() === new Date(selectedPoint.value.time).getTime());
+          if (!found) selectedPoint.value = null;
+          else selectedPoint.value = found;
+        }
       }
     }
 
@@ -143,7 +242,7 @@ export default defineComponent({
 
     // 窗口宽度变化（手机旋转 / 缩放）时按新宽度重绘图表
     function handleResize() {
-      if (usageChart || netChart) loadHistory();
+      if (usageChart || netChart || diskChart) loadHistory();
     }
 
     onMounted(async () => {
@@ -158,11 +257,14 @@ export default defineComponent({
       window.removeEventListener('resize', handleResize);
       if (usageChart) usageChart.destroy();
       if (netChart) netChart.destroy();
+      if (diskChart) diskChart.destroy();
     });
 
     return {
-      status, loading, autoRefresh, historyRange, usageChartEl, netChartEl,
-      load, loadHistory, setRange, RANGES,
+      status, loading, autoRefresh, historyRange, usageChartEl, netChartEl, diskChartEl,
+      processPoints, selectedPoint, processSort, PROCESS_SORTS,
+      overviewProcessSort, overviewProcesses,
+      load, loadHistory, setRange, selectPoint, sortedProcesses, RANGES,
       formatBps, formatBytes, formatTime, formatUptime, usageColor,
     };
   },
@@ -268,24 +370,32 @@ export default defineComponent({
         </div>
 
         <div class="panel p-4">
-          <h3 class="text-sm text-slate-300 font-medium mb-2">进程 TOP <span class="text-xs text-slate-500 font-normal">（按 CPU / 内存）</span></h3>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <div class="text-xs text-slate-500 mb-1">CPU 占用</div>
-              <div v-for="p in status.topCpuProcesses" :key="'c' + p.pid" class="flex justify-between text-xs py-1 border-b border-cyber-line/40">
-                <span class="text-slate-300 truncate">{{ p.name }} <span class="text-slate-600">({{ p.pid }})</span></span>
-                <span class="text-cyan-300 font-mono">{{ p.cpuPercent.toFixed(1) }}%</span>
-              </div>
-              <p v-if="!status.topCpuProcesses.length" class="text-slate-600 text-xs">无数据</p>
+          <div class="flex items-center gap-2 mb-2 flex-wrap">
+            <h3 class="text-sm text-slate-300 font-medium">进程 TOP <span class="text-xs text-slate-500 font-normal">（即时）</span></h3>
+            <div class="ml-auto flex gap-1.5 flex-wrap">
+              <button v-for="s in PROCESS_SORTS" :key="s.value" class="btn btn-xs"
+                      :class="overviewProcessSort === s.value ? 'btn-primary' : ''"
+                      @click="overviewProcessSort = s.value">{{ s.label }}</button>
             </div>
-            <div>
-              <div class="text-xs text-slate-500 mb-1">内存占用</div>
-              <div v-for="p in status.topMemProcesses" :key="'m' + p.pid" class="flex justify-between text-xs py-1 border-b border-cyber-line/40">
+          </div>
+          <div class="flex flex-col gap-1">
+            <div v-for="p in overviewProcesses(status, overviewProcessSort)" :key="'o' + p.pid"
+                 class="py-1 border-b border-cyber-line/40">
+              <div class="flex justify-between text-xs">
                 <span class="text-slate-300 truncate">{{ p.name }} <span class="text-slate-600">({{ p.pid }})</span></span>
-                <span class="text-violet-300 font-mono">{{ formatBytes(p.memBytes) }} · {{ p.memPercent.toFixed(1) }}%</span>
+                <span class="font-mono text-cyan-300">{{ p.cpuPercent.toFixed(1) }}% · {{ formatBytes(p.memBytes) }} · {{ p.memPercent.toFixed(1) }}%</span>
               </div>
-              <p v-if="!status.topMemProcesses.length" class="text-slate-600 text-xs">无数据</p>
+              <div v-if="p.diskReadBps || p.diskWriteBps || p.netSentBps || p.netRecvBps"
+                   class="flex justify-between text-[11px] text-slate-500 mt-0.5">
+                <span v-if="p.diskReadBps || p.diskWriteBps" class="truncate">
+                  磁盘 <span class="text-emerald-300/90">↓{{ formatBps(p.diskReadBps) }}</span> <span class="text-amber-300/90">↑{{ formatBps(p.diskWriteBps) }}</span>
+                </span>
+                <span v-if="p.netSentBps || p.netRecvBps" class="font-mono">
+                  网络 <span class="text-emerald-300/90">↓{{ formatBps(p.netRecvBps) }}</span> <span class="text-amber-300/90">↑{{ formatBps(p.netSentBps) }}</span>
+                </span>
+              </div>
             </div>
+            <p v-if="!overviewProcesses(status, overviewProcessSort).length" class="text-slate-600 text-xs">无数据</p>
           </div>
         </div>
 
@@ -298,9 +408,87 @@ export default defineComponent({
                       @click="setRange(range.hours)">{{ range.label }}</button>
             </div>
           </div>
+          <div class="text-xs text-slate-500 mb-1">CPU / 内存 / 根分区</div>
           <div ref="usageChartEl" class="w-full"></div>
-          <div ref="netChartEl" class="w-full mt-3"></div>
-          <p class="text-xs text-slate-600 mt-2">每 60 秒采样一次，保留 7 天；下载/上传单位 KB/s。</p>
+          <div class="text-xs text-slate-500 mb-1 mt-3">网卡速率（KB/s）</div>
+          <div ref="netChartEl" class="w-full mt-1"></div>
+          <div class="text-xs text-slate-500 mb-1 mt-3">磁盘挂载点使用率（%）</div>
+          <div ref="diskChartEl" class="w-full mt-1"></div>
+          <p class="text-xs text-slate-600 mt-2">整机 60s 采样；基线 30 分钟，异常（CPU≥80% 或 内存≥85%）时 10 分钟；保留 7 天。</p>
+        </div>
+
+        <div class="panel p-4">
+          <div class="flex items-center gap-2 mb-2 flex-wrap">
+            <h3 class="text-sm text-slate-300 font-medium">进程占用采样点</h3>
+            <div class="ml-auto flex gap-1.5 flex-wrap">
+              <button v-for="s in PROCESS_SORTS" :key="s.value" class="btn btn-xs"
+                      :class="processSort === s.value ? 'btn-primary' : ''"
+                      @click="processSort = s.value">{{ s.label }}</button>
+            </div>
+          </div>
+          <p class="text-xs text-slate-600 mb-3">点击某个采样点，查看当时 Top 进程、磁盘挂载点与网卡速率；CPU / 内存峰值可与上方趋势对应。</p>
+          <div class="flex flex-col gap-1.5 max-h-72 overflow-y-auto">
+            <p v-if="!processPoints.length" class="text-slate-600 text-xs">暂无进程采样数据</p>
+            <button v-for="p in processPoints" :key="new Date(p.time).getTime()"
+                    class="flex items-center justify-between text-xs border border-cyber-line/60 rounded-lg px-3 py-2 hover:border-cyan-400/60 transition-colors"
+                    :class="selectedPoint && new Date(selectedPoint.time).getTime() === new Date(p.time).getTime() ? 'border-cyan-400' : ''"
+                    @click="selectPoint(p)">
+              <span class="font-mono text-slate-300">{{ formatTime(p.time) }}</span>
+              <span class="text-slate-500">{{ p.processes.length }} 个进程</span>
+            </button>
+          </div>
+          <div v-if="selectedPoint" class="mt-3 border-t border-cyber-line/40 pt-3">
+            <div class="text-xs text-slate-500 mb-2">采样点 {{ formatTime(selectedPoint.time) }} 的资源概况</div>
+
+            <div v-if="selectedPoint.system" class="flex gap-4 text-xs text-slate-400 mb-2">
+              <span>整机 <span class="text-cyan-300 font-mono">CPU {{ selectedPoint.system.cpuUsage.toFixed(1) }}%</span></span>
+              <span>内存 <span class="text-violet-300 font-mono">{{ selectedPoint.system.memUsage.toFixed(1) }}%</span></span>
+              <span v-if="selectedPoint.system.netRecvBps || selectedPoint.system.netSentBps" class="font-mono">
+                全网卡 <span class="text-emerald-300">↓{{ formatBps(selectedPoint.system.netRecvBps) }}</span>
+                <span class="text-amber-300">↑{{ formatBps(selectedPoint.system.netSentBps) }}</span>
+              </span>
+            </div>
+
+            <div v-if="selectedPoint.disks.length" class="mb-2">
+              <div class="text-[11px] text-slate-500 mb-1">磁盘挂载点</div>
+              <div class="flex flex-col gap-0.5">
+                <div v-for="d in selectedPoint.disks" :key="d.mount" class="flex justify-between text-[11px] text-slate-400">
+                  <span class="font-mono text-cyan-300/80 truncate">{{ d.mount }}</span>
+                  <span class="font-mono">{{ d.usagePercent.toFixed(1) }}% · {{ formatBytes(d.usedBytes) }}/{{ formatBytes(d.totalBytes) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="selectedPoint.networks.length" class="mb-2">
+              <div class="text-[11px] text-slate-500 mb-1">网卡速率</div>
+              <div class="flex flex-col gap-0.5">
+                <div v-for="n in selectedPoint.networks" :key="n.name" class="flex justify-between text-[11px] text-slate-400">
+                  <span class="font-mono text-cyan-300/80 truncate">{{ n.name }}</span>
+                  <span class="font-mono"><span class="text-emerald-300">↓{{ formatBps(n.recvBytesPerSec) }}</span> <span class="text-amber-300">↑{{ formatBps(n.sentBytesPerSec) }}</span></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="text-xs text-slate-500 mb-2">当时的 Top 进程</div>
+            <div class="flex flex-col gap-1">
+              <div v-for="proc in sortedProcesses(selectedPoint.processes, processSort)" :key="proc.pid"
+                   class="py-1 border-b border-cyber-line/40">
+                <div class="flex justify-between text-xs">
+                  <span class="text-slate-300 truncate">{{ proc.name }} <span class="text-slate-600">({{ proc.pid }})</span></span>
+                  <span class="font-mono text-cyan-300">{{ proc.cpuPercent.toFixed(1) }}% · {{ formatBytes(proc.memBytes) }} · {{ proc.memPercent.toFixed(1) }}%</span>
+                </div>
+                <div v-if="proc.diskReadBps || proc.diskWriteBps || proc.netSentBps || proc.netRecvBps"
+                     class="flex justify-between text-[11px] text-slate-500 mt-0.5">
+                  <span v-if="proc.diskReadBps || proc.diskWriteBps" class="truncate">
+                    磁盘 <span class="text-emerald-300/90">↓{{ formatBps(proc.diskReadBps) }}</span> <span class="text-amber-300/90">↑{{ formatBps(proc.diskWriteBps) }}</span>
+                  </span>
+                  <span v-if="proc.netSentBps || proc.netRecvBps" class="font-mono">
+                    网络 <span class="text-emerald-300/90">↓{{ formatBps(proc.netRecvBps) }}</span> <span class="text-amber-300/90">↑{{ formatBps(proc.netSentBps) }}</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </template>
     </div>

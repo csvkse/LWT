@@ -2,11 +2,16 @@ using LinuxWebTool.Contracts.Interfaces;
 
 namespace LinuxWebTool.WebHost.Routes;
 
-/// <summary>系统状态：即时全量采集 + 历史曲线序列。</summary>
+/// <summary>系统状态：即时全量采集 + 历史曲线序列（整机 / 磁盘 / 网络 / 进程）。</summary>
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class SystemStatusController(ISystemStatusProvider statusProvider, SystemStatusStore statusStore) : ControllerBase
+public class SystemStatusController(
+    ISystemStatusProvider statusProvider,
+    SystemStatusStore statusStore,
+    SystemStatusDiskStore diskStore,
+    SystemStatusNetStore netStore,
+    SystemStatusProcessStore processStore) : ControllerBase
 {
     /// <summary>即时全量状态（主机 / CPU / 内存 / 磁盘明细 / 网卡速率 / 进程 Top）。</summary>
     [HttpGet]
@@ -22,5 +27,42 @@ public class SystemStatusController(ISystemStatusProvider statusProvider, System
     {
         var points = await statusStore.QueryAsync(hours);
         return Ok(points);
+    }
+
+    /// <summary>磁盘挂载点历史曲线序列（hours 上限 720 = 30 天）。</summary>
+    [HttpGet("DiskHistory")]
+    public async Task<IActionResult> DiskHistory([FromQuery] int hours = 6)
+    {
+        var points = await diskStore.QueryAsync(hours);
+        return Ok(points);
+    }
+
+    /// <summary>网卡历史曲线序列（hours 上限 720 = 30 天）。</summary>
+    [HttpGet("NetHistory")]
+    public async Task<IActionResult> NetHistory([FromQuery] int hours = 6)
+    {
+        var points = await netStore.QueryAsync(hours);
+        return Ok(points);
+    }
+
+    /// <summary>进程序列（hours 上限 720 = 30 天）。</summary>
+    [HttpGet("ProcessHistory")]
+    public async Task<IActionResult> ProcessHistory([FromQuery] int hours = 6)
+    {
+        var points = await processStore.QueryAsync(hours);
+        return Ok(points);
+    }
+
+    /// <summary>聚合历史：一次性返回整机 / 磁盘 / 网络 / 进程四类序列（共用时间轴，前端联动渲染）。</summary>
+    [HttpGet("ResourceHistory")]
+    public async Task<IActionResult> ResourceHistory([FromQuery] int hours = 6)
+    {
+        return Ok(new
+        {
+            System = await statusStore.QueryAsync(hours),
+            Disks = await diskStore.QueryAsync(hours),
+            Networks = await netStore.QueryAsync(hours),
+            Processes = await processStore.QueryAsync(hours),
+        });
     }
 }

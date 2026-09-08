@@ -18,9 +18,14 @@ public sealed partial class SystemStatusProvider : ISystemStatusProvider
 {
     private const int SampleWindowMs = 300;
 
+    private readonly SystemStatusOptions _options;
     private readonly object _sync = new();
     private (DateTime Time, long Idle, long Total)? _lastCpuSample;
     private Dictionary<string, (DateTime Time, long Recv, long Sent)>? _lastNetSample;
+    // 每进程磁盘 IO 差值基准（磁盘 IO 速率 = 两次采样 read/write_bytes 的差值 / 时间差）。
+    private Dictionary<int, (DateTime Time, long ReadBytes, long WriteBytes)>? _lastDiskIoSample;
+    // nethogs 可用性探测缓存（true=已接入可采；false=不可用永久跳过；null=未探测）。Provider 为单例。
+    private bool? _nethogsAvailable;
     // 宿主 df 采集模式探测缓存（Provider 为单例）：true=nsenter 可用（--privileged --pid=host）；false=回退容器自身视图
     private static bool? _hostDfMode;
 
@@ -31,6 +36,11 @@ public sealed partial class SystemStatusProvider : ISystemStatusProvider
     public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> ManagedMountPoints =
         new(System.StringComparer.Ordinal);
 
+    public SystemStatusProvider(SystemStatusOptions options)
+    {
+        _options = options;
+    }
+
     public Task<SystemStatusResult> GetStatusAsync(CancellationToken cancellationToken = default) =>
         Task.Run(Collect, cancellationToken);
 
@@ -40,6 +50,8 @@ public sealed partial class SystemStatusProvider : ISystemStatusProvider
         {
             var cpu = OperatingSystem.IsWindows() ? SampleCpuWindows() : SampleCpuLinux();
             var memory = OperatingSystem.IsWindows() ? SampleMemoryWindows() : SampleMemoryLinux();
+            // 每进程网络速率只采一次，供 CPU / 内存两个 Top 列表共享（避免 nethogs 重复运行）。
+            var netByPid = OperatingSystem.IsWindows() ? new Dictionary<int, (long Sent, long Recv)>() : SamplePerProcessNet();
             return new SystemStatusResult
             {
                 Host = CollectHost(),
@@ -47,8 +59,8 @@ public sealed partial class SystemStatusProvider : ISystemStatusProvider
                 Memory = memory,
                 Disks = OperatingSystem.IsWindows() ? CollectDisksWindows() : CollectDisksLinux(),
                 Networks = OperatingSystem.IsWindows() ? [] : SampleNetworkLinux(),
-                TopCpuProcesses = OperatingSystem.IsWindows() ? [] : CollectTopProcessesLinux(byCpu: true),
-                TopMemProcesses = OperatingSystem.IsWindows() ? [] : CollectTopProcessesLinux(byCpu: false),
+                TopCpuProcesses = OperatingSystem.IsWindows() ? [] : CollectTopProcessesLinux(byCpu: true, _options.TopProcessCount, netByPid),
+                TopMemProcesses = OperatingSystem.IsWindows() ? [] : CollectTopProcessesLinux(byCpu: false, _options.TopProcessCount, netByPid),
                 SampledAt = DateTime.Now,
             };
         }
@@ -409,8 +421,13 @@ public sealed partial class SystemStatusProvider : ISystemStatusProvider
 
     // ---------- 进程 ----------
 
-    private static List<ProcessStatus> CollectTopProcessesLinux(bool byCpu)
+    private List<ProcessStatus> CollectTopProcessesLinux(bool byCpu, int topCount, Dictionary<int, (long Sent, long Recv)> netByPid)
     {
+        if (topCount <= 0)
+        {
+            return [];
+        }
+
         // comm 放最后一列，按限次拆分避免进程名含空格时解析错位。
         var output = RunCapture("ps", "-eo pid=,pcpu=,pmem=,rss=,comm=", 5000);
         if (output is null)
@@ -436,12 +453,148 @@ public sealed partial class SystemStatusProvider : ISystemStatusProvider
             });
         }
 
-        return (byCpu
+        // 只对入选 Top 的进程补充 IO，避免对整个进程表做 /proc/<pid>/io 与 nethogs 归并。
+        var sorted = (byCpu
                 ? processes.OrderByDescending(p => p.CpuPercent)
                 : processes.OrderByDescending(p => p.MemBytes))
             .Where(p => p.Pid > 0)
-            .Take(5)
+            .Take(topCount)
             .ToList();
+
+        // 磁盘 IO（/proc/<pid>/io 差值）按 pid 补充；网络 IO 已由调用方一次采集后传入。
+        for (var i = 0; i < sorted.Count; i++)
+        {
+            var p = sorted[i];
+            var disk = SampleDiskIo(p.Pid);
+            var net = netByPid.TryGetValue(p.Pid, out var n) ? n : (0L, 0L);
+            sorted[i] = p with { DiskReadBps = disk.Read, DiskWriteBps = disk.Write, NetSentBps = net.Item1, NetRecvBps = net.Item2 };
+        }
+
+        return sorted;
+    }
+
+    private (long Read, long Write) SampleDiskIo(int pid)
+    {
+        var content = ReadFileSafe($"/proc/{pid}/io");
+        if (content is null)
+        {
+            return (0, 0);
+        }
+
+        long Get(string key) =>
+            Regex.Match(content, $@"^{key}:\s+(\d+)", RegexOptions.Multiline) is { Success: true } m
+                ? ParseLong(m.Groups[1].Value)
+                : 0;
+
+        var readBytes = Get("read_bytes");
+        var writeBytes = Get("write_bytes");
+        var now = DateTime.Now;
+
+        var previous = _lastDiskIoSample?.GetValueOrDefault(pid);
+        if (previous is { } last)
+        {
+            var seconds = (now - last.Time).TotalSeconds;
+            if (seconds > 0.01)
+            {
+                long readBps = (long)Math.Max(0, (readBytes - last.ReadBytes) / seconds);
+                long writeBps = (long)Math.Max(0, (writeBytes - last.WriteBytes) / seconds);
+                // 更新基准（保留当前累计值，避免累计器重复叠加导致差值负向）。
+                (_lastDiskIoSample ??= new())[pid] = (now, readBytes, writeBytes);
+                return (readBps, writeBps);
+            }
+        }
+        else
+        {
+            // 首次采样：记录基准，本次不产生速率（无窗口差值可算）。
+            (_lastDiskIoSample ??= new())[pid] = (now, readBytes, writeBytes);
+        }
+
+        return (0, 0);
+    }
+
+    /// <summary>
+    /// 每进程网络速率（nethogs tracemode）。能力探测：nethogs 不可用（未安装 / 非特权无法抓包）
+    /// 时返回空，永久跳过，不影响其余采集。tracemode 输出 &lt;name&gt;/&lt;pid&gt;/&lt;uid&gt;\t&lt;sent KB/s&gt;\t&lt;recv KB/s&gt;。
+    /// </summary>
+    private Dictionary<int, (long Sent, long Recv)> SamplePerProcessNet()
+    {
+        if (_nethogsAvailable == false)
+        {
+            return new();
+        }
+
+        // 首次探测是否已安装（用 sh 规避 busybox command -v 差异）。
+        if (_nethogsAvailable is null)
+        {
+            var which = RunCapture("sh", "-c \"command -v nethogs\"", 2000);
+            if (string.IsNullOrWhiteSpace(which))
+            {
+                _nethogsAvailable = false;
+                return new();
+            }
+        }
+
+        // -t tracemode；-d 1 刷新间隔 1 秒（产生速率差值）；-c 2 采 2 次后退出（取末次有效速率）。
+        var output = RunCapture("nethogs", "-t -d 1 -c 2", 8000);
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            _nethogsAvailable = false;
+            return new();
+        }
+
+        var result = ParseNetghosOutput(output);
+        _nethogsAvailable = result.Count > 0;
+        return result;
+    }
+
+    private static Dictionary<int, (long Sent, long Recv)> ParseNetghosOutput(string output)
+    {
+        var result = new Dictionary<int, (long Sent, long Recv)>();
+        foreach (var rawLine in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = rawLine.Trim();
+            if (line.StartsWith("Refreshing", StringComparison.Ordinal)
+                || line.StartsWith("Unknown connection", StringComparison.Ordinal)
+                || line.StartsWith("Ethernet link detected", StringComparison.Ordinal)
+                || line.StartsWith("WARNING", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            // 每个进程一行：name/pid/uid<TAB>sent<TAB>recv
+            var cols = line.Split('\t');
+            if (cols.Length < 3)
+            {
+                continue;
+            }
+            var meta = cols[0];
+            var uidIdx = meta.LastIndexOf('/');
+            if (uidIdx <= 0)
+            {
+                continue;
+            }
+            var pidIdx = meta.LastIndexOf('/', uidIdx - 1);
+            if (pidIdx < 0)
+            {
+                continue;
+            }
+            if (!int.TryParse(meta[(pidIdx + 1)..uidIdx], out var pid))
+            {
+                continue;
+            }
+            if (pid <= 0)
+            {
+                continue;
+            }
+            var sentKb = ParseDouble(cols[1]);
+            var recvKb = ParseDouble(cols[2]);
+            if (sentKb < 0 || recvKb < 0)
+            {
+                continue;
+            }
+            // tracemode 默认 VIEWMODE_KBPS，数值为 KB/s，转字节/秒。
+            result[pid] = ((long)(sentKb * 1024), (long)(recvKb * 1024));
+        }
+        return result;
     }
 
     // ---------- 工具 ----------
@@ -476,12 +629,16 @@ public sealed partial class SystemStatusProvider : ISystemStatusProvider
                 },
             };
             process.Start();
+            // 并行读取两个输出流，避免 stderr 填满管道缓冲导致进程阻塞（nethogs 会向 stderr 打 WARNING 等）。
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(timeoutMs))
             {
                 try { process.Kill(entireProcessTree: true); } catch { }
                 return null;
             }
-            return process.StandardOutput.ReadToEnd();
+            Task.WaitAll(stdoutTask, stderrTask);
+            return stdoutTask.Result;
         }
         catch (Exception)
         {

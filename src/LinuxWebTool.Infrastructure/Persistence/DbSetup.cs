@@ -36,6 +36,7 @@ public static class DbSetup
         // InitTables 泛型重载最多 5 个类型参数，分多次注册。
         db.CodeFirst.InitTables<LinuxCommand, CommandGroup, ScheduleTask, ExecutionRecord, OperationLog>();
         db.CodeFirst.InitTables<SystemStatusSnapshot>();
+        db.CodeFirst.InitTables<SystemStatusProcessSnapshot, SystemStatusDiskSnapshot, SystemStatusNetSnapshot>();
         db.CodeFirst.InitTables<SmbMount, TranscodePreset, TranscodeJob, WatchRule>();
     }
 
