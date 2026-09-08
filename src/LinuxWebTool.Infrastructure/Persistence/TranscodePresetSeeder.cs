@@ -2,15 +2,17 @@ using SqlSugar;
 
 namespace LinuxWebTool.Infrastructure.Persistence;
 
-/// <summary>内置转码预设播种：首次启动（预设表为空）时写入常用组合。</summary>
+/// <summary>内置转码预设播种：增量补齐内置预设（缺哪个补哪个，已存在的跳过，不干扰用户创建的预设）。</summary>
 public static class TranscodePresetSeeder
 {
     public static void Seed(ISqlSugarClient db)
     {
-        if (db.Queryable<TranscodePreset>().Any())
-        {
-            return;
-        }
+        // 已存在的内置预设名集合（按 Name 比对，避免重复插入；用户手动创建的 IsBuiltin=false 不计入）。
+        var existingBuiltin = db.Queryable<TranscodePreset>()
+            .Where(p => p.IsBuiltin)
+            .Select(p => p.Name)
+            .ToList()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var presets = new List<TranscodePreset>
         {
@@ -107,8 +109,13 @@ public static class TranscodePresetSeeder
             },
         };
 
+        // 增量补齐：只插入缺失的内置预设（按 Name 判定），已存在的跳过，避免重复。
         foreach (var preset in presets)
         {
+            if (existingBuiltin.Contains(preset.Name))
+            {
+                continue;
+            }
             preset.CreateTime = DateTime.Now;
             preset.UpdateTime = DateTime.Now;
             db.Insertable(preset).ExecuteCommandAsync();
