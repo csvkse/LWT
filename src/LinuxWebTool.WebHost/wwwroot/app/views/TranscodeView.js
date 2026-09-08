@@ -3,6 +3,7 @@ import { http } from '../api/client.js';
 import { API } from '../config.js';
 import { openConfirm } from '../store/modal.js';
 import { toast } from '../store/toast.js';
+import FilePicker from '../components/FilePicker.js';
 import {
   formatBytes, formatDuration, formatTime, transcodeModeLabel, transcodeStatusMeta, transcodeTriggerLabel,
 } from '../utils/format.js';
@@ -19,6 +20,7 @@ const SUGGESTED_PATTERNS = '.mkv,.avi,.mov,.wmv,.flv,.ts,.m2ts,.mp4';
 
 export default defineComponent({
   name: 'TranscodeView',
+  components: { FilePicker },
   setup() {
     const tab = ref('submit');
     const ffmpeg = reactive({ available: false, version: '', message: '' });
@@ -62,6 +64,26 @@ export default defineComponent({
     const loading = ref(false);
     const loadError = ref('');
     let timer = null;
+
+    // ---- 可视化选择器 ----
+    const picker = reactive({ show: false, mode: 'folder', target: '', startPath: '/' });
+    function openPicker(mode, target, startPath) {
+      picker.mode = mode;
+      picker.target = target;
+      picker.startPath = startPath || '/';
+      picker.show = true;
+    }
+    function onPickerSelect(path) {
+      picker.show = false;
+      if (picker.target === 'source') {
+        submitForm.sourcePath = path;
+      } else if (picker.target === 'watch') {
+        watchForm.watchPath = path;
+      }
+    }
+    function onPickerClose() {
+      picker.show = false;
+    }
 
     async function loadFfmpeg() {
       const result = await http(API.transcode.detectFfmpeg);
@@ -385,6 +407,7 @@ export default defineComponent({
 
     return {
       TABS, tab, ffmpeg, presets,
+      picker, openPicker, onPickerSelect, onPickerClose,
       submitForm, submitting, submit, resetSubmit,
       jobs, jobTotal, jobQuery, jobLoading, actJobId, cancelJob, retryJob, clearFinished, goPage, totalPages,
       showPresetEditor, editingPresetId, presetSaving, presetForm, openPresetCreate, openPresetEdit, savePreset, removePreset,
@@ -421,7 +444,10 @@ export default defineComponent({
       <div v-show="tab === 'submit'" class="panel p-4 flex flex-col gap-3 max-w-3xl">
         <label class="block">
           <span class="text-xs text-slate-500 mb-1 block">源文件 / 源文件夹（服务器本地可访问路径）*</span>
-          <input class="input font-mono" v-model="submitForm.sourcePath" placeholder="/mnt/media/movies 或 /mnt/media/file.mkv" />
+          <div class="flex gap-2">
+            <input class="input font-mono flex-1" v-model="submitForm.sourcePath" placeholder="/mnt/media/movies 或 /mnt/media/file.mkv" />
+            <button class="btn btn-xs" title="可视化选择" @click="openPicker('folder', 'source', submitForm.sourcePath || '/')">📂 选择</button>
+          </div>
           <p class="text-[11px] text-slate-600 mt-1">文件 → 单任务；文件夹 → 按扩展名过滤批量入队。路径直接在运行该服务的机器上解析。</p>
         </label>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -659,7 +685,10 @@ export default defineComponent({
             </label>
             <label class="block">
               <span class="text-xs text-slate-500 mb-1 block">监听目录 *</span>
-              <input class="input font-mono" v-model="watchForm.watchPath" placeholder="/mnt/media/movies" />
+              <div class="flex gap-2">
+                <input class="input font-mono flex-1" v-model="watchForm.watchPath" placeholder="/mnt/media/movies" />
+                <button class="btn btn-xs" title="可视化选择" @click="openPicker('folder', 'watch', watchForm.watchPath || '/')">📂 选择</button>
+              </div>
             </label>
             <label class="block">
               <span class="text-xs text-slate-500 mb-1 block">扩展名过滤</span>
@@ -706,6 +735,9 @@ export default defineComponent({
           </div>
         </div>
       </div>
+
+      <FilePicker :show="picker.show" :mode="picker.mode" :start-path="picker.startPath"
+                  @select="onPickerSelect" @close="onPickerClose" />
     </div>
   `,
 });

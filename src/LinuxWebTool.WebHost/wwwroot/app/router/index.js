@@ -7,6 +7,7 @@ const routes = [
   { path: '/commands', name: 'commands', component: () => import('../views/CommandsView.js') },
   { path: '/schedules', name: 'schedules', component: () => import('../views/SchedulesView.js') },
   { path: '/system', name: 'system', component: () => import('../views/SystemStatusView.js') },
+  { path: '/files', name: 'files', component: () => import('../views/FilesView.js') },
   { path: '/mounts', name: 'mounts', component: () => import('../views/SmbMountsView.js') },
   { path: '/transcode', name: 'transcode', component: () => import('../views/TranscodeView.js') },
   { path: '/history', name: 'history', component: () => import('../views/HistoryView.js') },

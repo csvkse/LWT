@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { path: '/commands', label: '指令' },
   { path: '/schedules', label: '定时任务' },
   { path: '/system', label: '系统状态' },
+  { path: '/files', label: '文件管理' },
   { path: '/mounts', label: '挂载管理' },
   { path: '/transcode', label: '转码' },
   { path: '/history', label: '执行历史' },

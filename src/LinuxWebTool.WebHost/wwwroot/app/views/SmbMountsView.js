@@ -1,4 +1,5 @@
 import { defineComponent, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { http } from '../api/client.js';
 import { API } from '../config.js';
 import { openConfirm } from '../store/modal.js';
@@ -20,6 +21,7 @@ const emptyForm = () => ({
 export default defineComponent({
   name: 'SmbMountsView',
   setup() {
+    const router = useRouter();
     const items = ref([]);
     const loading = ref(false);
     const actingId = ref(null);
@@ -143,6 +145,11 @@ export default defineComponent({
       }
     }
 
+    // 挂载成功后跳转到文件管理器，定位到该挂载点
+    function browse(mount) {
+      router.push({ path: '/files', query: { path: mount.localPath } });
+    }
+
     function unmount(mount) {
       openConfirm({
         title: '卸载挂载',
@@ -172,7 +179,7 @@ export default defineComponent({
 
     return {
       items, loading, actingId, unsupported, loadError, showEditor, editingId, saving, form,
-      load, openCreate, openEdit, save, remove, mountNow, unmount, statusMeta, formatTime,
+      load, openCreate, openEdit, save, remove, mountNow, browse, unmount, statusMeta, formatTime,
     };
   },
   template: `
@@ -218,7 +225,10 @@ export default defineComponent({
                   <button v-if="mount.status !== 1" class="btn btn-xs btn-primary" :disabled="actingId === mount.id" @click="mountNow(mount)">
                     {{ actingId === mount.id ? '挂载中…' : '⏏ 挂载' }}
                   </button>
-                  <button v-else class="btn btn-xs btn-danger" @click="unmount(mount)">⏐ 卸载</button>
+                  <template v-else>
+                    <button class="btn btn-xs btn-primary" @click="browse(mount)">📂 浏览</button>
+                    <button class="btn btn-xs btn-danger" @click="unmount(mount)">⏐ 卸载</button>
+                  </template>
                 </template>
                 <button class="btn btn-xs" @click="openEdit(mount)">编辑</button>
                 <button class="btn btn-xs btn-danger" @click="remove(mount)">删除</button>
