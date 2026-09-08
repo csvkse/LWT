@@ -24,7 +24,9 @@ ENV TZ=Asia/Shanghai \
 # nethogs   —— 每进程网络速率采集（tracemode；仅 --privileged --user root 运行时生效，非特权则探测跳过）
 # ffmpeg    —— 媒体转码（含 ffprobe，一次 一次性转码 / 队列 / 监听自动转码全依赖它）
 # tzdata/icu —— 时区与中文全球化
-RUN apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc cifs-utils nethogs ffmpeg tzdata icu-libs && \
+# libva / mesa-va-gallium —— VA-API 用户态库与 Intel/AMD 核显驱动（ffmpeg 硬件加速编码运行时依赖；
+#   ffmpeg 已启用 vaapi 编码支持，缺 libva 时 --device=/dev/dri 透传了核显也无法真正编码）
+RUN apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc cifs-utils nethogs ffmpeg libva mesa-va-gallium tzdata icu-libs && \
     cp /usr/share/zoneinfo/$TZ /etc/localtime && \
     echo $TZ > /etc/timezone
 

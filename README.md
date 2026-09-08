@@ -160,11 +160,73 @@ docker run -d --restart unless-stopped \
 |---|---|---|
 | **USB 控制** | `-v /dev/bus/usb:/dev/bus/usb` + `--user root` | 挂载整个 USB 总线（热插拔设备动态可见）；特定串口/TTY 设备另加 `--device=/dev/ttyUSB0`；`lsusb` 已内置。**WSL2**：先用 [usbipd-win](https://github.com/dorssel/usbipd-win) 把 Windows USB 设备 attach 到 WSL（`usbipd bind` / `usbipd attach --wsl`），容器再按上面配置 |
 | **宿主机 /usr/local/bin** | `-v /usr/local/bin:/usr/local/bin:ro` | 宿主安装的工具脚本直接在容器内使用（`:ro` 只读更安全）。⚠ 镜像是 alpine(musl)：宿主 Debian/Ubuntu 编译的**动态链接程序无法运行**，脚本与静态编译的二进制不受影响 |
-| **GPU（NVIDIA）** | `--gpus all` | 宿主需已装 NVIDIA 驱动 + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)；容器内 `nvidia-smi` 可用。WSL2 需 Windows 侧装 NVIDIA 驱动（驱动自带 WSL 支持） |
-| **GPU（Intel/AMD 核显）** | `--device=/dev/dri` | 挂载 DRI 设备（VA-API/Vulkan 硬件加速），容器内按需补用户态库 |
+| **GPU（NVIDIA）** | `--gpus all` | 宿主需已装 NVIDIA 驱动 + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)；**toolkit 装宿主机，非容器**（见下方「宿主机安装 NVIDIA 栈」）；容器内 `nvidia-smi` 可用。WSL2 需 Windows 侧装 NVIDIA 驱动（驱动自带 WSL 支持） |
+| **GPU（Intel/AMD 核显）** | `--device=/dev/dri` | 挂载 DRI 设备（VA-API/Vulkan 硬件加速）；镜像已内置 `libva`/`mesa-va-gallium` 用户态库，ffmpeg 已启用 vaapi 编码，透传后即可用 |
 | **全部要（省事）** | `--privileged --user root` | 接近宿主完整权限，含 USB/所有设备。方便但权限最大，请仅在信任内网使用 |
 | **查看宿主机磁盘（自动，推荐）** | `--privileged --pid=host --user root` | 采集器经 `nsenter` 进入宿主挂载命名空间执行 `df`，系统状态页**自动显示宿主全部磁盘与挂载点**，新增磁盘自动出现，无需任何手写。需标准 Linux 宿主 Docker（WSL2 的 wslc 不支持 privileged，见下行） |
 | **查看宿主机磁盘（手动）** | 逐盘挂载：`-v /mnt/c:/host-c:ro`（WSL2 的 Windows 盘）等 | 受限运行时（wslc）或不想给特权时的替代：容器文件系统与宿主隔离，`df` 天然只看到容器自身（如 `/dev/loop2` 虚拟盘）；挂进来的盘会出现在磁盘列表（真实容量）。已实测：WSL2 下挂 `/mnt/c` 后容器内 `df` 正确显示 Windows C 盘容量（790GB·70%） |
+
+**宿主机安装 NVIDIA 栈（`nvidia-container-toolkit` 装在宿主机，不在容器内）**
+
+> 关键：`nvidia-container-toolkit` 是**宿主机级容器运行时插件**，安装在跑 Docker 的那台宿主机器上（用宿主包管理器 + `sudo`），不是在容器里。它在 Docker 启动 `--gpus all` 时负责把 NVIDIA 驱动与 GPU 设备注入容器。缺它时 `--gpus all` 参数会直接报错。
+
+```bash
+# 1. 安装 NVIDIA 驱动（宿主，Ubuntu/Debian 示例；已装可跳过）
+sudo apt install -y nvidia-driver-550          # 版本按宿主机显卡与发行版选择
+# 重启宿主机使驱动生效，随后 nvidia-smi 应能列出 GPU
+
+# 2. 安装 nvidia-container-toolkit（宿主机）
+sudo apt install -y nvidia-container-toolkit
+# 或 NVIDIA 官方脚本：  curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg && ...（见官方 install-guide）
+
+# 3. 配置 Docker 运行时（宿主机，改 /etc/docker/daemon.json）
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+
+# 4. 验证（宿主机）——容器内 nvidia-smi 应可列出 GPU
+docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+```
+
+带 GPU 透传运行本应用（宿主机上执行）：
+
+```bash
+docker run -d --restart unless-stopped \
+  -p 5270:5270 \
+  -v linuxwebtool-data:/app/data \
+  --name linuxwebtool \
+  --user root \
+  --gpus all \
+  ghcr.io/csvkse/lwt:latest
+```
+
+compose 等价写法（NVIDIA GPU 透传）：
+
+```yaml
+services:
+  linuxwebtool:
+    image: ghcr.io/csvkse/lwt:latest
+    container_name: linuxwebtool
+    user: root
+    ports:
+      - "5270:5270"
+    volumes:
+      - linuxwebtool-data:/app/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  linuxwebtool-data:
+```
+
+**Intel/AMD 核显**（`--device=/dev/dri` 透传）：镜像已内置 VA-API 用户态库（`libva`）与 核显驱动（`mesa-va-gallium`），ffmpeg 已启用 vaapi 编码支持，透传 `/dev/dri` 后即可走 VA-API 硬件编码。核显路径**不需要** nvidia-container-toolkit。若自行裁剪镜像后遇到 "Cannot load libva" / "device not found"，需保留 `apk add libva mesa-va-gallium`。
+
+**应用侧行为（已实现）**：转码页顶部会检测当前环境的硬件编码器——若容器成功拿到 GPU（`--gpus all` 或 `--device=/dev/dri` 且用户态库齐全），显示「⚡ 硬件加速可用」并列出 `h264_nvenc`/`h264_vaapi` 等；若未透传或库缺失，显示「未检测到硬件加速」，转码自动回退软件编码（libx264/libx265），任务仍能正常执行，仅在日志提示。系统状态页「硬件」区块会标记 GPU（VGA/3D/Display 类）。
 
 **宿主机磁盘自动采集 —— 完整示例**（三个参数缺一不可，作用：`--privileged` 授予 nsenter 权限；`--pid=host` 让容器看到宿主 PID 1 以定位其命名空间；`--user root` 非 root 无权切换命名空间）：
 
