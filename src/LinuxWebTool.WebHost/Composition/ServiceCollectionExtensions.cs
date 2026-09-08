@@ -51,7 +51,8 @@ public static class ServiceCollectionExtensions
         var transcodeOptions = configuration.GetSection(TranscodeOptions.SectionName).Get<TranscodeOptions>() ?? new TranscodeOptions();
         builder.Services.AddSingleton(transcodeOptions);
         builder.Services.AddSingleton<FfmpegLocator>();
-        builder.Services.AddHostedService<TranscodeQueueService>();
+        builder.Services.AddSingleton<TranscodeQueueService>(); // WatchFolderService 依赖具体类型，须注册（同时作为 HostedService 启动）
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<TranscodeQueueService>());
         builder.Services.AddHostedService<WatchFolderService>();
 
         // Shell 执行器
