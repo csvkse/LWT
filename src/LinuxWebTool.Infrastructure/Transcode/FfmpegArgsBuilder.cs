@@ -297,7 +297,7 @@ public static class FfmpegArgsBuilder
             }
         }
 
-        // 音频 + 容器 + 额外参数（软件与硬件共用）
+        // 音频 + 容器 + 额外参数（软件与硬件共用；额外参数在硬件路径需剥离软件专属项）
         var tail = new List<string>();
         if (audio.Length == 0)
         {
@@ -322,17 +322,67 @@ public static class FfmpegArgsBuilder
             tail.AddRange(["-movflags", "+faststart"]);
         }
 
-        if (!string.IsNullOrWhiteSpace(preset.ExtraArgs))
-        {
-            tail.AddRange(ShellArgumentParser.Split(preset.ExtraArgs));
-        }
+        // 软件路径用完整 ExtraArgs；硬件路径剥离软件专属项（-preset/-tag:v/-crf 等）。
+        var fullExtra = string.IsNullOrWhiteSpace(preset.ExtraArgs)
+            ? new List<string>()
+            : ShellArgumentParser.Split(preset.ExtraArgs).ToList();
+        var hwExtra = FilterHwCompatibleArgs(fullExtra);
+        var hwTail = tail.Concat(hwExtra).ToList();
+        var swTail = tail.Concat(fullExtra).ToList();
 
-        var isHwPrimary = hwPlan is not null;
-        var args = (isHwPrimary ? hardwareVideo : softwareVideo).Concat(tail).ToList();
-        // 硬件启动失败时的软件兜底段（仅当首选为硬件时提供）
-        var fallbackArgs = isHwPrimary && softwareVideo.Count > 0 ? softwareVideo.Concat(tail).ToList() : null;
-        var intendedHwArgs = hardwareVideo.Count > 0 ? hardwareVideo.Concat(tail).ToList() : null;
-        return (args, isHwPrimary, fallbackReason, fallbackArgs, intendedHwArgs);
+        var hwPrimary = hwPlan is not null;
+        var args = (hwPrimary ? hardwareVideo.Concat(hwTail) : softwareVideo.Concat(swTail)).ToList();
+        // 硬件启动失败时的软件兜底段（软件路径保留全部 ExtraArgs）
+        var fallbackArgs = hwPrimary && softwareVideo.Count > 0 ? softwareVideo.Concat(swTail).ToList() : null;
+        var intendedHwArgs = hardwareVideo.Count > 0 ? hardwareVideo.Concat(hwTail).ToList() : null;
+        return (args, hwPrimary, fallbackReason, fallbackArgs, intendedHwArgs);
+    }
+
+    /// <summary>软件编码专属参数项（硬件编码路径需剥离）。键为参数名（不含前导 '-', 小写）。</summary>
+    private static readonly HashSet<string> SoftwareOnlyArgs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "preset",           // libx264/libx265 的层级，硬编不支持
+        "crf",              // 软件码率控制，硬编用 -qp
+        "tag:v",            // MP4 tag（如 hvc1），硬编由容器自动处理
+        "profile:v",        // 软件 profile，硬编可自动
+        "tune",             // x264 tune，硬编不支持
+        "maxrate",
+        "bufsize",
+        "x264-params",      // x264 专属
+        "x265-params",      // x265 专属
+        "sc_threshold",
+        "psy-rd",
+        "me_method",
+        "subq",
+        "keyint_min",
+    };
+
+    /// <summary>过滤出硬件编码可接受的参数：跳过软件专属项（及其参数值），保留通用容器/像素/码率等参数。</summary>
+    private static List<string> FilterHwCompatibleArgs(IReadOnlyList<string> tokens)
+    {
+        var result = new List<string>();
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            var token = tokens[i];
+            if (token.Length == 0 || !token.StartsWith('-'))
+            {
+                // 不带 '-' 的值 token 保留（无法判断归属，交给 ffmpeg）
+                result.Add(token);
+                continue;
+            }
+            var name = token.TrimStart('-').ToLowerInvariant();
+            if (SoftwareOnlyArgs.Contains(name))
+            {
+                // 若该选项带值（下一 token 不以 '-' 开头），跳过一个值 token
+                if (i + 1 < tokens.Count && !tokens[i + 1].StartsWith('-'))
+                {
+                    i++;
+                }
+                continue;
+            }
+            result.Add(token);
+        }
+        return result;
     }
 
     /// <summary>从编码器名识别硬件后端（如 h264_vaapi → vaapi）；非硬件编码器返回 null。</summary>
