@@ -130,4 +130,23 @@ public class FfmpegArgsFilterTests
         Assert.Contains("-preset medium", cmd);
         Assert.Contains("-tag:v hvc1", cmd);
     }
+
+    [Fact]
+    public void Custom_args_with_hw_codec_auto_injects_vaapi_global_and_strips_software_only()
+    {
+        // 自定义(customArgs)含硬件编码器 h264_vaapi 时：BuildWithHw 应自动注入 -vaapi_device/-hwaccel（置于 -i 前），
+        // 并剥离软件专属项 -preset；保留通用项 -c:a/-b:a/-movflags。用于修复"预设展开中间段缺设备参数"。
+        var result = FfmpegArgsBuilder.BuildWithHw(
+            "/in.mp4", "/out.mp4", null,
+            "-vf format=nv12,hwupload -c:v h264_vaapi -qp 23 -c:a aac -b:a 128k -movflags +faststart -preset medium",
+            new FfmpegArgsBuilder.HwEncodeContext(false, []));
+
+        var cmd = string.Join(' ', result.Args);
+        Assert.Contains("-vaapi_device /dev/dri/renderD128", cmd); // 自动补全局段
+        Assert.Contains("-hwaccel vaapi", cmd);                    // 自动补解码
+        Assert.DoesNotContain("-preset medium", cmd);              // 软件专属项被剥离
+        Assert.Contains("-c:v h264_vaapi", cmd);                   // 硬件编码器保留
+        Assert.Contains("-c:a aac", cmd);                          // 通用项保留
+        Assert.Contains("-b:a 128k", cmd);
+    }
 }

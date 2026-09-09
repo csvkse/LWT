@@ -112,10 +112,19 @@ public static class FfmpegArgsBuilder
 
         if (!string.IsNullOrWhiteSpace(customArgs))
         {
-            // 自定义模式：用户完全控制的参数段，系统不干预（不自动附加硬件参数）。
+            // 自定义模式：customArgs 是控制段。若其中手动指定了硬件编码器（-c:v xxx_vaapi 等），
+            // 自动补全硬件全局/解码选项（-vaapi_device -hwaccel，置于 -i 前），否则 VAAPI 会缺设备参数失败；
+            // 同时剥离软件专属项（-preset/-tag:v 等），避免硬件编码器报错。
+            var tokens = ShellArgumentParser.Split(customArgs);
+            var backend = DetectHwBackendFromArgs(tokens);
+            if (backend is not null)
+            {
+                head.AddRange(BuildHwGlobalArgs(backend));
+                tokens = FilterHwCompatibleArgs(tokens);
+            }
             head.Add("-i");
             head.Add(input);
-            foreach (var token in ShellArgumentParser.Split(customArgs))
+            foreach (var token in tokens)
             {
                 args.Add(ResolveToken(token, input, output));
             }
@@ -484,6 +493,27 @@ public static class FfmpegArgsBuilder
             if (videoCodec.EndsWith(backend, StringComparison.OrdinalIgnoreCase))
             {
                 return backend;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// 从自定义参数 tokens 中检测用户手写/预设展开的硬件视频编码器（-c:v xxx_vaapi 等），
+    /// 返回对应后端；未发现硬件编码器返回 null。用于自定义分支自动补全 -vaapi_device/-hwaccel。
+    /// </summary>
+    private static string? DetectHwBackendFromArgs(IReadOnlyList<string> tokens)
+    {
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            if (string.Equals(tokens[i], "-c:v", StringComparison.OrdinalIgnoreCase)
+                && i + 1 < tokens.Count)
+            {
+                var backend = DetectHardwareBackend(tokens[i + 1]);
+                if (backend is not null)
+                {
+                    return backend;
+                }
             }
         }
         return null;
