@@ -96,6 +96,29 @@ public class FfmpegArgsFilterTests
     }
 
     [Fact]
+    public void Raw_command_detects_hardware_encoder()
+    {
+        // 完整命令模式：命令中指定了硬件编码器（-c:v h264_vaapi）→ 标记实际用了硬件（徽标不再误显示"软件"）
+        var result = FfmpegArgsBuilder.BuildRaw("ffmpeg -hwaccel vaapi -i /in.mp4 -c:v h264_vaapi -qp 23 /out.mp4");
+        Assert.True(result.UsedHardwareAccel);
+
+        // 软件编码 → false
+        var soft = FfmpegArgsBuilder.BuildRaw("ffmpeg -i /in.mp4 -c:v libx264 /out.mp4");
+        Assert.False(soft.UsedHardwareAccel);
+    }
+
+    [Fact]
+    public void Raw_command_extracts_output_path()
+    {
+        // 完整命令模式：输出为最后一个未被选项消费的位置参数；-i 的输入路径被跳过
+        var cmd = "ffmpeg -hide_banner -y -vaapi_device /dev/dri/renderD128 -hwaccel vaapi "
+                  + "-i /mnt/test/303-720p.mp4 -vf format=nv12,hwupload -c:v h264_vaapi -qp 23 "
+                  + "-c:a aac -b:a 128k -movflags +faststart /mnt/test/303-720p-转码.mp4";
+        var output = FfmpegArgsBuilder.ExtractOutputPath(FfmpegArgsBuilder.BuildRaw(cmd).Args);
+        Assert.Equal("/mnt/test/303-720p-转码.mp4", output);
+    }
+
+    [Fact]
     public void Build_args_from_preset_returns_middle_section()
     {
         // 非完整模式：预设展开为中间段参数（不含 -i/输出/-progress）

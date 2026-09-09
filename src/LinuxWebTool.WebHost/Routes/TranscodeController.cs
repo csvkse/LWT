@@ -87,7 +87,7 @@ public class TranscodeController(
                 return BadRequest(new { message });
             }
             var preset = request.PresetId is { } presetId ? await presetStore.GetByIdAsync(presetId) : null;
-            var job = await CreateJobAsync(source, preset, preset?.Name, request.CustomArgs,
+            var job = await CreateJobAsync(source, preset, preset?.Name ?? request.PresetName, request.CustomArgs,
                 request.OutputContainer, request.OutputMode, TranscodeTrigger.Manual, request.OutputDir, watchRuleId: null,
                 request.UseHardwareAccel, request.HardwareBackend, request.IsFullCommand);
             await operationLogger.LogAsync("提交转码", "转码任务", Path.GetFileName(source),
@@ -121,7 +121,7 @@ public class TranscodeController(
                 {
                     break;
                 }
-                var job = await CreateJobAsync(path, preset, preset?.Name, request.CustomArgs,
+                var job = await CreateJobAsync(path, preset, preset?.Name ?? request.PresetName, request.CustomArgs,
                     request.OutputContainer, request.OutputMode, TranscodeTrigger.Manual, request.OutputDir, watchRuleId: null,
                     request.UseHardwareAccel, request.HardwareBackend, request.IsFullCommand);
                 count++;

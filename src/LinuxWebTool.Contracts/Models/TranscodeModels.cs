@@ -52,6 +52,9 @@ public sealed record TranscodeSubmitRequest
     /// <summary>转码预设（与 CustomArgs 至少一项）。</summary>
     public Guid? PresetId { get; init; }
 
+    /// <summary>预设名称（预设已展开为 CustomArgs 模板快照时前端附送，供任务队列回显"来源预设"）。</summary>
+    public string? PresetName { get; init; }
+
     /// <summary>自定义 ffmpeg 参数（{input}/{output} 占位符之外的部分，如 -c:v libx264 -crf 20）。</summary>
     public string? CustomArgs { get; init; }
 

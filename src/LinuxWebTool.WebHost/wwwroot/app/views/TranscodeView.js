@@ -235,6 +235,7 @@ export default defineComponent({
             sourcePath: submitForm.sourcePath,
             // 预设已展开到 customArgs（模板快照）时以 customArgs 为准，presetId 置空；未展开（手填自定义）则随 presetId
             presetId: submitForm.customArgs ? null : (submitForm.presetId || null),
+            presetName: submitForm.customArgs ? (presetById(submitForm.presetId)?.name || null) : null,
             customArgs: submitForm.customArgs || null,
             outputContainer: submitForm.customArgs ? (submitForm.outputContainer || null) : null,
             outputMode: Number(submitForm.outputMode),

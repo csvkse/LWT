@@ -55,7 +55,54 @@ public static class FfmpegArgsBuilder
                 tokens.RemoveAt(0);
             }
         }
-        return new BuildResult(tokens, false);
+        // 完整命令是用户自写的：若其中指定了硬件编码器（-c:v xxx_vaapi 等），
+        // 任务队列应如实标记"实际用了硬件"（否则徽标误显示"软件"）。
+        var usedHardware = DetectHwBackendFromArgs(tokens) is not null;
+        return new BuildResult(tokens, usedHardware);
+    }
+
+    /// <summary>
+    /// 从完整命令 token 中提取输出路径（最后一个"位置参数"，且未被前一个选项当作取值消费）。
+    /// 完整命令模式用户自写输出路径，系统不回写 OutputPath；此方法仅用于任务队列展示输出列。
+    /// </summary>
+    public static string? ExtractOutputPath(IReadOnlyList<string> tokens)
+    {
+        // 已知会消费下一个 token 作为取值的选项（取值为输入/输出之外的中间参数，如 -i/-c:v/-crf/-vf…）
+        var valueOptions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "-i", "-ss", "-t", "-to", "-vf", "-filter:v", "-af", "-filter:a", "-filter_complex",
+            "-c:v", "-c:a", "-c", "-crf", "-qp", "-b:v", "-b:a", "-preset",
+            "-tune", "-profile:v", "-level", "-tag:v", "-pix_fmt", "-movflags",
+            "-map", "-metadata", "-threads", "-f", "-progress", "-maxrate",
+            "-bufsize", "-r", "-s", "-scodec", "-acodec", "-vcodec",
+            "-vaapi_device", "-hwaccel", "-hwaccel_output_format",
+        };
+        // 无值开关（不消费下一 token），避免被误当输出
+        var flags = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "-y", "-n", "-hide_banner", "-nostats", "-an", "-vn", "-sn", "-dn",
+        };
+
+        string? lastPositional = null;
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            var token = tokens[i];
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                continue;
+            }
+            if (token.StartsWith('-'))
+            {
+                if (!flags.Contains(token) && valueOptions.Contains(token))
+                {
+                    i++; // 跳过该选项的取值 token（如 -i 后的输入路径）
+                }
+                continue;
+            }
+            // 位置参数：输入已随 -i 消费被跳过，剩余中最后一个视为输出路径
+            lastPositional = token;
+        }
+        return lastPositional;
     }
 
     /// <summary>
@@ -121,6 +168,7 @@ public static class FfmpegArgsBuilder
             {
                 head.AddRange(BuildHwGlobalArgs(backend));
                 tokens = FilterHwCompatibleArgs(tokens);
+                usedHardware = true; // 自定义参数指定了硬件编码器 → 标记实际用了硬件
             }
             head.Add("-i");
             head.Add(input);

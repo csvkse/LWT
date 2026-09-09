@@ -383,7 +383,6 @@ public sealed class TranscodeQueueService(
         job.Progress = 0;
         job.SpeedText = null;
         job.ErrorOutput = null;
-        job.UsedHardwareAccel = false;
         try
         {
             job.SourceSizeBytes = new FileInfo(job.SourcePath).Length;
@@ -392,11 +391,12 @@ public sealed class TranscodeQueueService(
         {
             // 取大小失败不阻断
         }
-        await jobStore.UpdateAsync(job);
-
+        // 完整命令是用户自写的：从中识别是否用了硬件编码器，并提取输出路径供任务队列展示。
         var buildResult = FfmpegArgsBuilder.BuildRaw(job.CustomArgs);
         var args = buildResult.Args;
         job.CommandLine = string.Join(' ', (new[] { detection.FfmpegPath }).Concat(args));
+        job.UsedHardwareAccel = buildResult.UsedHardwareAccel;
+        job.OutputPath = FfmpegArgsBuilder.ExtractOutputPath(args);
         job.FallbackReason = null;
         job.FallbackFromCommand = null;
         await jobStore.UpdateAsync(job);
