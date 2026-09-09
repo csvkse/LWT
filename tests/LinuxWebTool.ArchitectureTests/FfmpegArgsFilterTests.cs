@@ -55,4 +55,27 @@ public class FfmpegArgsFilterTests
         Assert.Contains("-c:a aac", cmd);
         Assert.Contains("-b:a 96k", cmd);
     }
+
+    [Fact]
+    public void Hw_global_args_and_filter_args_are_split()
+    {
+        // 反射调用私有 BuildHwGlobalArgs / BuildHwFilterArgs，确认 -vaapi_device/-hwaccel 归入全局段、-vf 归入滤镜段
+        var global = typeof(FfmpegArgsBuilder).GetMethod("BuildHwGlobalArgs",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var filter = typeof(FfmpegArgsBuilder).GetMethod("BuildHwFilterArgs",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(global);
+        Assert.NotNull(filter);
+
+        var g = (IEnumerable<string>)global!.Invoke(null, new object[] { "vaapi" })!;
+        var f = (IEnumerable<string>)filter!.Invoke(null, new object[] { "vaapi" })!;
+
+        var gCmd = string.Join(' ', g);
+        var fCmd = string.Join(' ', f);
+
+        Assert.Contains("-vaapi_device /dev/dri/renderD128", gCmd); // 全局段含设备
+        Assert.Contains("-hwaccel vaapi", gCmd);                    // 全局段含解码加速
+        Assert.DoesNotContain("-vf", gCmd);                          // 全局段不含滤镜
+        Assert.Contains("-vf format=nv12,hwupload", fCmd);          // 滤镜段含 -vf
+    }
 }

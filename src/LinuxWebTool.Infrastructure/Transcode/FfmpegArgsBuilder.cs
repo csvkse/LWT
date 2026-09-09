@@ -37,7 +37,10 @@ public static class FfmpegArgsBuilder
         HwEncodeContext? hwContext)
     {
         var hw = hwContext ?? new HwEncodeContext(false, []);
-        var args = new List<string> { "-hide_banner", "-y", "-i", input };
+        // 命令骨架：-hide_banner -y [硬件全局选项] -i <input> [参数段] ...
+        // 硬件全局/解码选项（-vaapi_device -hwaccel）必须在 -i 之前，ffmpeg 才能正确解析。
+        var head = new List<string> { "-hide_banner", "-y" };
+        var args = new List<string>();
         var usedHardware = false;
         string? fallbackReason = null;
         List<string>? fallbackArgs = null;
@@ -46,6 +49,8 @@ public static class FfmpegArgsBuilder
         if (!string.IsNullOrWhiteSpace(customArgs))
         {
             // 自定义模式：用户完全控制的参数段，系统不干预（不自动附加硬件参数）。
+            head.Add("-i");
+            head.Add(input);
             foreach (var token in ShellArgumentParser.Split(customArgs))
             {
                 args.Add(ResolveToken(token, input, output));
@@ -54,18 +59,31 @@ public static class FfmpegArgsBuilder
         else if (preset is not null)
         {
             var buildResult = BuildPresetTokens(preset, hw);
+            // 前置硬件全局选项（置于 -i 之前）
+            if (buildResult.Item6 is { Count: > 0 } preInput)
+            {
+                head.AddRange(preInput);
+                // "回退前硬件命令"需含前置段（-vaapi_device 等），补回以便任务队列展示完整命令
+                if (buildResult.Item5 is { Count: > 0 } intended)
+                {
+                    intendedHwArgs = preInput.Concat(intended).ToList();
+                }
+            }
+            head.Add("-i");
+            head.Add(input);
             args.AddRange(buildResult.Item1);
             usedHardware = buildResult.Item2;
             fallbackReason = buildResult.Item3;
             fallbackArgs = buildResult.Item4;
-            intendedHwArgs = buildResult.Item5;
+            intendedHwArgs ??= buildResult.Item5;
         }
 
         args.Add("-progress");
         args.Add("pipe:1");
         args.Add("-nostats");
         args.Add(output);
-        return new BuildResult(args, usedHardware, fallbackReason, fallbackArgs, intendedHwArgs);
+        head.AddRange(args);
+        return new BuildResult(head, usedHardware, fallbackReason, fallbackArgs, intendedHwArgs);
     }
 
     /// <summary>硬件编码器 → 对应软件编码器（环境不支持硬编时回退用）。</summary>
@@ -183,11 +201,12 @@ public static class FfmpegArgsBuilder
 
     /// <summary>
     /// 预设参数构造。产出两套视频参数段：
-    /// Args=首选命令；FallbackArgs=硬件启动失败时的软件兜底；IntendedHwArgs=意图执行的硬件命令（用于展示）。
+    /// Args=首选命令；FallbackArgs=硬件启动失败时的软件兜底；IntendedHwArgs=意图执行的硬件命令（用于展示）；
+    /// PreInputArgs=应置于 -i 之前的硬件全局/解码选项（vaapi/nvenc 等）。
     /// 请求硬件加速时：预设为硬件编码器（设备存在）直接硬编；预设为软件编码器则自动映射到同家族可用硬件编码器；
     /// 无可用硬件设备 / 未请求加速时保持软件编码并记录回退原因。
     /// </summary>
-    private static (List<string> Args, bool UsedHardwareAccel, string? FallbackReason, List<string>? FallbackArgs, List<string>? IntendedHwArgs)
+    private static (List<string> Args, bool UsedHardwareAccel, string? FallbackReason, List<string>? FallbackArgs, List<string>? IntendedHwArgs, List<string>? PreInputArgs)
         BuildPresetTokens(TranscodePreset preset, HwEncodeContext hw)
     {
         var video = (preset.VideoCodec ?? string.Empty).Trim();
@@ -228,6 +247,7 @@ public static class FfmpegArgsBuilder
         // 分段：软件段（真实软件编码器）与硬件段（意图的硬编）
         var softwareVideo = new List<string>();
         var hardwareVideo = new List<string>();
+        var preInputArgs = new List<string>(); // 应置于 -i 之前的硬件全局/解码选项
         string? fallbackReason = null;
 
         if (video.Length == 0)
@@ -240,8 +260,9 @@ public static class FfmpegArgsBuilder
         }
         else if (hwPlan is { } plan)
         {
-            // 硬编：前置上下文 + -c:v <hardware> + -qp
-            hardwareVideo = BuildHwContextArgs(plan.Backend).ToList();
+            // 硬编：全局/解码选项（-vaapi_device -hwaccel）置于 -i 前；滤镜(-vf)+编码器(-c:v -qp)置于输入后
+            preInputArgs.AddRange(BuildHwGlobalArgs(plan.Backend));
+            hardwareVideo.AddRange(BuildHwFilterArgs(plan.Backend));
             hardwareVideo.AddRange(["-c:v", plan.Codec]);
             if (preset.VideoQuality is >= 0 and <= 51)
             {
@@ -288,7 +309,8 @@ public static class FfmpegArgsBuilder
             // 记录意图的硬件命令（供展示"回退前硬件命令"）
             if (isHwCodec)
             {
-                hardwareVideo = BuildHwContextArgs(hardwareBackend!).ToList();
+                preInputArgs.AddRange(BuildHwGlobalArgs(hardwareBackend!));
+                hardwareVideo.AddRange(BuildHwFilterArgs(hardwareBackend!));
                 hardwareVideo.AddRange(["-c:v", video]);
                 if (preset.VideoQuality is >= 0 and <= 51)
                 {
@@ -335,7 +357,8 @@ public static class FfmpegArgsBuilder
         // 硬件启动失败时的软件兜底段（软件路径保留全部 ExtraArgs）
         var fallbackArgs = hwPrimary && softwareVideo.Count > 0 ? softwareVideo.Concat(swTail).ToList() : null;
         var intendedHwArgs = hardwareVideo.Count > 0 ? hardwareVideo.Concat(hwTail).ToList() : null;
-        return (args, hwPrimary, fallbackReason, fallbackArgs, intendedHwArgs);
+        var preInput = preInputArgs.Count > 0 ? preInputArgs : null;
+        return (args, hwPrimary, fallbackReason, fallbackArgs, intendedHwArgs, preInput);
     }
 
     /// <summary>软件编码专属参数项（硬件编码路径需剥离）。键为参数名（不含前导 '-', 小写）。</summary>
@@ -403,12 +426,21 @@ public static class FfmpegArgsBuilder
     }
 
     /// <summary>按硬件后端附加解码/设备/像素格式上下文参数（保证硬编不是"名字在但跑不了"）。</summary>
-    private static IEnumerable<string> BuildHwContextArgs(string backend) => backend.ToLowerInvariant() switch
+    /// <summary>应置于 -i（输入）之前的硬件全局/解码选项（如 -vaapi_device -hwaccel）。非硬件后端返回空。</summary>
+    private static IEnumerable<string> BuildHwGlobalArgs(string backend) => backend.ToLowerInvariant() switch
     {
-        "vaapi" => ["-vaapi_device", "/dev/dri/renderD128", "-hwaccel", "vaapi", "-vf", "format=nv12,hwupload"],
+        "vaapi" => ["-vaapi_device", "/dev/dri/renderD128", "-hwaccel", "vaapi"],
         "nvenc" => ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"],
-        "qsv" => ["-hwaccel", "qsv", "-vf", "format=nv12"],
+        "qsv" => ["-hwaccel", "qsv"],
         "v4l2m2m" => ["-hwaccel", "v4l2m2m"],
+        _ => [],
+    };
+
+    /// <summary>应置于 -i（输入）之后、编码器之前的硬件滤镜/像素格式段（如 -vf format=nv12,hwupload）。非硬件后端返回空。</summary>
+    private static IEnumerable<string> BuildHwFilterArgs(string backend) => backend.ToLowerInvariant() switch
+    {
+        "vaapi" => ["-vf", "format=nv12,hwupload"],
+        "qsv" => ["-vf", "format=nv12"],
         _ => [],
     };
 
