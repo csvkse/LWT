@@ -18,9 +18,10 @@ public static class FfmpegArgsBuilder
     /// 硬件加速上下文：UseHardwareAccel=用户是否请求；AvailableHwEncoders=当前环境探测到的可用硬件编码器；
     /// PreferredBackend=用户指定的后端（auto/nvenc/qsv/vaapi/v4l2m2m，空=auto 自动排优）；
     /// ReadyHwBackends=设备就绪且编码器存在的后端集合（无硬门槛，仅用于排序优先级）。
+    /// DevicePresent=测试注入的设备存在性覆盖；null=按真实文件系统探测（生产默认）。
     /// </summary>
     public sealed record HwEncodeContext(bool UseHardwareAccel, IReadOnlyList<string> AvailableHwEncoders,
-        string? PreferredBackend = null, IReadOnlyList<string>? ReadyHwBackends = null);
+        string? PreferredBackend = null, IReadOnlyList<string>? ReadyHwBackends = null, bool? DevicePresent = null);
 
     /// <summary>构造结果：args=首选执行的命令行参数（不含 ffmpeg 可执行文件名），UsedHardwareAccel=Args 是否为硬件命令。</summary>
     /// <param name="FallbackReason">回退原因：请求硬件加速但实际用软件编码时的说明文本；未回退为 null。</param>
@@ -166,9 +167,20 @@ public static class FfmpegArgsBuilder
             var backend = DetectHwBackendFromArgs(tokens);
             if (backend is not null)
             {
-                head.AddRange(BuildHwGlobalArgs(backend));
-                tokens = FilterHwCompatibleArgs(tokens);
-                usedHardware = true; // 自定义参数指定了硬件编码器 → 标记实际用了硬件
+                if (HwDeviceExists(hw, backend))
+                {
+                    // 设备真实存在：注入硬件全局/解码选项，剥离软件专属项，标记实际用了硬件。
+                    head.AddRange(BuildHwGlobalArgs(backend));
+                    tokens = FilterHwCompatibleArgs(tokens);
+                    usedHardware = true;
+                }
+                else
+                {
+                    // 设备不存在（如未透传 /dev/dri）：回退软件编码，避免"必败硬编"并误导标记"硬件"。
+                    // 与预设路径行为一致——设备不可用时不硬编，转等价软件编码并记录回退原因。
+                    tokens = ConvertToSoftwareArgs(tokens, backend, out var reason);
+                    fallbackReason = reason;
+                }
             }
             head.Add("-i");
             head.Add(input);
@@ -278,8 +290,8 @@ public static class FfmpegArgsBuilder
     /// 手动指定后端（preferred）时优先该后端，且该后端须设备就绪；auto 时按 OrderBackends 顺序选首个设备就绪者。
     /// 返回 (硬编编码器 + 后端)；无可用返回 null。
     /// </summary>
-    private static (string Codec, string Backend)? ResolveSoftwareHw(string softwareCodec,
-        IReadOnlyList<string> available, string? preferred, IReadOnlyList<string>? ready)
+    private static (string Codec, string Backend)? ResolveSoftwareHw(HwEncodeContext hw,
+        string softwareCodec, IReadOnlyList<string> available, string? preferred, IReadOnlyList<string>? ready)
     {
         if (!SoftwareFamily.TryGetValue(softwareCodec, out var family))
         {
@@ -288,7 +300,7 @@ public static class FfmpegArgsBuilder
         foreach (var backend in OrderBackends(preferred, ready))
         {
             var candidate = $"{family}_{backend}";
-            if (available.Contains(candidate, StringComparer.OrdinalIgnoreCase) && HwDeviceExists(backend))
+            if (available.Contains(candidate, StringComparer.OrdinalIgnoreCase) && HwDeviceExists(hw, backend))
             {
                 return (candidate, backend);
             }
@@ -296,9 +308,14 @@ public static class FfmpegArgsBuilder
         return null;
     }
 
-    /// <summary>判断硬件编码器对应的后端设备是否真实存在（避免映射到"编译支持但无设备"的编码器导致启动失败）。</summary>
-    private static bool HwDeviceExists(string? backend)
+    /// <summary>判断硬件编码器对应的后端设备是否真实存在（避免映射到"编译支持但无设备"的编码器导致启动失败）。
+    /// DevicePresent=null 时按真实文件系统探测（生产）；测试可显式注入 true/false 以确定性验证两条分支。</summary>
+    private static bool HwDeviceExists(HwEncodeContext hw, string? backend)
     {
+        if (hw.DevicePresent is { } present)
+        {
+            return present;
+        }
         var path = backend?.ToLowerInvariant();
         try
         {
@@ -353,7 +370,7 @@ public static class FfmpegArgsBuilder
                     || preferred.Equals(hardwareBackend, StringComparison.OrdinalIgnoreCase);
                 if (backendMatch
                     && hw.AvailableHwEncoders.Contains(video, StringComparer.OrdinalIgnoreCase)
-                    && HwDeviceExists(hardwareBackend))
+                    && HwDeviceExists(hw, hardwareBackend))
                 {
                     hwPlan = (video, hardwareBackend!);
                 }
@@ -361,7 +378,7 @@ public static class FfmpegArgsBuilder
             else
             {
                 // 软件预设 → 自动映射到同家族可用硬件编码器（支持手动指定后端 + 硬件就绪优先级）
-                hwPlan = ResolveSoftwareHw(video, hw.AvailableHwEncoders, preferred, hw.ReadyHwBackends);
+                hwPlan = ResolveSoftwareHw(hw, video, hw.AvailableHwEncoders, preferred, hw.ReadyHwBackends);
             }
         }
 
@@ -526,6 +543,107 @@ public static class FfmpegArgsBuilder
             }
             result.Add(token);
         }
+        return result;
+    }
+
+    /// <summary>
+    /// 自定义参数指定硬件编码器但设备不存在时的软件回退转换：
+    /// 把 -c:v xxx_vaapi 换成等价软件编码器（h264_vaapi→libx264）、-qp N 换成 -crf N，
+    /// 剥离硬编专属项（-vf format=nv12,hwupload、-hwaccel、-vaapi_device），保留其余参数。
+    /// 目的是让"设备没透传"的任务能跑软件编码，而非必败硬编。返回转换后的 tokens 并给出回退原因。
+    /// </summary>
+    private static List<string> ConvertToSoftwareArgs(IReadOnlyList<string> tokens, string backend, out string reason)
+    {
+        var result = new List<string>();
+        string? softwareCodec = null;
+        string? hwCodec = null;
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            var token = tokens[i];
+            if (token.Length == 0)
+            {
+                continue;
+            }
+            var name = token.TrimStart('-').ToLowerInvariant();
+            // -c:v xxx_vaapi → -c:v <软件编码器>
+            if (name.Equals("c:v", StringComparison.OrdinalIgnoreCase) || name.Equals("vcodec", StringComparison.OrdinalIgnoreCase))
+            {
+                var value = i + 1 < tokens.Count ? tokens[i + 1] : null;
+                var hwBackend = value is null ? null : DetectHardwareBackend(value);
+                if (value is not null && hwBackend is not null)
+                {
+                    // 截掉后端后缀（h264_vaapi → h264）再查等价软件编码器
+                    var codecName = value[..(value.Length - hwBackend.Length - 1)];
+                    var sw = HwToSoftware.TryGetValue(codecName, out var s) ? s : null;
+                    hwCodec = value;
+                    if (sw is not null)
+                    {
+                        softwareCodec = sw;
+                        result.Add("-c:v");
+                        result.Add(sw);
+                    }
+                    else
+                    {
+                        // 无等价软件编码器：保留原值（交给 ffmpeg 自行判定，避免丢失）
+                        result.Add(token);
+                        result.Add(value!);
+                    }
+                    i++;
+                    continue;
+                }
+                result.Add(token);
+                continue;
+            }
+            // -qp N → -crf N（libx264/libx265 用 crf 控质量）
+            if (name.Equals("qp", StringComparison.OrdinalIgnoreCase))
+            {
+                var value = i + 1 < tokens.Count ? tokens[i + 1] : null;
+                if (value is not null && !value.StartsWith('-'))
+                {
+                    result.Add("-crf");
+                    result.Add(value);
+                    i++;
+                    continue;
+                }
+                result.Add(token);
+                continue;
+            }
+            // 剥离硬件全局/解码选项（软件路径不需要）：-hwaccel <backend> / -vaapi_device <dev> / -hwaccel_output_format <fmt>
+            if (name.Equals("hwaccel", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("vaapi_device", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("hwaccel_output_format", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("vaapi_output_format", StringComparison.OrdinalIgnoreCase))
+            {
+                // 若该选项带值（下一 token 不以 '-' 开头），跳过值 token
+                if (i + 1 < tokens.Count && !tokens[i + 1].StartsWith('-'))
+                {
+                    i++;
+                }
+                continue;
+            }
+            // 剥离硬编滤镜项：-vf 含 hwupload / format=nv12 等
+            if (name.Equals("vf", StringComparison.OrdinalIgnoreCase) || name.Equals("filter:v", StringComparison.OrdinalIgnoreCase))
+            {
+                var value = i + 1 < tokens.Count ? tokens[i + 1] : null;
+                if (value is not null && !value.StartsWith('-'))
+                {
+                    if (value.Contains("hwupload", StringComparison.OrdinalIgnoreCase)
+                        || value.Contains("vaapi", StringComparison.OrdinalIgnoreCase))
+                    {
+                        i++; // 硬编滤镜，剥离
+                        continue;
+                    }
+                    result.Add(token);
+                    result.Add(value);
+                    i++;
+                    continue;
+                }
+            }
+            result.Add(token);
+        }
+        reason = hwCodec is not null && softwareCodec is not null
+            ? $"自定义参数指定硬件编码器 {hwCodec}，但设备不可用（{backend} 无对应设备节点），已回退软件编码 {softwareCodec}"
+            : $"自定义参数指定硬件编码器，但设备不可用（{backend} 无对应设备节点），已回退软件编码";
         return result;
     }
 

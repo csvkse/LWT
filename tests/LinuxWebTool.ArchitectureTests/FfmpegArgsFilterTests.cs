@@ -119,6 +119,27 @@ public class FfmpegArgsFilterTests
     }
 
     [Fact]
+    public void Custom_args_fallback_to_software_when_device_missing()
+    {
+        // 自定义参数指定硬件编码器，但 /dev/dri 设备不存在（注入 DevicePresent=false 模拟无 GPU 透传）：
+        // BuildWithHw 自定义分支应回退软件编码，不再注入 -vaapi_device、不再标"硬件"，并给回退原因。
+        var result = FfmpegArgsBuilder.BuildWithHw(
+            "/in.mp4", "/out.mp4", null,
+            "-c:v h264_vaapi -qp 23 -c:a aac -b:a 128k -vf format=nv12,hwupload",
+            new FfmpegArgsBuilder.HwEncodeContext(true, ["h264_vaapi", "h264_qsv", "hevc_vaapi"], "vaapi", [], DevicePresent: false));
+
+        var cmd = string.Join(' ', result.Args);
+        Assert.False(result.UsedHardwareAccel);                       // 不误标硬件
+        Assert.DoesNotContain("-vaapi_device", cmd);                  // 不注入设备参数
+        Assert.DoesNotContain("-hwaccel", cmd);                       // 不注入硬件解码
+        Assert.Contains("-c:v libx264", cmd);                         // h264_vaapi → libx264
+        Assert.Contains("-crf 23", cmd);                              // -qp 23 → -crf 23
+        Assert.DoesNotContain("format=nv12,hwupload", cmd);           // 剥离硬编滤镜
+        Assert.False(string.IsNullOrWhiteSpace(result.FallbackReason));
+        Assert.Contains("已回退软件编码", result.FallbackReason);
+    }
+
+    [Fact]
     public void Build_args_from_preset_returns_middle_section()
     {
         // 非完整模式：预设展开为中间段参数（不含 -i/输出/-progress）
@@ -159,10 +180,11 @@ public class FfmpegArgsFilterTests
     {
         // 自定义(customArgs)含硬件编码器 h264_vaapi 时：BuildWithHw 应自动注入 -vaapi_device/-hwaccel（置于 -i 前），
         // 并剥离软件专属项 -preset；保留通用项 -c:a/-b:a/-movflags。用于修复"预设展开中间段缺设备参数"。
+        // 注入 DevicePresent=true 模拟设备存在（设备不存在时应走回退，见另一测试）。
         var result = FfmpegArgsBuilder.BuildWithHw(
             "/in.mp4", "/out.mp4", null,
             "-vf format=nv12,hwupload -c:v h264_vaapi -qp 23 -c:a aac -b:a 128k -movflags +faststart -preset medium",
-            new FfmpegArgsBuilder.HwEncodeContext(false, []));
+            new FfmpegArgsBuilder.HwEncodeContext(false, [], DevicePresent: true));
 
         var cmd = string.Join(' ', result.Args);
         Assert.Contains("-vaapi_device /dev/dri/renderD128", cmd); // 自动补全局段
