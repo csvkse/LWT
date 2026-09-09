@@ -206,6 +206,14 @@ public sealed class TranscodeQueueService(
             return;
         }
 
+        // 完整命令模式：customArgs 即整条 ffmpeg 命令（含 -i 与输出路径），
+        // 系统不注入 -progress/输出规划/硬件上下文，也不做替换/并存/删除源。
+        if (job.IsFullCommand)
+        {
+            await RunRawCommandAsync(detection, job, jobStopping);
+            return;
+        }
+
         // 源文件与预设校验
         if (!File.Exists(job.SourcePath))
         {
@@ -346,6 +354,72 @@ public sealed class TranscodeQueueService(
         await jobStore.UpdateAsync(job);
         OutputCompleted?.Invoke(finalPath, outputSize);
         logger.LogInformation("转码成功：{Source} → {Output}（{DurationMs}ms）", job.SourcePath, finalPath, job.DurationMs);
+    }
+
+    /// <summary>
+    /// 完整命令模式执行：直接运行 customArgs 整条 ffmpeg 命令。
+    /// 不注入 -progress（进度不可用）、不做输出路径规划/替换/删除源；仅记录命令与退出码/日志。
+    /// </summary>
+    private async Task RunRawCommandAsync(FfmpegDetection detection, TranscodeJob job, CancellationToken jobStopping)
+    {
+        if (string.IsNullOrWhiteSpace(job.CustomArgs))
+        {
+            await SetTerminalAsync(job, TranscodeJobStatus.Failed, "完整命令模式需填写 ffmpeg 命令", null);
+            return;
+        }
+
+        if (!File.Exists(job.SourcePath))
+        {
+            await SetTerminalAsync(job, TranscodeJobStatus.Failed, "源文件不存在（可能已被删除或替换）", null);
+            return;
+        }
+
+        var logPath = Path.Combine(LogDirectory, $"{job.Id:N}.log");
+        Directory.CreateDirectory(LogDirectory);
+
+        job.Status = (int)TranscodeJobStatus.Running;
+        job.StartTime = DateTime.Now;
+        job.LogFile = logPath;
+        job.Progress = 0;
+        job.SpeedText = null;
+        job.ErrorOutput = null;
+        job.UsedHardwareAccel = false;
+        try
+        {
+            job.SourceSizeBytes = new FileInfo(job.SourcePath).Length;
+        }
+        catch
+        {
+            // 取大小失败不阻断
+        }
+        await jobStore.UpdateAsync(job);
+
+        var buildResult = FfmpegArgsBuilder.BuildRaw(job.CustomArgs);
+        var args = buildResult.Args;
+        job.CommandLine = string.Join(' ', (new[] { detection.FfmpegPath }).Concat(args));
+        job.FallbackReason = null;
+        job.FallbackFromCommand = null;
+        await jobStore.UpdateAsync(job);
+        logger.LogInformation("完整命令转码开始：{Command}", job.CommandLine);
+
+        var tailBuffer = new StringBuilder();
+        var (exitCode, tail) = await RunFfmpegAttemptAsync(detection.FfmpegPath, args.ToArray(), job, null, logPath, tailBuffer, jobStopping);
+
+        if (exitCode != 0)
+        {
+            await SetTerminalAsync(job, TranscodeJobStatus.Failed, $"ffmpeg 退出码 {exitCode}：{tail}", tail);
+            logger.LogWarning("完整命令转码失败（exit {Code}）：{Source}", exitCode, job.SourcePath);
+            return;
+        }
+
+        // 完整命令模式：不更新进度百分比，仅记录成功状态。输出大小不强制（用户自写路径）
+        job.Status = (int)TranscodeJobStatus.Success;
+        job.Progress = 100;
+        job.SpeedText = null;
+        job.DurationMs = (long)(DateTime.Now - (job.StartTime ?? DateTime.Now)).TotalMilliseconds;
+        job.EndTime = DateTime.Now;
+        await jobStore.UpdateAsync(job);
+        logger.LogInformation("完整命令转码成功：{Source}", job.SourcePath);
     }
 
     /// <summary>运行一次 ffmpeg（单条命令），消费进度与日志，返回 (exitCode, 日志尾部)。</summary>

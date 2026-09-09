@@ -57,6 +57,7 @@ public class TranscodeController(
             j.CommandLine,
             j.FallbackReason,
             j.FallbackFromCommand,
+            j.IsFullCommand,
         });
         return Ok(new { items = mapped, total });
     }
@@ -89,7 +90,7 @@ public class TranscodeController(
             var preset = request.PresetId is { } presetId ? await presetStore.GetByIdAsync(presetId) : null;
             var job = await CreateJobAsync(source, preset, preset?.Name, request.CustomArgs,
                 request.OutputContainer, request.OutputMode, TranscodeTrigger.Manual, request.OutputDir, watchRuleId: null,
-                request.UseHardwareAccel, request.HardwareBackend);
+                request.UseHardwareAccel, request.HardwareBackend, request.IsFullCommand);
             await operationLogger.LogAsync("提交转码", "转码任务", Path.GetFileName(source),
                 $"{source}（预设: {request.PresetId?.ToString() ?? "自定义参数"}）", clientIp: HttpContext.GetClientIp());
             return Ok(new { message = "已加入转码队列", count = 1, jobId = job.Id });
@@ -123,7 +124,7 @@ public class TranscodeController(
                 }
                 var job = await CreateJobAsync(path, preset, preset?.Name, request.CustomArgs,
                     request.OutputContainer, request.OutputMode, TranscodeTrigger.Manual, request.OutputDir, watchRuleId: null,
-                    request.UseHardwareAccel, request.HardwareBackend);
+                    request.UseHardwareAccel, request.HardwareBackend, request.IsFullCommand);
                 count++;
             }
             await operationLogger.LogAsync("提交文件夹转码", "转码任务", source,
@@ -197,7 +198,7 @@ public class TranscodeController(
     private async Task<TranscodeJob> CreateJobAsync(string source, TranscodePreset? preset, string? presetName,
         string? customArgs, string? outputContainer, TranscodeOutputMode outputMode,
         TranscodeTrigger trigger, string? outputDir, Guid? watchRuleId, bool useHardwareAccel = true,
-        string? hardwareBackend = "auto")
+        string? hardwareBackend = "auto", bool isFullCommand = false)
     {
         var job = new TranscodeJob
         {
@@ -205,6 +206,7 @@ public class TranscodeController(
             PresetId = preset?.Id,
             PresetName = presetName ?? preset?.Name,
             CustomArgs = string.IsNullOrWhiteSpace(customArgs) ? null : customArgs.Trim(),
+            IsFullCommand = isFullCommand,
             OutputMode = (int)outputMode,
             Trigger = (int)trigger,
             WatchRuleId = watchRuleId,
@@ -242,9 +244,9 @@ public class TranscodeController(
                 request = request with { OutputContainer = preset.Container };
             }
         }
-        else if (string.IsNullOrWhiteSpace(request.OutputContainer))
+        else if (string.IsNullOrWhiteSpace(request.OutputContainer) && !request.IsFullCommand)
         {
-            // 自定义参数必填输出容器
+            // 自定义参数必填输出容器；完整命令模式例外（用户自写输出路径）
             return (false, "自定义参数模式请填写输出扩展名（如 mp4 / mkv / mp3）");
         }
         return (true, string.Empty);

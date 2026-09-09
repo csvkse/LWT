@@ -26,6 +26,9 @@ public class TranscodeJob
     [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(2000)")]
     public string? CustomArgs { get; set; }
 
+    /// <summary>是否为完整命令模式：true=CustomArgs 是完整 ffmpeg 命令（含 -i/输出路径），系统不注入 -progress/输出规划/硬件上下文。</summary>
+    public bool IsFullCommand { get; set; }
+
     /// <summary>是否请求使用硬件加速（提交时标记，默认开启）。</summary>
     public bool UseHardwareAccel { get; set; } = true;
 

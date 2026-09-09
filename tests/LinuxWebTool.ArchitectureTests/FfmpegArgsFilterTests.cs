@@ -78,4 +78,20 @@ public class FfmpegArgsFilterTests
         Assert.DoesNotContain("-vf", gCmd);                          // 全局段不含滤镜
         Assert.Contains("-vf format=nv12,hwupload", fCmd);          // 滤镜段含 -vf
     }
+
+    [Fact]
+    public void Raw_command_is_used_as_is()
+    {
+        // 完整命令模式：BuildRaw 直接返回拆分后的命令，不注入 -i/-progress/-nostats/输出
+        var result = FfmpegArgsBuilder.BuildRaw("ffmpeg -i /in.mp4 -c:v libx264 /out.mp4");
+        var cmd = string.Join(' ', result.Args);
+
+        Assert.Equal("-i /in.mp4 -c:v libx264 /out.mp4", cmd);
+        Assert.DoesNotContain("-hide_banner", cmd);
+        Assert.DoesNotContain("-progress", cmd);
+        Assert.DoesNotContain("-nostats", cmd);
+        Assert.False(result.UsedHardwareAccel);
+        // 输入源不被强制注入
+        Assert.DoesNotContain(" -i /in.mp4 ", cmd); // 由用户自写，系统不重复
+    }
 }

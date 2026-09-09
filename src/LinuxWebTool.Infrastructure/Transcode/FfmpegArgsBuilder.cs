@@ -33,6 +33,31 @@ public static class FfmpegArgsBuilder
     public static List<string> Build(string input, string output, TranscodePreset? preset, string? customArgs)
         => BuildWithHw(input, output, preset, customArgs, new HwEncodeContext(false, [])).Args;
 
+    /// <summary>
+    /// 完整命令模式：customArgs 即整条 ffmpeg 命令（含 -i 输入与输出路径）。
+    /// 系统不注入 -hide_banner/-i/-progress/-nostats/输出，也不附加硬件上下文。
+    /// 若命令首位是 ffmpeg/ffmpeg.exe 则剥掉（可执行名由队列用 ffmpegPath 前置），避免重复。
+    /// 用于高级用户完全自控；进度/输出规划/硬件加速不生效。
+    /// </summary>
+    public static BuildResult BuildRaw(string? customArgs)
+    {
+        var tokens = string.IsNullOrWhiteSpace(customArgs)
+            ? new List<string>()
+            : ShellArgumentParser.Split(customArgs);
+        if (tokens.Count > 0)
+        {
+            var first = tokens[0];
+            if (first.Equals("ffmpeg", StringComparison.OrdinalIgnoreCase)
+                || first.Equals("ffmpeg.exe", StringComparison.OrdinalIgnoreCase)
+                || first.EndsWith("/ffmpeg", StringComparison.OrdinalIgnoreCase)
+                || first.EndsWith("\\ffmpeg.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                tokens.RemoveAt(0);
+            }
+        }
+        return new BuildResult(tokens, false);
+    }
+
     public static BuildResult BuildWithHw(string input, string output, TranscodePreset? preset, string? customArgs,
         HwEncodeContext? hwContext)
     {

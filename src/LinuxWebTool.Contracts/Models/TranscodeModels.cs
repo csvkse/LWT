@@ -55,6 +55,9 @@ public sealed record TranscodeSubmitRequest
     /// <summary>自定义 ffmpeg 参数（{input}/{output} 占位符之外的部分，如 -c:v libx264 -crf 20）。</summary>
     public string? CustomArgs { get; init; }
 
+    /// <summary>完整命令模式：true=CustomArgs 为完整 ffmpeg 命令（含 -i 输入与输出路径），系统不注入 -progress/输出规划/硬件上下文。</summary>
+    public bool IsFullCommand { get; init; }
+
     /// <summary>输出容器 / 扩展名；使用自定义参数（无预设）时必填，默认 mp4。</summary>
     public string? OutputContainer { get; init; }
 

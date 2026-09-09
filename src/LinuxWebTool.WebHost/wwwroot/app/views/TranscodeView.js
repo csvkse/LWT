@@ -31,7 +31,7 @@ export default defineComponent({
     const submitForm = reactive({
       sourcePath: '', presetId: '', customArgs: '', outputContainer: 'mp4',
       outputMode: 1, filePatterns: SUGGESTED_PATTERNS, recursive: true, outputDir: '',
-      useHardwareAccel: true, hardwareBackend: 'auto',
+      useHardwareAccel: true, hardwareBackend: 'auto', isFullCommand: false,
     });
     const submitting = ref(false);
 
@@ -236,6 +236,7 @@ export default defineComponent({
             outputDir: submitForm.outputDir || null,
             useHardwareAccel: submitForm.useHardwareAccel,
             hardwareBackend: submitForm.hardwareBackend,
+            isFullCommand: submitForm.isFullCommand,
           },
         });
         if (result.ok) {
@@ -540,11 +541,20 @@ export default defineComponent({
           </label>
         </div>
         <label class="block">
-          <span class="text-xs text-slate-500 mb-1 block">自定义 ffmpeg 参数（使用自定义参数时生效，{input}/{output} 之外的中间段）</span>
-          <input class="input font-mono" v-model="submitForm.customArgs" placeholder="-c:v libx264 -crf 20 -c:a aac -b:a 128k" />
+          <span class="text-xs text-slate-500 mb-1 block" v-if="!submitForm.isFullCommand">自定义 ffmpeg 参数（使用自定义参数时生效，{input}/{output} 之外的中间段）</span>
+          <span class="text-xs text-slate-500 mb-1 block" v-else>完整 ffmpeg 命令（含 -i 输入与输出路径；进度/输出规划/硬件加速均不生效）</span>
+          <input class="input font-mono" v-model="submitForm.customArgs"
+                 :placeholder="submitForm.isFullCommand ? 'ffmpeg -i /in.mp4 -c:v libx264 -crf 20 /out.mp4' : '-c:v libx264 -crf 20 -c:a aac -b:a 128k'" />
         </label>
+        <label class="flex items-center gap-2 text-sm text-slate-400">
+          <input type="checkbox" v-model="submitForm.isFullCommand" class="accent-cyan-400" /> 高级：完整命令模式
+        </label>
+        <div v-if="submitForm.isFullCommand" class="text-[10px] text-amber-300/80 px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 -mt-1">
+          ⚠ 完整命令模式由你自写整条命令（含输入与输出路径）：系统不注入「-progress pipe:1」因此<b>进度百分比不可用</b>；
+          不规划输出（替换/并存失效），也不删除源文件；硬件加速开关与后端选择<b>不生效</b>。系统仅在任务队列记录命令与退出码/错误日志。
+        </div>
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <label v-if="submitForm.customArgs" class="block">
+          <label v-if="submitForm.customArgs && !submitForm.isFullCommand" class="block">
             <span class="text-xs text-slate-500 mb-1 block">输出扩展名 *</span>
             <input class="input font-mono" v-model="submitForm.outputContainer" placeholder="mp4 / mkv / mp3" />
           </label>
