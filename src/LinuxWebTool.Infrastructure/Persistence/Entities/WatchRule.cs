@@ -35,6 +35,9 @@ public class WatchRule
 
     public bool Enabled { get; set; } = true;
 
+    /// <summary>是否使用硬件加速（默认开启；运行时探测不支持则回退软件编码）。</summary>
+    public bool UseHardwareAccel { get; set; } = true;
+
     [SugarColumn(IsNullable = true)]
     public DateTime? LastScanTime { get; set; }
 

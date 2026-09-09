@@ -154,7 +154,8 @@ public sealed class WatchFolderService(
     private static bool RuleEquals(WatchRule a, WatchRule b) =>
         a.Name == b.Name && a.WatchPath == b.WatchPath && a.FilePatterns == b.FilePatterns
         && a.PresetId == b.PresetId && a.OutputMode == b.OutputMode && a.Recursive == b.Recursive
-        && a.Mode == b.Mode && a.PollSeconds == b.PollSeconds && a.Enabled == b.Enabled;
+        && a.Mode == b.Mode && a.PollSeconds == b.PollSeconds && a.Enabled == b.Enabled
+        && a.UseHardwareAccel == b.UseHardwareAccel;
 
     // ---------- 轮询模式 ----------
 
@@ -398,6 +399,7 @@ public sealed class WatchFolderService(
                 OutputMode = rule.OutputMode,
                 Trigger = (int)TranscodeTrigger.Watch,
                 WatchRuleId = rule.Id,
+                UseHardwareAccel = rule.UseHardwareAccel,
                 SourceSizeBytes = size,
                 QueueTime = DateTime.Now,
                 Status = (int)TranscodeJobStatus.Queued,

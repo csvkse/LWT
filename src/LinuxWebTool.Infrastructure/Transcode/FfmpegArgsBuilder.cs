@@ -11,13 +11,30 @@ namespace LinuxWebTool.Infrastructure.Transcode;
 /// </summary>
 public static class FfmpegArgsBuilder
 {
+    // 硬件编码器后端后缀集合：用于从编码器名判断硬件加速类型。
+    private static readonly string[] HwBackends = ["nvenc", "vaapi", "qsv", "v4l2m2m", "videotoolbox", "amf", "mfx"];
+
+    /// <summary>
+    /// 硬件加速上下文：UseHardwareAccel=用户是否请求，AvailableHwEncoders=当前环境探测到的可用硬件编码器。
+    /// </summary>
+    public sealed record HwEncodeContext(bool UseHardwareAccel, IReadOnlyList<string> AvailableHwEncoders);
+
+    /// <summary>构造结果：args=完整命令行参数（不含 ffmpeg 可执行文件名），UsedHardwareAccel=实际是否用了硬件编码器。</summary>
+    public sealed record BuildResult(List<string> Args, bool UsedHardwareAccel);
+
     public static List<string> Build(string input, string output, TranscodePreset? preset, string? customArgs)
+        => BuildWithHw(input, output, preset, customArgs, new HwEncodeContext(false, [])).Args;
+
+    public static BuildResult BuildWithHw(string input, string output, TranscodePreset? preset, string? customArgs,
+        HwEncodeContext? hwContext)
     {
+        var hw = hwContext ?? new HwEncodeContext(false, []);
         var args = new List<string> { "-hide_banner", "-y", "-i", input };
+        var usedHardware = false;
 
         if (!string.IsNullOrWhiteSpace(customArgs))
         {
-            // 自定义模式：引号感知拆分（复用脚本参数解析器），支持 {input}/{output} 占位符复用
+            // 自定义模式：用户完全控制的参数段，系统不干预（不自动附加硬件参数）。
             foreach (var token in ShellArgumentParser.Split(customArgs))
             {
                 args.Add(ResolveToken(token, input, output));
@@ -25,23 +42,42 @@ public static class FfmpegArgsBuilder
         }
         else if (preset is not null)
         {
-            args.AddRange(BuildPresetTokens(preset));
+            var buildResult = BuildPresetTokens(preset, hw);
+            args.AddRange(buildResult.Args);
+            usedHardware = buildResult.UsedHardwareAccel;
         }
 
         args.Add("-progress");
         args.Add("pipe:1");
         args.Add("-nostats");
         args.Add(output);
-        return args;
+        return new BuildResult(args, usedHardware);
     }
 
-    private static IEnumerable<string> BuildPresetTokens(TranscodePreset preset)
+    /// <summary>
+    /// 预设参数构造：若请求硬件加速且预设 VideoCodec 是当前环境可用的硬件编码器，则用硬编并附加后端参数；
+    /// 否则回退软件编码（UsedHardwareAccel=false）。
+    /// </summary>
+    private static (List<string> Args, bool UsedHardwareAccel) BuildPresetTokens(TranscodePreset preset, HwEncodeContext hw)
     {
         var tokens = new List<string>();
         var video = (preset.VideoCodec ?? string.Empty).Trim();
         var audio = (preset.AudioCodec ?? string.Empty).Trim();
 
-        if (video.Length == 0)
+        var usedHardware = false;
+        var hardwareBackend = DetectHardwareBackend(video);
+        if (hw.UseHardwareAccel && hardwareBackend is not null && hw.AvailableHwEncoders.Contains(video, StringComparer.OrdinalIgnoreCase))
+        {
+            // 硬编：前置设备/解码上下文参数，编码器用 -c:v <hardware-codec>，CRF 用 -qp 替代
+            tokens.AddRange(BuildHwContextArgs(hardwareBackend));
+            tokens.AddRange(["-c:v", video]);
+            if (preset.VideoQuality is >= 0 and <= 51)
+            {
+                tokens.AddRange(["-qp", preset.VideoQuality.Value.ToString()]);
+            }
+            usedHardware = true;
+        }
+        else if (video.Length == 0)
         {
             tokens.Add("-vn"); // 纯音频输出
         }
@@ -75,7 +111,8 @@ public static class FfmpegArgsBuilder
             }
         }
 
-        if (preset.Container.Trim().Equals("mp4", StringComparison.OrdinalIgnoreCase) && !video.Equals("copy", StringComparison.OrdinalIgnoreCase))
+        var isCopy = video.Equals("copy", StringComparison.OrdinalIgnoreCase);
+        if (preset.Container.Trim().Equals("mp4", StringComparison.OrdinalIgnoreCase) && !isCopy)
         {
             tokens.AddRange(["-movflags", "+faststart"]);
         }
@@ -84,8 +121,35 @@ public static class FfmpegArgsBuilder
         {
             tokens.AddRange(ShellArgumentParser.Split(preset.ExtraArgs));
         }
-        return tokens;
+        return (tokens, usedHardware);
     }
+
+    /// <summary>从编码器名识别硬件后端（如 h264_vaapi → vaapi）；非硬件编码器返回 null。</summary>
+    private static string? DetectHardwareBackend(string videoCodec)
+    {
+        if (string.IsNullOrWhiteSpace(videoCodec))
+        {
+            return null;
+        }
+        foreach (var backend in HwBackends)
+        {
+            if (videoCodec.EndsWith(backend, StringComparison.OrdinalIgnoreCase))
+            {
+                return backend;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>按硬件后端附加解码/设备/像素格式上下文参数（保证硬编不是"名字在但跑不了"）。</summary>
+    private static IEnumerable<string> BuildHwContextArgs(string backend) => backend.ToLowerInvariant() switch
+    {
+        "vaapi" => ["-vaapi_device", "/dev/dri/renderD128", "-hwaccel", "vaapi", "-vf", "format=nv12,hwupload"],
+        "nvenc" => ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"],
+        "qsv" => ["-hwaccel", "qsv", "-vf", "format=nv12"],
+        "v4l2m2m" => ["-hwaccel", "v4l2m2m"],
+        _ => [],
+    };
 
     private static string ResolveToken(string token, string input, string output) => token switch
     {

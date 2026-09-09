@@ -68,6 +68,9 @@ public sealed record TranscodeSubmitRequest
 
     /// <summary>输出目录；为空时输出到源文件所在目录。</summary>
     public string? OutputDir { get; init; }
+
+    /// <summary>是否使用硬件加速（默认开启；运行时探测不支持则回退软件编码，并记录实际结果）。</summary>
+    public bool UseHardwareAccel { get; init; } = true;
 }
 
 /// <summary>保存转码预设请求。</summary>
@@ -145,6 +148,9 @@ public sealed record SaveWatchRuleRequest
     public int PollSeconds { get; init; } = 300;
 
     public bool Enabled { get; init; } = true;
+
+    /// <summary>是否使用硬件加速（默认开启；运行时探测不支持则回退软件编码）。</summary>
+    public bool UseHardwareAccel { get; init; } = true;
 }
 
 /// <summary>ffmpeg / ffprobe 检测结果。</summary>

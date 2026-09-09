@@ -26,6 +26,16 @@ public class TranscodeJob
     [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(2000)")]
     public string? CustomArgs { get; set; }
 
+    /// <summary>是否请求使用硬件加速（提交时标记，默认开启）。</summary>
+    public bool UseHardwareAccel { get; set; } = true;
+
+    /// <summary>实际是否使用了硬件编码器（运行时判定回写；false=回退软件编码）。</summary>
+    public bool UsedHardwareAccel { get; set; }
+
+    /// <summary>实际执行的完整 ffmpeg 命令行（运行时记录，供任务队列回显）。</summary>
+    [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(2000)")]
+    public string? CommandLine { get; set; }
+
     /// <summary>输出目录；为空 = 输出到源文件所在目录。</summary>
     [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(1000)")]
     public string? OutputDir { get; set; }

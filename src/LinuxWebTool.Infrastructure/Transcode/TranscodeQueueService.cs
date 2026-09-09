@@ -256,9 +256,17 @@ public sealed class TranscodeQueueService(
         // 时长探测（失败不阻断，仅无百分比）
         var totalSeconds = await ProbeDurationAsync(job.SourcePath, detection.FfprobePath);
 
-        logger.LogInformation("转码开始：{Source} → {Output}（{Mode}）", job.SourcePath, finalPath, mode == TranscodeOutputMode.Replace ? "替换" : "并存");
+        logger.LogInformation("转码开始：{Source} → {Output}（{Mode}，硬件加速={Hw}）", job.SourcePath, finalPath, mode == TranscodeOutputMode.Replace ? "替换" : "并存", job.UseHardwareAccel);
 
-        var args = FfmpegArgsBuilder.Build(job.SourcePath, tempPath ?? finalPath, preset, job.CustomArgs);
+        var buildResult = FfmpegArgsBuilder.BuildWithHw(job.SourcePath, tempPath ?? finalPath, preset, job.CustomArgs,
+            new FfmpegArgsBuilder.HwEncodeContext(job.UseHardwareAccel, detection.HwEncoders));
+        var args = buildResult.Args;
+        // 记录实际执行的完整命令（供任务队列回显）与实际是否用了硬件编码器
+        job.CommandLine = string.Join(' ', (new[] { detection.FfmpegPath }).Concat(args));
+        job.UsedHardwareAccel = buildResult.UsedHardwareAccel;
+        await jobStore.UpdateAsync(job);
+        logger.LogInformation("转码命令：{Command}（{Mode}）", job.CommandLine, buildResult.UsedHardwareAccel ? "硬件加速" : "软件编码");
+
         var tailBuffer = new StringBuilder();
         long outputSize = 0;
 

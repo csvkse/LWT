@@ -51,6 +51,9 @@ public class TranscodeController(
             j.QueueTime,
             j.StartTime,
             j.EndTime,
+            j.UseHardwareAccel,
+            j.UsedHardwareAccel,
+            j.CommandLine,
         });
         return Ok(new { items = mapped, total });
     }
@@ -82,7 +85,8 @@ public class TranscodeController(
             }
             var preset = request.PresetId is { } presetId ? await presetStore.GetByIdAsync(presetId) : null;
             var job = await CreateJobAsync(source, preset, preset?.Name, request.CustomArgs,
-                request.OutputContainer, request.OutputMode, TranscodeTrigger.Manual, request.OutputDir, watchRuleId: null);
+                request.OutputContainer, request.OutputMode, TranscodeTrigger.Manual, request.OutputDir, watchRuleId: null,
+                request.UseHardwareAccel);
             await operationLogger.LogAsync("提交转码", "转码任务", Path.GetFileName(source),
                 $"{source}（预设: {request.PresetId?.ToString() ?? "自定义参数"}）", clientIp: HttpContext.GetClientIp());
             return Ok(new { message = "已加入转码队列", count = 1, jobId = job.Id });
@@ -115,7 +119,8 @@ public class TranscodeController(
                     break;
                 }
                 var job = await CreateJobAsync(path, preset, preset?.Name, request.CustomArgs,
-                    request.OutputContainer, request.OutputMode, TranscodeTrigger.Manual, request.OutputDir, watchRuleId: null);
+                    request.OutputContainer, request.OutputMode, TranscodeTrigger.Manual, request.OutputDir, watchRuleId: null,
+                    request.UseHardwareAccel);
                 count++;
             }
             await operationLogger.LogAsync("提交文件夹转码", "转码任务", source,
@@ -188,7 +193,7 @@ public class TranscodeController(
 
     private async Task<TranscodeJob> CreateJobAsync(string source, TranscodePreset? preset, string? presetName,
         string? customArgs, string? outputContainer, TranscodeOutputMode outputMode,
-        TranscodeTrigger trigger, string? outputDir, Guid? watchRuleId)
+        TranscodeTrigger trigger, string? outputDir, Guid? watchRuleId, bool useHardwareAccel = true)
     {
         var job = new TranscodeJob
         {
@@ -201,6 +206,7 @@ public class TranscodeController(
             WatchRuleId = watchRuleId,
             OutputDir = string.IsNullOrWhiteSpace(outputDir) ? null : outputDir.Trim(),
             OutputContainer = preset is null ? (string.IsNullOrWhiteSpace(outputContainer) ? null : outputContainer.Trim()) : null,
+            UseHardwareAccel = useHardwareAccel,
             QueueTime = DateTime.Now,
         };
         try
@@ -494,6 +500,7 @@ public class TranscodeController(
             r.Mode,
             r.PollSeconds,
             r.Enabled,
+            r.UseHardwareAccel,
             r.LastScanTime,
         }));
     }
@@ -517,6 +524,7 @@ public class TranscodeController(
             Mode = (int)request.Mode,
             PollSeconds = request.PollSeconds,
             Enabled = request.Enabled,
+            UseHardwareAccel = request.UseHardwareAccel,
         };
         await watchRuleStore.InsertAsync(rule);
         await operationLogger.LogAsync("新增监听规则", "监听转码", rule.Name,
@@ -546,6 +554,7 @@ public class TranscodeController(
         rule.Mode = (int)request.Mode;
         rule.PollSeconds = request.PollSeconds;
         rule.Enabled = request.Enabled;
+        rule.UseHardwareAccel = request.UseHardwareAccel;
         await watchRuleStore.UpdateAsync(rule);
         await operationLogger.LogAsync("修改监听规则", "监听转码", rule.Name, $"{rule.WatchPath}", clientIp: HttpContext.GetClientIp());
         return Ok(new { rule.Id });

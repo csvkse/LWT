@@ -31,6 +31,7 @@ export default defineComponent({
     const submitForm = reactive({
       sourcePath: '', presetId: '', customArgs: '', outputContainer: 'mp4',
       outputMode: 1, filePatterns: SUGGESTED_PATTERNS, recursive: true, outputDir: '',
+      useHardwareAccel: true,
     });
     const submitting = ref(false);
 
@@ -40,6 +41,13 @@ export default defineComponent({
     const jobQuery = reactive({ page: 1, pageSize: 20, status: '' });
     const jobLoading = ref(false);
     const actJobId = ref(null);
+    const commandView = reactive({ show: false, command: '', label: '' });
+
+    function showCommand(job) {
+      commandView.command = job.commandLine || '';
+      commandView.label = `${job.sourcePath} → ${job.outputPath || ''}`;
+      commandView.show = true;
+    }
 
     // ---- 预设编辑 ----
     const showPresetEditor = ref(false);
@@ -60,6 +68,7 @@ export default defineComponent({
     const watchForm = reactive({
       name: '', watchPath: '', filePatterns: SUGGESTED_PATTERNS, presetId: '',
       outputMode: 1, recursive: true, mode: 0, pollSeconds: 300, enabled: true,
+      useHardwareAccel: true,
     });
 
     const loading = ref(false);
@@ -223,6 +232,7 @@ export default defineComponent({
             filePatterns: submitForm.filePatterns || null,
             recursive: submitForm.recursive,
             outputDir: submitForm.outputDir || null,
+            useHardwareAccel: submitForm.useHardwareAccel,
           },
         });
         if (result.ok) {
@@ -379,6 +389,7 @@ export default defineComponent({
           mode: Number(watchForm.mode),
           pollSeconds: Number(watchForm.pollSeconds),
           enabled: watchForm.enabled,
+          useHardwareAccel: watchForm.useHardwareAccel,
         };
         const result = editingWatchId.value
           ? await http(API.transcode.watchRuleItem(editingWatchId.value), { method: 'PUT', body: payload })
@@ -451,6 +462,7 @@ export default defineComponent({
       picker, openPicker, onPickerSelect, onPickerClose,
       submitForm, submitting, submit, resetSubmit,
       jobs, jobTotal, jobQuery, jobLoading, actJobId, cancelJob, retryJob, clearFinished, goPage, totalPages,
+      commandView, showCommand,
       showPresetEditor, editingPresetId, presetSaving, presetForm, openPresetCreate, openPresetEdit, savePreset, removePreset,
       presetCodecOptions, presetAudioOptions,
       exportPresets, triggerImport, onImportFile, importInput,
@@ -542,6 +554,16 @@ export default defineComponent({
           </label>
         </div>
         <label class="flex items-center gap-2 text-sm text-slate-400">
+          <input type="checkbox" v-model="submitForm.useHardwareAccel" class="accent-cyan-400" /> ⚡ 使用硬件加速
+          <span class="text-[10px] text-slate-600 truncate" :title="ffmpeg.hwEncoders && ffmpeg.hwEncoders.length ? '当前环境支持：' + ffmpeg.hwEncoders.join(' · ') : '当前环境未检测到硬件编码器，将使用软件编码'">
+            （{{
+              ffmpeg.hwEncoders && ffmpeg.hwEncoders.length
+                ? '检测到 ' + ffmpeg.hwEncoders.length + ' 个硬件编码器'
+                : '当前环境未检测到，将自动回退软件编码'
+            }}）
+          </span>
+        </label>
+        <label class="flex items-center gap-2 text-sm text-slate-400">
           <input type="checkbox" v-model="submitForm.recursive" class="accent-cyan-400" /> 包含子文件夹（仅文件夹模式）
         </label>
         <div class="flex justify-end gap-2 mt-1">
@@ -582,7 +604,13 @@ export default defineComponent({
                   <div v-if="job.sourceSizeBytes" class="text-[10px] text-slate-600">{{ formatBytes(job.sourceSizeBytes) }}</div>
                 </td>
                 <td class="max-w-[10rem] truncate font-mono text-xs text-slate-400" :title="job.outputPath">{{ job.outputPath || '—' }}</td>
-                <td class="text-xs text-slate-400">{{ job.presetName || (job.customArgs ? '自定义' : '—') }}</td>
+                <td class="text-xs text-slate-400">
+                  {{ job.presetName || (job.customArgs ? '自定义' : '—') }}
+                  <span class="ml-1 badge align-middle" :class="job.usedHardwareAccel ? 'border-cyan-500/50 text-cyan-300' : 'border-slate-500/40 text-slate-400'"
+                        :title="job.usedHardwareAccel ? '本次实际使用硬件编码器' : (job.useHardwareAccel ? '请求了加速但回退为软件编码' : '未启用硬件加速')">
+                    {{ job.usedHardwareAccel ? '⚡硬件' : '软件' }}
+                  </span>
+                </td>
                 <td class="min-w-[6rem]">
                   <div class="flex items-center gap-2">
                     <div class="h-1.5 flex-1 rounded bg-slate-800 overflow-hidden">
@@ -596,6 +624,7 @@ export default defineComponent({
                 <td class="text-xs text-slate-500 whitespace-nowrap">{{ transcodeTriggerLabel(job.trigger) }}</td>
                 <td class="text-[10px] text-slate-500 whitespace-nowrap">{{ formatTime(job.startTime || job.queueTime) }}</td>
                 <td class="text-right whitespace-nowrap">
+                  <button v-if="job.commandLine" class="btn btn-xs" title="查看实际执行的 ffmpeg 命令" @click="showCommand(job)">命令</button>
                   <template v-if="job.status === 0 || job.status === 1">
                     <button class="btn btn-xs btn-danger" :disabled="actJobId === job.id" @click="cancelJob(job)">取消</button>
                   </template>
@@ -792,6 +821,10 @@ export default defineComponent({
             <label class="flex items-center gap-2 text-sm text-slate-400">
               <input type="checkbox" v-model="watchForm.enabled" class="accent-cyan-400" /> 创建后启用
             </label>
+            <label class="flex items-center gap-2 text-sm text-slate-400">
+              <input type="checkbox" v-model="watchForm.useHardwareAccel" class="accent-cyan-400" /> ⚡ 使用硬件加速
+              <span class="text-[10px] text-slate-600">（{{ ffmpeg.hwEncoders && ffmpeg.hwEncoders.length ? '检测到 ' + ffmpeg.hwEncoders.length + ' 个硬件编码器' : '未检测到，将回退软件编码' }}）</span>
+            </label>
           </div>
           <div class="flex justify-end gap-2 mt-5">
             <button class="btn" @click="showWatchEditor = false">取消</button>
@@ -802,6 +835,22 @@ export default defineComponent({
 
       <FilePicker :show="picker.show" :mode="picker.mode" :start-path="picker.startPath"
                   @select="onPickerSelect" @close="onPickerClose" />
+
+      <!-- 实际转码命令查看弹窗 -->
+      <div v-if="commandView.show" class="fixed inset-0 z-[85] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+           @click.self="commandView.show = false">
+        <div class="panel w-full max-w-3xl p-5 max-h-[88vh] flex flex-col" style="background: rgba(13, 21, 38, 0.97)">
+          <div class="flex items-center gap-2 mb-3">
+            <h3 class="font-display text-base text-neon-soft">实际转码命令</h3>
+            <span class="text-xs text-slate-500 truncate flex-1" :title="commandView.label">{{ commandView.label }}</span>
+            <button class="btn btn-xs ml-auto" @click="commandView.show = false">✕</button>
+          </div>
+          <pre class="flex-1 overflow-auto text-xs font-mono leading-relaxed p-3 bg-black/40 rounded-lg border border-cyber-line/40 whitespace-pre-wrap break-all">{{ commandView.command }}</pre>
+          <div class="flex justify-end gap-2 mt-3">
+            <button class="btn" @click="commandView.show = false">关闭</button>
+          </div>
+        </div>
+      </div>
     </div>
   `,
 });
