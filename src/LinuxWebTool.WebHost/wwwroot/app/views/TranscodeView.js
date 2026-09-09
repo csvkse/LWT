@@ -560,7 +560,7 @@ export default defineComponent({
           <span class="text-[10px] text-slate-600 truncate" :title="ffmpeg.hwEncoders && ffmpeg.hwEncoders.length ? '当前环境支持：' + ffmpeg.hwEncoders.join(' · ') : '当前环境未检测到硬件编码器，将使用软件编码'">
             （{{
               ffmpeg.hwEncoders && ffmpeg.hwEncoders.length
-                ? '检测到 ' + ffmpeg.hwEncoders.length + ' 个硬件编码器'
+                ? '检测到 ' + ffmpeg.hwEncoders.length + ' 个硬件编码器，软件预设将自动映射'
                 : '当前环境未检测到，将自动回退软件编码'
             }}）
           </span>

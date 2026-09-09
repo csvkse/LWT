@@ -265,57 +265,54 @@ public sealed class TranscodeQueueService(
         job.CommandLine = string.Join(' ', (new[] { detection.FfmpegPath }).Concat(args));
         job.UsedHardwareAccel = buildResult.UsedHardwareAccel;
         job.FallbackReason = buildResult.FallbackReason;
-        // 回退前本应执行的硬件命令（含可执行路径），仅在"预设为硬件编码器但环境不支持"回退时记录
-        job.FallbackFromCommand = buildResult.FallbackArgs is { Count: > 0 }
-            ? string.Join(' ', (new[] { detection.FfmpegPath }).Concat(buildResult.FallbackArgs))
+        // 回退前本应执行的硬件命令（含可执行路径），用于展示"想用但没用到"的硬件方案
+        job.FallbackFromCommand = buildResult.IntendedHwArgs is { Count: > 0 } intended
+            ? string.Join(' ', (new[] { detection.FfmpegPath }).Concat(intended))
             : null;
         await jobStore.UpdateAsync(job);
         logger.LogInformation("转码命令：{Command}（{Mode}）", job.CommandLine, buildResult.UsedHardwareAccel ? "硬件加速" : "软件编码");
 
+        // 执行命令列表：首选（可能硬件）+ 软件兜底。硬件启动失败且存在软件兜底时自动重跑一次。
         var tailBuffer = new StringBuilder();
         long outputSize = 0;
-
-        using (var process = new Process())
+        var attempts = new List<string[]> { args.ToArray() };
+        if (buildResult.UsedHardwareAccel && buildResult.FallbackArgs is { Count: > 0 })
         {
-            process.StartInfo = new ProcessStartInfo
-            {
-                FileName = detection.FfmpegPath,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-            };
-            foreach (var arg in args)
-            {
-                process.StartInfo.ArgumentList.Add(arg);
-            }
+            attempts.Add(buildResult.FallbackArgs.ToArray());
+        }
 
-            await using var logStream = new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.Read);
-            process.Start();
-
-            var stdoutTask = ConsumeProgressAsync(process, job, totalSeconds, jobStopping);
-            var stderrTask = ConsumeLogAsync(process, logStream, tailBuffer);
-
-            try
+        var finalExitCode = 0;
+        var lastTail = string.Empty;
+        for (var attemptIdx = 0; attemptIdx < attempts.Count; attemptIdx++)
+        {
+            var attemptArgs = attempts[attemptIdx];
+            var isHwAttempt = attemptIdx == 0;
+            var (exitCode, tail) = await RunFfmpegAttemptAsync(detection.FfmpegPath, attemptArgs, job, totalSeconds, logPath, tailBuffer, jobStopping);
+            finalExitCode = exitCode;
+            lastTail = tail;
+            if (exitCode == 0)
             {
-                await process.WaitForExitAsync(jobStopping);
+                break;
             }
-            catch (OperationCanceledException)
+            if (isHwAttempt && attemptIdx == 0 && attempts.Count > 1)
             {
-                TryKillTree(process);
-                throw; // 由外层统一标记取消 / 中断并清理
+                // 硬件启动失败 → 自动回退软件编码重跑，并更新回显命令与实际结果
+                job.UsedHardwareAccel = false;
+                job.CommandLine = string.Join(' ', (new[] { detection.FfmpegPath }).Concat(attemptArgs));
+                job.FallbackReason = $"硬件加速编码失败（exit {exitCode}），已自动回退软件编码";
+                job.Progress = 0;
+                job.SpeedText = null;
+                await jobStore.UpdateAsync(job);
+                logger.LogWarning("硬件编码启动失败（exit {Code}），自动回退软件编码重试：{Source}", exitCode, job.SourcePath);
             }
-            await stdoutTask;
-            await stderrTask;
+        }
 
-            if (process.ExitCode != 0)
-            {
-                var tail = Tail(tailBuffer);
-                await SetTerminalAsync(job, TranscodeJobStatus.Failed, $"ffmpeg 退出码 {process.ExitCode}：{tail}", tail);
-                OutputPathPlanner.CleanupTemp(tempPath);
-                logger.LogWarning("转码失败（exit {Code}）：{Source}", process.ExitCode, job.SourcePath);
-                return;
-            }
+        if (finalExitCode != 0)
+        {
+            await SetTerminalAsync(job, TranscodeJobStatus.Failed, $"ffmpeg 退出码 {finalExitCode}：{lastTail}", lastTail);
+            OutputPathPlanner.CleanupTemp(tempPath);
+            logger.LogWarning("转码失败（exit {Code}）：{Source}", finalExitCode, job.SourcePath);
+            return;
         }
 
         // 成功校验 + 替换落地（失败抛异常 → 外层记为失败并清理临时文件）
@@ -348,6 +345,47 @@ public sealed class TranscodeQueueService(
         await jobStore.UpdateAsync(job);
         OutputCompleted?.Invoke(finalPath, outputSize);
         logger.LogInformation("转码成功：{Source} → {Output}（{DurationMs}ms）", job.SourcePath, finalPath, job.DurationMs);
+    }
+
+    /// <summary>运行一次 ffmpeg（单条命令），消费进度与日志，返回 (exitCode, 日志尾部)。</summary>
+    private async Task<(int ExitCode, string Tail)> RunFfmpegAttemptAsync(string ffmpegPath, string[] args, TranscodeJob job,
+        double? totalSeconds, string logPath, StringBuilder tailBuffer, CancellationToken jobStopping)
+    {
+        tailBuffer.Clear();
+        using (var process = new Process())
+        {
+            process.StartInfo = new ProcessStartInfo
+            {
+                FileName = ffmpegPath,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            foreach (var arg in args)
+            {
+                process.StartInfo.ArgumentList.Add(arg);
+            }
+
+            await using var logStream = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.Read);
+            process.Start();
+
+            var stdoutTask = ConsumeProgressAsync(process, job, totalSeconds, jobStopping);
+            var stderrTask = ConsumeLogAsync(process, logStream, tailBuffer);
+
+            try
+            {
+                await process.WaitForExitAsync(jobStopping);
+            }
+            catch (OperationCanceledException)
+            {
+                TryKillTree(process);
+                throw; // 由外层统一标记取消 / 中断并清理
+            }
+            await stdoutTask;
+            await stderrTask;
+            return (process.ExitCode, Tail(tailBuffer));
+        }
     }
 
     // ---------- 进度 / 日志消费 ----------

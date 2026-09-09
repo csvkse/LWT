@@ -19,11 +19,13 @@ public static class FfmpegArgsBuilder
     /// </summary>
     public sealed record HwEncodeContext(bool UseHardwareAccel, IReadOnlyList<string> AvailableHwEncoders);
 
-    /// <summary>构造结果：args=完整命令行参数（不含 ffmpeg 可执行文件名），UsedHardwareAccel=实际是否用了硬件编码器。</summary>
+    /// <summary>构造结果：args=首选执行的命令行参数（不含 ffmpeg 可执行文件名），UsedHardwareAccel=Args 是否为硬件命令。</summary>
     /// <param name="FallbackReason">回退原因：请求硬件加速但实际用软件编码时的说明文本；未回退为 null。</param>
-    /// <param name="FallbackArgs">回退前本应执行的硬件加速参数段（不含 ffmpeg 路径）；无回退前命令为 null。</param>
+    /// <param name="FallbackArgs">首选(硬件)命令失败后，应改用的替代参数段（软件）；无替代为 null。</param>
+    /// <param name="IntendedHwArgs">意图执行的硬件参数段（用于显示"回退前硬件命令"）。</param>
     public sealed record BuildResult(List<string> Args, bool UsedHardwareAccel,
-        string? FallbackReason = null, IReadOnlyList<string>? FallbackArgs = null);
+        string? FallbackReason = null, IReadOnlyList<string>? FallbackArgs = null,
+        IReadOnlyList<string>? IntendedHwArgs = null);
 
     public static List<string> Build(string input, string output, TranscodePreset? preset, string? customArgs)
         => BuildWithHw(input, output, preset, customArgs, new HwEncodeContext(false, [])).Args;
@@ -36,6 +38,7 @@ public static class FfmpegArgsBuilder
         var usedHardware = false;
         string? fallbackReason = null;
         List<string>? fallbackArgs = null;
+        List<string>? intendedHwArgs = null;
 
         if (!string.IsNullOrWhiteSpace(customArgs))
         {
@@ -48,17 +51,18 @@ public static class FfmpegArgsBuilder
         else if (preset is not null)
         {
             var buildResult = BuildPresetTokens(preset, hw);
-            args.AddRange(buildResult.Args);
-            usedHardware = buildResult.UsedHardwareAccel;
-            fallbackReason = buildResult.FallbackReason;
-            fallbackArgs = buildResult.FallbackArgs;
+            args.AddRange(buildResult.Item1);
+            usedHardware = buildResult.Item2;
+            fallbackReason = buildResult.Item3;
+            fallbackArgs = buildResult.Item4;
+            intendedHwArgs = buildResult.Item5;
         }
 
         args.Add("-progress");
         args.Add("pipe:1");
         args.Add("-nostats");
         args.Add(output);
-        return new BuildResult(args, usedHardware, fallbackReason, fallbackArgs);
+        return new BuildResult(args, usedHardware, fallbackReason, fallbackArgs, intendedHwArgs);
     }
 
     /// <summary>硬件编码器 → 对应软件编码器（环境不支持硬编时回退用）。</summary>
@@ -75,58 +79,125 @@ public static class FfmpegArgsBuilder
         ["h263"] = "h263p",
     };
 
+    /// <summary>软件视频编码器 → 视频家族（用于请求加速时查找同家族的可用硬件编码器）。</summary>
+    private static readonly Dictionary<string, string> SoftwareFamily = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["libx264"] = "h264",
+        ["libx265"] = "hevc",
+        ["libvpx"] = "vp8",
+        ["libvpx-vp9"] = "vp9",
+        ["libaom-av1"] = "av1",
+        ["libsvtav1"] = "av1",
+    };
+
+    /// <summary>软件→硬件自动映射的后端优先顺序（在探测到的可用编码器里挑选）。</summary>
+    private static readonly string[] BackendPriority = ["vaapi", "nvenc", "qsv", "v4l2m2m", "mfx", "amf", "videotoolbox"];
+
+    /// <summary>软件预设 + 请求加速时：从可用硬件编码器里找同家族、优先级最高者（返回 硬编编码器 + 后端）。</summary>
+    private static (string Codec, string Backend)? ResolveSoftwareHw(string softwareCodec, IReadOnlyList<string> available)
+    {
+        if (!SoftwareFamily.TryGetValue(softwareCodec, out var family))
+        {
+            return null;
+        }
+        foreach (var backend in BackendPriority)
+        {
+            var candidate = $"{family}_{backend}";
+            if (available.Contains(candidate, StringComparer.OrdinalIgnoreCase) && HwDeviceExists(backend))
+            {
+                return (candidate, backend);
+            }
+        }
+        return null;
+    }
+
+    /// <summary>判断硬件编码器对应的后端设备是否真实存在（避免映射到"编译支持但无设备"的编码器导致启动失败）。</summary>
+    private static bool HwDeviceExists(string? backend)
+    {
+        var path = backend?.ToLowerInvariant();
+        try
+        {
+            return path switch
+            {
+                "vaapi" => File.Exists("/dev/dri/renderD128") || File.Exists("/dev/dri/renderD129"),
+                "qsv" or "mfx" => Directory.Exists("/dev/dri"),
+                "v4l2m2m" => Directory.Exists("/dev") && Directory.EnumerateFiles("/dev", "video*").Any(),
+                "nvenc" => File.Exists("/dev/nvidia0") || File.Exists("/dev/nvidiactl"),
+                "videotoolbox" => OperatingSystem.IsMacOS(),
+                "amf" => false,
+                _ => false,
+            };
+        }
+        catch
+        {
+            // 探测设备目录权限受限时视为不存在（安全降级为软件编码）
+            return false;
+        }
+    }
+
     /// <summary>
-    /// 预设参数构造：若请求硬件加速且预设 VideoCodec 是当前环境可用的硬件编码器，则用硬编并附加后端参数；
-    /// 否则回退软件编码（UsedHardwareAccel=false），并记录回退原因与回退前本应执行的硬件命令段。
+    /// 预设参数构造。产出两套视频参数段：
+    /// Args=首选命令；FallbackArgs=硬件启动失败时的软件兜底；IntendedHwArgs=意图执行的硬件命令（用于展示）。
+    /// 请求硬件加速时：预设为硬件编码器（设备存在）直接硬编；预设为软件编码器则自动映射到同家族可用硬件编码器；
+    /// 无可用硬件设备 / 未请求加速时保持软件编码并记录回退原因。
     /// </summary>
-    private static (List<string> Args, bool UsedHardwareAccel, string? FallbackReason, List<string>? FallbackArgs) BuildPresetTokens(
-        TranscodePreset preset, HwEncodeContext hw)
+    private static (List<string> Args, bool UsedHardwareAccel, string? FallbackReason, List<string>? FallbackArgs, List<string>? IntendedHwArgs)
+        BuildPresetTokens(TranscodePreset preset, HwEncodeContext hw)
     {
         var video = (preset.VideoCodec ?? string.Empty).Trim();
         var audio = (preset.AudioCodec ?? string.Empty).Trim();
 
-        // 视频编码参数段与判定
-        var softwareVideo = new List<string>();
-        List<string>? hardwareVideo = null; // 本应执行的硬件视频段（仅当预设为硬件编码器时）
-        var usedHardware = false;
-        string? fallbackReason = null;
-
         var hardwareBackend = DetectHardwareBackend(video);
         var isHwCodec = hardwareBackend is not null;
-        var hwSupported = isHwCodec && hw.UseHardwareAccel
-            && hw.AvailableHwEncoders.Contains(video, StringComparer.OrdinalIgnoreCase);
+
+        // 软件编码器（硬件预设映射回等价软件；软件预设原样）
+        string? softwareCodec = isHwCodec
+            ? (HwToSoftware.TryGetValue(video[..(video.Length - hardwareBackend!.Length - 1)], out var sw) ? sw : null)
+            : video;
+
+        // 选定的硬件方案（编码器 + 后端）；null = 本次不启用硬编
+        (string Codec, string Backend)? hwPlan = null;
+        if (hw.UseHardwareAccel)
+        {
+            if (isHwCodec)
+            {
+                // 预设即硬件编码器：需在探测列表内 且 设备存在
+                if (hw.AvailableHwEncoders.Contains(video, StringComparer.OrdinalIgnoreCase)
+                    && HwDeviceExists(hardwareBackend))
+                {
+                    hwPlan = (video, hardwareBackend!);
+                }
+            }
+            else
+            {
+                // 软件预设 → 自动映射到同家族可用硬件编码器（含设备校验）
+                hwPlan = ResolveSoftwareHw(video, hw.AvailableHwEncoders);
+            }
+        }
+
+        // 分段：软件段（真实软件编码器）与硬件段（意图的硬编）
+        var softwareVideo = new List<string>();
+        var hardwareVideo = new List<string>();
+        string? fallbackReason = null;
 
         if (video.Length == 0)
         {
-            softwareVideo.Add("-vn");
+            softwareVideo.Add("-vn"); // 纯音频
         }
         else if (video.Equals("copy", StringComparison.OrdinalIgnoreCase))
         {
             softwareVideo.AddRange(["-c:v", "copy"]);
         }
-        else if (hwSupported)
+        else if (hwPlan is { } plan)
         {
-            // 硬编：前置设备/解码上下文参数，编码器用 -c:v <hardware-codec>，CRF 用 -qp 替代
-            var hwCtx = BuildHwContextArgs(hardwareBackend!);
-            softwareVideo.AddRange(hwCtx);
-            softwareVideo.AddRange(["-c:v", video]);
-            if (preset.VideoQuality is >= 0 and <= 51)
-            {
-                softwareVideo.AddRange(["-qp", preset.VideoQuality.Value.ToString()]);
-            }
-            usedHardware = true;
-        }
-        else if (isHwCodec)
-        {
-            // 预设为硬件编码器但环境不支持或未请求加速 → 回退到等价软件编码器
-            var baseCodec = video[..(video.Length - hardwareBackend!.Length - 1)];
-            var softwareCodec = HwToSoftware.TryGetValue(baseCodec, out var sw) ? sw : null;
-            hardwareVideo = BuildHwContextArgs(hardwareBackend!).ToList();
-            hardwareVideo.AddRange(["-c:v", video]);
+            // 硬编：前置上下文 + -c:v <hardware> + -qp
+            hardwareVideo = BuildHwContextArgs(plan.Backend).ToList();
+            hardwareVideo.AddRange(["-c:v", plan.Codec]);
             if (preset.VideoQuality is >= 0 and <= 51)
             {
                 hardwareVideo.AddRange(["-qp", preset.VideoQuality.Value.ToString()]);
             }
+            // 软件兜底段（若硬件启动失败时重跑）
             if (softwareCodec is not null)
             {
                 softwareVideo.AddRange(["-c:v", softwareCodec]);
@@ -134,34 +205,46 @@ public static class FfmpegArgsBuilder
                 {
                     softwareVideo.AddRange(["-crf", preset.VideoQuality.Value.ToString()]);
                 }
-                fallbackReason = $"硬件编码器 {video} 不可用，已回退软件编码 {softwareCodec}";
+            }
+            if (isHwCodec)
+            {
+                fallbackReason = $"硬件编码器 {video} 已启用";
             }
             else
             {
-                // 无对应软件编码器，按原编码器执行但以软件方式（不附加硬件上下文）
-                softwareVideo.AddRange(["-c:v", video]);
-                if (preset.VideoQuality is >= 0 and <= 51)
-                {
-                    softwareVideo.AddRange(["-crf", preset.VideoQuality.Value.ToString()]);
-                }
-                fallbackReason = $"硬件编码器 {video} 不可用，且无对应软件编码器，按原编码器执行";
+                fallbackReason = $"预设 {video} 为软件编码器，已自动映射为硬件编码器 {plan.Codec}";
             }
         }
-        else
+        else if (softwareCodec is not null)
         {
-            // 软件编码器：请求了加速但预设本身是软件编码器 → 记录原因（无硬件命令可回退）
-            softwareVideo.AddRange(["-c:v", video]);
+            // 保持软件编码
+            softwareVideo.AddRange(["-c:v", softwareCodec]);
             if (preset.VideoQuality is >= 0 and <= 51)
             {
                 softwareVideo.AddRange(["-crf", preset.VideoQuality.Value.ToString()]);
             }
-            if (hw.UseHardwareAccel)
+            if (isHwCodec)
             {
-                fallbackReason = $"请求硬件加速，但预设视频编码器 {video} 为软件编码器，未启用硬件加速";
+                // 硬件预设但环境不支持 / 未请求加速 → 已映射软件
+                fallbackReason = $"硬件编码器 {video} 不可用，已回退软件编码 {softwareCodec}";
+            }
+            else if (hw.UseHardwareAccel)
+            {
+                fallbackReason = $"请求硬件加速，但预设视频编码器 {video} 无可用的同家族硬件编码器，保持软件编码";
+            }
+            // 记录意图的硬件命令（供展示"回退前硬件命令"）
+            if (isHwCodec)
+            {
+                hardwareVideo = BuildHwContextArgs(hardwareBackend!).ToList();
+                hardwareVideo.AddRange(["-c:v", video]);
+                if (preset.VideoQuality is >= 0 and <= 51)
+                {
+                    hardwareVideo.AddRange(["-qp", preset.VideoQuality.Value.ToString()]);
+                }
             }
         }
 
-        // 音频 + 容器 + 额外参数（软件与硬件共用，回退前命令同样包含）
+        // 音频 + 容器 + 额外参数（软件与硬件共用）
         var tail = new List<string>();
         if (audio.Length == 0)
         {
@@ -191,9 +274,12 @@ public static class FfmpegArgsBuilder
             tail.AddRange(ShellArgumentParser.Split(preset.ExtraArgs));
         }
 
-        var args = softwareVideo.Concat(tail).ToList();
-        var fallbackArgs = hardwareVideo is not null ? hardwareVideo.Concat(tail).ToList() : null;
-        return (args, usedHardware, fallbackReason, fallbackArgs);
+        var isHwPrimary = hwPlan is not null;
+        var args = (isHwPrimary ? hardwareVideo : softwareVideo).Concat(tail).ToList();
+        // 硬件启动失败时的软件兜底段（仅当首选为硬件时提供）
+        var fallbackArgs = isHwPrimary && softwareVideo.Count > 0 ? softwareVideo.Concat(tail).ToList() : null;
+        var intendedHwArgs = hardwareVideo.Count > 0 ? hardwareVideo.Concat(tail).ToList() : null;
+        return (args, isHwPrimary, fallbackReason, fallbackArgs, intendedHwArgs);
     }
 
     /// <summary>从编码器名识别硬件后端（如 h264_vaapi → vaapi）；非硬件编码器返回 null。</summary>
