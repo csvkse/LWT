@@ -7,7 +7,13 @@
 # -----------------------------------------------------------------------------
 
 # ---------- 阶段 1：运行时基础 ----------
+# VENDOR 按 GPU 厂商选装 VA 驱动（intel/amd/nv/all/cpu）；见下方"按厂商装 VA 驱动"层。
+# 顶层 ARG 仅作为默认值，base 阶段需再次声明才能被 RUN 引用。
+ARG VENDOR=all
+
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS base
+# 重新声明全局 ARG（多阶段中 FROM 之前的 ARG 需在对应阶段重新 ARG 才能被 RUN 使用）
+ARG VENDOR
 WORKDIR /app
 EXPOSE 5270
 
@@ -24,14 +30,31 @@ ENV TZ=Asia/Shanghai \
 # nethogs   —— 每进程网络速率采集（tracemode；仅 --privileged --user root 运行时生效，非特权则探测跳过）
 # ffmpeg    —— 媒体转码（含 ffprobe，一次 一次性转码 / 队列 / 监听自动转码全依赖它）
 # tzdata/icu —— 时区与中文全球化
-# libva / mesa-va-gallium —— VA-API 用户态库与 AMD/NVIDIA 通用 Gallium 驱动（ffmpeg 硬件加速编码运行时依赖；
-#   ffmpeg 已启用 vaapi 编码支持，缺 libva 时 --device=/dev/dri 透传了核显也无法真正编码）
-# intel-media-driver —— Intel 核显(iHD) VA 驱动：Alder Lake-N(N100) 等新核显必需，提供 iHD_drv_video.so；
-#   Alpine 的 mesa-va-gallium 仅含 AMD/NVIDIA 空壳链接，缺 Intel iHD 时 vainfo 报 "Trying iHD_drv_video.so → va_openDriver() -1"
-# libva-utils —— vainfo 诊断工具（验证 VA-API 驱动是否就绪）
-RUN apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc cifs-utils nethogs ffmpeg libva mesa-va-gallium intel-media-driver libva-utils tzdata icu-libs && \
+# libva/libva-utils —— VA-API 用户态库与诊断工具（vainfo）。VA 编码能力由运行时透传驱动接管，
+#   ffmpeg 已内置 h264_vaapi/hevc_vaapi/nvenc 等硬件编码器支持，缺 libva 时 --device=/dev/dri 透传核显也无法真正编码。
+#
+# 镜像瘦身：VA 驱动（intel iHD 39.5M / mesa gallium 42M）不再无条件全打包，按 VENDOR 分层选装，
+#   仅装所用 GPU 厂商的用户态驱动，避免"全能镜像"白白增容（详见 base 阶段底部"按厂商装 VA 驱动"层）。
+RUN apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc cifs-utils nethogs \
+      ffmpeg libva libva-utils tzdata icu-libs && \
     cp /usr/share/zoneinfo/$TZ /etc/localtime && \
     echo $TZ > /etc/timezone
+
+# 按 GPU 厂商装 VA 用户态驱动（编码器已在 ffmpeg 内，这里只装让 -vaapi_device 真正可用的驱动库）：
+#   intel -> iHD（Alder Lake-N / N100 等新核显必需，提供 iHD_drv_video.so）；
+#            Alpine 的 mesa-va-gallium 仅含 AMD/NVIDIA 空壳链接，缺 Intel iHD 时 vainfo 报 "va_openDriver() -1"
+#   amd   -> mesa-va-gallium（radeonsi 解码；Alpine 该包以 VA 解码为主，AMD VA 编码受限，跑不了时应用自动回退软件编码）
+#   nv    -> 不装 VA 驱动：NVIDIA 走 NVENC，由部署侧 nvidia-container-toolkit + --gpus 透传驱动，ffmpeg 已含 nvenc 支持
+#   all   -> 全装（兜底，与原行为一致）
+#   cpu/none -> 纯软件编码，不装 VA 驱动
+RUN echo "==> VENDOR=${VENDOR}" && \
+    case "${VENDOR}" in \
+      intel) apk add --no-cache intel-media-driver ;; \
+      amd)   apk add --no-cache mesa-va-gallium ;; \
+      nv|nvidia) echo "nvenc 由 nvidia-container-toolkit 透传驱动，镜像内置 nvenc 编码器支持，不装 VA 驱动" ;; \
+      all)   apk add --no-cache intel-media-driver mesa-va-gallium ;; \
+      cpu|none|*) echo "纯软件编码，不装 VA 驱动" ;; \
+    esac
 
 # 非 root 运行；data 为运行期数据目录（SQLite/凭据/jwt 密钥/日志全部聚合于此，单卷持久化）。
 # 若需要执行 systemctl/docker 等特权指令，可将下方 USER 改为 root 或部署时覆盖。

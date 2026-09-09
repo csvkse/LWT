@@ -92,6 +92,8 @@ docker run -e Admin__UserName=ops -e Admin__Password=你的密码 ghcr.io/csvkse
 
 **直接使用 CI 发布的镜像**（每次推送 main 自动构建发布）：
 
+> 镜像是按 GPU 厂商分 tag 的：默认 `latest` 装全部 VA 驱动（兜底）；`latest-intel`/`latest-amd`/`latest-nv` 只含对应厂商驱动，体积更小。N100 这类 Intel 核显用 `latest-intel`。
+
 ```bash
 # 更新镜像（已运行过的容器更新方式见下方）
 docker pull ghcr.io/csvkse/lwt:latest
@@ -102,6 +104,11 @@ docker run -d --restart unless-stopped -p 5270:5270 -v linuxwebtool-data:/app/da
 
 # 端口映射 -p 宿主端口:容器端口：容器内固定监听 5270（全链路与桌面端一致），宿主端口可自选（如 -p 80:5270）。
 # 已运行容器更新镜像：docker pull 后执行 docker rm -f linuxwebtool，再重新运行上面的 docker run（data 卷保留数据）。
+
+# 按 GPU 厂商选 tag（体积更小；见下方「镜像 tag 说明」）：
+#   Intel 核显（N100 等）：docker pull ghcr.io/csvkse/lwt:latest-intel
+#   AMD 核显：           docker pull ghcr.io/csvkse/lwt:latest-amd
+#   NVIDIA（需 --gpus）: docker pull ghcr.io/csvkse/lwt:latest-nv
 
 # 容器开机自启的前提是宿主机 Docker 服务本身自启：
 #   Linux:   sudo systemctl enable docker
@@ -161,10 +168,23 @@ docker run -d --restart unless-stopped \
 | **USB 控制** | `-v /dev/bus/usb:/dev/bus/usb` + `--user root` | 挂载整个 USB 总线（热插拔设备动态可见）；特定串口/TTY 设备另加 `--device=/dev/ttyUSB0`；`lsusb` 已内置。**WSL2**：先用 [usbipd-win](https://github.com/dorssel/usbipd-win) 把 Windows USB 设备 attach 到 WSL（`usbipd bind` / `usbipd attach --wsl`），容器再按上面配置 |
 | **宿主机 /usr/local/bin** | `-v /usr/local/bin:/usr/local/bin:ro` | 宿主安装的工具脚本直接在容器内使用（`:ro` 只读更安全）。⚠ 镜像是 alpine(musl)：宿主 Debian/Ubuntu 编译的**动态链接程序无法运行**，脚本与静态编译的二进制不受影响 |
 | **GPU（NVIDIA）** | `--gpus all` | 宿主需已装 NVIDIA 驱动 + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)；**toolkit 装宿主机，非容器**（见下方「宿主机安装 NVIDIA 栈」）；容器内 `nvidia-smi` 可用。WSL2 需 Windows 侧装 NVIDIA 驱动（驱动自带 WSL 支持） |
-| **GPU（Intel/AMD 核显）** | `--device=/dev/dri` | 挂载 DRI 设备（VA-API/Vulkan 硬件加速）；镜像已内置 `libva`/`mesa-va-gallium` 用户态库，ffmpeg 已启用 vaapi 编码，透传后即可用 |
+| **GPU（Intel/AMD 核显）** | `--device=/dev/dri` | 挂载 DRI 设备（VA-API/Vulkan 硬件加速）；`libva` 用户态库已内置，ffmpeg 已启用 vaapi 编码，透传后即可用。**注意**：VA 驱动按 tag 区分——`latest-intel` 只含 Intel iHD、`latest-amd` 只含 AMD gallium；`latest` 全装（更大全能）。请选对应厂商的 tag，否则核显无对应驱动会回退软件编码 |
 | **全部要（省事）** | `--privileged --user root` | 接近宿主完整权限，含 USB/所有设备。方便但权限最大，请仅在信任内网使用 |
 | **查看宿主机磁盘（自动，推荐）** | `--privileged --pid=host --user root` | 采集器经 `nsenter` 进入宿主挂载命名空间执行 `df`，系统状态页**自动显示宿主全部磁盘与挂载点**，新增磁盘自动出现，无需任何手写。需标准 Linux 宿主 Docker（WSL2 的 wslc 不支持 privileged，见下行） |
 | **查看宿主机磁盘（手动）** | 逐盘挂载：`-v /mnt/c:/host-c:ro`（WSL2 的 Windows 盘）等 | 受限运行时（wslc）或不想给特权时的替代：容器文件系统与宿主隔离，`df` 天然只看到容器自身（如 `/dev/loop2` 虚拟盘）；挂进来的盘会出现在磁盘列表（真实容量）。已实测：WSL2 下挂 `/mnt/c` 后容器内 `df` 正确显示 Windows C 盘容量（790GB·70%） |
+
+### 镜像 tag 说明（按 GPU 厂商瘦身）
+
+CI 每次推送 main 会构建并推送 4 个镜像 tag，用 `VENDOR` 构建参数选装对应 VA 用户态驱动（编码器在 ffmpeg 内，这里只装让 `/dev/dri` 真正可用的驱动库）：
+
+| tag | 适用 GPU | 驱动层 | 说明 |
+|---|---|---|---|
+| `latest` | 通用（兜底） | Intel iHD + AMD/NVIDIA gallium | 与原行为一致，体积最大 |
+| `latest-intel` | Intel 核显（N100/Alder Lake-N 等） | 仅 Intel iHD | **推荐**，比 `latest` 省约 42MB |
+| `latest-amd` | AMD 核显 | 仅 mesa-va-gallium | 走 VAAPI；编码受限时应用自动回退软件 |
+| `latest-nv` | NVIDIA | 无（由 nvidia-container-toolkit 透传） | 需 `--gpus all`，复用宿主机 NVIDIA 驱动 |
+
+> 选 tag 原则：**按宿主机显卡厂商选对应 tag**，避免「全能镜像」白白增容；不确定就先用 `latest`（全装，一定能跑）。
 
 **宿主机安装 NVIDIA 栈（`nvidia-container-toolkit` 装在宿主机，不在容器内）**
 

@@ -51,6 +51,19 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      # 按 GPU 厂商分 tag：每档只含所需 VA 驱动（见 Dockerfile 的 VENDOR 层）。
+      # latest = all 兜底（原行为）；latest-intel/amd/nv 为按需驱动档，体积更小。
+      matrix:
+        include:
+          - vendor: all
+            tag: latest
+          - vendor: intel
+            tag: latest-intel
+          - vendor: amd
+            tag: latest-amd
+          - vendor: nv
+            tag: latest-nv
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -71,15 +84,17 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-
 
-      - name: Build & Push
+      - name: Build & Push (${{ matrix.tag }})
         uses: docker/build-push-action@v6
         with:
           context: .
+          build-args: VENDOR=${{ matrix.vendor }}
           push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ matrix.tag }}
+            ghcr.io/${{ github.repository }}:sha-${{ github.sha }}-${{ matrix.vendor }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
