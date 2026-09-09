@@ -78,11 +78,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 镜像仓库名必须全小写；github.repository 可能是大写（如 csvkse/LWT），
+      # Docker 直接用它作 tag 会报 "repository name must be lowercase"。这里统一转小写。
+      - name: Lowercase repo
+        id: repo
+        run: echo "repo_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
       - name: Docker Metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ghcr.io/${{ steps.repo.outputs.repo_lower }}
           tags: |
             type=sha,prefix=sha-
 
@@ -93,8 +99,8 @@ jobs:
           build-args: VENDOR=${{ matrix.vendor }}
           push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
           tags: |
-            ghcr.io/${{ github.repository }}:${{ matrix.tag }}
-            ghcr.io/${{ github.repository }}:sha-${{ github.sha }}-${{ matrix.vendor }}
+            ghcr.io/${{ steps.repo.outputs.repo_lower }}:${{ matrix.tag }}
+            ghcr.io/${{ steps.repo.outputs.repo_lower }}:sha-${{ github.sha }}-${{ matrix.vendor }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
