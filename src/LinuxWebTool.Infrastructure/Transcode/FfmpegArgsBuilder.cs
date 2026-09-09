@@ -11,13 +11,16 @@ namespace LinuxWebTool.Infrastructure.Transcode;
 /// </summary>
 public static class FfmpegArgsBuilder
 {
-    // 硬件编码器后端后缀集合：用于从编码器名判断硬件加速类型。
-    private static readonly string[] HwBackends = ["nvenc", "vaapi", "qsv", "v4l2m2m", "videotoolbox", "amf", "mfx"];
+    // 硬件编码器后端后缀集合：用于从编码器名判断硬件加速类型。含 d3d11va（Windows 专用）以与 FfmpegLocator 对齐。
+    private static readonly string[] HwBackends = ["nvenc", "vaapi", "qsv", "v4l2m2m", "videotoolbox", "amf", "mfx", "d3d11va"];
 
     /// <summary>
-    /// 硬件加速上下文：UseHardwareAccel=用户是否请求，AvailableHwEncoders=当前环境探测到的可用硬件编码器。
+    /// 硬件加速上下文：UseHardwareAccel=用户是否请求；AvailableHwEncoders=当前环境探测到的可用硬件编码器；
+    /// PreferredBackend=用户指定的后端（auto/nvenc/qsv/vaapi/v4l2m2m，空=auto 自动排优）；
+    /// ReadyHwBackends=设备就绪且编码器存在的后端集合（无硬门槛，仅用于排序优先级）。
     /// </summary>
-    public sealed record HwEncodeContext(bool UseHardwareAccel, IReadOnlyList<string> AvailableHwEncoders);
+    public sealed record HwEncodeContext(bool UseHardwareAccel, IReadOnlyList<string> AvailableHwEncoders,
+        string? PreferredBackend = null, IReadOnlyList<string>? ReadyHwBackends = null);
 
     /// <summary>构造结果：args=首选执行的命令行参数（不含 ffmpeg 可执行文件名），UsedHardwareAccel=Args 是否为硬件命令。</summary>
     /// <param name="FallbackReason">回退原因：请求硬件加速但实际用软件编码时的说明文本；未回退为 null。</param>
@@ -90,17 +93,60 @@ public static class FfmpegArgsBuilder
         ["libsvtav1"] = "av1",
     };
 
-    /// <summary>软件→硬件自动映射的后端优先顺序（在探测到的可用编码器里挑选）。</summary>
+    /// <summary>软件→硬件自动映射的后端可候选清单（全部）。</summary>
     private static readonly string[] BackendPriority = ["vaapi", "nvenc", "qsv", "v4l2m2m", "mfx", "amf", "videotoolbox"];
 
-    /// <summary>软件预设 + 请求加速时：从可用硬件编码器里找同家族、优先级最高者（返回 硬编编码器 + 后端）。</summary>
-    private static (string Codec, string Backend)? ResolveSoftwareHw(string softwareCodec, IReadOnlyList<string> available)
+    /// <summary>
+    /// 计算后端的尝试顺序：手动指定后端排最前；否则按硬件就绪优先级（readyBackends 中的顺序）排列，
+    /// 最后补上未就绪的默认候选（保证编辑器的候选不丢）。就绪的排前。
+    /// </summary>
+    private static IEnumerable<string> OrderBackends(string? preferred, IReadOnlyList<string>? ready)
+    {
+        var result = new List<string>();
+        if (!string.IsNullOrWhiteSpace(preferred) && !preferred.Equals("auto", StringComparison.OrdinalIgnoreCase))
+        {
+            // 手动指定：指定后端唯一候选，成功后直接返回；不可用则回退软件（由调用方决定）
+            yield return preferred.Trim();
+            yield break;
+        }
+
+        // auto：按硬件就绪信号 + 默认优先级
+        if (ready is not null)
+        {
+            foreach (var b in ready)
+            {
+                if (!result.Contains(b, StringComparer.OrdinalIgnoreCase))
+                {
+                    result.Add(b);
+                }
+            }
+        }
+        foreach (var b in BackendPriority)
+        {
+            if (!result.Contains(b, StringComparer.OrdinalIgnoreCase))
+            {
+                result.Add(b);
+            }
+        }
+        foreach (var b in result)
+        {
+            yield return b;
+        }
+    }
+
+    /// <summary>
+    /// 软件预设 + 请求加速时：从可用硬件编码器里找同家族硬件编码器。
+    /// 手动指定后端（preferred）时优先该后端，且该后端须设备就绪；auto 时按 OrderBackends 顺序选首个设备就绪者。
+    /// 返回 (硬编编码器 + 后端)；无可用返回 null。
+    /// </summary>
+    private static (string Codec, string Backend)? ResolveSoftwareHw(string softwareCodec,
+        IReadOnlyList<string> available, string? preferred, IReadOnlyList<string>? ready)
     {
         if (!SoftwareFamily.TryGetValue(softwareCodec, out var family))
         {
             return null;
         }
-        foreach (var backend in BackendPriority)
+        foreach (var backend in OrderBackends(preferred, ready))
         {
             var candidate = $"{family}_{backend}";
             if (available.Contains(candidate, StringComparer.OrdinalIgnoreCase) && HwDeviceExists(backend))
@@ -157,12 +203,16 @@ public static class FfmpegArgsBuilder
 
         // 选定的硬件方案（编码器 + 后端）；null = 本次不启用硬编
         (string Codec, string Backend)? hwPlan = null;
+        var preferred = string.IsNullOrWhiteSpace(hw.PreferredBackend) ? "auto" : hw.PreferredBackend.Trim();
         if (hw.UseHardwareAccel)
         {
             if (isHwCodec)
             {
-                // 预设即硬件编码器：需在探测列表内 且 设备存在
-                if (hw.AvailableHwEncoders.Contains(video, StringComparer.OrdinalIgnoreCase)
+                // 预设即硬件编码器：需在探测列表内 且 设备存在；手动指定后端时还需匹配指定后端
+                var backendMatch = preferred.Equals("auto", StringComparison.OrdinalIgnoreCase)
+                    || preferred.Equals(hardwareBackend, StringComparison.OrdinalIgnoreCase);
+                if (backendMatch
+                    && hw.AvailableHwEncoders.Contains(video, StringComparer.OrdinalIgnoreCase)
                     && HwDeviceExists(hardwareBackend))
                 {
                     hwPlan = (video, hardwareBackend!);
@@ -170,8 +220,8 @@ public static class FfmpegArgsBuilder
             }
             else
             {
-                // 软件预设 → 自动映射到同家族可用硬件编码器（含设备校验）
-                hwPlan = ResolveSoftwareHw(video, hw.AvailableHwEncoders);
+                // 软件预设 → 自动映射到同家族可用硬件编码器（支持手动指定后端 + 硬件就绪优先级）
+                hwPlan = ResolveSoftwareHw(video, hw.AvailableHwEncoders, preferred, hw.ReadyHwBackends);
             }
         }
 
@@ -230,7 +280,10 @@ public static class FfmpegArgsBuilder
             }
             else if (hw.UseHardwareAccel)
             {
-                fallbackReason = $"请求硬件加速，但预设视频编码器 {video} 无可用的同家族硬件编码器，保持软件编码";
+                var pref = string.IsNullOrWhiteSpace(hw.PreferredBackend) ? "auto" : hw.PreferredBackend.Trim();
+                fallbackReason = pref.Equals("auto", StringComparison.OrdinalIgnoreCase)
+                    ? $"请求硬件加速，但预设视频编码器 {video} 无可用的同家族硬件编码器，保持软件编码"
+                    : $"请求使用 {pref} 硬件后端，但该后端在此环境不可用（无对应设备或编码器），已回退软件编码";
             }
             // 记录意图的硬件命令（供展示"回退前硬件命令"）
             if (isHwCodec)

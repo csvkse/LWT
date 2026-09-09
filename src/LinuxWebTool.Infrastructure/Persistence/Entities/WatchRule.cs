@@ -38,6 +38,10 @@ public class WatchRule
     /// <summary>是否使用硬件加速（默认开启；运行时探测不支持则回退软件编码）。</summary>
     public bool UseHardwareAccel { get; set; } = true;
 
+    /// <summary>用户指定的硬件后端：auto / nvenc / qsv / vaapi / v4l2m2m；auto = 按硬件信号自动排优。</summary>
+    [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(20)")]
+    public string? HardwareBackend { get; set; } = "auto";
+
     [SugarColumn(IsNullable = true)]
     public DateTime? LastScanTime { get; set; }
 

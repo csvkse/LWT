@@ -259,7 +259,8 @@ public sealed class TranscodeQueueService(
         logger.LogInformation("转码开始：{Source} → {Output}（{Mode}，硬件加速={Hw}）", job.SourcePath, finalPath, mode == TranscodeOutputMode.Replace ? "替换" : "并存", job.UseHardwareAccel);
 
         var buildResult = FfmpegArgsBuilder.BuildWithHw(job.SourcePath, tempPath ?? finalPath, preset, job.CustomArgs,
-            new FfmpegArgsBuilder.HwEncodeContext(job.UseHardwareAccel, detection.HwEncoders));
+            new FfmpegArgsBuilder.HwEncodeContext(job.UseHardwareAccel, detection.HwEncoders,
+                job.HardwareBackend, detection.HwBackends));
         var args = buildResult.Args;
         // 记录实际执行的完整命令（供任务队列回显）与实际是否用了硬件编码器
         job.CommandLine = string.Join(' ', (new[] { detection.FfmpegPath }).Concat(args));

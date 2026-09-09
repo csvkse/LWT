@@ -71,6 +71,9 @@ public sealed record TranscodeSubmitRequest
 
     /// <summary>是否使用硬件加速（默认开启；运行时探测不支持则回退软件编码，并记录实际结果）。</summary>
     public bool UseHardwareAccel { get; init; } = true;
+
+    /// <summary>指定硬件后端：auto / nvenc / qsv / vaapi / v4l2m2m；auto = 按硬件信号自动排优（默认）。</summary>
+    public string? HardwareBackend { get; init; } = "auto";
 }
 
 /// <summary>保存转码预设请求。</summary>
@@ -151,6 +154,9 @@ public sealed record SaveWatchRuleRequest
 
     /// <summary>是否使用硬件加速（默认开启；运行时探测不支持则回退软件编码）。</summary>
     public bool UseHardwareAccel { get; init; } = true;
+
+    /// <summary>指定硬件后端：auto / nvenc / qsv / vaapi / v4l2m2m；auto = 按硬件信号自动排优（默认）。</summary>
+    public string? HardwareBackend { get; init; } = "auto";
 }
 
 /// <summary>ffmpeg / ffprobe 检测结果。</summary>
@@ -169,4 +175,11 @@ public sealed record FfmpegDetection
 
     /// <summary>可用的硬件视频编码器（ffmpeg -encoders 过滤 nvenc / vaapi / qsv / videotoolbox），如 h264_nvenc / hevc_vaapi。</summary>
     public List<string> HwEncoders { get; init; } = [];
+
+    /// <summary>设备节点真实存在、且对应编码器在 -encoders 里也有的后端（已双重校验，可直接用于选择）。
+    /// 仅含 nvenc / qsv / vaapi / v4l2m2m 等；空 = 无可用硬件后端（将回退软件编码）。</summary>
+    public List<string> HwBackends { get; init; } = [];
+
+    /// <summary>探测到的 GPU 厂商（nvidia / intel / amd），用于提示展示；未探测到为 null。</summary>
+    public string? GpuVendor { get; init; }
 }

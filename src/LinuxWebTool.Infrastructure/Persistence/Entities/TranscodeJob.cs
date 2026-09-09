@@ -29,6 +29,10 @@ public class TranscodeJob
     /// <summary>是否请求使用硬件加速（提交时标记，默认开启）。</summary>
     public bool UseHardwareAccel { get; set; } = true;
 
+    /// <summary>用户指定的硬件后端：auto / nvenc / qsv / vaapi / v4l2m2m；auto = 按硬件信号自动排优。</summary>
+    [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(20)")]
+    public string? HardwareBackend { get; set; } = "auto";
+
     /// <summary>实际是否使用了硬件编码器（运行时判定回写；false=回退软件编码）。</summary>
     public bool UsedHardwareAccel { get; set; }
 

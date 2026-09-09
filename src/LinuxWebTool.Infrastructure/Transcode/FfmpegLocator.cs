@@ -51,13 +51,109 @@ public sealed class FfmpegLocator(TranscodeOptions options)
             Message = probeExit != 0 ? "ffprobe 不可用（进度将无法显示百分比，转码本身不受影响）" : string.Empty,
         };
 
-        // 探测硬件加速：解码加速方式（-hwaccels）与硬件编码器（-encoders 过滤）。任何失败静默降级为空。
+        // 探测硬件加速：解码加速方式（-hwaccels）、硬件编码器（-encoders 过滤）、及"设备就绪且编码器存在"的后端。
+        // 任何失败静默降级为空。
+        var hwEncoders = await RunHwEncodersAsync(options.FfmpegPath);
         detection = detection with
         {
             HardwareAccels = await RunFfmpegListAsync(options.FfmpegPath, "-hide_banner -hwaccels"),
-            HwEncoders = await RunHwEncodersAsync(options.FfmpegPath),
+            HwEncoders = hwEncoders,
+            HwBackends = DetectReadyHwBackends(hwEncoders),
+            GpuVendor = DetectGpuVendor(),
         };
         return detection;
+    }
+
+    /// <summary>
+    /// 探测"设备节点真实存在 且 对应编码器在 -encoders 里也有"的后端集合（双重校验）。
+    /// 空 = 无可用硬件后端（将回退软件编码）。仅识别 nvenc / qsv / vaapi / v4l2m2m / mfx。
+    /// </summary>
+    private static List<string> DetectReadyHwBackends(List<string> hwEncoders)
+    {
+        var ready = new List<string>();
+        if (HasNvidiaDevice() && hwEncoders.Any(c => c.Contains("nvenc", StringComparison.OrdinalIgnoreCase)))
+        {
+            ready.Add("nvenc");
+        }
+        if (HasDriBackend() && hwEncoders.Any(c => c.Contains("_vaapi", StringComparison.OrdinalIgnoreCase)))
+        {
+            ready.Add("vaapi");
+        }
+        if (HasDriBackend() && hwEncoders.Any(c => c.Contains("_qsv", StringComparison.OrdinalIgnoreCase)))
+        {
+            ready.Add("qsv");
+        }
+        if (HasVideoDevice() && hwEncoders.Any(c => c.Contains("v4l2m2m", StringComparison.OrdinalIgnoreCase)))
+        {
+            ready.Add("v4l2m2m");
+        }
+        return ready;
+    }
+
+    /// <summary>探测 GPU 厂商：nvidia / intel / amd；未探测到（无设备节点且无内核模块）返回 null。</summary>
+    private static string? DetectGpuVendor()
+    {
+        if (HasNvidiaDevice())
+        {
+            return "nvidia";
+        }
+        if (HasDriBackend())
+        {
+            // /dev/dri 存在，结合内核模块区分 Intel（i915）/ AMD（amdgpu）
+            if (IsModuleLoaded("i915"))
+            {
+                return "intel";
+            }
+            if (IsModuleLoaded("amdgpu"))
+            {
+                return "amd";
+            }
+            return "intel"; // 有 dri 但模块不可读时，兜底视为 intel（最常见场景）
+        }
+        return null;
+    }
+
+    private static bool HasNvidiaDevice()
+        => File.Exists("/dev/nvidia0") || File.Exists("/dev/nvidiactl") || Directory.Exists("/proc/driver/nvidia");
+
+    private static bool HasDriBackend()
+        => Directory.Exists("/dev/dri");
+
+    private static bool HasVideoDevice()
+    {
+        try
+        {
+            return Directory.Exists("/dev") && Directory.EnumerateFiles("/dev", "video*").Any();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>检查内核模块是否加载（读 /proc/modules 首列），任何异常返回 false。</summary>
+    private static bool IsModuleLoaded(string name)
+    {
+        try
+        {
+            if (!File.Exists("/proc/modules"))
+            {
+                return false;
+            }
+            foreach (var line in File.ReadLines("/proc/modules"))
+            {
+                var first = line.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+                if (string.Equals(first, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static readonly HashSet<string> HwEncoderKeywords =

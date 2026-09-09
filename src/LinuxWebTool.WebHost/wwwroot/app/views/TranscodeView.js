@@ -31,7 +31,7 @@ export default defineComponent({
     const submitForm = reactive({
       sourcePath: '', presetId: '', customArgs: '', outputContainer: 'mp4',
       outputMode: 1, filePatterns: SUGGESTED_PATTERNS, recursive: true, outputDir: '',
-      useHardwareAccel: true,
+      useHardwareAccel: true, hardwareBackend: 'auto',
     });
     const submitting = ref(false);
 
@@ -70,7 +70,7 @@ export default defineComponent({
     const watchForm = reactive({
       name: '', watchPath: '', filePatterns: SUGGESTED_PATTERNS, presetId: '',
       outputMode: 1, recursive: true, mode: 0, pollSeconds: 300, enabled: true,
-      useHardwareAccel: true,
+      useHardwareAccel: true, hardwareBackend: 'auto',
     });
 
     const loading = ref(false);
@@ -235,6 +235,7 @@ export default defineComponent({
             recursive: submitForm.recursive,
             outputDir: submitForm.outputDir || null,
             useHardwareAccel: submitForm.useHardwareAccel,
+            hardwareBackend: submitForm.hardwareBackend,
           },
         });
         if (result.ok) {
@@ -392,6 +393,7 @@ export default defineComponent({
           pollSeconds: Number(watchForm.pollSeconds),
           enabled: watchForm.enabled,
           useHardwareAccel: watchForm.useHardwareAccel,
+          hardwareBackend: watchForm.hardwareBackend,
         };
         const result = editingWatchId.value
           ? await http(API.transcode.watchRuleItem(editingWatchId.value), { method: 'PUT', body: payload })
@@ -557,12 +559,20 @@ export default defineComponent({
         </div>
         <label class="flex items-center gap-2 text-sm text-slate-400">
           <input type="checkbox" v-model="submitForm.useHardwareAccel" class="accent-cyan-400" /> ⚡ 使用硬件加速
+          <select v-model="submitForm.hardwareBackend" class="input input-sm w-auto !w-36 py-1 text-xs"
+                  :title="ffmpeg.hwBackends && ffmpeg.hwBackends.length ? '就绪后端：' + ffmpeg.hwBackends.join(' · ') : ''">
+            <option value="auto">auto（按硬件自动选）</option>
+            <option value="nvenc">nvenc（NVIDIA）</option>
+            <option value="qsv">qsv（Intel）</option>
+            <option value="vaapi">vaapi（Intel/AMD）</option>
+            <option value="v4l2m2m">v4l2m2m</option>
+          </select>
           <span class="text-[10px] text-slate-600 truncate" :title="ffmpeg.hwEncoders && ffmpeg.hwEncoders.length ? '当前环境支持：' + ffmpeg.hwEncoders.join(' · ') : '当前环境未检测到硬件编码器，将使用软件编码'">
             （{{
               ffmpeg.hwEncoders && ffmpeg.hwEncoders.length
                 ? '检测到 ' + ffmpeg.hwEncoders.length + ' 个硬件编码器，软件预设将自动映射'
                 : '当前环境未检测到，将自动回退软件编码'
-            }}）
+            }}）{{ ffmpeg.hwBackends && ffmpeg.hwBackends.length ? ' · 就绪：' + ffmpeg.hwBackends.join('/') : '' }}
           </span>
         </label>
         <label class="flex items-center gap-2 text-sm text-slate-400">
@@ -825,6 +835,14 @@ export default defineComponent({
             </label>
             <label class="flex items-center gap-2 text-sm text-slate-400">
               <input type="checkbox" v-model="watchForm.useHardwareAccel" class="accent-cyan-400" /> ⚡ 使用硬件加速
+              <select v-model="watchForm.hardwareBackend" class="input input-sm w-auto !w-36 py-1 text-xs"
+                      :title="ffmpeg.hwBackends && ffmpeg.hwBackends.length ? '就绪后端：' + ffmpeg.hwBackends.join(' · ') : ''">
+                <option value="auto">auto（按硬件自动选）</option>
+                <option value="nvenc">nvenc（NVIDIA）</option>
+                <option value="qsv">qsv（Intel）</option>
+                <option value="vaapi">vaapi（Intel/AMD）</option>
+                <option value="v4l2m2m">v4l2m2m</option>
+              </select>
               <span class="text-[10px] text-slate-600">（{{ ffmpeg.hwEncoders && ffmpeg.hwEncoders.length ? '检测到 ' + ffmpeg.hwEncoders.length + ' 个硬件编码器' : '未检测到，将回退软件编码' }}）</span>
             </label>
           </div>
