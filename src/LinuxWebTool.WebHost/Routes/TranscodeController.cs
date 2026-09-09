@@ -54,6 +54,8 @@ public class TranscodeController(
             j.UseHardwareAccel,
             j.UsedHardwareAccel,
             j.CommandLine,
+            j.FallbackReason,
+            j.FallbackFromCommand,
         });
         return Ok(new { items = mapped, total });
     }

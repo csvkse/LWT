@@ -41,11 +41,13 @@ export default defineComponent({
     const jobQuery = reactive({ page: 1, pageSize: 20, status: '' });
     const jobLoading = ref(false);
     const actJobId = ref(null);
-    const commandView = reactive({ show: false, command: '', label: '' });
+    const commandView = reactive({ show: false, command: '', label: '', fallbackReason: '', fallbackFrom: '' });
 
     function showCommand(job) {
       commandView.command = job.commandLine || '';
       commandView.label = `${job.sourcePath} → ${job.outputPath || ''}`;
+      commandView.fallbackReason = job.fallbackReason || '';
+      commandView.fallbackFrom = job.fallbackFromCommand || '';
       commandView.show = true;
     }
 
@@ -607,7 +609,7 @@ export default defineComponent({
                 <td class="text-xs text-slate-400">
                   {{ job.presetName || (job.customArgs ? '自定义' : '—') }}
                   <span class="ml-1 badge align-middle" :class="job.usedHardwareAccel ? 'border-cyan-500/50 text-cyan-300' : 'border-slate-500/40 text-slate-400'"
-                        :title="job.usedHardwareAccel ? '本次实际使用硬件编码器' : (job.useHardwareAccel ? '请求了加速但回退为软件编码' : '未启用硬件加速')">
+                        :title="job.usedHardwareAccel ? '本次实际使用硬件编码器' : ((job.fallbackReason) || (job.useHardwareAccel ? '请求了加速但回退为软件编码' : '未启用硬件加速'))">
                     {{ job.usedHardwareAccel ? '⚡硬件' : '软件' }}
                   </span>
                 </td>
@@ -845,7 +847,13 @@ export default defineComponent({
             <span class="text-xs text-slate-500 truncate flex-1" :title="commandView.label">{{ commandView.label }}</span>
             <button class="btn btn-xs ml-auto" @click="commandView.show = false">✕</button>
           </div>
-          <pre class="flex-1 overflow-auto text-xs font-mono leading-relaxed p-3 bg-black/40 rounded-lg border border-cyber-line/40 whitespace-pre-wrap break-all">{{ commandView.command }}</pre>
+          <div v-if="commandView.fallbackReason" class="mb-2 px-3 py-2 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs text-amber-300">
+            ⚠ 已回退：{{ commandView.fallbackReason }}
+          </div>
+          <pre v-if="commandView.fallbackFrom" class="flex-1 overflow-auto text-xs font-mono leading-relaxed p-3 bg-black/40 rounded-lg border border-cyber-line/40 whitespace-pre-wrap break-all mt-1">
+            <span class="block text-slate-500 mb-1">——— 回退前的硬件命令（实际未执行）———</span>{{ commandView.fallbackFrom }}
+          </pre>
+          <pre class="flex-1 overflow-auto text-xs font-mono leading-relaxed p-3 bg-black/40 rounded-lg border border-cyber-line/40 whitespace-pre-wrap break-all mt-1">{{ commandView.command }}</pre>
           <div class="flex justify-end gap-2 mt-3">
             <button class="btn" @click="commandView.show = false">关闭</button>
           </div>

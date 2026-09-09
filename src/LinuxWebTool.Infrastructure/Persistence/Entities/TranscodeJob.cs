@@ -36,6 +36,14 @@ public class TranscodeJob
     [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(2000)")]
     public string? CommandLine { get; set; }
 
+    /// <summary>回退原因（请求硬件加速但实际用软件编码时写此字段，如"预设为软件编码器"/"硬件编码器不可用，已回退软件编码"）。</summary>
+    [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(500)")]
+    public string? FallbackReason { get; set; }
+
+    /// <summary>回退前本应执行的硬件加速命令（当预设指定硬件编码器但因环境不支持回退时记录，供任务队列对比）。</summary>
+    [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(2000)")]
+    public string? FallbackFromCommand { get; set; }
+
     /// <summary>输出目录；为空 = 输出到源文件所在目录。</summary>
     [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(1000)")]
     public string? OutputDir { get; set; }

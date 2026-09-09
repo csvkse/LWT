@@ -264,6 +264,11 @@ public sealed class TranscodeQueueService(
         // 记录实际执行的完整命令（供任务队列回显）与实际是否用了硬件编码器
         job.CommandLine = string.Join(' ', (new[] { detection.FfmpegPath }).Concat(args));
         job.UsedHardwareAccel = buildResult.UsedHardwareAccel;
+        job.FallbackReason = buildResult.FallbackReason;
+        // 回退前本应执行的硬件命令（含可执行路径），仅在"预设为硬件编码器但环境不支持"回退时记录
+        job.FallbackFromCommand = buildResult.FallbackArgs is { Count: > 0 }
+            ? string.Join(' ', (new[] { detection.FfmpegPath }).Concat(buildResult.FallbackArgs))
+            : null;
         await jobStore.UpdateAsync(job);
         logger.LogInformation("转码命令：{Command}（{Mode}）", job.CommandLine, buildResult.UsedHardwareAccel ? "硬件加速" : "软件编码");
 

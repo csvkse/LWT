@@ -20,7 +20,10 @@ public static class FfmpegArgsBuilder
     public sealed record HwEncodeContext(bool UseHardwareAccel, IReadOnlyList<string> AvailableHwEncoders);
 
     /// <summary>构造结果：args=完整命令行参数（不含 ffmpeg 可执行文件名），UsedHardwareAccel=实际是否用了硬件编码器。</summary>
-    public sealed record BuildResult(List<string> Args, bool UsedHardwareAccel);
+    /// <param name="FallbackReason">回退原因：请求硬件加速但实际用软件编码时的说明文本；未回退为 null。</param>
+    /// <param name="FallbackArgs">回退前本应执行的硬件加速参数段（不含 ffmpeg 路径）；无回退前命令为 null。</param>
+    public sealed record BuildResult(List<string> Args, bool UsedHardwareAccel,
+        string? FallbackReason = null, IReadOnlyList<string>? FallbackArgs = null);
 
     public static List<string> Build(string input, string output, TranscodePreset? preset, string? customArgs)
         => BuildWithHw(input, output, preset, customArgs, new HwEncodeContext(false, [])).Args;
@@ -31,6 +34,8 @@ public static class FfmpegArgsBuilder
         var hw = hwContext ?? new HwEncodeContext(false, []);
         var args = new List<string> { "-hide_banner", "-y", "-i", input };
         var usedHardware = false;
+        string? fallbackReason = null;
+        List<string>? fallbackArgs = null;
 
         if (!string.IsNullOrWhiteSpace(customArgs))
         {
@@ -45,83 +50,150 @@ public static class FfmpegArgsBuilder
             var buildResult = BuildPresetTokens(preset, hw);
             args.AddRange(buildResult.Args);
             usedHardware = buildResult.UsedHardwareAccel;
+            fallbackReason = buildResult.FallbackReason;
+            fallbackArgs = buildResult.FallbackArgs;
         }
 
         args.Add("-progress");
         args.Add("pipe:1");
         args.Add("-nostats");
         args.Add(output);
-        return new BuildResult(args, usedHardware);
+        return new BuildResult(args, usedHardware, fallbackReason, fallbackArgs);
     }
+
+    /// <summary>硬件编码器 → 对应软件编码器（环境不支持硬编时回退用）。</summary>
+    private static readonly Dictionary<string, string> HwToSoftware = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["h264"] = "libx264",
+        ["hevc"] = "libx265",
+        ["av1"] = "libaom-av1",
+        ["vp8"] = "libvpx",
+        ["vp9"] = "libvpx-vp9",
+        ["mjpeg"] = "mjpeg",
+        ["mpeg2"] = "mpeg2video",
+        ["mpeg4"] = "mpeg4",
+        ["h263"] = "h263p",
+    };
 
     /// <summary>
     /// 预设参数构造：若请求硬件加速且预设 VideoCodec 是当前环境可用的硬件编码器，则用硬编并附加后端参数；
-    /// 否则回退软件编码（UsedHardwareAccel=false）。
+    /// 否则回退软件编码（UsedHardwareAccel=false），并记录回退原因与回退前本应执行的硬件命令段。
     /// </summary>
-    private static (List<string> Args, bool UsedHardwareAccel) BuildPresetTokens(TranscodePreset preset, HwEncodeContext hw)
+    private static (List<string> Args, bool UsedHardwareAccel, string? FallbackReason, List<string>? FallbackArgs) BuildPresetTokens(
+        TranscodePreset preset, HwEncodeContext hw)
     {
-        var tokens = new List<string>();
         var video = (preset.VideoCodec ?? string.Empty).Trim();
         var audio = (preset.AudioCodec ?? string.Empty).Trim();
 
+        // 视频编码参数段与判定
+        var softwareVideo = new List<string>();
+        List<string>? hardwareVideo = null; // 本应执行的硬件视频段（仅当预设为硬件编码器时）
         var usedHardware = false;
+        string? fallbackReason = null;
+
         var hardwareBackend = DetectHardwareBackend(video);
-        if (hw.UseHardwareAccel && hardwareBackend is not null && hw.AvailableHwEncoders.Contains(video, StringComparer.OrdinalIgnoreCase))
+        var isHwCodec = hardwareBackend is not null;
+        var hwSupported = isHwCodec && hw.UseHardwareAccel
+            && hw.AvailableHwEncoders.Contains(video, StringComparer.OrdinalIgnoreCase);
+
+        if (video.Length == 0)
         {
-            // 硬编：前置设备/解码上下文参数，编码器用 -c:v <hardware-codec>，CRF 用 -qp 替代
-            tokens.AddRange(BuildHwContextArgs(hardwareBackend));
-            tokens.AddRange(["-c:v", video]);
-            if (preset.VideoQuality is >= 0 and <= 51)
-            {
-                tokens.AddRange(["-qp", preset.VideoQuality.Value.ToString()]);
-            }
-            usedHardware = true;
-        }
-        else if (video.Length == 0)
-        {
-            tokens.Add("-vn"); // 纯音频输出
+            softwareVideo.Add("-vn");
         }
         else if (video.Equals("copy", StringComparison.OrdinalIgnoreCase))
         {
-            tokens.AddRange(["-c:v", "copy"]);
+            softwareVideo.AddRange(["-c:v", "copy"]);
+        }
+        else if (hwSupported)
+        {
+            // 硬编：前置设备/解码上下文参数，编码器用 -c:v <hardware-codec>，CRF 用 -qp 替代
+            var hwCtx = BuildHwContextArgs(hardwareBackend!);
+            softwareVideo.AddRange(hwCtx);
+            softwareVideo.AddRange(["-c:v", video]);
+            if (preset.VideoQuality is >= 0 and <= 51)
+            {
+                softwareVideo.AddRange(["-qp", preset.VideoQuality.Value.ToString()]);
+            }
+            usedHardware = true;
+        }
+        else if (isHwCodec)
+        {
+            // 预设为硬件编码器但环境不支持或未请求加速 → 回退到等价软件编码器
+            var baseCodec = video[..(video.Length - hardwareBackend!.Length - 1)];
+            var softwareCodec = HwToSoftware.TryGetValue(baseCodec, out var sw) ? sw : null;
+            hardwareVideo = BuildHwContextArgs(hardwareBackend!).ToList();
+            hardwareVideo.AddRange(["-c:v", video]);
+            if (preset.VideoQuality is >= 0 and <= 51)
+            {
+                hardwareVideo.AddRange(["-qp", preset.VideoQuality.Value.ToString()]);
+            }
+            if (softwareCodec is not null)
+            {
+                softwareVideo.AddRange(["-c:v", softwareCodec]);
+                if (preset.VideoQuality is >= 0 and <= 51)
+                {
+                    softwareVideo.AddRange(["-crf", preset.VideoQuality.Value.ToString()]);
+                }
+                fallbackReason = $"硬件编码器 {video} 不可用，已回退软件编码 {softwareCodec}";
+            }
+            else
+            {
+                // 无对应软件编码器，按原编码器执行但以软件方式（不附加硬件上下文）
+                softwareVideo.AddRange(["-c:v", video]);
+                if (preset.VideoQuality is >= 0 and <= 51)
+                {
+                    softwareVideo.AddRange(["-crf", preset.VideoQuality.Value.ToString()]);
+                }
+                fallbackReason = $"硬件编码器 {video} 不可用，且无对应软件编码器，按原编码器执行";
+            }
         }
         else
         {
-            tokens.AddRange(["-c:v", video]);
+            // 软件编码器：请求了加速但预设本身是软件编码器 → 记录原因（无硬件命令可回退）
+            softwareVideo.AddRange(["-c:v", video]);
             if (preset.VideoQuality is >= 0 and <= 51)
             {
-                tokens.AddRange(["-crf", preset.VideoQuality.Value.ToString()]);
+                softwareVideo.AddRange(["-crf", preset.VideoQuality.Value.ToString()]);
+            }
+            if (hw.UseHardwareAccel)
+            {
+                fallbackReason = $"请求硬件加速，但预设视频编码器 {video} 为软件编码器，未启用硬件加速";
             }
         }
 
+        // 音频 + 容器 + 额外参数（软件与硬件共用，回退前命令同样包含）
+        var tail = new List<string>();
         if (audio.Length == 0)
         {
-            tokens.Add("-an");
+            tail.Add("-an");
         }
         else if (audio.Equals("copy", StringComparison.OrdinalIgnoreCase))
         {
-            tokens.AddRange(["-c:a", "copy"]);
+            tail.AddRange(["-c:a", "copy"]);
         }
         else
         {
-            tokens.AddRange(["-c:a", audio]);
+            tail.AddRange(["-c:a", audio]);
             if (!string.IsNullOrWhiteSpace(preset.AudioBitrate))
             {
-                tokens.AddRange(["-b:a", preset.AudioBitrate.Trim()]);
+                tail.AddRange(["-b:a", preset.AudioBitrate.Trim()]);
             }
         }
 
         var isCopy = video.Equals("copy", StringComparison.OrdinalIgnoreCase);
         if (preset.Container.Trim().Equals("mp4", StringComparison.OrdinalIgnoreCase) && !isCopy)
         {
-            tokens.AddRange(["-movflags", "+faststart"]);
+            tail.AddRange(["-movflags", "+faststart"]);
         }
 
         if (!string.IsNullOrWhiteSpace(preset.ExtraArgs))
         {
-            tokens.AddRange(ShellArgumentParser.Split(preset.ExtraArgs));
+            tail.AddRange(ShellArgumentParser.Split(preset.ExtraArgs));
         }
-        return (tokens, usedHardware);
+
+        var args = softwareVideo.Concat(tail).ToList();
+        var fallbackArgs = hardwareVideo is not null ? hardwareVideo.Concat(tail).ToList() : null;
+        return (args, usedHardware, fallbackReason, fallbackArgs);
     }
 
     /// <summary>从编码器名识别硬件后端（如 h264_vaapi → vaapi）；非硬件编码器返回 null。</summary>
