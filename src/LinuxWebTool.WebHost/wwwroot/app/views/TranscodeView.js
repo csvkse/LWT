@@ -215,19 +215,26 @@ export default defineComponent({
       Object.assign(submitForm, {
         sourcePath: '', presetId: presets.value[0]?.id || '', customArgs: '', outputContainer: 'mp4',
         outputMode: 1, filePatterns: SUGGESTED_PATTERNS, recursive: true, outputDir: '',
+        useHardwareAccel: true, hardwareBackend: 'auto', isFullCommand: false,
       });
     }
 
     async function submit() {
       if (!submitForm.sourcePath.trim()) return toast.error('请填写源文件 / 源文件夹路径');
       if (!submitForm.customArgs && !submitForm.presetId) return toast.error('请选择预设或填写自定义参数');
+      // 完整命令模式仅支持单文件（含固定 -i 与输出路径，无法逐文件替换）。按文件名是否含扩展名点判断。
+      if (submitForm.isFullCommand && submitForm.customArgs) {
+        const base = String(submitForm.sourcePath).replace(/[\/\\]+$/, '').split(/[\/\\]/).pop() || '';
+        if (!base.includes('.')) return toast.error('完整命令模式仅支持单文件，请改用非完整模式或选择具体文件路径');
+      }
       submitting.value = true;
       try {
         const result = await http(API.transcode.submit, {
           method: 'POST',
           body: {
             sourcePath: submitForm.sourcePath,
-            presetId: submitForm.presetId || null,
+            // 预设已展开到 customArgs（模板快照）时以 customArgs 为准，presetId 置空；未展开（手填自定义）则随 presetId
+            presetId: submitForm.customArgs ? null : (submitForm.presetId || null),
             customArgs: submitForm.customArgs || null,
             outputContainer: submitForm.customArgs ? (submitForm.outputContainer || null) : null,
             outputMode: Number(submitForm.outputMode),
@@ -358,6 +365,164 @@ export default defineComponent({
       return presets.value.find((p) => p.id === id);
     }
 
+    // 硬件编码器后端 → 具体编码器家族后缀（与后端软件编码器家族映射一致）
+    const SOFTWARE_FAMILY = {
+      libx264: 'h264', libx265: 'hevc', libvpx: 'vp8',
+      'libvpx-vp9': 'vp9', 'libaom-av1': 'av1', 'libsvtav1': 'av1',
+    };
+    // 后端优先级（auto 时按就绪后端 + 此顺序选）
+    const BACKEND_PRIORITY = ['vaapi', 'nvenc', 'qsv', 'v4l2m2m', 'mfx', 'amf', 'videotoolbox'];
+    // 后端 → 硬件编码器家族名（用于从"家族_后端"找到正确编码器）
+    const HW_BACKEND_CODE = {
+      vaapi: '-vaapi_device /dev/dri/renderD128 -hwaccel vaapi -vf format=nv12,hwupload',
+      nvenc: '-hwaccel cuda -hwaccel_output_format cuda',
+      qsv: '-hwaccel qsv -vf format=nv12',
+      v4l2m2m: '-hwaccel v4l2m2m',
+    };
+
+    /// 预测输出真实路径（复刻后端 OutputPathPlanner.Plan：替换/并存/重名避让）
+    function predictOutputPath(input, container, outputMode, outputDir) {
+      const ext = (container || 'mp4').trim().replace(/^\./, '') || 'mp4';
+      const dir = (outputDir && outputDir.trim()) || (input.lastIndexOf('/') >= 0 ? input.slice(0, input.lastIndexOf('/') + 1) : './');
+      const name = input.slice(input.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '');
+      const base = (dir.endsWith('/') ? dir : dir + '/') + name;
+      if (String(outputMode) === '0') return base + '.' + ext; // 替换模式（并存=1 见下）
+      // 并存：重名避让（前端仅预测 base，实际以运行时为准）
+      let candidate = base + '.' + ext;
+      let idx = 0;
+      // 前端无法可靠检测 File.Exists，预测用 -1 起步；运行时以 Plan 为准
+      return candidate;
+    }
+
+    /// 展开预设为完整 ffmpeg 命令（含 -i 输入、具体硬件编码器、输出路径）。
+    /// 复刻后端 BuildFullCommand 的核心映射：硬件后端决定 -c:v 编码器类型与硬件上下文。
+    function buildFullCommandFromPreset(preset, input, output, hwBackends, hwEncoders, preferredBackend, useHardwareAccel) {
+      const video = (preset.videoCodec || '').trim();
+      const audio = (preset.audioCodec || '').trim();
+      const q = preset.videoQuality;
+      const hwReady = Array.isArray(hwBackends) ? hwBackends : [];
+      const hwList = Array.isArray(hwEncoders) ? hwEncoders : [];
+      const pref = (preferredBackend || 'auto').trim() || 'auto';
+
+      // 判定硬件方案：指定后端 → {family}_{backend}；auto → 就绪优先级第一个可用
+      let hwCodec = null, hwCtx = '';
+      const family = SOFTWARE_FAMILY[video];
+      if (family && useHardwareAccel) {
+        const candidates = pref === 'auto'
+          ? BACKEND_PRIORITY.filter(b => hwReady.includes(b))
+          : [pref];
+        for (const b of candidates) {
+          const codec = family + '_' + b;
+          if (hwList.includes(codec)) { hwCodec = codec; hwCtx = HW_BACKEND_CODE[b] || ''; break; }
+        }
+      }
+      // 预设本身是硬件编码器（如 h264_vaapi）→ 直接用
+      if (!hwCodec && /_(nvenc|vaapi|qsv|v4l2m2m|mfx|amf)$/.test(video)) {
+        const b = video.slice(video.lastIndexOf('_') + 1);
+        if (hwList.includes(video)) { hwCodec = video; hwCtx = HW_BACKEND_CODE[b] || ''; }
+      }
+
+      const parts = ['ffmpeg', '-y'];
+      if (hwCodec) {
+        // 硬件全局/解码选项须在 -i 之前
+        if (hwCtx) parts.push(...hwCtx.split(' '));
+      }
+      parts.push('-i', input);
+      if (hwCodec) {
+        parts.push('-c:v', hwCodec);
+        if (q >= 0 && q <= 51) parts.push('-qp', String(q));
+      } else if (video === '') {
+        parts.push('-vn');
+      } else if (video === 'copy') {
+        parts.push('-c:v', 'copy');
+      } else {
+        parts.push('-c:v', video);
+        if (q >= 0 && q <= 51) parts.push('-crf', String(q));
+      }
+      // 音频
+      if (audio === '') parts.push('-an');
+      else if (audio === 'copy') parts.push('-c:a', 'copy');
+      else {
+        parts.push('-c:a', audio);
+        if (preset.audioBitrate) parts.push('-b:a', preset.audioBitrate);
+      }
+      // 容器：mp4 + 非 copy → faststart
+      if (((preset.container || '').trim().toLowerCase() === 'mp4') && video !== 'copy') parts.push('-movflags', '+faststart');
+      // 额外参数
+      if (preset.extraArgs) parts.push(...preset.extraArgs.trim().split(/\s+/).filter(Boolean));
+      // 骨架：... -progress pipe:1 -nostats <output>
+      parts.push('-progress', 'pipe:1', '-nostats', output);
+      return parts.join(' ');
+    }
+
+    /// 展开预设为中间段参数（不含 -i/输出/-progress），供非完整模式预填。复刻后端 BuildArgsFromPreset。
+    function buildArgsFromPreset(preset, hwBackends, hwEncoders, preferredBackend, useHardwareAccel) {
+      const video = (preset.videoCodec || '').trim();
+      const audio = (preset.audioCodec || '').trim();
+      const q = preset.videoQuality;
+      const hwReady = Array.isArray(hwBackends) ? hwBackends : [];
+      const hwList = Array.isArray(hwEncoders) ? hwEncoders : [];
+      const pref = (preferredBackend || 'auto').trim() || 'auto';
+
+      // 判定硬件方案（与 buildFullCommandFromPreset 一致）
+      let hwCodec = null;
+      const family = SOFTWARE_FAMILY[video];
+      if (family && useHardwareAccel) {
+        const candidates = pref === 'auto'
+          ? BACKEND_PRIORITY.filter(b => hwReady.includes(b))
+          : [pref];
+        for (const b of candidates) {
+          const codec = family + '_' + b;
+          if (hwList.includes(codec)) { hwCodec = codec; break; }
+        }
+      }
+      if (!hwCodec && /_(nvenc|vaapi|qsv|v4l2m2m|mfx|amf)$/.test(video)) {
+        if (hwList.includes(video)) hwCodec = video;
+      }
+
+      const parts = [];
+      if (hwCodec) {
+        // 硬件滤镜段（非完整模式由 BuildWithHw 注入全局段，这里只放 -vf 与 -c:v）
+        const b = hwCodec.slice(hwCodec.lastIndexOf('_') + 1);
+        if (b === 'vaapi') parts.push('-vf', 'format=nv12,hwupload');
+        else if (b === 'qsv') parts.push('-vf', 'format=nv12');
+        parts.push('-c:v', hwCodec);
+        if (q >= 0 && q <= 51) parts.push('-qp', String(q));
+      } else if (video === '') {
+        parts.push('-vn');
+      } else if (video === 'copy') {
+        parts.push('-c:v', 'copy');
+      } else {
+        parts.push('-c:v', video);
+        if (q >= 0 && q <= 51) parts.push('-crf', String(q));
+      }
+      if (audio === '') parts.push('-an');
+      else if (audio === 'copy') parts.push('-c:a', 'copy');
+      else {
+        parts.push('-c:a', audio);
+        if (preset.audioBitrate) parts.push('-b:a', preset.audioBitrate);
+      }
+      if (((preset.container || '').trim().toLowerCase() === 'mp4') && video !== 'copy') parts.push('-movflags', '+faststart');
+      if (preset.extraArgs) parts.push(...preset.extraArgs.trim().split(/\s+/).filter(Boolean));
+      return parts.join(' ');
+    }
+
+    /// 选中预设 → 展开到 customArgs（模板快照，可编辑）。完整模式→完整命令；非完整→中间段参数。
+    function syncPresetToArgs() {
+      const preset = presetById(submitForm.presetId);
+      if (!preset) return;             // 选了"使用自定义参数"或未选，不自动展开
+      if (!submitForm.sourcePath) return;
+      const hwCtx = { hwBackends: ffmpeg.hwBackends, hwEncoders: ffmpeg.hwEncoders, preferredBackend: submitForm.hardwareBackend, useHardwareAccel: submitForm.useHardwareAccel };
+      if (submitForm.isFullCommand) {
+        const output = predictOutputPath(submitForm.sourcePath, preset.container, submitForm.outputMode, submitForm.outputDir);
+        submitForm.customArgs = buildFullCommandFromPreset(preset, submitForm.sourcePath, output,
+          hwCtx.hwBackends, hwCtx.hwEncoders, hwCtx.preferredBackend, hwCtx.useHardwareAccel);
+      } else {
+        submitForm.customArgs = buildArgsFromPreset(preset,
+          hwCtx.hwBackends, hwCtx.hwEncoders, hwCtx.preferredBackend, hwCtx.useHardwareAccel);
+      }
+    }
+
     function openWatchCreate() {
       editingWatchId.value = null;
       Object.assign(watchForm, {
@@ -465,7 +630,7 @@ export default defineComponent({
     return {
       TABS, tab, ffmpeg, presets,
       picker, openPicker, onPickerSelect, onPickerClose,
-      submitForm, submitting, submit, resetSubmit,
+      submitForm, submitting, submit, resetSubmit, syncPresetToArgs,
       jobs, jobTotal, jobQuery, jobLoading, actJobId, cancelJob, retryJob, clearFinished, goPage, totalPages,
       commandView, showCommand,
       showPresetEditor, editingPresetId, presetSaving, presetForm, openPresetCreate, openPresetEdit, savePreset, removePreset,
@@ -519,7 +684,7 @@ export default defineComponent({
         <label class="block">
           <span class="text-xs text-slate-500 mb-1 block">源文件 / 源文件夹（服务器本地可访问路径）*</span>
           <div class="flex gap-2">
-            <input class="input font-mono flex-1" v-model="submitForm.sourcePath" placeholder="/mnt/media/movies 或 /mnt/media/file.mkv" />
+            <input class="input font-mono flex-1" v-model="submitForm.sourcePath" placeholder="/mnt/media/movies 或 /mnt/media/file.mkv" @change="syncPresetToArgs()" />
             <button class="btn btn-xs" title="可视化选择文件或文件夹" @click="openPicker('any', 'source', submitForm.sourcePath || '/')">📂 选择</button>
           </div>
           <p class="text-[11px] text-slate-600 mt-1">文件 → 单任务；文件夹 → 按扩展名过滤批量入队。路径直接在运行该服务的机器上解析。</p>
@@ -527,7 +692,7 @@ export default defineComponent({
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label class="block">
             <span class="text-xs text-slate-500 mb-1 block">转码预设（或下方自定义参数）</span>
-            <select class="input" v-model="submitForm.presetId">
+            <select class="input" v-model="submitForm.presetId" @change="syncPresetToArgs()">
               <option value="">使用自定义参数</option>
               <option v-for="p in presets" :key="p.id" :value="p.id">{{ p.name }}（{{ p.container }}）</option>
             </select>
@@ -547,7 +712,7 @@ export default defineComponent({
                  :placeholder="submitForm.isFullCommand ? 'ffmpeg -i /in.mp4 -c:v libx264 -crf 20 /out.mp4' : '-c:v libx264 -crf 20 -c:a aac -b:a 128k'" />
         </label>
         <label class="flex items-center gap-2 text-sm text-slate-400">
-          <input type="checkbox" v-model="submitForm.isFullCommand" class="accent-cyan-400" /> 高级：完整命令模式
+          <input type="checkbox" v-model="submitForm.isFullCommand" class="accent-cyan-400" @change="syncPresetToArgs()" /> 高级：完整命令模式
         </label>
         <div v-if="submitForm.isFullCommand" class="text-[10px] text-amber-300/80 px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 -mt-1">
           ⚠ 完整命令模式由你自写整条命令（含输入与输出路径）：系统不注入「-progress pipe:1」因此<b>进度百分比不可用</b>；
@@ -568,8 +733,8 @@ export default defineComponent({
           </label>
         </div>
         <label class="flex items-center gap-2 text-sm text-slate-400">
-          <input type="checkbox" v-model="submitForm.useHardwareAccel" class="accent-cyan-400" /> ⚡ 使用硬件加速
-          <select v-model="submitForm.hardwareBackend" class="input input-sm w-auto !w-36 py-1 text-xs"
+          <input type="checkbox" v-model="submitForm.useHardwareAccel" class="accent-cyan-400" @change="syncPresetToArgs()" /> ⚡ 使用硬件加速
+          <select v-model="submitForm.hardwareBackend" class="input input-sm w-auto !w-36 py-1 text-xs" @change="syncPresetToArgs()"
                   :title="ffmpeg.hwBackends && ffmpeg.hwBackends.length ? '就绪后端：' + ffmpeg.hwBackends.join(' · ') : ''">
             <option value="auto">auto（按硬件自动选）</option>
             <option value="nvenc">nvenc（NVIDIA）</option>

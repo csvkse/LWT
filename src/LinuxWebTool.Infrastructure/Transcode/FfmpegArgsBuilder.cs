@@ -58,6 +58,45 @@ public static class FfmpegArgsBuilder
         return new BuildResult(tokens, false);
     }
 
+    /// <summary>
+    /// 预设 → 完整命令（含 -i 输入与输出路径、具体硬件编码器类型）。供完整命令模式展示/预填/后端兜底展开。
+    /// 复用 BuildPresetTokens 的硬件判定：指定后端(vaapi/nvenc/qsv)→用同家族具体硬件编码器；
+    /// auto→按就绪后端(readyBackends)优先级选；不可用→回退等价软件编码器。
+    /// 保留 -progress pipe:1 -nostats 骨架（与普通转码一致，仅用于展示/编辑，是否执行由用户自控）。
+    /// </summary>
+    public static string BuildFullCommand(TranscodePreset preset, string input, string output,
+        string? preferredBackend, IReadOnlyList<string>? readyBackends,
+        IReadOnlyList<string> hwEncoders, bool useHardwareAccel)
+    {
+        var hw = new HwEncodeContext(useHardwareAccel, hwEncoders, preferredBackend, readyBackends);
+        var r = BuildPresetTokens(preset, hw);
+        var parts = new List<string> { "ffmpeg", "-y" };
+        // 硬件全局/解码选项（-vaapi_device -hwaccel）置于 -i 前
+        if (r.Item6 is { Count: > 0 } preInput)
+        {
+            parts.AddRange(preInput);
+        }
+        parts.Add("-i");
+        parts.Add(input);
+        parts.AddRange(r.Item1); // 参数段：-c:v/-qp/-crf/-c:a/-b:a/-movflags/ExtraArgs
+        parts.AddRange(["-progress", "pipe:1", "-nostats", output]);
+        return string.Join(' ', parts);
+    }
+
+    /// <summary>
+    /// 预设 → 中间段参数（不含 -i/输出/-progress）。供非完整模式展示/预填/后端兜底展开。
+    /// 硬件判定逻辑与 BuildFullCommand/BuildPresetTokens 一致：指定后端/auto 选具体硬件编码器，
+    /// 不可用回退等价软件编码器。返回如 "-c:v libx264 -crf 23 -c:a aac -b:a 128k -movflags +faststart"。
+    /// </summary>
+    public static string BuildArgsFromPreset(TranscodePreset preset,
+        string? preferredBackend, IReadOnlyList<string>? readyBackends,
+        IReadOnlyList<string> hwEncoders, bool useHardwareAccel)
+    {
+        var hw = new HwEncodeContext(useHardwareAccel, hwEncoders, preferredBackend, readyBackends);
+        var r = BuildPresetTokens(preset, hw);
+        return string.Join(' ', r.Item1);
+    }
+
     public static BuildResult BuildWithHw(string input, string output, TranscodePreset? preset, string? customArgs,
         HwEncodeContext? hwContext)
     {

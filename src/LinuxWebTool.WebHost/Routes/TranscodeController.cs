@@ -74,10 +74,9 @@ public class TranscodeController(
         {
             return BadRequest(new { message = "请选择预设或填写自定义 ffmpeg 参数" });
         }
-        if (!string.IsNullOrWhiteSpace(request.CustomArgs) && request.PresetId is not null)
-        {
-            return BadRequest(new { message = "预设与自定义参数不能同时使用" });
-        }
+        // 预设与自定义参数可共存（预设作为模板快照展开到自定义参数后，以自定义参数为准）。
+        // 仅当两者同时明确非空且分属不同来源（未展开）时，视为互斥；这里放宽——自定义参数优先。
+        // （前端选预设展开后 presetId 置 null，实际不会同时非空；API 直调时允许以 customArgs 为准。）
 
         var source = request.SourcePath.Trim();
         if (System.IO.File.Exists(source))
@@ -200,6 +199,25 @@ public class TranscodeController(
         TranscodeTrigger trigger, string? outputDir, Guid? watchRuleId, bool useHardwareAccel = true,
         string? hardwareBackend = "auto", bool isFullCommand = false)
     {
+        // 预设作为模板快照：选预设且未填自定义参数时，用预设展开到 CustomArgs（可执行）。
+        // 非完整模式 → 中间段参数；完整命令模式 → 完整命令（含 -i/输出路径/具体硬件编码器）。
+        if (preset is not null && string.IsNullOrWhiteSpace(customArgs))
+        {
+            var detection = await locator.DetectAsync();
+            if (isFullCommand)
+            {
+                var container = preset.Container.Trim().Length > 0 ? preset.Container.Trim() : (outputContainer ?? "mp4");
+                var (finalPath, _) = OutputPathPlanner.Plan(source, container, outputMode, outputDir);
+                customArgs = FfmpegArgsBuilder.BuildFullCommand(preset, source, finalPath, hardwareBackend,
+                    detection.HwBackends, detection.HwEncoders, useHardwareAccel);
+            }
+            else
+            {
+                customArgs = FfmpegArgsBuilder.BuildArgsFromPreset(preset, hardwareBackend,
+                    detection.HwBackends, detection.HwEncoders, useHardwareAccel);
+            }
+        }
+
         var job = new TranscodeJob
         {
             SourcePath = source,

@@ -94,4 +94,40 @@ public class FfmpegArgsFilterTests
         // 输入源不被强制注入
         Assert.DoesNotContain(" -i /in.mp4 ", cmd); // 由用户自写，系统不重复
     }
+
+    [Fact]
+    public void Build_args_from_preset_returns_middle_section()
+    {
+        // 非完整模式：预设展开为中间段参数（不含 -i/输出/-progress）
+        var args = FfmpegArgsBuilder.BuildArgsFromPreset(SoftPreset(), "auto", [], [], false);
+        Assert.Contains("-c:v libx264", args);
+        Assert.Contains("-crf 23", args);       // 软件质量 → -crf
+        Assert.Contains("-c:a aac", args);
+        Assert.Contains("-b:a 128k", args);
+        Assert.Contains("-movflags +faststart", args);
+        Assert.DoesNotContain("-i ", args);      // 无输入
+        Assert.DoesNotContain("-progress", args);// 无进度
+        Assert.DoesNotContain("-nostats", args); // 无 nostats
+    }
+
+    [Fact]
+    public void Build_full_command_includes_input_progress_output()
+    {
+        // 完整命令模式：预设展开为完整命令（含 -i/进度/输出/中间段，非硬件路径保留软件 ExtraArgs）
+        var cmd = FfmpegArgsBuilder.BuildFullCommand(SoftPreset(), "/in.mp4", "/out.mp4", "auto", [], [], false);
+        Assert.StartsWith("ffmpeg -y", cmd);
+        Assert.Contains("-i /in.mp4", cmd);
+        Assert.Contains("-c:v libx264", cmd);
+        Assert.Contains("-crf 23", cmd);
+        Assert.Contains("-progress pipe:1 -nostats /out.mp4", cmd);
+    }
+
+    [Fact]
+    public void Build_full_command_keeps_software_extra_args_in_non_hw()
+    {
+        // 非硬件路径完整命令保留软件专属 ExtraArgs（-preset medium）
+        var cmd = FfmpegArgsBuilder.BuildFullCommand(SoftPreset(), "/in.mp4", "/out.mp4", "auto", [], [], false);
+        Assert.Contains("-preset medium", cmd);
+        Assert.Contains("-tag:v hvc1", cmd);
+    }
 }
