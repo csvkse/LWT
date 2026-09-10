@@ -30,45 +30,30 @@ public partial class ExecutionStore(DbConnectionFactory factory)
         var page = Math.Max(1, query.Page);
         var pageSize = Math.Clamp(query.PageSize <= 0 ? 20 : query.PageSize, 1, 200);
         
-        var whereClause = "WHERE 1=1";
-        var parameters = new DynamicParameters();
-        
-        if (query.Source.HasValue)
+        var source = query.Source.HasValue ? (int)query.Source.Value : (int?)null;
+        var status = query.Status.HasValue ? (int)query.Status.Value : (int?)null;
+        var keyword = string.IsNullOrWhiteSpace(query.Keyword) ? null : $"%{query.Keyword.Trim()}%";
+        var parameters = new
         {
-            whereClause += " AND Source = @Source";
-            parameters.Add("Source", (int)query.Source.Value);
-        }
-        if (query.Status.HasValue)
-        {
-            whereClause += " AND Status = @Status";
-            parameters.Add("Status", (int)query.Status.Value);
-        }
-        if (query.CommandId.HasValue)
-        {
-            whereClause += " AND CommandId = @CommandId";
-            parameters.Add("CommandId", query.CommandId.Value);
-        }
-        if (query.ScheduleTaskId.HasValue)
-        {
-            whereClause += " AND ScheduleTaskId = @ScheduleTaskId";
-            parameters.Add("ScheduleTaskId", query.ScheduleTaskId.Value);
-        }
-        if (!string.IsNullOrWhiteSpace(query.Keyword))
-        {
-            var keyword = query.Keyword.Trim();
-            whereClause += " AND (CommandName LIKE @Keyword OR CommandText LIKE @Keyword)";
-            parameters.Add("Keyword", $"%{keyword}%");
-        }
-
-        var countSql = $"SELECT COUNT(*) FROM execution_record {whereClause}";
-        var total = await db.QueryFirstOrDefaultAsync<int>(countSql, parameters);
-
+            Source = source,
+            Status = status,
+            CommandId = query.CommandId,
+            ScheduleTaskId = query.ScheduleTaskId,
+            Keyword = keyword,
+        };
+        const string whereClause = "WHERE (@Source IS NULL OR Source = @Source) AND (@Status IS NULL OR Status = @Status) AND (@CommandId IS NULL OR CommandId = @CommandId) AND (@ScheduleTaskId IS NULL OR ScheduleTaskId = @ScheduleTaskId) AND (@Keyword IS NULL OR CommandName LIKE @Keyword OR CommandText LIKE @Keyword)";
+        var total = await db.QueryFirstOrDefaultAsync<int>($"SELECT COUNT(*) FROM execution_record {whereClause}", parameters);
         var offset = (page - 1) * pageSize;
-        var dataSql = $"SELECT * FROM execution_record {whereClause} ORDER BY StartTime DESC LIMIT @PageSize OFFSET @Offset";
-        parameters.Add("PageSize", pageSize);
-        parameters.Add("Offset", offset);
-
-        var records = await db.QueryAsync<ExecutionRecord>(dataSql, parameters);
+        var records = await db.QueryAsync<ExecutionRecord>($"SELECT * FROM execution_record {whereClause} ORDER BY StartTime DESC LIMIT @PageSize OFFSET @Offset", new
+        {
+            parameters.Source,
+            parameters.Status,
+            parameters.CommandId,
+            parameters.ScheduleTaskId,
+            parameters.Keyword,
+            PageSize = pageSize,
+            Offset = offset,
+        });
 
         return new PagedResult<ExecutionRecord>
         {

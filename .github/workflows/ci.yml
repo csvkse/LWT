@@ -41,6 +41,9 @@ jobs:
       - name: Architecture Tests (后端架构门禁)
         run: dotnet test tests/LinuxWebTool.ArchitectureTests/LinuxWebTool.ArchitectureTests.csproj -c Release --no-build --nologo
 
+      - name: API Integration Tests (后端接口集成门禁)
+        run: dotnet test tests/LinuxWebTool.IntegrationTests/LinuxWebTool.IntegrationTests.csproj -c Release --no-build --nologo
+
       - name: Frontend Gate (前端架构门禁)
         run: node src/LinuxWebTool.WebHost/wwwroot/frontend-gate.cjs
 

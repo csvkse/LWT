@@ -21,7 +21,7 @@ public class LogsController(OperationLogStore operationLogStore, LogFileService 
     [HttpGet("Files")]
     public IResult Files()
     {
-        return Ok(logFileService.List());
+        return Ok(logFileService.List().Select(x => new LogFileItemResponse(x.Name, x.LengthBytes, x.LastWriteTime)).ToList());
     }
 
     /// <summary>查看日志文件末尾 N 行（默认 300）。</summary>

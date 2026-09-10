@@ -323,7 +323,11 @@ USB / GPU 直通的 compose 节选（叠加到上方任一示例的对应位置�
 
 ```powershell
 ./scripts/verify-fast.ps1          # 提交前必跑
+dotnet test LinuxWebTool.slnx -c Release # 运行全部单元/架构/集成测试
+./scripts/verify-aot.ps1            # Docker Native AOT 构建 + 61 路由冒烟
 ```
+
+测试分层：`tests/LinuxWebTool.ArchitectureTests` 包含架构门禁和核心纯单元测试；`tests/LinuxWebTool.IntegrationTests` 使用 TestServer、SQLite 和 Quartz 验证认证、CRUD 及 AOT 敏感接口；`scripts/smoke-aot.ps1` 在 Native AOT Docker 容器中调用全部后端路由，并扫描动态代码生成与 JSON metadata 错误。
 
 - Contracts 零依赖；Infrastructure 不引上层；Controller 禁直接 using SqlSugar（经 `*Store` 访问数据）
 - 命名空间 = 物理路径

@@ -24,29 +24,9 @@ public class SchedulesController(
         var items = tasks.Select(t =>
         {
             commands.TryGetValue(t.CommandId, out var command);
-            return new
-            {
-                t.Id,
-                t.Name,
-                t.CommandId,
-                CommandName = command?.Name ?? "(指令已删除)",
-                CommandText = command?.CommandText ?? string.Empty,
-                ScriptType = command?.ScriptType ?? 0,
-                t.CronExpression,
-                t.Enabled,
-                t.GroupId,
-                GroupName = t.GroupId.HasValue && groupNames.TryGetValue(t.GroupId.Value, out var name) ? name : null,
-                t.IsPinned,
-                t.SortOrder,
-                t.TimeoutSeconds,
-                t.Arguments,
-                t.LastRunTime,
-                t.NextRunTime,
-                t.CreateTime,
-                t.UpdateTime,
-            };
+            return new ScheduleItemResponse(t.Id, t.Name, t.CommandId, command?.Name ?? "(指令已删除)", command?.CommandText ?? string.Empty, command?.ScriptType ?? 0, t.CronExpression, t.Enabled, t.GroupId, t.GroupId.HasValue && groupNames.TryGetValue(t.GroupId.Value, out var name) ? name : null, t.IsPinned, t.SortOrder, t.TimeoutSeconds, t.Arguments, t.LastRunTime, t.NextRunTime, t.CreateTime, t.UpdateTime);
         });
-        return Ok(items);
+        return Ok(items.ToList());
     }
 
     [HttpPost]

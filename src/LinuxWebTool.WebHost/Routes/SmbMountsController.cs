@@ -18,13 +18,11 @@ public class SmbMountsController(
     [HttpGet("Support")]
     public IResult Support()
     {
-        return Ok(new
-        {
-            supported = SmbMountService.IsSupported,
-            message = SmbMountService.IsSupported
+        return Ok(new SmbSupportResponse(
+            SmbMountService.IsSupported,
+            SmbMountService.IsSupported
                 ? string.Empty
-                : "当前系统不支持挂载管理（需 Linux）。Docker 部署请以 --privileged --user root 运行（镜像含 cifs-utils）",
-        });
+                : "当前系统不支持挂载管理（需 Linux）。Docker 部署请以 --privileged --user root 运行（镜像含 cifs-utils）"));
     }
 
     [HttpGet]
@@ -34,26 +32,9 @@ public class SmbMountsController(
         var items = mounts.Select(m =>
         {
             var status = mountService.GetStatus(m);
-            return new
-            {
-                m.Id,
-                m.Name,
-                m.Server,
-                m.LocalPath,
-                m.Username,
-                m.Domain,
-                m.Options,
-                m.AutoMount,
-                m.Enabled,
-                m.Description,
-                HasPassword = !string.IsNullOrEmpty(m.Password),
-                Status = (int)status,
-                StatusText = StatusText(status),
-                m.CreateTime,
-                m.UpdateTime,
-            };
+            return new SmbMountItemResponse(m.Id, m.Name, m.Server, m.LocalPath, m.Username, m.Domain, m.Options, m.AutoMount, m.Enabled, m.Description, !string.IsNullOrEmpty(m.Password), (int)status, StatusText(status), m.CreateTime, m.UpdateTime);
         });
-        return Ok(items);
+        return Ok(items.ToList());
     }
 
     [HttpPost]

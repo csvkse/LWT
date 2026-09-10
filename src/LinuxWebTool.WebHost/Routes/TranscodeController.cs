@@ -275,20 +275,7 @@ public class TranscodeController(
     public async Task<IResult> Presets()
     {
         var presets = await presetStore.GetAllAsync();
-        return Ok(presets.Select(p => new
-        {
-            p.Id,
-            p.Name,
-            p.Container,
-            p.VideoCodec,
-            p.VideoQuality,
-            p.AudioCodec,
-            p.AudioBitrate,
-            p.ExtraArgs,
-            p.Description,
-            p.IsBuiltin,
-            p.CreateTime,
-        }));
+        return Ok(presets.Select(p => new PresetItemResponse(p.Id, p.Name, p.Container, p.VideoCodec, p.VideoQuality, p.AudioCodec, p.AudioBitrate, p.ExtraArgs, p.Description, p.IsBuiltin, p.CreateTime)).ToList());
     }
 
     [HttpPost("Presets")]
@@ -508,22 +495,7 @@ public class TranscodeController(
     public async Task<IResult> WatchRules()
     {
         var rules = await watchRuleStore.GetAllAsync();
-        return Ok(rules.Select(r => new
-        {
-            r.Id,
-            r.Name,
-            r.WatchPath,
-            r.FilePatterns,
-            r.PresetId,
-            r.OutputMode,
-            r.Recursive,
-            r.Mode,
-            r.PollSeconds,
-            r.Enabled,
-            r.UseHardwareAccel,
-            r.HardwareBackend,
-            r.LastScanTime,
-        }));
+        return Ok(rules.Select(r => new WatchRuleItemResponse(r.Id, r.Name, r.WatchPath, r.FilePatterns, r.PresetId, r.OutputMode, r.Recursive, r.Mode, r.PollSeconds, r.Enabled, r.UseHardwareAccel, r.HardwareBackend, r.LastScanTime)).ToList());
     }
 
     [HttpPost("WatchRules")]

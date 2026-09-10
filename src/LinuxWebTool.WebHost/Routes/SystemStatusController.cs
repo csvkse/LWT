@@ -57,12 +57,10 @@ public class SystemStatusController(
     [HttpGet("ResourceHistory")]
     public async Task<IResult> ResourceHistory([FromQuery] int hours = 6)
     {
-        return Ok(new
-        {
-            System = await statusStore.QueryAsync(hours),
-            Disks = await diskStore.QueryAsync(hours),
-            Networks = await netStore.QueryAsync(hours),
-            Processes = await processStore.QueryAsync(hours),
-        });
+        return Ok(new ResourceHistoryResponse(
+            await statusStore.QueryAsync(hours),
+            await diskStore.QueryAsync(hours),
+            await netStore.QueryAsync(hours),
+            await processStore.QueryAsync(hours)));
     }
 }

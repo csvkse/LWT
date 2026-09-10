@@ -10,6 +10,7 @@ $root = Split-Path -Parent $PSScriptRoot
 Write-Host "== dotnet publish ($Runtime, self-contained) ==" -ForegroundColor Cyan
 dotnet publish (Join-Path $root 'src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj') `
     -c Release -r $Runtime --self-contained true `
+    -p:PublishAot=true `
     -o (Join-Path $root $OutputDir) --nologo
 if ($LASTEXITCODE -ne 0) { throw 'publish 失败' }
 

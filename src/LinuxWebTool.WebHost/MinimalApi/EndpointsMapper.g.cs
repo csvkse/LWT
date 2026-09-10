@@ -44,6 +44,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
         {
             var group_AuthController = app.MapGroup("/api/Auth");
             group_AuthController.MapPost("Login", async ([FromServices] AuthController ctrl, HttpContext ctx, [FromBody] LoginRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Login(request); }).AllowAnonymous();
+            group_AuthController.MapGet("Check", ([FromServices] AuthController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.Check(); });
             group_AuthController.MapPost("ChangeCredential", async ([FromServices] AuthController ctrl, HttpContext ctx, [FromBody] ChangeCredentialRequest request) => { ctrl.HttpContext = ctx; return await ctrl.ChangeCredential(request); });
             var group_CommandsController = app.MapGroup("/api/Commands");
             group_CommandsController.RequireAuthorization();
@@ -56,6 +57,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_CommandsController.MapGet("{id:guid}/History", async ([FromServices] CommandsController ctrl, HttpContext ctx, Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20) => { ctrl.HttpContext = ctx; return await ctrl.History(id, page, pageSize); });
             var group_FilesController = app.MapGroup("/api/Files");
             group_FilesController.RequireAuthorization();
+            group_FilesController.MapGet("", ([FromServices] FilesController ctrl, HttpContext ctx, [FromQuery] string path) => { ctrl.HttpContext = ctx; return ctrl.List(path); });
             group_FilesController.MapGet("Content", async ([FromServices] FilesController ctrl, HttpContext ctx, [FromQuery] string path) => { ctrl.HttpContext = ctx; return await ctrl.ReadContent(path); });
             group_FilesController.MapPost("Content", async ([FromServices] FilesController ctrl, HttpContext ctx, [FromBody] SaveTextRequest request) => { ctrl.HttpContext = ctx; return await ctrl.WriteContent(request); });
             group_FilesController.MapPost("Mkdir", async ([FromServices] FilesController ctrl, HttpContext ctx, [FromBody] PathRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Mkdir(request); });
@@ -75,6 +77,8 @@ namespace LinuxWebTool.WebHost.MinimalApi
             var group_LogsController = app.MapGroup("/api/Logs");
             group_LogsController.RequireAuthorization();
             group_LogsController.MapGet("Operations", async ([FromServices] LogsController ctrl, HttpContext ctx, [AsParameters] OperationLogQuery query) => { ctrl.HttpContext = ctx; return await ctrl.Operations(query); });
+            group_LogsController.MapGet("Files", ([FromServices] LogsController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.Files(); });
+            group_LogsController.MapGet("Files/{name}", ([FromServices] LogsController ctrl, HttpContext ctx, string name, [FromQuery] int tail = 300) => { ctrl.HttpContext = ctx; return ctrl.FileContent(name, tail); });
             var group_OverviewController = app.MapGroup("/api/Overview");
             group_OverviewController.RequireAuthorization();
             group_OverviewController.MapGet("", async ([FromServices] OverviewController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.Get(); });
@@ -89,6 +93,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_SchedulesController.MapGet("{id:guid}/Records", async ([FromServices] SchedulesController ctrl, HttpContext ctx, Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20) => { ctrl.HttpContext = ctx; return await ctrl.Records(id, page, pageSize); });
             var group_SmbMountsController = app.MapGroup("/api/SmbMounts");
             group_SmbMountsController.RequireAuthorization();
+            group_SmbMountsController.MapGet("Support", ([FromServices] SmbMountsController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.Support(); });
             group_SmbMountsController.MapGet("", async ([FromServices] SmbMountsController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.GetAll(); });
             group_SmbMountsController.MapPost("", async ([FromServices] SmbMountsController ctrl, HttpContext ctx, [FromBody] SaveSmbMountRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Create(request); });
             group_SmbMountsController.MapPut("{id:guid}", async ([FromServices] SmbMountsController ctrl, HttpContext ctx, Guid id, [FromBody] SaveSmbMountRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Update(id, request); });

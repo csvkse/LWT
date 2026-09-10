@@ -32,7 +32,7 @@ public class FilesController(
             return NotFound(new MessageResponse($"路径不存在或不是目录：{normalized}"));
         }
 
-        List<object> entries;
+        List<FileEntryResponse> entries;
         try
         {
             entries = BuildEntries(normalized);
@@ -46,19 +46,12 @@ public class FilesController(
             return StatusCode(StatusCodes.Status500InternalServerError, new MessageResponse($"读取目录失败：{ex.Message}"));
         }
 
-        return Ok(new
-        {
-            path = normalized,
-            parent = Parent(normalized),
-            name = Name(normalized),
-            isRoot = normalized == "/",
-            entries,
-        });
+        return Ok(new FileListResponse(normalized, Parent(normalized), Name(normalized), normalized == "/", entries));
     }
 
-    private static List<object> BuildEntries(string normalized)
+    private static List<FileEntryResponse> BuildEntries(string normalized)
     {
-        var entries = new List<object>();
+        var entries = new List<FileEntryResponse>();
         foreach (var dir in Directory.EnumerateDirectories(normalized).OrderBy(d => d, StringComparer.Ordinal))
         {
             var name = Name(dir);
@@ -72,16 +65,9 @@ public class FilesController(
         return entries;
     }
 
-    private static object Entry(string dir, string name, bool isDirectory, long? size, DateTime modified) => new
-    {
-        name,
-        path = Join(dir, name),
-        isDirectory,
-        size = isDirectory ? 0 : size ?? 0,
-        modified,
-        extension = isDirectory ? string.Empty : Path.GetExtension(name),
-        isTextual = !isDirectory && IsTextExtension(name),
-    };
+    private static FileEntryResponse Entry(string dir, string name, bool isDirectory, long? size, DateTime modified) => new(
+        name, Join(dir, name), isDirectory, isDirectory ? 0 : size ?? 0, modified,
+        isDirectory ? string.Empty : Path.GetExtension(name), !isDirectory && IsTextExtension(name));
 
     private static string Join(string dir, string name) => dir == "/" ? "/" + name : dir + "/" + name;
 

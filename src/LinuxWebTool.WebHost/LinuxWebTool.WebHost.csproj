@@ -2,6 +2,8 @@
 
   <PropertyGroup>
     <RootNamespace>LinuxWebTool.WebHost</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
 
   <ItemGroup>

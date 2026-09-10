@@ -30,7 +30,7 @@ public class GroupsController(
                 usage
             ));
         }
-        return Ok(items);
+        return Ok(items.ToList());
     }
 
     [HttpPost]

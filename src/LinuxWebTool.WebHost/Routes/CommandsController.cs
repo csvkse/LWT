@@ -31,23 +31,11 @@ public class CommandsController(
         }
 
         var groupNames = (await groupStore.GetByTypeAsync(GroupBizType.Command)).ToDictionary(g => g.Id, g => g.Name);
-        var items = query.Select(c => new
-        {
-            c.Id,
-            c.Name,
-            c.CommandText,
-            c.ScriptType,
-            c.Description,
-            c.GroupId,
-            GroupName = c.GroupId.HasValue && groupNames.TryGetValue(c.GroupId.Value, out var name) ? name : null,
-            c.IsPinned,
-            c.SortOrder,
-            c.TimeoutSeconds,
-            c.LastExecTime,
-            c.CreateTime,
-            c.UpdateTime,
-        });
-        return Ok(items);
+        var items = query.Select(c => new CommandItemResponse(
+            c.Id, c.Name, c.CommandText, c.ScriptType, c.Description, c.GroupId,
+            c.GroupId.HasValue && groupNames.TryGetValue(c.GroupId.Value, out var name) ? name : null,
+            c.IsPinned, c.SortOrder, c.TimeoutSeconds, c.LastExecTime, c.CreateTime, c.UpdateTime));
+        return Ok(items.ToList());
     }
 
     [HttpPost]

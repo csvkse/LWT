@@ -113,4 +113,43 @@ public class ArchitectureTests
         }
         Assert.True(violations.Count == 0, "命名空间与物理路径不一致：\n" + string.Join("\n", violations));
     }
+
+    [Fact]
+    public void LinuxArch008_AOT关键响应类型必须为显式DTO()
+    {
+        var routesDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Routes");
+        var violations = Directory.EnumerateFiles(routesDir, "*.cs", SearchOption.TopDirectoryOnly)
+            .Where(file => Regex.IsMatch(File.ReadAllText(file), @"new\s*\{"))
+            .Select(Path.GetFileName)
+            .ToList();
+        Assert.True(violations.Count == 0, "Routes 禁止匿名对象响应/投影：" + string.Join(", ", violations));
+        foreach (var file in new[] { "CommandsController.cs", "SmbMountsController.cs", "SystemStatusController.cs", "FilesController.cs", "TranscodeController.cs" })
+        {
+            var source = File.ReadAllText(Path.Combine(routesDir, file));
+            Assert.DoesNotContain("List<object>", source);
+        }
+    }
+
+    [Fact]
+    public void LinuxArch009_关键控制器接口必须存在生成映射()
+    {
+        var mapper = File.ReadAllText(Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "MinimalApi", "EndpointsMapper.g.cs"));
+        foreach (var route in new[] { "MapGet(\"Check\"", "group_FilesController.MapGet(\"\"", "MapGet(\"Files\"", "MapGet(\"Files/{name}\"", "group_SmbMountsController.MapGet(\"Support\"" })
+        {
+            Assert.Contains(route, mapper);
+        }
+    }
+
+    [Fact]
+    public void LinuxArch010_发布脚本必须启用NativeAOT且关闭反射JSON()
+    {
+        var project = File.ReadAllText(Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "LinuxWebTool.WebHost.csproj"));
+        var publish = File.ReadAllText(Path.Combine(RepoRoot, "scripts", "publish.ps1"));
+        Assert.Contains("<IsAotCompatible>true</IsAotCompatible>", project);
+        Assert.Contains("<JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>", project);
+        Assert.Contains("-p:PublishAot=true", publish);
+        var verifier = File.ReadAllText(Path.Combine(RepoRoot, "scripts", "verify-aot.ps1"));
+        Assert.Contains("docker build", verifier);
+        Assert.Contains("PublishAot", File.ReadAllText(Path.Combine(RepoRoot, "Dockerfile")));
+    }
 }
