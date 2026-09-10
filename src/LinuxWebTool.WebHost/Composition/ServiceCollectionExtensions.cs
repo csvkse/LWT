@@ -2,13 +2,14 @@ using LinuxWebTool.WebHost.Middleware;
 using LinuxWebTool.Infrastructure.Support;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
 
 namespace LinuxWebTool.WebHost.Composition;
 
 public static class ServiceCollectionExtensions
 {
-    /// <summary>功能装配：数据库、仓储、Shell、日志、认证、调度、MVC 与 Swagger。</summary>
+    /// <summary>功能装配：数据库、仓储、Shell、日志、认证、调度、MVC 与 OpenAPI。</summary>
     public static WebApplicationBuilder AddApplicationServices(this WebApplicationBuilder builder)
     {
         var configuration = builder.Configuration;
@@ -86,26 +87,40 @@ public static class ServiceCollectionExtensions
 
         // Quartz 定时调度
         builder.Services.AddScheduling();
-        // MVC + Swagger
+
+        // MVC + OpenAPI（AOT 兼容，替代 Swashbuckle）
         builder.Services.AddControllers();
         builder.Services.AddHttpContextAccessor();
-        builder.Services.AddEndpointsApiExplorer();
-        builder.Services.AddSwaggerGen(options =>
+        builder.Services.AddOpenApi(options =>
         {
-            options.SwaggerDoc("v1", new OpenApiInfo { Title = "LinuxWebTool API", Version = "v1" });
-            options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+            options.AddDocumentTransformer((document, context, ct) =>
             {
-                Type = SecuritySchemeType.Http,
-                Scheme = "bearer",
-                BearerFormat = "JWT",
-                Description = "粘贴 /api/Auth/Login 返回的 Token",
+                document.Info.Title = "LinuxWebTool API";
+                document.Info.Version = "v1";
+                return Task.CompletedTask;
             });
-            options.AddSecurityRequirement(document => new OpenApiSecurityRequirement
-            {
-                [new OpenApiSecuritySchemeReference("Bearer", document)] = [],
-            });
+            // JWT Bearer 安全方案
+            options.AddDocumentTransformer<BearerSecuritySchemeTransformer>();
         });
 
         return builder;
+    }
+}
+
+/// <summary>为 OpenAPI 文档注入 JWT Bearer 安全方案。</summary>
+internal sealed class BearerSecuritySchemeTransformer : IOpenApiDocumentTransformer
+{
+    public Task TransformAsync(OpenApiDocument document, OpenApiDocumentTransformerContext context, CancellationToken cancellationToken)
+    {
+        document.Components ??= new OpenApiComponents();
+        document.Components.SecuritySchemes ??= new Dictionary<string, OpenApiSecurityScheme>();
+        document.Components.SecuritySchemes["Bearer"] = new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "JWT",
+            Description = "粘贴 /api/Auth/Login 返回的 Token",
+        };
+        return Task.CompletedTask;
     }
 }

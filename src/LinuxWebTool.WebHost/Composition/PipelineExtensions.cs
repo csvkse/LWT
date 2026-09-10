@@ -1,11 +1,12 @@
 using LinuxWebTool.Infrastructure.Support;
 using LinuxWebTool.WebHost.Middleware;
+using Scalar.AspNetCore;
 
 namespace LinuxWebTool.WebHost.Composition;
 
 public static class PipelineExtensions
 {
-    /// <summary>中间件管线：异常 → 静态前端 → Swagger → 认证 → API → SPA 回退。</summary>
+    /// <summary>中间件管线：异常 → 静态前端 → OpenAPI → 认证 → API → SPA 回退。</summary>
     public static WebApplication UseApplicationPipeline(this WebApplication app)
     {
         app.UseMiddleware<ExceptionHandlingMiddleware>();
@@ -38,8 +39,10 @@ public static class PipelineExtensions
         var swaggerEnabled = app.Configuration.GetValue("Swagger:Enabled", true);
         if (swaggerEnabled)
         {
-            app.UseSwagger();
-            app.UseSwaggerUI();
+            // MapOpenApi 提供 /openapi/v1.json（AOT 兼容，替代 UseSwagger）
+            app.MapOpenApi();
+            // Scalar UI 替代 Swagger UI，默认访问路径 /scalar/v1
+            app.MapScalarApiReference();
         }
 
         app.UseAuthentication();
