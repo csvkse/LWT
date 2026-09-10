@@ -1,26 +1,22 @@
-using SqlSugar;
-
+﻿
 namespace LinuxWebTool.Infrastructure.Persistence.Entities;
 
 /// <summary>
-/// 系统状态历史网卡快照（每次采样记录每个网卡的收发速率）。
-/// 与 SystemStatusProcessSnapshot / SystemStatusDiskSnapshot 共用同一采样时间戳（Time）。
-/// </summary>
-[SugarTable("system_status_net_snapshot")]
+/// 绯荤粺鐘舵€佸巻鍙茬綉鍗″揩鐓э紙姣忔閲囨牱璁板綍姣忎釜缃戝崱鐨勬敹鍙戦€熺巼锛夈€?/// 涓?SystemStatusProcessSnapshot / SystemStatusDiskSnapshot 鍏辩敤鍚屼竴閲囨牱鏃堕棿鎴筹紙Time锛夈€?/// </summary>
 public class SystemStatusNetSnapshot
 {
-    [SugarColumn(IsPrimaryKey = true)]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    /// <summary>共用采样时间（与整机 / 进程 / 磁盘快照同刻）。</summary>
+    /// <summary>鍏辩敤閲囨牱鏃堕棿锛堜笌鏁存満 / 杩涚▼ / 纾佺洏蹇収鍚屽埢锛夈€?/summary>
     public DateTime Time { get; set; } = DateTime.Now;
 
-    /// <summary>网卡名。</summary>
+    /// <summary>缃戝崱鍚嶃€?/summary>
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>发送速率（字节/秒）。</summary>
+    /// <summary>鍙戦€侀€熺巼锛堝瓧鑺?绉掞級銆?/summary>
     public long SentBytesPerSec { get; set; }
 
-    /// <summary>接收速率（字节/秒）。</summary>
+    /// <summary>鎺ユ敹閫熺巼锛堝瓧鑺?绉掞級銆?/summary>
     public long RecvBytesPerSec { get; set; }
 }
+

@@ -1,47 +1,37 @@
-using SqlSugar;
-
+﻿
 namespace LinuxWebTool.Infrastructure.Persistence.Entities;
 
-/// <summary>SMB 挂载配置。挂载 / 卸载 / 状态探测由 SmbMountService 执行，启动重挂由 SmbMountStartupService 负责。</summary>
-[SugarTable("smb_mount")]
+/// <summary>SMB 鎸傝浇閰嶇疆銆傛寕杞?/ 鍗歌浇 / 鐘舵€佹帰娴嬬敱 SmbMountService 鎵ц锛屽惎鍔ㄩ噸鎸傜敱 SmbMountStartupService 璐熻矗銆?/summary>
 public class SmbMount
 {
-    [SugarColumn(IsPrimaryKey = true)]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [SugarColumn(ColumnDataType = "nvarchar(100)")]
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>服务器共享地址，归一化为 //host/share。</summary>
-    [SugarColumn(ColumnDataType = "nvarchar(200)")]
+    /// <summary>鏈嶅姟鍣ㄥ叡浜湴鍧€锛屽綊涓€鍖栦负 //host/share銆?/summary>
     public string Server { get; set; } = string.Empty;
 
-    /// <summary>本地挂载点（Linux 绝对路径）。</summary>
-    [SugarColumn(ColumnDataType = "nvarchar(500)")]
+    /// <summary>鏈湴鎸傝浇鐐癸紙Linux 缁濆璺緞锛夈€?/summary>
     public string LocalPath { get; set; } = string.Empty;
 
-    [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(100)")]
     public string? Username { get; set; }
 
-    /// <summary>SMB 密码（挂载本身需要原文；同时落地 data/mount-creds 凭据文件，600 权限）。</summary>
-    [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(200)")]
+    /// <summary>SMB 瀵嗙爜锛堟寕杞芥湰韬渶瑕佸師鏂囷紱鍚屾椂钀藉湴 data/mount-creds 鍑嵁鏂囦欢锛?00 鏉冮檺锛夈€?/summary>
     public string? Password { get; set; }
 
-    [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(100)")]
     public string? Domain { get; set; }
 
-    /// <summary>附加挂载选项（逗号分隔）。</summary>
-    [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(500)")]
+    /// <summary>闄勫姞鎸傝浇閫夐」锛堥€楀彿鍒嗛殧锛夈€?/summary>
     public string? Options { get; set; }
 
     public bool AutoMount { get; set; }
 
     public bool Enabled { get; set; } = true;
 
-    [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(500)")]
     public string? Description { get; set; }
 
     public DateTime CreateTime { get; set; } = DateTime.Now;
 
     public DateTime UpdateTime { get; set; } = DateTime.Now;
 }
+

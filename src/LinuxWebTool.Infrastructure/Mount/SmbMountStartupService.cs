@@ -29,7 +29,7 @@ public sealed class SmbMountStartupService(
         List<SmbMount> mounts;
         try
         {
-            mounts = await store.GetAllAsync();
+            mounts = (await store.GetAllAsync()).ToList();
         }
         catch (Exception ex)
         {

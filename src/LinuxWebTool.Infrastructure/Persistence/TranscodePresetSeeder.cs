@@ -1,23 +1,26 @@
-using SqlSugar;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Dapper;
+using LinuxWebTool.Infrastructure.Persistence.Entities;
 
 namespace LinuxWebTool.Infrastructure.Persistence;
 
 /// <summary>内置转码预设播种：增量补齐内置预设（缺哪个补哪个，已存在的跳过，不干扰用户创建的预设）。</summary>
 public static class TranscodePresetSeeder
 {
-    public static void Seed(ISqlSugarClient db)
+    public static void Seed(DbConnectionFactory factory)
     {
+        using var db = factory.CreateConnection();
         // 已存在的内置预设名集合（按 Name 比对，避免重复插入；用户手动创建的 IsBuiltin=false 不计入）。
-        var existingBuiltin = db.Queryable<TranscodePreset>()
-            .Where(p => p.IsBuiltin)
-            .Select(p => p.Name)
-            .ToList()
+        var existingBuiltin = db.Query<string>("SELECT Name FROM transcode_preset WHERE IsBuiltin = 1")
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var presets = new List<TranscodePreset>
         {
             new()
             {
+                Id = Guid.NewGuid(),
                 Name = "MP4 H.264 通用",
                 Container = "mp4",
                 VideoCodec = "libx264",
@@ -30,6 +33,7 @@ public static class TranscodePresetSeeder
             },
             new()
             {
+                Id = Guid.NewGuid(),
                 Name = "MP4 H.265 高压缩",
                 Container = "mp4",
                 VideoCodec = "libx265",
@@ -42,6 +46,7 @@ public static class TranscodePresetSeeder
             },
             new()
             {
+                Id = Guid.NewGuid(),
                 Name = "MKV 无损重封装",
                 Container = "mkv",
                 VideoCodec = "copy",
@@ -51,6 +56,7 @@ public static class TranscodePresetSeeder
             },
             new()
             {
+                Id = Guid.NewGuid(),
                 Name = "MP3 音频提取",
                 Container = "mp3",
                 VideoCodec = "",
@@ -61,6 +67,7 @@ public static class TranscodePresetSeeder
             },
             new()
             {
+                Id = Guid.NewGuid(),
                 Name = "MP4 H.264 高码率",
                 Container = "mp4",
                 VideoCodec = "libx264",
@@ -73,6 +80,7 @@ public static class TranscodePresetSeeder
             },
             new()
             {
+                Id = Guid.NewGuid(),
                 Name = "MP4 H.264 低码率",
                 Container = "mp4",
                 VideoCodec = "libx264",
@@ -85,6 +93,7 @@ public static class TranscodePresetSeeder
             },
             new()
             {
+                Id = Guid.NewGuid(),
                 Name = "MP4 H.265 高码率",
                 Container = "mp4",
                 VideoCodec = "libx265",
@@ -97,6 +106,7 @@ public static class TranscodePresetSeeder
             },
             new()
             {
+                Id = Guid.NewGuid(),
                 Name = "MP4 屏幕录制 / 动画",
                 Container = "mp4",
                 VideoCodec = "libx264",
@@ -109,6 +119,7 @@ public static class TranscodePresetSeeder
             },
             new()
             {
+                Id = Guid.NewGuid(),
                 Name = "MP4 H.265 低码率",
                 Container = "mp4",
                 VideoCodec = "libx265",
@@ -121,6 +132,7 @@ public static class TranscodePresetSeeder
             },
             new()
             {
+                Id = Guid.NewGuid(),
                 Name = "MKV H.265 无损重封装",
                 Container = "mkv",
                 VideoCodec = "copy",
@@ -130,6 +142,7 @@ public static class TranscodePresetSeeder
             },
             new()
             {
+                Id = Guid.NewGuid(),
                 Name = "M4A AAC 音频提取",
                 Container = "m4a",
                 VideoCodec = "",
@@ -140,6 +153,7 @@ public static class TranscodePresetSeeder
             },
             new()
             {
+                Id = Guid.NewGuid(),
                 Name = "FLAC 无损音频提取",
                 Container = "flac",
                 VideoCodec = "",
@@ -158,7 +172,10 @@ public static class TranscodePresetSeeder
             }
             preset.CreateTime = DateTime.Now;
             preset.UpdateTime = DateTime.Now;
-            db.Insertable(preset).ExecuteCommandAsync();
+            db.Execute(@"
+                INSERT INTO transcode_preset (Id, Name, Container, VideoCodec, VideoQuality, AudioCodec, AudioBitrate, ExtraArgs, Description, IsBuiltin, CreateTime, UpdateTime)
+                VALUES (@Id, @Name, @Container, @VideoCodec, @VideoQuality, @AudioCodec, @AudioBitrate, @ExtraArgs, @Description, @IsBuiltin, @CreateTime, @UpdateTime)
+            ", preset);
         }
     }
 }

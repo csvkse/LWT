@@ -1,49 +1,74 @@
-using SqlSugar;
+using Dapper;
+using LinuxWebTool.Infrastructure.Persistence.Entities;
 
 namespace LinuxWebTool.Infrastructure.Persistence;
 
 /// <summary>SMB 挂载配置仓储。</summary>
-public class SmbMountStore(ISqlSugarClient db)
+[DapperAot]
+public partial class SmbMountStore(DbConnectionFactory factory)
 {
-    public Task<List<Entities.SmbMount>> GetAllAsync()
+    public async Task<IEnumerable<SmbMount>> GetAllAsync()
     {
-        return db.Queryable<Entities.SmbMount>()
-            .OrderBy(m => m.CreateTime)
-            .ToListAsync();
+        using var db = factory.CreateConnection();
+        var sql = "SELECT * FROM smb_mount ORDER BY CreateTime ASC";
+        return await db.QueryAsync<SmbMount>(sql);
     }
 
-    public async Task<Entities.SmbMount?> GetByIdAsync(Guid id)
+    public async Task<SmbMount?> GetByIdAsync(Guid id)
     {
-        return (Entities.SmbMount?)await db.Queryable<Entities.SmbMount>().FirstAsync(m => m.Id == id);
+        using var db = factory.CreateConnection();
+        var sql = "SELECT * FROM smb_mount WHERE Id = @Id LIMIT 1";
+        return await db.QueryFirstOrDefaultAsync<SmbMount>(sql, new { Id = id });
     }
 
-    public Task<bool> ExistsNameAsync(string name, Guid? excludeId)
+    public async Task<bool> ExistsNameAsync(string name, Guid? excludeId)
     {
-        return db.Queryable<Entities.SmbMount>()
-            .AnyAsync(m => m.Name == name && (excludeId == null || m.Id != excludeId));
+        using var db = factory.CreateConnection();
+        var sql = excludeId.HasValue 
+            ? "SELECT 1 FROM smb_mount WHERE Name = @Name AND Id != @ExcludeId LIMIT 1"
+            : "SELECT 1 FROM smb_mount WHERE Name = @Name LIMIT 1";
+        var count = await db.QueryFirstOrDefaultAsync<int>(sql, new { Name = name, ExcludeId = excludeId });
+        return count > 0;
     }
 
-    public Task<bool> ExistsLocalPathAsync(string localPath, Guid? excludeId)
+    public async Task<bool> ExistsLocalPathAsync(string localPath, Guid? excludeId)
     {
-        return db.Queryable<Entities.SmbMount>()
-            .AnyAsync(m => m.LocalPath == localPath && (excludeId == null || m.Id != excludeId));
+        using var db = factory.CreateConnection();
+        var sql = excludeId.HasValue 
+            ? "SELECT 1 FROM smb_mount WHERE LocalPath = @LocalPath AND Id != @ExcludeId LIMIT 1"
+            : "SELECT 1 FROM smb_mount WHERE LocalPath = @LocalPath LIMIT 1";
+        var count = await db.QueryFirstOrDefaultAsync<int>(sql, new { LocalPath = localPath, ExcludeId = excludeId });
+        return count > 0;
     }
 
-    public async Task InsertAsync(Entities.SmbMount mount)
+    public async Task InsertAsync(SmbMount mount)
     {
         mount.CreateTime = DateTime.Now;
         mount.UpdateTime = DateTime.Now;
-        await db.Insertable(mount).ExecuteCommandAsync();
+        using var db = factory.CreateConnection();
+        var sql = @"
+INSERT INTO smb_mount (Id, Name, Server, LocalPath, Username, Password, Domain, Options, AutoMount, Enabled, Description, CreateTime, UpdateTime) 
+VALUES (@Id, @Name, @Server, @LocalPath, @Username, @Password, @Domain, @Options, @AutoMount, @Enabled, @Description, @CreateTime, @UpdateTime)";
+        await db.ExecuteAsync(sql, mount);
     }
 
-    public async Task UpdateAsync(Entities.SmbMount mount)
+    public async Task UpdateAsync(SmbMount mount)
     {
         mount.UpdateTime = DateTime.Now;
-        await db.Updateable(mount).ExecuteCommandAsync();
+        using var db = factory.CreateConnection();
+        var sql = @"
+UPDATE smb_mount SET 
+    Name = @Name, Server = @Server, LocalPath = @LocalPath, Username = @Username, Password = @Password, 
+    Domain = @Domain, Options = @Options, AutoMount = @AutoMount, Enabled = @Enabled, 
+    Description = @Description, UpdateTime = @UpdateTime
+WHERE Id = @Id";
+        await db.ExecuteAsync(sql, mount);
     }
 
-    public Task DeleteAsync(Guid id)
+    public async Task DeleteAsync(Guid id)
     {
-        return db.Deleteable<Entities.SmbMount>().Where(m => m.Id == id).ExecuteCommandAsync();
+        using var db = factory.CreateConnection();
+        var sql = "DELETE FROM smb_mount WHERE Id = @Id";
+        await db.ExecuteAsync(sql, new { Id = id });
     }
 }

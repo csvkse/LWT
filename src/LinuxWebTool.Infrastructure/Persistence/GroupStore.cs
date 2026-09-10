@@ -1,45 +1,60 @@
-using SqlSugar;
+using Dapper;
+using LinuxWebTool.Infrastructure.Persistence.Entities;
 
 namespace LinuxWebTool.Infrastructure.Persistence;
 
 /// <summary>分组仓储（指令与定时任务共用）。</summary>
-public class GroupStore(ISqlSugarClient db)
+[DapperAot]
+public partial class GroupStore(DbConnectionFactory factory)
 {
-    public Task<List<CommandGroup>> GetByTypeAsync(GroupBizType bizType)
+    public async Task<IEnumerable<CommandGroup>> GetByTypeAsync(GroupBizType bizType)
     {
-        return db.Queryable<CommandGroup>()
-            .Where(g => g.BizType == (int)bizType)
-            .OrderBy(g => g.SortOrder)
-            .OrderBy(g => g.CreateTime)
-            .ToListAsync();
+        using var db = factory.CreateConnection();
+        return await db.QueryAsync<CommandGroup>(
+            "SELECT * FROM command_group WHERE BizType = @BizType ORDER BY SortOrder ASC, CreateTime ASC", 
+            new { BizType = (int)bizType });
     }
 
     public async Task<CommandGroup?> GetByIdAsync(Guid id)
     {
-        return (CommandGroup?)await db.Queryable<CommandGroup>().FirstAsync();
+        using var db = factory.CreateConnection();
+        return await db.QueryFirstOrDefaultAsync<CommandGroup>("SELECT * FROM command_group WHERE Id = @Id", new { Id = id });
     }
 
-    public Task<bool> ExistsNameAsync(string name, GroupBizType bizType, Guid? excludeId)
+    public async Task<bool> ExistsNameAsync(string name, GroupBizType bizType, Guid? excludeId)
     {
-        return db.Queryable<CommandGroup>()
-            .AnyAsync(g => g.Name == name
-                && g.BizType == (int)bizType
-                && (excludeId == null || g.Id != excludeId));
+        using var db = factory.CreateConnection();
+        var sql = "SELECT 1 FROM command_group WHERE Name = @Name AND BizType = @BizType";
+        if (excludeId.HasValue)
+        {
+            sql += " AND Id != @ExcludeId";
+        }
+        return await db.QueryFirstOrDefaultAsync<int?>(sql, new { Name = name, BizType = (int)bizType, ExcludeId = excludeId }) != null;
     }
 
     public async Task InsertAsync(CommandGroup group)
     {
+        using var db = factory.CreateConnection();
         group.CreateTime = DateTime.Now;
-        await db.Insertable(group).ExecuteCommandAsync();
+        var sql = @"
+            INSERT INTO command_group (Id, Name, BizType, SortOrder, CreateTime)
+            VALUES (@Id, @Name, @BizType, @SortOrder, @CreateTime)";
+        await db.ExecuteAsync(sql, group);
     }
 
     public async Task UpdateAsync(CommandGroup group)
     {
-        await db.Updateable(group).ExecuteCommandAsync();
+        using var db = factory.CreateConnection();
+        var sql = @"
+            UPDATE command_group 
+            SET Name = @Name, BizType = @BizType, SortOrder = @SortOrder, CreateTime = @CreateTime
+            WHERE Id = @Id";
+        await db.ExecuteAsync(sql, group);
     }
 
-    public Task DeleteAsync(Guid id)
+    public async Task DeleteAsync(Guid id)
     {
-        return db.Deleteable<CommandGroup>().Where(g => g.Id == id).ExecuteCommandAsync();
+        using var db = factory.CreateConnection();
+        await db.ExecuteAsync("DELETE FROM command_group WHERE Id = @Id", new { Id = id });
     }
 }

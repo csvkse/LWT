@@ -1,29 +1,25 @@
-using SqlSugar;
-
+﻿
 namespace LinuxWebTool.Infrastructure.Persistence.Entities;
 
 /// <summary>
-/// 系统状态历史磁盘挂载点快照（每次采样记录每个挂载点的使用情况）。
-/// 与 SystemStatusProcessSnapshot / SystemStatusNetSnapshot 共用同一采样时间戳（Time）。
-/// </summary>
-[SugarTable("system_status_disk_snapshot")]
+/// 绯荤粺鐘舵€佸巻鍙茬鐩樻寕杞界偣蹇収锛堟瘡娆￠噰鏍疯褰曟瘡涓寕杞界偣鐨勪娇鐢ㄦ儏鍐碉級銆?/// 涓?SystemStatusProcessSnapshot / SystemStatusNetSnapshot 鍏辩敤鍚屼竴閲囨牱鏃堕棿鎴筹紙Time锛夈€?/// </summary>
 public class SystemStatusDiskSnapshot
 {
-    [SugarColumn(IsPrimaryKey = true)]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    /// <summary>共用采样时间（与整机 / 进程 / 网络快照同刻）。</summary>
+    /// <summary>鍏辩敤閲囨牱鏃堕棿锛堜笌鏁存満 / 杩涚▼ / 缃戠粶蹇収鍚屽埢锛夈€?/summary>
     public DateTime Time { get; set; } = DateTime.Now;
 
-    /// <summary>挂载点。</summary>
+    /// <summary>鎸傝浇鐐广€?/summary>
     public string Mount { get; set; } = string.Empty;
 
     public string FileSystem { get; set; } = string.Empty;
 
-    /// <summary>使用率（0~100）。</summary>
+    /// <summary>浣跨敤鐜囷紙0~100锛夈€?/summary>
     public double UsagePercent { get; set; }
 
     public long TotalBytes { get; set; }
     public long UsedBytes { get; set; }
     public long FreeBytes { get; set; }
 }
+

@@ -18,8 +18,8 @@ public class OverviewController(
 
         return Ok(new OverviewResult
         {
-            CommandCount = (await commandStore.GetAllAsync()).Count,
-            ScheduleCount = schedules.Count,
+            CommandCount = (await commandStore.GetAllAsync()).Count(),
+            ScheduleCount = schedules.Count(),
             EnabledScheduleCount = schedules.Count(t => t.Enabled),
             TodayExecutions = await executionStore.CountTodayAsync(),
             TodayFailures = await executionStore.CountTodayFailuresAsync(),

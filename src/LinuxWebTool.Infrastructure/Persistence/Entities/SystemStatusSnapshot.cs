@@ -1,30 +1,28 @@
-using SqlSugar;
-
+﻿
 namespace LinuxWebTool.Infrastructure.Persistence.Entities;
 
-/// <summary>系统状态历史快照（后台 60s 采样一条，保留 7 天，供前端画曲线）。</summary>
-[SugarTable("system_status_snapshot")]
+/// <summary>绯荤粺鐘舵€佸巻鍙插揩鐓э紙鍚庡彴 60s 閲囨牱涓€鏉★紝淇濈暀 7 澶╋紝渚涘墠绔敾鏇茬嚎锛夈€?/summary>
 public class SystemStatusSnapshot
 {
-    [SugarColumn(IsPrimaryKey = true)]
     public Guid Id { get; set; } = Guid.NewGuid();
 
     public DateTime Time { get; set; } = DateTime.Now;
 
-    /// <summary>CPU 使用率（0~100）。</summary>
+    /// <summary>CPU 浣跨敤鐜囷紙0~100锛夈€?/summary>
     public double CpuUsage { get; set; }
 
     public double Load1 { get; set; }
 
-    /// <summary>内存使用率（0~100）。</summary>
+    /// <summary>鍐呭瓨浣跨敤鐜囷紙0~100锛夈€?/summary>
     public double MemUsage { get; set; }
 
-    /// <summary>根分区（Windows 系统盘）使用率（0~100）。</summary>
+    /// <summary>鏍瑰垎鍖猴紙Windows 绯荤粺鐩橈級浣跨敤鐜囷紙0~100锛夈€?/summary>
     public double DiskRootUsage { get; set; }
 
-    /// <summary>全网卡发送速率（字节/秒）。</summary>
+    /// <summary>鍏ㄧ綉鍗″彂閫侀€熺巼锛堝瓧鑺?绉掞級銆?/summary>
     public long NetSentBps { get; set; }
 
-    /// <summary>全网卡接收速率（字节/秒）。</summary>
+    /// <summary>鍏ㄧ綉鍗℃帴鏀堕€熺巼锛堝瓧鑺?绉掞級銆?/summary>
     public long NetRecvBps { get; set; }
 }
+

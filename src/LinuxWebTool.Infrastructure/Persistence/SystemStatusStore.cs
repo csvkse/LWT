@@ -1,39 +1,54 @@
+using Dapper;
 using LinuxWebTool.Contracts.Models;
-using SqlSugar;
+using LinuxWebTool.Infrastructure.Persistence.Entities;
 
 namespace LinuxWebTool.Infrastructure.Persistence;
 
 /// <summary>系统状态快照仓储（写入 / 时间窗口查询 / 过期清理）。</summary>
-public class SystemStatusStore(ISqlSugarClient db)
+[DapperAot]
+public partial class SystemStatusStore(DbConnectionFactory factory)
 {
     public async Task InsertAsync(SystemStatusSnapshot snapshot)
     {
         snapshot.Time = DateTime.Now;
-        await db.Insertable(snapshot).ExecuteCommandAsync();
+        using var db = factory.CreateConnection();
+        var sql = @"
+INSERT INTO system_status_snapshot (Id, Time, CpuUsage, Load1, MemUsage, DiskRootUsage, NetSentBps, NetRecvBps)
+VALUES (@Id, @Time, @CpuUsage, @Load1, @MemUsage, @DiskRootUsage, @NetSentBps, @NetRecvBps)";
+        await db.ExecuteAsync(sql, snapshot);
     }
 
     /// <summary>以显式时间戳插入（与进程 / 磁盘 / 网络快照共用同一采样时刻）。</summary>
     public async Task InsertAsync(SystemStatusSnapshot snapshot, DateTime time)
     {
         snapshot.Time = time;
-        await db.Insertable(snapshot).ExecuteCommandAsync();
+        using var db = factory.CreateConnection();
+        var sql = @"
+INSERT INTO system_status_snapshot (Id, Time, CpuUsage, Load1, MemUsage, DiskRootUsage, NetSentBps, NetRecvBps)
+VALUES (@Id, @Time, @CpuUsage, @Load1, @MemUsage, @DiskRootUsage, @NetSentBps, @NetRecvBps)";
+        await db.ExecuteAsync(sql, snapshot);
     }
 
     /// <summary>查询最近 hours 小时的序列点（时间正序，供曲线渲染）。</summary>
-    public async Task<List<StatusSnapshotPoint>> QueryAsync(int hours)
+    public async Task<IEnumerable<StatusSnapshotPoint>> QueryAsync(int hours)
     {
         hours = Math.Clamp(hours, 1, 24 * 30);
         var since = DateTime.Now.AddHours(-hours);
-        var rows = await db.Queryable<SystemStatusSnapshot>()
-            .Where(s => s.Time >= since)
-            .OrderBy(s => s.Time)
-            .ToListAsync();
-        return rows.Select(ToPoint).ToList();
+        using var db = factory.CreateConnection();
+        var sql = @"
+SELECT *
+FROM system_status_snapshot
+WHERE Time >= @Since
+ORDER BY Time";
+        var rows = await db.QueryAsync<SystemStatusSnapshot>(sql, new { Since = since });
+        return rows.Select(ToPoint);
     }
 
-    public Task ClearOlderThan(DateTime cutoff)
+    public async Task ClearOlderThan(DateTime cutoff)
     {
-        return db.Deleteable<SystemStatusSnapshot>().Where(s => s.Time < cutoff).ExecuteCommandAsync();
+        using var db = factory.CreateConnection();
+        var sql = "DELETE FROM system_status_snapshot WHERE Time < @Cutoff";
+        await db.ExecuteAsync(sql, new { Cutoff = cutoff });
     }
 
     /// <summary>
@@ -48,9 +63,12 @@ public class SystemStatusStore(ISqlSugarClient db)
         long netThresholdBps)
     {
         var since = DateTime.Now.Add(-window);
-        var rows = await db.Queryable<SystemStatusSnapshot>()
-            .Where(s => s.Time >= since)
-            .ToListAsync();
+        using var db = factory.CreateConnection();
+        var sql = @"
+SELECT *
+FROM system_status_snapshot
+WHERE Time >= @Since";
+        var rows = await db.QueryAsync<SystemStatusSnapshot>(sql, new { Since = since });
         return rows.Any(s =>
             s.CpuUsage >= cpuThreshold ||
             s.MemUsage >= memThreshold ||

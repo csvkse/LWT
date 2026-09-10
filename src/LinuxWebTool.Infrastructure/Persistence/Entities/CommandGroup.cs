@@ -1,21 +1,18 @@
-using SqlSugar;
-
+﻿
 namespace LinuxWebTool.Infrastructure.Persistence.Entities;
 
-/// <summary>分组（指令 / 定时任务共用一张表，按 BizType 区分）。</summary>
-[SugarTable("command_group")]
+/// <summary>鍒嗙粍锛堟寚浠?/ 瀹氭椂浠诲姟鍏辩敤涓€寮犺〃锛屾寜 BizType 鍖哄垎锛夈€?/summary>
 public class CommandGroup
 {
-    [SugarColumn(IsPrimaryKey = true)]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [SugarColumn(ColumnDataType = "nvarchar(100)")]
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>0=指令分组 1=定时任务分组。</summary>
+    /// <summary>0=鎸囦护鍒嗙粍 1=瀹氭椂浠诲姟鍒嗙粍銆?/summary>
     public int BizType { get; set; }
 
     public int SortOrder { get; set; }
 
     public DateTime CreateTime { get; set; } = DateTime.Now;
 }
+

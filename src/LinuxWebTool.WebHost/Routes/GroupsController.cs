@@ -15,7 +15,7 @@ public class GroupsController(
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] GroupBizType bizType = GroupBizType.Command)
     {
-        var groups = await groupStore.GetByTypeAsync(bizType);
+        var groups = (await groupStore.GetByTypeAsync(bizType)).ToList();
         var items = new List<object>(groups.Count);
         foreach (var group in groups)
         {

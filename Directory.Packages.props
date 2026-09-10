@@ -4,9 +4,9 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- 持久化 -->
-    <PackageVersion Include="SqlSugarCore" Version="5.1.4.216" />
-    <!-- 覆盖传递依赖中存在已知漏洞的 e_sqlite3 原生库（GHSA-2m69-gcr7-jv3q），与参考项目一致 -->
-    <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.53.3" />
+    <PackageVersion Include="Dapper" Version="2.1.35" />
+    <PackageVersion Include="Dapper.AOT" Version="1.0.52" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.0" />
     <!-- 定时调度 -->
     <PackageVersion Include="Quartz.Extensions.Hosting" Version="3.18.2" />
     <!-- 认证 -->

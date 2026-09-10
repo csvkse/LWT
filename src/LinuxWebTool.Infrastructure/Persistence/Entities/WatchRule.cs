@@ -1,51 +1,44 @@
-using SqlSugar;
-
+﻿
 namespace LinuxWebTool.Infrastructure.Persistence.Entities;
 
-/// <summary>文件夹监听规则：发现新增 / 变更的匹配文件后自动入队转码。</summary>
-[SugarTable("watch_rule")]
+/// <summary>鏂囦欢澶圭洃鍚鍒欙細鍙戠幇鏂板 / 鍙樻洿鐨勫尮閰嶆枃浠跺悗鑷姩鍏ラ槦杞爜銆?/summary>
 public class WatchRule
 {
-    [SugarColumn(IsPrimaryKey = true)]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [SugarColumn(ColumnDataType = "nvarchar(100)")]
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>监听目录（可为 SMB 挂载路径）。</summary>
-    [SugarColumn(ColumnDataType = "nvarchar(1000)")]
+    /// <summary>鐩戝惉鐩綍锛堝彲涓?SMB 鎸傝浇璺緞锛夈€?/summary>
     public string WatchPath { get; set; } = string.Empty;
 
-    /// <summary>扩展名过滤（逗号分隔含点）；空 = 内置媒体扩展名全集。</summary>
-    [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(500)")]
+    /// <summary>鎵╁睍鍚嶈繃婊わ紙閫楀彿鍒嗛殧鍚偣锛夛紱绌?= 鍐呯疆濯掍綋鎵╁睍鍚嶅叏闆嗐€?/summary>
     public string? FilePatterns { get; set; }
 
     public Guid PresetId { get; set; }
 
-    /// <summary>输出模式：0=替换 1=并存。</summary>
+    /// <summary>杈撳嚭妯″紡锛?=鏇挎崲 1=骞跺瓨銆?/summary>
     public int OutputMode { get; set; }
 
     public bool Recursive { get; set; }
 
-    /// <summary>扫描方式：0=轮询 1=文件系统事件。</summary>
+    /// <summary>鎵弿鏂瑰紡锛?=杞 1=鏂囦欢绯荤粺浜嬩欢銆?/summary>
     public int Mode { get; set; }
 
-    /// <summary>轮询间隔秒数（最小 30）。</summary>
+    /// <summary>杞闂撮殧绉掓暟锛堟渶灏?30锛夈€?/summary>
     public int PollSeconds { get; set; } = 300;
 
     public bool Enabled { get; set; } = true;
 
-    /// <summary>是否使用硬件加速（默认开启；运行时探测不支持则回退软件编码）。</summary>
+    /// <summary>鏄惁浣跨敤纭欢鍔犻€燂紙榛樿寮€鍚紱杩愯鏃舵帰娴嬩笉鏀寔鍒欏洖閫€杞欢缂栫爜锛夈€?/summary>
     public bool UseHardwareAccel { get; set; } = true;
 
-    /// <summary>用户指定的硬件后端：auto / nvenc / qsv / vaapi / v4l2m2m；auto = 按硬件信号自动排优。</summary>
-    [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(20)")]
+    /// <summary>鐢ㄦ埛鎸囧畾鐨勭‖浠跺悗绔細auto / nvenc / qsv / vaapi / v4l2m2m锛沘uto = 鎸夌‖浠朵俊鍙疯嚜鍔ㄦ帓浼樸€?/summary>
     public string? HardwareBackend { get; set; } = "auto";
 
-    [SugarColumn(IsNullable = true)]
     public DateTime? LastScanTime { get; set; }
 
     public DateTime CreateTime { get; set; } = DateTime.Now;
 
     public DateTime UpdateTime { get; set; } = DateTime.Now;
 }
+

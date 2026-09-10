@@ -7,7 +7,7 @@ public sealed class ScheduleBootstrapService(ScheduleStore scheduleStore, ISched
     {
         try
         {
-            var tasks = await scheduleStore.GetEnabledAsync();
+            var tasks = (await scheduleStore.GetEnabledAsync()).ToList();
             await scheduleManager.SyncAllAsync(tasks);
             logger.LogInformation("定时任务引导完成：已注册 {Count} 个启用任务", tasks.Count);
         }

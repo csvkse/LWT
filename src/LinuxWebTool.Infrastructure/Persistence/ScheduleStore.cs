@@ -1,60 +1,84 @@
-using SqlSugar;
+using Dapper;
+using LinuxWebTool.Infrastructure.Persistence.Entities;
 
 namespace LinuxWebTool.Infrastructure.Persistence;
 
 /// <summary>定时任务仓储。</summary>
-public class ScheduleStore(ISqlSugarClient db)
+[DapperAot]
+public partial class ScheduleStore(DbConnectionFactory factory)
 {
-    public Task<List<ScheduleTask>> GetAllAsync()
+    public async Task<IEnumerable<ScheduleTask>> GetAllAsync()
     {
-        return db.Queryable<ScheduleTask>()
-            .OrderBy(t => t.IsPinned, OrderByType.Desc)
-            .OrderBy(t => t.SortOrder)
-            .OrderBy(t => t.CreateTime)
-            .ToListAsync();
+        using var db = factory.CreateConnection();
+        var sql = "SELECT * FROM schedule_task ORDER BY IsPinned DESC, SortOrder ASC, CreateTime ASC";
+        return await db.QueryAsync<ScheduleTask>(sql);
     }
 
-    public Task<List<ScheduleTask>> GetEnabledAsync()
+    public async Task<IEnumerable<ScheduleTask>> GetEnabledAsync()
     {
-        return db.Queryable<ScheduleTask>().Where(t => t.Enabled).ToListAsync();
+        using var db = factory.CreateConnection();
+        var sql = "SELECT * FROM schedule_task WHERE Enabled = 1";
+        return await db.QueryAsync<ScheduleTask>(sql);
     }
 
     public async Task<ScheduleTask?> GetByIdAsync(Guid id)
     {
-        return (ScheduleTask?)await db.Queryable<ScheduleTask>().FirstAsync(t => t.Id == id);
+        using var db = factory.CreateConnection();
+        var sql = "SELECT * FROM schedule_task WHERE Id = @Id LIMIT 1";
+        return await db.QueryFirstOrDefaultAsync<ScheduleTask>(sql, new { Id = id });
     }
 
     public async Task InsertAsync(ScheduleTask task)
     {
         task.CreateTime = DateTime.Now;
         task.UpdateTime = DateTime.Now;
-        await db.Insertable(task).ExecuteCommandAsync();
+        using var db = factory.CreateConnection();
+        var sql = @"
+INSERT INTO schedule_task (Id, Name, CommandId, CronExpression, Enabled, GroupId, IsPinned, SortOrder, TimeoutSeconds, Arguments, LastRunTime, NextRunTime, CreateTime, UpdateTime) 
+VALUES (@Id, @Name, @CommandId, @CronExpression, @Enabled, @GroupId, @IsPinned, @SortOrder, @TimeoutSeconds, @Arguments, @LastRunTime, @NextRunTime, @CreateTime, @UpdateTime)";
+        await db.ExecuteAsync(sql, task);
     }
 
     public async Task UpdateAsync(ScheduleTask task)
     {
         task.UpdateTime = DateTime.Now;
-        await db.Updateable(task).ExecuteCommandAsync();
+        using var db = factory.CreateConnection();
+        var sql = @"
+UPDATE schedule_task SET 
+    Name = @Name, CommandId = @CommandId, CronExpression = @CronExpression, Enabled = @Enabled, 
+    GroupId = @GroupId, IsPinned = @IsPinned, SortOrder = @SortOrder, TimeoutSeconds = @TimeoutSeconds, 
+    Arguments = @Arguments, LastRunTime = @LastRunTime, NextRunTime = @NextRunTime, UpdateTime = @UpdateTime
+WHERE Id = @Id";
+        await db.ExecuteAsync(sql, task);
     }
 
-    public Task DeleteAsync(Guid id)
+    public async Task DeleteAsync(Guid id)
     {
-        return db.Deleteable<ScheduleTask>().Where(t => t.Id == id).ExecuteCommandAsync();
+        using var db = factory.CreateConnection();
+        var sql = "DELETE FROM schedule_task WHERE Id = @Id";
+        await db.ExecuteAsync(sql, new { Id = id });
     }
 
-    public Task<int> CountByGroupAsync(Guid groupId)
+    public async Task<int> CountByGroupAsync(Guid groupId)
     {
-        return db.Queryable<ScheduleTask>().CountAsync(t => t.GroupId == groupId);
+        using var db = factory.CreateConnection();
+        var sql = "SELECT COUNT(1) FROM schedule_task WHERE GroupId = @GroupId";
+        return await db.QueryFirstOrDefaultAsync<int>(sql, new { GroupId = groupId });
     }
 
     /// <summary>任务执行后回写最近执行时间；nextRun 为空时不改动下次执行时间（手动触发场景）。</summary>
-    public Task UpdateRunInfoAsync(Guid id, DateTime lastRun, DateTime? nextRun)
+    public async Task UpdateRunInfoAsync(Guid id, DateTime lastRun, DateTime? nextRun)
     {
-        var updateable = db.Updateable<ScheduleTask>()
-            .SetColumns(t => t.LastRunTime == lastRun)
-            .Where(t => t.Id == id);
-        return nextRun.HasValue
-            ? updateable.SetColumns(t => t.NextRunTime == nextRun.Value).ExecuteCommandAsync()
-            : updateable.ExecuteCommandAsync();
+        using var db = factory.CreateConnection();
+        if (nextRun.HasValue)
+        {
+            var sql = "UPDATE schedule_task SET LastRunTime = @LastRun, NextRunTime = @NextRun WHERE Id = @Id";
+            await db.ExecuteAsync(sql, new { Id = id, LastRun = lastRun, NextRun = nextRun.Value });
+        }
+        else
+        {
+            var sql = "UPDATE schedule_task SET LastRunTime = @LastRun WHERE Id = @Id";
+            await db.ExecuteAsync(sql, new { Id = id, LastRun = lastRun });
+        }
     }
 }

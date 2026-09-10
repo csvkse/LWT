@@ -1,37 +1,5 @@
-using System.IO;
-using Microsoft.Data.Sqlite;
-using Dapper;
-
-namespace LinuxWebTool.Infrastructure.Persistence;
-
-public class DbConnectionFactory(string connectionString)
-{
-    public string ConnectionString { get; } = connectionString;
-
-    public SqliteConnection CreateConnection()
+    public static void Initialize(Microsoft.Data.Sqlite.SqliteConnection db)
     {
-        return new SqliteConnection(ConnectionString);
-    }
-}
-
-public static class DbSetup
-{
-    public static DbConnectionFactory CreateFactory(string connectionString)
-    {
-        var directory = GetSqliteDirectory(connectionString);
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        var concurrencySafe = EnsureSqliteOptions(connectionString);
-        return new DbConnectionFactory(concurrencySafe);
-    }
-
-    public static void Initialize(DbConnectionFactory factory)
-    {
-        using var db = factory.CreateConnection();
-        db.Open();
         using var cmd = db.CreateCommand();
         cmd.CommandText = @"
 CREATE TABLE IF NOT EXISTS command_group (
@@ -221,56 +189,3 @@ CREATE TABLE IF NOT EXISTS watch_rule (
 ";
         cmd.ExecuteNonQuery();
     }
-
-    private static string EnsureSqliteOptions(string connectionString)
-    {
-        if (connectionString.Contains("Data Source", System.StringComparison.OrdinalIgnoreCase)
-            && !connectionString.Contains("Default Timeout", System.StringComparison.OrdinalIgnoreCase))
-        {
-            return connectionString.TrimEnd(';') + ";Default Timeout=30";
-        }
-        return connectionString;
-    }
-
-    public static string ResolveConnectionString(string connectionString, string basePath)
-    {
-        foreach (var part in connectionString.Split(';', System.StringSplitOptions.TrimEntries | System.StringSplitOptions.RemoveEmptyEntries))
-        {
-            var index = part.IndexOf('=', System.StringComparison.OrdinalIgnoreCase);
-            if (index <= 0) continue;
-            var key = part.Substring(0, index).Trim();
-            if (!key.Equals("Data Source", System.StringComparison.OrdinalIgnoreCase)
-                && !key.Equals("DataSource", System.StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            var value = part.Substring(index + 1).Trim();
-            if (!System.IO.Path.IsPathRooted(value))
-            {
-                var absolute = System.IO.Path.GetFullPath(System.IO.Path.Combine(basePath, value));
-                return connectionString.Replace(part, $"'{key}={absolute}'", System.StringComparison.OrdinalIgnoreCase);
-            }
-        }
-        return connectionString;
-    }
-
-    private static string? GetSqliteDirectory(string connectionString)
-    {
-        foreach (var part in connectionString.Split(';', System.StringSplitOptions.TrimEntries | System.StringSplitOptions.RemoveEmptyEntries))
-        {
-            var index = part.IndexOf('=', System.StringComparison.OrdinalIgnoreCase);
-            if (index <= 0) continue;
-            var key = part.Substring(0, index).Trim();
-            if (!key.Equals("Data Source", System.StringComparison.OrdinalIgnoreCase)
-                && !key.Equals("DataSource", System.StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-            var value = part.Substring(index + 1).Trim();
-            var separator = value.LastIndexOfAny(new[] { '/', '\\' });
-            return separator > 0 ? value.Substring(0, separator) : null;
-        }
-        return null;
-    }
-}

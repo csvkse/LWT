@@ -1,51 +1,79 @@
+using Dapper;
 using LinuxWebTool.Infrastructure.Persistence.Entities;
-using SqlSugar;
 
 namespace LinuxWebTool.Infrastructure.Persistence;
 
 /// <summary>转码预设仓储。</summary>
-public class TranscodePresetStore(ISqlSugarClient db)
+[DapperAot]
+public partial class TranscodePresetStore(DbConnectionFactory factory)
 {
-    public Task<List<TranscodePreset>> GetAllAsync()
+    public async Task<IEnumerable<TranscodePreset>> GetAllAsync()
     {
-        return db.Queryable<TranscodePreset>()
-            .OrderBy(p => p.IsBuiltin, OrderByType.Desc)
-            .OrderBy(p => p.CreateTime)
-            .ToListAsync();
+        using var db = factory.CreateConnection();
+        return await db.QueryAsync<TranscodePreset>(
+            "SELECT * FROM transcode_preset ORDER BY IsBuiltin DESC, CreateTime ASC");
     }
 
     public async Task<TranscodePreset?> GetByIdAsync(Guid id)
     {
-        return (TranscodePreset?)await db.Queryable<TranscodePreset>().FirstAsync(p => p.Id == id);
+        using var db = factory.CreateConnection();
+        return await db.QueryFirstOrDefaultAsync<TranscodePreset>(
+            "SELECT * FROM transcode_preset WHERE Id = @Id", new { Id = id });
     }
 
-    public Task<bool> ExistsNameAsync(string name, Guid? excludeId)
+    public async Task<bool> ExistsNameAsync(string name, Guid? excludeId)
     {
-        return db.Queryable<TranscodePreset>()
-            .AnyAsync(p => p.Name == name && (excludeId == null || p.Id != excludeId));
+        using var db = factory.CreateConnection();
+        var sql = "SELECT 1 FROM transcode_preset WHERE Name = @Name";
+        if (excludeId.HasValue)
+        {
+            sql += " AND Id != @ExcludeId";
+        }
+        var count = await db.QueryFirstOrDefaultAsync<int?>(sql, new { Name = name, ExcludeId = excludeId });
+        return count.HasValue;
     }
 
     public async Task InsertAsync(TranscodePreset preset)
     {
+        using var db = factory.CreateConnection();
         preset.CreateTime = DateTime.Now;
         preset.UpdateTime = DateTime.Now;
-        await db.Insertable(preset).ExecuteCommandAsync();
+        var sql = @"
+            INSERT INTO transcode_preset (
+                Id, Name, Container, VideoCodec, VideoQuality, AudioCodec, AudioBitrate, ExtraArgs, 
+                Description, IsBuiltin, CreateTime, UpdateTime
+            ) VALUES (
+                @Id, @Name, @Container, @VideoCodec, @VideoQuality, @AudioCodec, @AudioBitrate, @ExtraArgs, 
+                @Description, @IsBuiltin, @CreateTime, @UpdateTime
+            )";
+        await db.ExecuteAsync(sql, preset);
     }
 
     public async Task UpdateAsync(TranscodePreset preset)
     {
+        using var db = factory.CreateConnection();
         preset.UpdateTime = DateTime.Now;
-        await db.Updateable(preset).ExecuteCommandAsync();
+        var sql = @"
+            UPDATE transcode_preset SET 
+                Name = @Name, Container = @Container, VideoCodec = @VideoCodec, 
+                VideoQuality = @VideoQuality, AudioCodec = @AudioCodec, AudioBitrate = @AudioBitrate, 
+                ExtraArgs = @ExtraArgs, Description = @Description, IsBuiltin = @IsBuiltin, 
+                UpdateTime = @UpdateTime
+            WHERE Id = @Id";
+        await db.ExecuteAsync(sql, preset);
     }
 
-    public Task DeleteAsync(Guid id)
+    public async Task DeleteAsync(Guid id)
     {
-        return db.Deleteable<TranscodePreset>().Where(p => p.Id == id).ExecuteCommandAsync();
+        using var db = factory.CreateConnection();
+        await db.ExecuteAsync("DELETE FROM transcode_preset WHERE Id = @Id", new { Id = id });
     }
 
     /// <summary>被监听规则引用的数量（删除前校验）。</summary>
-    public Task<int> CountWatchRuleUsageAsync(Guid presetId)
+    public async Task<int> CountWatchRuleUsageAsync(Guid presetId)
     {
-        return db.Queryable<WatchRule>().CountAsync(r => r.PresetId == presetId);
+        using var db = factory.CreateConnection();
+        return await db.QueryFirstOrDefaultAsync<int>(
+            "SELECT COUNT(1) FROM watch_rule WHERE PresetId = @PresetId", new { PresetId = presetId });
     }
 }

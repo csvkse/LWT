@@ -1,45 +1,36 @@
-using SqlSugar;
-
+﻿
 namespace LinuxWebTool.Infrastructure.Persistence.Entities;
 
-/// <summary>定时任务：按 Cron 表达式调度执行已保存的指令。</summary>
-[SugarTable("schedule_task")]
+/// <summary>瀹氭椂浠诲姟锛氭寜 Cron 琛ㄨ揪寮忚皟搴︽墽琛屽凡淇濆瓨鐨勬寚浠ゃ€?/summary>
 public class ScheduleTask
 {
-    [SugarColumn(IsPrimaryKey = true)]
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    [SugarColumn(ColumnDataType = "nvarchar(100)")]
     public string Name { get; set; } = string.Empty;
 
     public Guid CommandId { get; set; }
 
-    [SugarColumn(ColumnDataType = "nvarchar(100)")]
     public string CronExpression { get; set; } = string.Empty;
 
     public bool Enabled { get; set; } = true;
 
-    [SugarColumn(IsNullable = true)]
     public Guid? GroupId { get; set; }
 
     public bool IsPinned { get; set; }
 
     public int SortOrder { get; set; }
 
-    [SugarColumn(IsNullable = true)]
     public int? TimeoutSeconds { get; set; }
 
-    /// <summary>脚本位置参数原始串（引号感知拆分为 $1 $2...；定时执行使用固定参数）。</summary>
-    [SugarColumn(IsNullable = true, ColumnDataType = "nvarchar(500)")]
+    /// <summary>鑴氭湰浣嶇疆鍙傛暟鍘熷涓诧紙寮曞彿鎰熺煡鎷嗗垎涓?$1 $2...锛涘畾鏃舵墽琛屼娇鐢ㄥ浐瀹氬弬鏁帮級銆?/summary>
     public string? Arguments { get; set; }
 
-    [SugarColumn(IsNullable = true)]
     public DateTime? LastRunTime { get; set; }
 
-    [SugarColumn(IsNullable = true)]
     public DateTime? NextRunTime { get; set; }
 
     public DateTime CreateTime { get; set; } = DateTime.Now;
 
     public DateTime UpdateTime { get; set; } = DateTime.Now;
 }
+

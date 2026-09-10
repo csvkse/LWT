@@ -1,44 +1,72 @@
+using Dapper;
 using LinuxWebTool.Infrastructure.Persistence.Entities;
-using SqlSugar;
 
 namespace LinuxWebTool.Infrastructure.Persistence;
 
 /// <summary>监听规则仓储。</summary>
-public class WatchRuleStore(ISqlSugarClient db)
+[DapperAot]
+public partial class WatchRuleStore(DbConnectionFactory factory)
 {
-    public Task<List<WatchRule>> GetAllAsync()
+    public async Task<IEnumerable<WatchRule>> GetAllAsync()
     {
-        return db.Queryable<WatchRule>()
-            .OrderBy(r => r.CreateTime)
-            .ToListAsync();
+        using var db = factory.CreateConnection();
+        return await db.QueryAsync<WatchRule>(
+            "SELECT * FROM watch_rule ORDER BY CreateTime");
     }
 
     public async Task<WatchRule?> GetByIdAsync(Guid id)
     {
-        return (WatchRule?)await db.Queryable<WatchRule>().FirstAsync(r => r.Id == id);
+        using var db = factory.CreateConnection();
+        return await db.QueryFirstOrDefaultAsync<WatchRule>(
+            "SELECT * FROM watch_rule WHERE Id = @Id", new { Id = id });
     }
 
-    public Task<bool> ExistsNameAsync(string name, Guid? excludeId)
+    public async Task<bool> ExistsNameAsync(string name, Guid? excludeId)
     {
-        return db.Queryable<WatchRule>()
-            .AnyAsync(r => r.Name == name && (excludeId == null || r.Id != excludeId));
+        using var db = factory.CreateConnection();
+        var sql = "SELECT 1 FROM watch_rule WHERE Name = @Name";
+        if (excludeId.HasValue)
+        {
+            sql += " AND Id != @ExcludeId";
+        }
+        var count = await db.QueryFirstOrDefaultAsync<int?>(sql, new { Name = name, ExcludeId = excludeId });
+        return count.HasValue;
     }
 
     public async Task InsertAsync(WatchRule rule)
     {
+        using var db = factory.CreateConnection();
         rule.CreateTime = DateTime.Now;
         rule.UpdateTime = DateTime.Now;
-        await db.Insertable(rule).ExecuteCommandAsync();
+        var sql = @"
+            INSERT INTO watch_rule (
+                Id, Name, WatchPath, FilePatterns, PresetId, OutputMode, Recursive, Mode, 
+                PollSeconds, Enabled, UseHardwareAccel, HardwareBackend, LastScanTime, CreateTime, UpdateTime
+            ) VALUES (
+                @Id, @Name, @WatchPath, @FilePatterns, @PresetId, @OutputMode, @Recursive, @Mode, 
+                @PollSeconds, @Enabled, @UseHardwareAccel, @HardwareBackend, @LastScanTime, @CreateTime, @UpdateTime
+            )";
+        await db.ExecuteAsync(sql, rule);
     }
 
     public async Task UpdateAsync(WatchRule rule)
     {
+        using var db = factory.CreateConnection();
         rule.UpdateTime = DateTime.Now;
-        await db.Updateable(rule).ExecuteCommandAsync();
+        var sql = @"
+            UPDATE watch_rule SET 
+                Name = @Name, WatchPath = @WatchPath, FilePatterns = @FilePatterns, 
+                PresetId = @PresetId, OutputMode = @OutputMode, Recursive = @Recursive, 
+                Mode = @Mode, PollSeconds = @PollSeconds, Enabled = @Enabled, 
+                UseHardwareAccel = @UseHardwareAccel, HardwareBackend = @HardwareBackend, 
+                LastScanTime = @LastScanTime, UpdateTime = @UpdateTime
+            WHERE Id = @Id";
+        await db.ExecuteAsync(sql, rule);
     }
 
-    public Task DeleteAsync(Guid id)
+    public async Task DeleteAsync(Guid id)
     {
-        return db.Deleteable<WatchRule>().Where(r => r.Id == id).ExecuteCommandAsync();
+        using var db = factory.CreateConnection();
+        await db.ExecuteAsync("DELETE FROM watch_rule WHERE Id = @Id", new { Id = id });
     }
 }

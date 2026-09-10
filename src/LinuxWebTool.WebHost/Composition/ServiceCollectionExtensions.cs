@@ -22,14 +22,14 @@ public static class ServiceCollectionExtensions
         // 文件日志（程序日志 + 调试日志），相对目录锚定到数据目录
         builder.Logging.AddFileLogging(configuration, dataPaths);
 
-        // SQLite（SqlSugar CodeFirst 建表）：未显式配置连接串时落在数据目录
+        // SQLite（原 CodeFirst 建表，现 DDL建表）：未显式配置连接串时落在数据目录
         var rawConnectionString = configuration.GetConnectionString("SQLite");
         var connectionString = string.IsNullOrWhiteSpace(rawConnectionString)
             ? $"Data Source={dataPaths.PathFor("linuxweb.db")}"
             : DbSetup.ResolveConnectionString(rawConnectionString, contentRoot);
-        var db = DbSetup.Create(connectionString);
-        DbSetup.Initialize(db);
-        builder.Services.AddSingleton(db);
+        var dbFactory = DbSetup.CreateFactory(connectionString);
+        DbSetup.Initialize(dbFactory);
+        builder.Services.AddSingleton(dbFactory);
 
         // 仓储与操作日志
         builder.Services.AddSingleton<CommandStore>();
@@ -45,7 +45,7 @@ public static class ServiceCollectionExtensions
         builder.Services.AddHostedService<SmbMountStartupService>();
 
         // FFmpeg 转码：预设 / 队列执行 / 监听自动转码
-        TranscodePresetSeeder.Seed(db); // 内置预设播种（表为空时）
+        TranscodePresetSeeder.Seed(dbFactory); // 内置预设播种（表为空时）
         builder.Services.AddSingleton<TranscodePresetStore>();
         builder.Services.AddSingleton<TranscodeJobStore>();
         builder.Services.AddSingleton<WatchRuleStore>();
@@ -113,7 +113,7 @@ internal sealed class BearerSecuritySchemeTransformer : IOpenApiDocumentTransfor
     public Task TransformAsync(OpenApiDocument document, OpenApiDocumentTransformerContext context, CancellationToken cancellationToken)
     {
         document.Components ??= new OpenApiComponents();
-        document.Components.SecuritySchemes ??= new Dictionary<string, OpenApiSecurityScheme>();
+        document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
         document.Components.SecuritySchemes["Bearer"] = new OpenApiSecurityScheme
         {
             Type = SecuritySchemeType.Http,

@@ -1,15 +1,21 @@
-using SqlSugar;
+using Dapper;
+using LinuxWebTool.Infrastructure.Persistence.Entities;
 
 namespace LinuxWebTool.Infrastructure.Persistence;
 
 /// <summary>操作日志仓储。</summary>
-public class OperationLogStore(ISqlSugarClient db)
+[DapperAot]
+public partial class OperationLogStore(DbConnectionFactory factory)
 {
     public async Task<Guid> InsertAsync(OperationLog log)
     {
         log.Id = Guid.NewGuid();
         log.Time = DateTime.Now;
-        await db.Insertable(log).ExecuteCommandAsync();
+        using var db = factory.CreateConnection();
+        var sql = @"
+INSERT INTO operation_log (Id, Time, Action, TargetType, TargetName, Detail, ClientIp, Success) 
+VALUES (@Id, @Time, @Action, @TargetType, @TargetName, @Detail, @ClientIp, @Success)";
+        await db.ExecuteAsync(sql, log);
         return log.Id;
     }
 
@@ -17,25 +23,27 @@ public class OperationLogStore(ISqlSugarClient db)
     {
         var page = Math.Max(1, query.Page);
         var pageSize = Math.Clamp(query.PageSize <= 0 ? 20 : query.PageSize, 1, 200);
-        RefAsync<int> total = new();
-
-        var sql = db.Queryable<OperationLog>();
+        
+        using var db = factory.CreateConnection();
+        var whereClause = "";
+        string? keyword = null;
+        
         if (!string.IsNullOrWhiteSpace(query.Keyword))
         {
-            var keyword = query.Keyword.Trim();
-            sql = sql.Where(l => l.Action.Contains(keyword)
-                || l.TargetName.Contains(keyword)
-                || (l.Detail != null && l.Detail.Contains(keyword)));
+            keyword = $"%{query.Keyword.Trim()}%";
+            whereClause = "WHERE Action LIKE @Keyword OR TargetName LIKE @Keyword OR Detail LIKE @Keyword";
         }
 
-        var items = await sql
-            .OrderBy(l => l.Time, OrderByType.Desc)
-            .ToPageListAsync(page, pageSize, total);
+        var countSql = $"SELECT COUNT(1) FROM operation_log {whereClause}";
+        var total = await db.QueryFirstOrDefaultAsync<int>(countSql, new { Keyword = keyword });
+
+        var dataSql = $"SELECT * FROM operation_log {whereClause} ORDER BY Time DESC LIMIT @Limit OFFSET @Offset";
+        var items = await db.QueryAsync<OperationLog>(dataSql, new { Keyword = keyword, Limit = pageSize, Offset = (page - 1) * pageSize });
 
         return new PagedResult<OperationLog>
         {
-            Items = items,
-            Total = total.Value,
+            Items = items.ToList(),
+            Total = total,
             Page = page,
             PageSize = pageSize,
         };
