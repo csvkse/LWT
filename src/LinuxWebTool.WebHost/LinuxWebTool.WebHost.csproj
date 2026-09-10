@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <RootNamespace>LinuxWebTool.WebHost</RootNamespace>
@@ -15,7 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- 运行期数据目录（数据库/凭据/密钥/日志）绝不能进发布产物：凭据会随包泄漏 -->
+    <!-- 杩愯鏈熸暟鎹洰褰曪紙鏁版嵁搴?鍑嵁/瀵嗛挜/鏃ュ織锛夌粷涓嶈兘杩涘彂甯冧骇鐗╋細鍑嵁浼氶殢鍖呮硠婕?-->
     <None Remove="data\**" />
     <Content Remove="data\**" />
     <None Update="wwwroot\**">
@@ -23,4 +23,9 @@
     </None>
   </ItemGroup>
 
+
+  <ItemGroup>
+    <TrimmerRootAssembly Include="Quartz" />
+  </ItemGroup>
 </Project>
+

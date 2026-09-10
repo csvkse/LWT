@@ -40,7 +40,7 @@ public class GroupsController(
         var (valid, message) = await ValidateAsync(request, excludeId: null);
         if (!valid)
         {
-            return BadRequest(new { message });
+            return BadRequest(new MessageResponse(message));
         }
 
         var group = new CommandGroup
@@ -60,13 +60,13 @@ public class GroupsController(
         var group = await groupStore.GetByIdAsync(id);
         if (group is null)
         {
-            return NotFound(new { message = "分组不存在" });
+            return NotFound(new MessageResponse("分组不存在"));
         }
 
         var (valid, message) = await ValidateAsync(request, excludeId: id);
         if (!valid)
         {
-            return BadRequest(new { message });
+            return BadRequest(new MessageResponse(message));
         }
 
         group.Name = request.Name.Trim();
@@ -82,7 +82,7 @@ public class GroupsController(
         var group = await groupStore.GetByIdAsync(id);
         if (group is null)
         {
-            return NotFound(new { message = "分组不存在" });
+            return NotFound(new MessageResponse("分组不存在"));
         }
 
         var usage = group.BizType == (int)GroupBizType.Command
@@ -90,12 +90,12 @@ public class GroupsController(
             : await scheduleStore.CountByGroupAsync(id);
         if (usage > 0)
         {
-            return BadRequest(new { message = $"分组下仍有 {usage} 个条目，请先移出后再删除" });
+            return BadRequest(new MessageResponse($"分组下仍有 {usage} 个条目，请先移出后再删除"));
         }
 
         await groupStore.DeleteAsync(id);
         await operationLogger.LogAsync("删除分组", "分组", group.Name, clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = "已删除" });
+        return Ok(new MessageResponse("已删除"));
     }
 
     private async Task<(bool Valid, string Message)> ValidateAsync(SaveGroupRequest request, Guid? excludeId)

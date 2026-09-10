@@ -89,7 +89,16 @@ public static class ServiceCollectionExtensions
         builder.Services.AddScheduling();
 
         // MVC + OpenAPI（AOT 兼容，替代 Swashbuckle）
-        builder.Services.AddControllers();
+        builder.Services.AddControllers()
+            .AddJsonOptions(options =>
+            {
+                options.JsonSerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);
+            });
+        
+        builder.Services.ConfigureHttpJsonOptions(options =>
+        {
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);
+        });
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddOpenApi(options =>
         {

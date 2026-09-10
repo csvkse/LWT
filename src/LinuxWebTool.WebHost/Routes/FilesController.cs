@@ -29,7 +29,7 @@ public class FilesController(
         var normalized = NormalizePosix(path);
         if (!Directory.Exists(normalized))
         {
-            return NotFound(new { message = $"路径不存在或不是目录：{normalized}" });
+            return NotFound(new MessageResponse($"路径不存在或不是目录：{normalized}"));
         }
 
         List<object> entries;
@@ -39,11 +39,11 @@ public class FilesController(
         }
         catch (UnauthorizedAccessException)
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = $"无权限读取该目录：{normalized}" });
+            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse($"无权限读取该目录：{normalized}"));
         }
         catch (IOException ex)
         {
-            return StatusCode(StatusCodes.Status500InternalServerError, new { message = $"读取目录失败：{ex.Message}" });
+            return StatusCode(StatusCodes.Status500InternalServerError, new MessageResponse($"读取目录失败：{ex.Message}"));
         }
 
         return Ok(new
@@ -94,13 +94,13 @@ public class FilesController(
         var normalized = NormalizePosix(path);
         if (!System.IO.File.Exists(normalized))
         {
-            return NotFound(new { message = $"文件不存在：{normalized}" });
+            return NotFound(new MessageResponse($"文件不存在：{normalized}"));
         }
 
         var info = new System.IO.FileInfo(normalized);
         if (info.Length > MaxTextBytes)
         {
-            return BadRequest(new { message = $"文件超过 {MaxTextBytes / 1024 / 1024}MB，无法以文本查看，请直接用系统工具处理", tooLarge = true });
+            return BadRequest(new ReadFileErrorResponse($"文件超过 {MaxTextBytes / 1024 / 1024}MB，无法以文本查看，请直接用系统工具处理", true, false));
         }
 
         // 二进制探测：前 8KB 内出现 NUL 字节即以二进制处理。
@@ -110,12 +110,12 @@ public class FilesController(
             var read = await fs.ReadAsync(buffer);
             if (buffer.Take(read).Contains((byte)0))
             {
-                return BadRequest(new { message = "二进制文件，无法以文本查看", binary = true });
+                return BadRequest(new ReadFileErrorResponse("二进制文件，无法以文本查看", false, true));
             }
         }
 
         var content = await System.IO.File.ReadAllTextAsync(normalized, Encoding.UTF8);
-        return Ok(new { path = normalized, name = info.Name, size = info.Length, content });
+        return Ok(new FileContentResponse(normalized, info.Name, info.Length, content));
     }
 
     /// <summary>写文本文件（新建或覆盖）。父目录必须存在。</summary>
@@ -125,21 +125,21 @@ public class FilesController(
         var normalized = NormalizePosix(request.Path);
         if (IsProtected(normalized))
         {
-            return BadRequest(new { message = "程序数据目录禁止写入" });
+            return BadRequest(new MessageResponse("程序数据目录禁止写入"));
         }
         var parent = Path.GetDirectoryName(normalized);
         if (string.IsNullOrEmpty(parent) || !Directory.Exists(parent))
         {
-            return BadRequest(new { message = "目标目录不存在，请先创建目录" });
+            return BadRequest(new MessageResponse("目标目录不存在，请先创建目录"));
         }
         if (Encoding.UTF8.GetByteCount(request.Content ?? string.Empty) > MaxTextBytes)
         {
-            return BadRequest(new { message = "内容超过大小限制" });
+            return BadRequest(new MessageResponse("内容超过大小限制"));
         }
 
         await System.IO.File.WriteAllTextAsync(normalized, request.Content ?? string.Empty, new UTF8Encoding(false));
         await operationLogger.LogAsync("写文本文件", "文件管理", Name(normalized), parent, clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = "已保存" });
+        return Ok(new MessageResponse("已保存"));
     }
 
     // ---------- 目录 / 文件操作 ----------
@@ -151,11 +151,11 @@ public class FilesController(
         var normalized = NormalizePosix(request.Path);
         if (IsProtected(normalized))
         {
-            return BadRequest(new { message = "程序数据目录禁止写入" });
+            return BadRequest(new MessageResponse("程序数据目录禁止写入"));
         }
         if (Directory.Exists(normalized) || System.IO.File.Exists(normalized))
         {
-            return BadRequest(new { message = "同名文件或目录已存在" });
+            return BadRequest(new MessageResponse("同名文件或目录已存在"));
         }
 
         try
@@ -164,10 +164,10 @@ public class FilesController(
         }
         catch (Exception ex)
         {
-            return BadRequest(new { message = $"创建目录失败：{ex.Message}" });
+            return BadRequest(new MessageResponse($"创建目录失败：{ex.Message}"));
         }
         await operationLogger.LogAsync("新建文件夹", "文件管理", Name(normalized), Parent(normalized), clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = "已创建", path = normalized });
+        return Ok(new CreateFileResponse("已创建", normalized));
     }
 
     /// <summary>重命名 / 移动文件或目录。</summary>
@@ -178,29 +178,29 @@ public class FilesController(
         var to = NormalizePosix(request.To);
         if (from == "/" || to == "/")
         {
-            return BadRequest(new { message = "不能对根目录进行操作" });
+            return BadRequest(new MessageResponse("不能对根目录进行操作"));
         }
         if (IsProtected(from) || IsProtected(to))
         {
-            return BadRequest(new { message = "程序数据目录禁止重命名 / 移动" });
+            return BadRequest(new MessageResponse("程序数据目录禁止重命名 / 移动"));
         }
 
         if (System.IO.File.Exists(from))
         {
-            if (System.IO.File.Exists(to)) return BadRequest(new { message = "目标已存在同名文件" });
+            if (System.IO.File.Exists(to)) return BadRequest(new MessageResponse("目标已存在同名文件"));
             System.IO.File.Move(from, to);
         }
         else if (Directory.Exists(from))
         {
-            if (Directory.Exists(to)) return BadRequest(new { message = "目标已存在同名目录" });
+            if (Directory.Exists(to)) return BadRequest(new MessageResponse("目标已存在同名目录"));
             Directory.Move(from, to);
         }
         else
         {
-            return NotFound(new { message = "源路径不存在" });
+            return NotFound(new MessageResponse("源路径不存在"));
         }
         await operationLogger.LogAsync("重命名", "文件管理", Name(from), $"{from} → {to}", clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = "已重命名", path = to });
+        return Ok(new RenameFileResponse("已重命名", to));
     }
 
     /// <summary>删除文件或目录（目录递归需 recursive=true）。</summary>
@@ -210,11 +210,11 @@ public class FilesController(
         var normalized = NormalizePosix(path);
         if (normalized == "/")
         {
-            return BadRequest(new { message = "不能删除根目录" });
+            return BadRequest(new MessageResponse("不能删除根目录"));
         }
         if (IsProtected(normalized))
         {
-            return BadRequest(new { message = "程序数据目录禁止删除" });
+            return BadRequest(new MessageResponse("程序数据目录禁止删除"));
         }
 
         if (System.IO.File.Exists(normalized))
@@ -225,16 +225,16 @@ public class FilesController(
         {
             if (!recursive && Directory.EnumerateFileSystemEntries(normalized).Any())
             {
-                return BadRequest(new { message = "目录非空，确认后使用递归删除", needRecursive = true });
+                return BadRequest(new DeleteFileErrorResponse("目录非空，确认后使用递归删除", true));
             }
             Directory.Delete(normalized, recursive);
         }
         else
         {
-            return NotFound(new { message = "路径不存在" });
+            return NotFound(new MessageResponse("路径不存在"));
         }
         await operationLogger.LogAsync("删除", "文件管理", Name(normalized), Parent(normalized), success: true, clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = "已删除" });
+        return Ok(new MessageResponse("已删除"));
     }
 
     /// <summary>上传文件到目录（一次一个）。重名自动加序号。</summary>
@@ -244,17 +244,17 @@ public class FilesController(
         var normalized = NormalizePosix(path);
         if (!Directory.Exists(normalized))
         {
-            return BadRequest(new { message = $"目录不存在：{normalized}" });
+            return BadRequest(new MessageResponse($"目录不存在：{normalized}"));
         }
         if (file is null || file.Length == 0)
         {
-            return BadRequest(new { message = "未选择文件" });
+            return BadRequest(new MessageResponse("未选择文件"));
         }
 
         var fileName = Path.GetFileName(file.FileName);
         if (string.IsNullOrWhiteSpace(fileName))
         {
-            return BadRequest(new { message = "文件名无效" });
+            return BadRequest(new MessageResponse("文件名无效"));
         }
 
         var target = UniquePath(normalized, fileName);
@@ -263,7 +263,7 @@ public class FilesController(
             await file.CopyToAsync(stream);
         }
         await operationLogger.LogAsync("上传文件", "文件管理", fileName, normalized, clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = "已上传", path = target });
+        return Ok(new UploadFileResponse("已上传", target));
     }
 
     // ---------- 校验与工具 ----------

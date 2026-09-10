@@ -62,15 +62,15 @@ public class SmbMountsController(
         var (valid, message, server, localPath) = Validate(request);
         if (!valid)
         {
-            return BadRequest(new { message });
+            return BadRequest(new MessageResponse(message));
         }
         if (await mountStore.ExistsNameAsync(request.Name.Trim(), null))
         {
-            return BadRequest(new { message = "挂载名称已存在" });
+            return BadRequest(new MessageResponse("挂载名称已存在"));
         }
         if (await mountStore.ExistsLocalPathAsync(localPath, null))
         {
-            return BadRequest(new { message = "本地挂载点已被其他配置使用" });
+            return BadRequest(new MessageResponse("本地挂载点已被其他配置使用"));
         }
 
         var mount = new SmbMount
@@ -90,7 +90,7 @@ public class SmbMountsController(
         mountService.EnsureCredentialFile(mount);
         await operationLogger.LogAsync("新增挂载配置", "SMB挂载", mount.Name,
             $"{mount.Server} → {mount.LocalPath}", clientIp: HttpContext.GetClientIp());
-        return Ok(new { mount.Id });
+        return Ok(new IdResponse(mount.Id));
     }
 
     [HttpPut("{id:guid}")]
@@ -99,21 +99,21 @@ public class SmbMountsController(
         var mount = await mountStore.GetByIdAsync(id);
         if (mount is null)
         {
-            return NotFound(new { message = "挂载配置不存在" });
+            return NotFound(new MessageResponse("挂载配置不存在"));
         }
 
         var (valid, message, server, localPath) = Validate(request);
         if (!valid)
         {
-            return BadRequest(new { message });
+            return BadRequest(new MessageResponse(message));
         }
         if (await mountStore.ExistsNameAsync(request.Name.Trim(), id))
         {
-            return BadRequest(new { message = "挂载名称已存在" });
+            return BadRequest(new MessageResponse("挂载名称已存在"));
         }
         if (await mountStore.ExistsLocalPathAsync(localPath, id))
         {
-            return BadRequest(new { message = "本地挂载点已被其他配置使用" });
+            return BadRequest(new MessageResponse("本地挂载点已被其他配置使用"));
         }
 
         var oldPath = mount.LocalPath;
@@ -139,7 +139,7 @@ public class SmbMountsController(
         }
         await operationLogger.LogAsync("修改挂载配置", "SMB挂载", mount.Name,
             $"{mount.Server} → {mount.LocalPath}", clientIp: HttpContext.GetClientIp());
-        return Ok(new { mount.Id });
+        return Ok(new IdResponse(mount.Id));
     }
 
     [HttpDelete("{id:guid}")]
@@ -148,7 +148,7 @@ public class SmbMountsController(
         var mount = await mountStore.GetByIdAsync(id);
         if (mount is null)
         {
-            return NotFound(new { message = "挂载配置不存在" });
+            return NotFound(new MessageResponse("挂载配置不存在"));
         }
 
         // 挂载中先卸载，避免留下游离挂载点
@@ -158,7 +158,7 @@ public class SmbMountsController(
             var (unmounted, message) = await mountService.UnmountAsync(mount, lazy: true);
             if (!unmounted)
             {
-                return BadRequest(new { message = $"删除前卸载失败：{message}" });
+                return BadRequest(new MessageResponse($"删除前卸载失败：{message}"));
             }
         }
 
@@ -167,7 +167,7 @@ public class SmbMountsController(
         SystemStatusProvider.ManagedMountPoints.TryRemove(mount.LocalPath.Trim().TrimEnd('/'), out _);
         await operationLogger.LogAsync("删除挂载配置", "SMB挂载", mount.Name,
             $"{mount.Server} → {mount.LocalPath}", clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = "已删除" });
+        return Ok(new MessageResponse("已删除"));
     }
 
     /// <summary>执行挂载。</summary>
@@ -177,13 +177,13 @@ public class SmbMountsController(
         var mount = await mountStore.GetByIdAsync(id);
         if (mount is null)
         {
-            return NotFound(new { message = "挂载配置不存在" });
+            return NotFound(new MessageResponse("挂载配置不存在"));
         }
 
         var (success, message) = await mountService.MountAsync(mount);
         await operationLogger.LogAsync("挂载", "SMB挂载", mount.Name,
             $"{mount.Server} → {mount.LocalPath}", success, clientIp: HttpContext.GetClientIp());
-        return success ? Ok(new { message }) : BadRequest(new { message });
+        return success ? Ok(new MessageResponse(message)) : BadRequest(new MessageResponse(message));
     }
 
     /// <summary>执行卸载（body {lazy:true} 懒卸载）。</summary>
@@ -193,13 +193,13 @@ public class SmbMountsController(
         var mount = await mountStore.GetByIdAsync(id);
         if (mount is null)
         {
-            return NotFound(new { message = "挂载配置不存在" });
+            return NotFound(new MessageResponse("挂载配置不存在"));
         }
 
         var (success, message) = await mountService.UnmountAsync(mount, request?.Lazy == true);
         await operationLogger.LogAsync("卸载", "SMB挂载", mount.Name,
             $"{mount.Server} → {mount.LocalPath}", success, clientIp: HttpContext.GetClientIp());
-        return success ? Ok(new { message }) : BadRequest(new { message });
+        return success ? Ok(new MessageResponse(message)) : BadRequest(new MessageResponse(message));
     }
 
     public sealed record UnmountRequest(bool Lazy);

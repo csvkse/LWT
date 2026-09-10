@@ -56,7 +56,7 @@ public class CommandsController(
         var (valid, message) = await ValidateAsync(request, excludeId: null);
         if (!valid)
         {
-            return BadRequest(new { message });
+            return BadRequest(new MessageResponse(message));
         }
 
         var command = new LinuxCommand
@@ -80,13 +80,13 @@ public class CommandsController(
         var command = await commandStore.GetByIdAsync(id);
         if (command is null)
         {
-            return NotFound(new { message = "指令不存在" });
+            return NotFound(new MessageResponse("指令不存在"));
         }
 
         var (valid, message) = await ValidateAsync(request, excludeId: id);
         if (!valid)
         {
-            return BadRequest(new { message });
+            return BadRequest(new MessageResponse(message));
         }
 
         command.Name = request.Name.Trim();
@@ -107,12 +107,12 @@ public class CommandsController(
         var command = await commandStore.GetByIdAsync(id);
         if (command is null)
         {
-            return NotFound(new { message = "指令不存在" });
+            return NotFound(new MessageResponse("指令不存在"));
         }
 
         await commandStore.DeleteAsync(id);
         await operationLogger.LogAsync("删除指令", "指令", command.Name, Summarize((ScriptType)command.ScriptType, command.CommandText, null), clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = "已删除（历史执行记录保留）" });
+        return Ok(new MessageResponse("已删除（历史执行记录保留）"));
     }
 
     /// <summary>执行已保存的指令并记录调用历史；脚本类型可携带位置参数。</summary>
@@ -122,7 +122,7 @@ public class CommandsController(
         var command = await commandStore.GetByIdAsync(id);
         if (command is null)
         {
-            return NotFound(new { message = "指令不存在" });
+            return NotFound(new MessageResponse("指令不存在"));
         }
 
         var response = await ExecuteAndRecordAsync(
@@ -141,7 +141,7 @@ public class CommandsController(
     {
         if (string.IsNullOrWhiteSpace(request.CommandText))
         {
-            return BadRequest(new { message = "指令内容不能为空" });
+            return BadRequest(new MessageResponse("指令内容不能为空"));
         }
 
         var response = await ExecuteAndRecordCoreAsync(

@@ -31,8 +31,8 @@ public class LogsController(OperationLogStore operationLogStore, LogFileService 
         var content = logFileService.ReadTail(name, tail);
         if (content is null)
         {
-            return NotFound(new { message = "日志文件不存在或文件名非法" });
+            return NotFound(new MessageResponse("日志文件不存在或文件名非法"));
         }
-        return Ok(new { name, tail, content });
+        return Ok(new LogContentResponse(name, tail, content));
     }
 }

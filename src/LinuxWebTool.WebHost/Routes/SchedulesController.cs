@@ -55,7 +55,7 @@ public class SchedulesController(
         var (valid, message, cron) = await ValidateAsync(request);
         if (!valid)
         {
-            return BadRequest(new { message });
+            return BadRequest(new MessageResponse(message));
         }
 
         var task = new ScheduleTask
@@ -81,13 +81,13 @@ public class SchedulesController(
         var task = await scheduleStore.GetByIdAsync(id);
         if (task is null)
         {
-            return NotFound(new { message = "定时任务不存在" });
+            return NotFound(new MessageResponse("定时任务不存在"));
         }
 
         var (valid, message, cron) = await ValidateAsync(request);
         if (!valid)
         {
-            return BadRequest(new { message });
+            return BadRequest(new MessageResponse(message));
         }
 
         task.Name = request.Name.Trim();
@@ -110,13 +110,13 @@ public class SchedulesController(
         var task = await scheduleStore.GetByIdAsync(id);
         if (task is null)
         {
-            return NotFound(new { message = "定时任务不存在" });
+            return NotFound(new MessageResponse("定时任务不存在"));
         }
 
         await scheduleManager.RemoveAsync(id);
         await scheduleStore.DeleteAsync(id);
         await operationLogger.LogAsync("删除定时任务", "定时任务", task.Name, task.CronExpression, clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = "已删除" });
+        return Ok(new MessageResponse("已删除"));
     }
 
     /// <summary>启用 / 停用切换：停用即从调度器移除触发器。</summary>
@@ -126,14 +126,14 @@ public class SchedulesController(
         var task = await scheduleStore.GetByIdAsync(id);
         if (task is null)
         {
-            return NotFound(new { message = "定时任务不存在" });
+            return NotFound(new MessageResponse("定时任务不存在"));
         }
 
         task.Enabled = !task.Enabled;
         await scheduleStore.UpdateAsync(task);
         task.NextRunTime = await SyncScheduleAsync(task);
         await operationLogger.LogAsync(task.Enabled ? "启用定时任务" : "停用定时任务", "定时任务", task.Name, task.CronExpression, clientIp: HttpContext.GetClientIp());
-        return Ok(new { task.Enabled, task.NextRunTime });
+        return Ok(new ScheduleStatusResponse(task.Enabled, task.NextRunTime));
     }
 
     /// <summary>立即执行一次（不影响 Cron 计划）。</summary>
@@ -143,12 +143,12 @@ public class SchedulesController(
         var task = await scheduleStore.GetByIdAsync(id);
         if (task is null)
         {
-            return NotFound(new { message = "定时任务不存在" });
+            return NotFound(new MessageResponse("定时任务不存在"));
         }
 
         await scheduleManager.TriggerNowAsync(task);
         await operationLogger.LogAsync("立即运行定时任务", "定时任务", task.Name, task.CronExpression, clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = "已触发，执行结果请在执行历史中查看" });
+        return Ok(new MessageResponse("已触发，执行结果请在执行历史中查看"));
     }
 
     /// <summary>定时任务的执行记录。</summary>

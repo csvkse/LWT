@@ -32,8 +32,7 @@ public class TranscodeController(
         [FromQuery] TranscodeJobStatus? status = null, [FromQuery] Guid? watchRuleId = null)
     {
         var (items, total) = await jobStore.QueryAsync(page, pageSize, status, watchRuleId);
-        var mapped = items.Select(j => new
-        {
+        var mapped = items.Select(j => new TranscodeJobBrief(
             j.Id,
             j.SourcePath,
             j.OutputPath,
@@ -57,8 +56,8 @@ public class TranscodeController(
             j.CommandLine,
             j.FallbackReason,
             j.FallbackFromCommand,
-            j.IsFullCommand,
-        });
+            j.IsFullCommand
+        ));
         return Ok(new { items = mapped, total });
     }
 
@@ -369,23 +368,19 @@ public class TranscodeController(
     public async Task<IActionResult> ExportPresets()
     {
         var presets = await presetStore.GetAllAsync();
-        var items = presets.Select(p => new
+        var items = presets.Select(p => new PresetImportItem
         {
-            name = p.Name,
-            container = p.Container,
-            videoCodec = p.VideoCodec,
-            videoQuality = p.VideoQuality,
-            audioCodec = p.AudioCodec,
-            audioBitrate = p.AudioBitrate,
-            extraArgs = p.ExtraArgs,
-            description = p.Description,
-            isBuiltin = p.IsBuiltin,
+            Name = p.Name,
+            Container = p.Container,
+            VideoCodec = p.VideoCodec,
+            VideoQuality = p.VideoQuality,
+            AudioCodec = p.AudioCodec,
+            AudioBitrate = p.AudioBitrate,
+            ExtraArgs = p.ExtraArgs,
+            Description = p.Description,
+            IsBuiltin = p.IsBuiltin,
         });
-        var json = System.Text.Json.JsonSerializer.Serialize(items, new System.Text.Json.JsonSerializerOptions
-        {
-            WriteIndented = true,
-            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-        });
+        var json = System.Text.Json.JsonSerializer.Serialize(items, LinuxWebTool.WebHost.Composition.AppJsonSerializerContext.Default.IEnumerablePresetImportItem);
         var fileName = $"transcode-presets-{DateTime.Now:yyyyMMdd-HHmmss}.json";
         var bytes = System.Text.Encoding.UTF8.GetBytes(json);
         return File(bytes, "application/json; charset=utf-8", fileName);

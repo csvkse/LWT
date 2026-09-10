@@ -90,7 +90,7 @@ public sealed class AdminCredentialService
 
     private void Persist(string? generatedPassword)
     {
-        var persisted = new Dictionary<string, string>
+        var persisted = new System.Text.Json.Nodes.JsonObject
         {
             ["userName"] = Account.UserName,
             ["passwordHash"] = Account.PasswordHash,
@@ -101,7 +101,7 @@ public sealed class AdminCredentialService
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(_filePath)!);
-        File.WriteAllText(_filePath, JsonSerializer.Serialize(persisted, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(_filePath, persisted.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
     }
 
     private bool TryLoadFromFile()
@@ -113,8 +113,13 @@ public sealed class AdminCredentialService
                 return false;
             }
 
-            var json = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(_filePath));
-            if (json is null || !json.TryGetValue("userName", out var userName) || !json.TryGetValue("passwordHash", out var hash))
+            var node = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(_filePath));
+            if (node is not System.Text.Json.Nodes.JsonObject obj) return false;
+
+            var userName = obj["userName"]?.GetValue<string>();
+            var hash = obj["passwordHash"]?.GetValue<string>();
+
+            if (string.IsNullOrEmpty(userName) || string.IsNullOrEmpty(hash))
             {
                 return false;
             }
@@ -122,7 +127,8 @@ public sealed class AdminCredentialService
             Account = new AdminAccount { UserName = userName, PasswordHash = hash };
 
             // 自动生成密码的场景：文件里保留了明文，每次启动都回显，避免用户忘记密码后无处可查。
-            if (json.TryGetValue("generatedPassword", out var generated))
+            var generated = obj["generatedPassword"]?.GetValue<string>();
+            if (!string.IsNullOrEmpty(generated))
             {
                 _logger.LogWarning("当前管理员凭据（自动生成，文件 {File}）：用户名 {UserName}，密码 {Password}。可通过网页右上角 ⚙ 修改，或用环境变量 Admin__Password 覆盖",
                     _filePath, userName, generated);
@@ -135,7 +141,7 @@ public sealed class AdminCredentialService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "加载管理员账户文件失败：{File}", _filePath);
+            _logger.LogError(ex, "读取管理员配置文件失败");
             return false;
         }
     }

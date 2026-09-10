@@ -26,14 +26,14 @@ public class AuthController(
         {
             var waitMinutes = Math.Ceiling((state.LockUntil - DateTime.Now).TotalMinutes);
             return StatusCode(StatusCodes.Status429TooManyRequests,
-                new { message = $"失败次数过多，请约 {waitMinutes} 分钟后再试" });
+                new MessageResponse($"失败次数过多，请约 {waitMinutes} 分钟后再试"));
         }
 
         if (userName.Length == 0 || !adminCredential.Validate(userName, request.Password ?? string.Empty))
         {
             RecordFailure(ip);
             await operationLogger.LogAsync("登录", "认证", userName, "用户名或密码错误", success: false, clientIp: ip);
-            return Unauthorized(new { message = "用户名或密码错误" });
+            return Unauthorized(new MessageResponse("用户名或密码错误"));
         }
 
         Failures.TryRemove(ip, out _);
@@ -46,7 +46,7 @@ public class AuthController(
     [Authorize]
     public IActionResult Check()
     {
-        return Ok(new { userName = User.Identity?.Name ?? string.Empty });
+        return Ok(new UserInfoResponse(User.Identity?.Name ?? string.Empty));
     }
 
     /// <summary>
@@ -60,27 +60,27 @@ public class AuthController(
         var newPassword = request.NewPassword;
         if (string.IsNullOrWhiteSpace(newUserName) && string.IsNullOrWhiteSpace(newPassword))
         {
-            return BadRequest(new { message = "新用户名与新密码至少填写一项" });
+            return BadRequest(new MessageResponse("新用户名与新密码至少填写一项"));
         }
         if (newPassword is { Length: < 6 })
         {
-            return BadRequest(new { message = "新密码至少 6 位" });
+            return BadRequest(new MessageResponse("新密码至少 6 位"));
         }
         if (newUserName is { Length: > 100 })
         {
-            return BadRequest(new { message = "用户名不能超过 100 个字符" });
+            return BadRequest(new MessageResponse("用户名不能超过 100 个字符"));
         }
         if (!adminCredential.Validate(User.Identity?.Name ?? string.Empty, request.CurrentPassword ?? string.Empty))
         {
             await operationLogger.LogAsync("修改凭据", "认证", User.Identity?.Name ?? string.Empty, "当前密码验证失败", success: false, clientIp: HttpContext.GetClientIp());
-            return BadRequest(new { message = "当前密码错误" });
+            return BadRequest(new MessageResponse("当前密码错误"));
         }
 
         adminCredential.UpdateCredential(newUserName, newPassword);
         await operationLogger.LogAsync("修改凭据", "认证", adminCredential.Account.UserName,
             (newUserName is { Length: > 0 } ? "修改用户名 " : string.Empty) + (newPassword is { Length: > 0 } ? "修改密码" : string.Empty),
             clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = "凭据已更新，请使用新凭据重新登录", requireRelogin = true });
+        return Ok(new ChangeCredentialResponse("凭据已更新，请使用新凭据重新登录", true));
     }
 
     private static void RecordFailure(string ip)

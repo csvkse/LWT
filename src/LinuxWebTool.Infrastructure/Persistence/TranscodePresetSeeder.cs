@@ -7,8 +7,9 @@ using LinuxWebTool.Infrastructure.Persistence.Entities;
 namespace LinuxWebTool.Infrastructure.Persistence;
 
 /// <summary>内置转码预设播种：增量补齐内置预设（缺哪个补哪个，已存在的跳过，不干扰用户创建的预设）。</summary>
-public static class TranscodePresetSeeder
+public static partial class TranscodePresetSeeder
 {
+    [DapperAot]
     public static void Seed(DbConnectionFactory factory)
     {
         using var db = factory.CreateConnection();
