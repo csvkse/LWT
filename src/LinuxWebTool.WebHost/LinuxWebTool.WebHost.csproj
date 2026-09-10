@@ -3,12 +3,16 @@
   <PropertyGroup>
     <RootNamespace>LinuxWebTool.WebHost</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- 发布时将前端资源嵌入主程序；开发环境仍保留物理 wwwroot 便于调试。 -->
+    <EmbeddedResource Include="wwwroot\**" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" />
     <PackageReference Include="Scalar.AspNetCore" />
   </ItemGroup>
 

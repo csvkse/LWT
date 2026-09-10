@@ -1,6 +1,7 @@
 ﻿using LinuxWebTool.WebHost.MinimalApi;
 using LinuxWebTool.Infrastructure.Support;
 using LinuxWebTool.WebHost.Middleware;
+using Microsoft.Extensions.FileProviders;
 using Scalar.AspNetCore;
 
 namespace LinuxWebTool.WebHost.Composition;
@@ -23,9 +24,17 @@ public static class PipelineExtensions
             await next();
         });
 
-        app.UseDefaultFiles();
+        var webRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+        IFileProvider fileProvider = app.Environment.IsDevelopment() && Directory.Exists(webRoot)
+            ? new PhysicalFileProvider(webRoot)
+            : new EmbeddedFileProvider(typeof(PipelineExtensions).Assembly, "LinuxWebTool.WebHost.wwwroot");
+
+        // DefaultFiles、StaticFiles 和 SPA fallback 必须共享同一个 provider。
+        app.Environment.WebRootFileProvider = fileProvider;
+        app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = fileProvider });
         app.UseStaticFiles(new StaticFileOptions
         {
+            FileProvider = fileProvider,
             // 前端资源全部 no-cache：内网工具性能足够，保证版本更新后浏览器立即拿到新文件
             OnPrepareResponse = context =>
             {
