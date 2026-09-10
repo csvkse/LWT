@@ -36,9 +36,9 @@ LinuxWebTool.slnx
 │   └── LinuxWebTool.WebHost/           # Program + Composition + Routes(7 组 API) + wwwroot/app(前端)
 ├── tests/LinuxWebTool.ArchitectureTests/  # 后端架构门禁（6 条规则）
 ├── scripts/verify-fast.ps1             # 一键门禁：build + test + 前端 gate
-├── scripts/publish.ps1                 # 发布 linux-x64 自包含产物
+├── scripts/publish.ps1                 # 发布 linux-x64 自包含产物（systemd）
 ├── .github/workflows/ci.yml            # CI：构建+门禁+GHCR 镜像（push/PR 触发）
-├── .github/workflows/desktop-release.yml  # 桌面端多平台构建发布（tag v* 触发 GitHub Release）
+├── .github/workflows/desktop-release.yml  # 桌面端多平台 Native AOT 发布（tag v* 触发 GitHub Release）
 ├── Dockerfile                          # Docker 部署（三阶段，alpine）
 ├── start.bat                           # Windows 开发机一键启动（dotnet run + 自动开浏览器）
 └── docs/dev/architecture-gates.md      # 门禁规则文档
@@ -72,11 +72,37 @@ docker run -e Admin__UserName=ops -e Admin__Password=你的密码 ghcr.io/csvkse
 
 ## 部署与使用
 
+## 效果预览
+
+### 首页与指令管理
+
+![首页](docs/imgs/首页.png)
+
+![指令页](docs/imgs/指令页.png)
+
+### 文件、日志与执行历史
+
+![文件管理](docs/imgs/文件管理.png)
+
+![操作日志](docs/imgs/操作日志.png)
+
+![指令执行历史](docs/imgs/指令执行历史.png)
+
+### 系统状态、转码与 SMB 挂载
+
+![系统状态](docs/imgs/系统状态.png)
+
+![系统状态采样点](docs/imgs/系统状态-采样点.png)
+
+![转码页](docs/imgs/转码页.png)
+
+![SMB 挂载](docs/imgs/Smb挂载.png)
+
 三种方式任选：**桌面端（Releases 下载，免装 .NET）** / **Docker** / **systemd 自包含发布**。
 
 ### 方式一：桌面端（推荐，开箱即用）
 
-从 [Releases](https://github.com/csvkse/LWT/releases) 下载对应平台压缩包——均为**自包含发布，目标机无需安装 .NET 运行时**，解压即可运行：
+从 [Releases](https://github.com/csvkse/LWT/releases) 下载对应平台压缩包（当前最新版本 `v0.1.7`）。桌面端包为**Native AOT 自包含单文件发布**，目标机无需安装 .NET 运行时，解压即可运行：
 
 | 平台 | 包 | 运行方式 |
 |---|---|---|
@@ -87,6 +113,8 @@ docker run -e Admin__UserName=ops -e Admin__Password=你的密码 ghcr.io/csvkse
 - 首次启动自动生成管理员密码：见**控制台启动日志**或 `data/admin.json` 的 `generatedPassword` 字段
 - Linux 注册系统服务：使用包内自带的 `linuxwebtool.service`（`sudo cp linuxwebtool.service /etc/systemd/system/ && sudo systemctl enable --now linuxwebtool`，注意按需修改 `User` 与路径）
 - **升级**：下载新版本包覆盖程序文件，**保留 `data/` 文件夹**即可保留全部数据
+
+> 桌面端发布由 `.github/workflows/desktop-release.yml` 在推送 `v*` tag 后自动构建 Linux x64、Linux ARM64 和 Windows x64；Native AOT 包与 Docker AOT 镜像使用同一套编译期序列化/路由约束。
 
 ### 方式二：Docker
 
@@ -300,12 +328,14 @@ USB / GPU 直通的 compose 节选（叠加到上方任一示例的对应位置�
 
 > ⚠️ 这些配置授予容器宿主硬件控制权，与「不暴露公网」原则叠加使用；非 NVIDIA 环境去掉 `--gpus all`（无 toolkit 时该参数会直接报错）。
 
-### 方式三：systemd（自包含发布）
+### 方式三：systemd（常规自包含发布）
 
 ```powershell
 ./scripts/publish.ps1
 # 按输出提示上传 /opt/linuxwebtool 并启用 linuxwebtool.service
 ```
+
+> `scripts/publish.ps1` 面向 Linux x64 的常规自包含部署；桌面端 Native AOT 包请优先从 Releases 下载。systemd 服务文件中的启动路径应与实际发布产物保持一致。
 
 ### 持久化与数据目录（三种方式通用）
 
