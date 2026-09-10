@@ -387,7 +387,7 @@ export default defineComponent({
         </div>
       </div>
 
-      <input type="file" ref="uploadInput" class="hidden" @change="onUpload()" />
+      <input type="file" ref="uploadInput" class="hidden" @change="onUpload($event)" />
     </div>
   `,
 });
