@@ -22,3 +22,5 @@ public record DeleteFileErrorResponse(string message, bool needRecursive);
 public record UploadFileResponse(string message, string path);
 public record TranscodeJobBrief(Guid Id, string SourcePath, string OutputPath, string PresetName, int OutputMode, int Trigger, Guid? WatchRuleId, int Status, double Progress, string SpeedText, long? DurationMs, string ErrorOutput, long? SourceSizeBytes, long? OutputSizeBytes, DateTime QueueTime, DateTime? StartTime, DateTime? EndTime, bool UseHardwareAccel, string HardwareBackend, bool UsedHardwareAccel, string CommandLine, string FallbackReason, string FallbackFromCommand, bool IsFullCommand);
 
+
+public record GroupBrief(Guid Id, string Name, int SortOrder, DateTime CreateTime, int UsageCount);

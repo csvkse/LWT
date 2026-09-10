@@ -1,4 +1,4 @@
-using LinuxWebTool.WebHost.Extensions;
+﻿using LinuxWebTool.WebHost.Extensions;
 
 namespace LinuxWebTool.WebHost.Routes;
 
@@ -16,20 +16,19 @@ public class GroupsController(
     public async Task<IActionResult> GetAll([FromQuery] GroupBizType bizType = GroupBizType.Command)
     {
         var groups = (await groupStore.GetByTypeAsync(bizType)).ToList();
-        var items = new List<object>(groups.Count);
+        var items = new List<LinuxWebTool.WebHost.Routes.GroupBrief>(groups.Count);
         foreach (var group in groups)
         {
             var usage = bizType == GroupBizType.Command
                 ? await commandStore.CountByGroupAsync(group.Id)
                 : await scheduleStore.CountByGroupAsync(group.Id);
-            items.Add(new
-            {
+            items.Add(new LinuxWebTool.WebHost.Routes.GroupBrief(
                 group.Id,
                 group.Name,
                 group.SortOrder,
                 group.CreateTime,
-                UsageCount = usage,
-            });
+                usage
+            ));
         }
         return Ok(items);
     }

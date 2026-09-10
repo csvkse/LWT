@@ -1,4 +1,4 @@
-using LinuxWebTool.Infrastructure.Support;
+﻿using LinuxWebTool.Infrastructure.Support;
 using LinuxWebTool.WebHost.Middleware;
 using Scalar.AspNetCore;
 
@@ -55,7 +55,7 @@ public static class PipelineExtensions
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.Response.ContentType = "application/json; charset=utf-8";
-            await context.Response.WriteAsJsonAsync(new { message = "API endpoint not found" });
+            await context.Response.WriteAsJsonAsync(new LinuxWebTool.WebHost.Routes.MessageResponse("API endpoint not found"), AppJsonSerializerContext.Default.MessageResponse);
         });
 
         app.MapFallbackToFile("app/index.html");

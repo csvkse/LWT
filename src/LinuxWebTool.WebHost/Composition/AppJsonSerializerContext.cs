@@ -71,6 +71,7 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(PresetImportItem))]
 [JsonSerializable(typeof(IEnumerable<PresetImportItem>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
+[JsonSerializable(typeof(List<LinuxWebTool.WebHost.Routes.GroupBrief>))]
 public partial class AppJsonSerializerContext
  : JsonSerializerContext
 {

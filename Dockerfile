@@ -1,15 +1,19 @@
-﻿# -----------------------------------------------------------------------------
-# 鏋勫缓涓婁笅鏂?= 浠撳簱鏍圭洰褰曪細docker build -t linuxwebtool .
-# 鍙傝€?DNSPodForNETCore(InfiniWeb) 鐨勪笁闃舵缁撴瀯锛?#   base  鈥斺€?aspnet alpine 杩愯鏃?+ 鏃跺尯/ICU + bash/procps锛堣剼鏈笌鐘舵€侀噰闆嗕緷璧栵級+ 闈?root 鐢ㄦ埛
-#   build 鈥斺€?sdk 杩樺師锛坈sproj 鍏堣鎷疯礉鍒╃敤缂撳瓨锛変笌鍙戝竷
-#   final 鈥斺€?base + 鍙戝竷浜х墿
+# -----------------------------------------------------------------------------
+# 构建上下文 = 仓库根目录：docker build -t linuxwebtool .
+# 参考 DNSPodForNETCore(InfiniWeb) 的三阶段结构：
+#   base  —— aspnet alpine 运行时 + 时区/ICU + bash/procps（脚本与状态采集依赖）+ 非 root 用户
+#   build —— sdk 还原（csproj 先行拷贝利用缓存）与发布
+#   final —— base + 发布产物
 # -----------------------------------------------------------------------------
 
-# ---------- 闃舵 1锛氳繍琛屾椂鍩虹 ----------
-# VENDOR 鎸?GPU 鍘傚晢閫夎 VA 椹卞姩锛坕ntel/amd/nv/all/cpu锛夛紱瑙佷笅鏂?鎸夊巶鍟嗚 VA 椹卞姩"灞傘€?# 椤跺眰 ARG 浠呬綔涓洪粯璁ゅ€硷紝base 闃舵闇€鍐嶆澹版槑鎵嶈兘琚?RUN 寮曠敤銆?ARG VENDOR=all
+# ---------- 阶段 1：运行时基础 ----------
+# VENDOR 按 GPU 厂商选装 VA 驱动（intel/amd/nv/all/cpu）；见下方"按厂商装 VA 驱动"层。
+# 顶层 ARG 仅作为默认值，base 阶段需再次声明才能被 RUN 引用。
+ARG VENDOR=all
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-alpine AS base
-# 閲嶆柊澹版槑鍏ㄥ眬 ARG锛堝闃舵涓?FROM 涔嬪墠鐨?ARG 闇€鍦ㄥ搴旈樁娈甸噸鏂?ARG 鎵嶈兘琚?RUN 浣跨敤锛?ARG VENDOR
+# 重新声明全局 ARG（多阶段中 FROM 之前的 ARG 需在对应阶段重新 ARG 才能被 RUN 使用）
+ARG VENDOR
 WORKDIR /app
 EXPOSE 5270
 
@@ -18,31 +22,44 @@ ENV TZ=Asia/Shanghai \
     LC_ALL=en_US.UTF-8 \
     DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
 
-# bash      鈥斺€?鑴氭湰绫诲瀷鎵ц渚濊禆 /bin/bash
-# procps    鈥斺€?绯荤粺鐘舵€侀〉鐨?ps 閲囬泦锛坅lpine 鑷甫 busybox ps 涓嶆敮鎸?-eo锛?# usbutils/pciutils/kmod 鈥斺€?纭欢鏌ョ湅宸ュ叿锛坙susb / lspci / lsmod锛?# util-linux-misc 鈥斺€?nsenter锛氶厤鍚?--privileged --pid=host --user root 鑷姩閲囬泦瀹夸富鍏ㄩ儴纾佺洏
-# cifs-utils 鈥斺€?SMB 鎸傝浇绠＄悊锛坢ount -t cifs锛涢渶 --privileged --user root 杩愯锛?# nethogs   鈥斺€?姣忚繘绋嬬綉缁滈€熺巼閲囬泦锛坱racemode锛涗粎 --privileged --user root 杩愯鏃剁敓鏁堬紝闈炵壒鏉冨垯鎺㈡祴璺宠繃锛?# ffmpeg    鈥斺€?濯掍綋杞爜锛堝惈 ffprobe锛屼竴娆?涓€娆℃€ц浆鐮?/ 闃熷垪 / 鐩戝惉鑷姩杞爜鍏ㄤ緷璧栧畠锛?# tzdata/icu 鈥斺€?鏃跺尯涓庝腑鏂囧叏鐞冨寲
-# libva/libva-utils 鈥斺€?VA-API 鐢ㄦ埛鎬佸簱涓庤瘖鏂伐鍏凤紙vainfo锛夈€俈A 缂栫爜鑳藉姏鐢辫繍琛屾椂閫忎紶椹卞姩鎺ョ锛?#   ffmpeg 宸插唴缃?h264_vaapi/hevc_vaapi/nvenc 绛夌‖浠剁紪鐮佸櫒鏀寔锛岀己 libva 鏃?--device=/dev/dri 閫忎紶鏍告樉涔熸棤娉曠湡姝ｇ紪鐮併€?#
-# 闀滃儚鐦﹁韩锛歏A 椹卞姩锛坕ntel iHD 39.5M / mesa gallium 42M锛変笉鍐嶆棤鏉′欢鍏ㄦ墦鍖咃紝鎸?VENDOR 鍒嗗眰閫夎锛?#   浠呰鎵€鐢?GPU 鍘傚晢鐨勭敤鎴锋€侀┍鍔紝閬垮厤"鍏ㄨ兘闀滃儚"鐧界櫧澧炲锛堣瑙?base 闃舵搴曢儴"鎸夊巶鍟嗚 VA 椹卞姩"灞傦級銆?RUN apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc cifs-utils nethogs \
+# bash      —— 脚本类型执行依赖 /bin/bash
+# procps    —— 系统状态页的 ps 采集（alpine 自带 busybox ps 不支持 -eo）
+# usbutils/pciutils/kmod —— 硬件查看工具（lsusb / lspci / lsmod）
+# util-linux-misc —— nsenter：配合 --privileged --pid=host --user root 自动采集宿主全部磁盘
+# cifs-utils —— SMB 挂载管理（mount -t cifs；需 --privileged --user root 运行）
+# nethogs   —— 每进程网络速率采集（tracemode；仅 --privileged --user root 运行时生效，非特权则探测跳过）
+# ffmpeg    —— 媒体转码（含 ffprobe，一次 一次性转码 / 队列 / 监听自动转码全依赖它）
+# tzdata/icu —— 时区与中文全球化
+# libva/libva-utils —— VA-API 用户态库与诊断工具（vainfo）。VA 编码能力由运行时透传驱动接管，
+#   ffmpeg 已内置 h264_vaapi/hevc_vaapi/nvenc 等硬件编码器支持，缺 libva 时 --device=/dev/dri 透传核显也无法真正编码。
+#
+# 镜像瘦身：VA 驱动（intel iHD 39.5M / mesa gallium 42M）不再无条件全打包，按 VENDOR 分层选装，
+#   仅装所用 GPU 厂商的用户态驱动，避免"全能镜像"白白增容（详见 base 阶段底部"按厂商装 VA 驱动"层）。
+RUN apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc cifs-utils nethogs \
       ffmpeg libva libva-utils tzdata icu-libs && \
     cp /usr/share/zoneinfo/$TZ /etc/localtime && \
     echo $TZ > /etc/timezone
 
-# 鎸?GPU 鍘傚晢瑁?VA 鐢ㄦ埛鎬侀┍鍔紙缂栫爜鍣ㄥ凡鍦?ffmpeg 鍐咃紝杩欓噷鍙璁?-vaapi_device 鐪熸鍙敤鐨勯┍鍔ㄥ簱锛夛細
-#   intel -> iHD锛圓lder Lake-N / N100 绛夋柊鏍告樉蹇呴渶锛屾彁渚?iHD_drv_video.so锛夛紱
-#            Alpine 鐨?mesa-va-gallium 浠呭惈 AMD/NVIDIA 绌哄３閾炬帴锛岀己 Intel iHD 鏃?vainfo 鎶?"va_openDriver() -1"
-#   amd   -> mesa-va-gallium锛坮adeonsi 瑙ｇ爜锛汚lpine 璇ュ寘浠?VA 瑙ｇ爜涓轰富锛孉MD VA 缂栫爜鍙楅檺锛岃窇涓嶄簡鏃跺簲鐢ㄨ嚜鍔ㄥ洖閫€杞欢缂栫爜锛?#   nv    -> 涓嶈 VA 椹卞姩锛歂VIDIA 璧?NVENC锛岀敱閮ㄧ讲渚?nvidia-container-toolkit + --gpus 閫忎紶椹卞姩锛宖fmpeg 宸插惈 nvenc 鏀寔
-#   all   -> 鍏ㄨ锛堝厹搴曪紝涓庡師琛屼负涓€鑷达級
-#   cpu/none -> 绾蒋浠剁紪鐮侊紝涓嶈 VA 椹卞姩
+# 按 GPU 厂商装 VA 用户态驱动（编码器已在 ffmpeg 内，这里只装让 -vaapi_device 真正可用的驱动库）：
+#   intel -> iHD（Alder Lake-N / N100 等新核显必需，提供 iHD_drv_video.so）；
+#            Alpine 的 mesa-va-gallium 仅含 AMD/NVIDIA 空壳链接，缺 Intel iHD 时 vainfo 报 "va_openDriver() -1"
+#   amd   -> mesa-va-gallium（radeonsi 解码；Alpine 该包以 VA 解码为主，AMD VA 编码受限，跑不了时应用自动回退软件编码）
+#   nv    -> 不装 VA 驱动：NVIDIA 走 NVENC，由部署侧 nvidia-container-toolkit + --gpus 透传驱动，ffmpeg 已含 nvenc 支持
+#   all   -> 全装（兜底，与原行为一致）
+#   cpu/none -> 纯软件编码，不装 VA 驱动
 RUN echo "==> VENDOR=${VENDOR}" && \
     case "${VENDOR}" in \
       intel) apk add --no-cache intel-media-driver ;; \
       amd)   apk add --no-cache mesa-va-gallium ;; \
-      nv|nvidia) echo "nvenc 鐢?nvidia-container-toolkit 閫忎紶椹卞姩锛岄暅鍍忓唴缃?nvenc 缂栫爜鍣ㄦ敮鎸侊紝涓嶈 VA 椹卞姩" ;; \
+      nv|nvidia) echo "nvenc 由 nvidia-container-toolkit 透传驱动，镜像内置 nvenc 编码器支持，不装 VA 驱动" ;; \
       all)   apk add --no-cache intel-media-driver mesa-va-gallium ;; \
-      cpu|none|*) echo "绾蒋浠剁紪鐮侊紝涓嶈 VA 椹卞姩" ;; \
+      cpu|none|*) echo "纯软件编码，不装 VA 驱动" ;; \
     esac
 
-# 闈?root 杩愯锛沝ata 涓鸿繍琛屾湡鏁版嵁鐩綍锛圫QLite/鍑嵁/jwt 瀵嗛挜/鏃ュ織鍏ㄩ儴鑱氬悎浜庢锛屽崟鍗锋寔涔呭寲锛夈€?# 鑻ラ渶瑕佹墽琛?systemctl/docker 绛夌壒鏉冩寚浠わ紝鍙皢涓嬫柟 USER 鏀逛负 root 鎴栭儴缃叉椂瑕嗙洊銆?# 鍔犲叆 audio 缁勶細瀹瑰櫒閫忎紶 --device=/dev/dri 鍚庯紝renderD128 灞?audio 缁勶紝闈?root 闇€璇ョ粍鎵嶈兘鐢?VA-API銆?RUN addgroup -g 1001 appgroup && \
+# 非 root 运行；data 为运行期数据目录（SQLite/凭据/jwt 密钥/日志全部聚合于此，单卷持久化）。
+# 若需要执行 systemctl/docker 等特权指令，可将下方 USER 改为 root 或部署时覆盖。
+# 加入 audio 组：容器透传 --device=/dev/dri 后，renderD128 属 audio 组，非 root 需该组才能用 VA-API。
+RUN addgroup -g 1001 appgroup && \
     adduser -u 1001 -G appgroup -s /bin/bash -D appuser && \
     addgroup appuser audio 2>/dev/null; \
     mkdir -p /app/data /home/appuser/.aspnet/DataProtection-Keys && \
@@ -50,12 +67,13 @@ RUN echo "==> VENDOR=${VENDOR}" && \
 
 USER appuser
 
-# ---------- 闃舵 2锛氭瀯寤轰笌鍙戝竷 ----------
+# ---------- 阶段 2：构建与发布 ----------
 FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
-# 鍏堝鍒堕」鐩枃浠讹紝鍏呭垎鍒╃敤渚濊禆杩樺師缂撳瓨銆?COPY ["Directory.Build.props", "Directory.Packages.props", "./"]
+# 先复制项目文件，充分利用依赖还原缓存。
+COPY ["Directory.Build.props", "Directory.Packages.props", "./"]
 COPY ["src/LinuxWebTool.Contracts/LinuxWebTool.Contracts.csproj", "src/LinuxWebTool.Contracts/"]
 COPY ["src/LinuxWebTool.Infrastructure/LinuxWebTool.Infrastructure.csproj", "src/LinuxWebTool.Infrastructure/"]
 COPY ["src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj", "src/LinuxWebTool.WebHost/"]
@@ -71,18 +89,21 @@ RUN dotnet publish "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj" \
     /p:PublishAot=true \
     -r linux-musl-x64
 
-# 娓呯悊璋冭瘯绗﹀彿锛屽噺灏忛暅鍍忎綋绉?RUN find /app/publish -type f -name "*.pdb" -delete
+# 清理调试符号，减小镜像体积
+RUN find /app/publish -type f -name "*.pdb" -delete
 
-# ---------- 闃舵 3锛氭渶缁堢敓浜ч暅鍍?----------
+# ---------- 阶段 3：最终生产镜像 ----------
 FROM base AS final
 WORKDIR /app
 COPY --from=build --chown=appuser:appgroup /app/publish .
 
-# appsettings.json 宸插皢 Urls 璁句负 http://0.0.0.0:5270锛屽鍣ㄥ唴鐩存帴鐢熸晥锛?# 鏈湴寮€鍙戠敱 launchSettings.json 鐨?applicationUrl 瑕嗙洊锛屼簩鑰呬簰涓嶅共鎵般€?
-# data/ 鑱氬悎鍏ㄩ儴鎸佷箙鍖栨暟鎹細SQLite銆乤dmin.json銆乯wt 瀵嗛挜銆乴ogs/ 鈥斺€?鍗曞嵎鎸傝浇鍗冲彲瀹屾暣鎸佷箙鍖?VOLUME ["/app/data"]
+# appsettings.json 已将 Urls 设为 http://0.0.0.0:5270，容器内直接生效，
+# 本地开发由 launchSettings.json 的 applicationUrl 覆盖，二者互不干扰。
+
+# data/ 聚合全部持久化数据：SQLite、admin.json、jwt 密钥、logs/ —— 单卷挂载即可完整持久化
+VOLUME ["/app/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD wget -q --spider http://127.0.0.1:5270/app/ || exit 1
 
 ENTRYPOINT ["./LinuxWebTool.WebHost"]
-

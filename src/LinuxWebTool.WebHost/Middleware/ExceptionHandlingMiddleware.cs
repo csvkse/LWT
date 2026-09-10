@@ -1,4 +1,4 @@
-namespace LinuxWebTool.WebHost.Middleware;
+﻿namespace LinuxWebTool.WebHost.Middleware;
 
 /// <summary>全局异常兜底：记录程序日志并返回统一 JSON 错误体。</summary>
 public sealed class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger)
@@ -20,7 +20,7 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Ex
             {
                 context.Response.StatusCode = StatusCodes.Status500InternalServerError;
                 context.Response.ContentType = "application/json; charset=utf-8";
-                await context.Response.WriteAsJsonAsync(new { message = "服务器内部错误：" + ex.Message });
+                await context.Response.WriteAsJsonAsync(new LinuxWebTool.WebHost.Routes.MessageResponse("服务器内部错误：" + ex.Message), LinuxWebTool.WebHost.Composition.AppJsonSerializerContext.Default.MessageResponse);
             }
         }
     }
