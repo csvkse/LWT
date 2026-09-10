@@ -34,7 +34,9 @@ public sealed class CoreUnitTests
             Assert.Equal(Path.GetFullPath(root), paths.Root);
             Assert.Equal(Path.Combine(paths.Root, "linuxweb.db"), paths.PathFor("linuxweb.db"));
             Assert.Equal(Path.Combine(paths.Root, "logs", "app.log"), paths.Resolve("logs/app.log"));
-            Assert.Equal("C:/absolute.log", paths.Resolve("C:/absolute.log"));
+            var absolutePath = Path.Combine(Path.GetTempPath(), "absolute.log");
+            Assert.True(Path.IsPathRooted(absolutePath));
+            Assert.Equal(absolutePath, paths.Resolve(absolutePath));
         }
         finally
         {
