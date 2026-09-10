@@ -13,10 +13,10 @@ public class SchedulesController(
     GroupStore groupStore,
     ExecutionStore executionStore,
     IScheduleManager scheduleManager,
-    IOperationLogger operationLogger) : ControllerBase
+    IOperationLogger operationLogger) : MinimalApi.ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> GetAll()
+    public async Task<IResult> GetAll()
     {
         var tasks = await scheduleStore.GetAllAsync();
         var commands = (await commandStore.GetAllAsync()).ToDictionary(c => c.Id);
@@ -50,7 +50,7 @@ public class SchedulesController(
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] SaveScheduleRequest request)
+    public async Task<IResult> Create([FromBody] SaveScheduleRequest request)
     {
         var (valid, message, cron) = await ValidateAsync(request);
         if (!valid)
@@ -76,7 +76,7 @@ public class SchedulesController(
     }
 
     [HttpPut("{id:guid}")]
-    public async Task<IActionResult> Update(Guid id, [FromBody] SaveScheduleRequest request)
+    public async Task<IResult> Update(Guid id, [FromBody] SaveScheduleRequest request)
     {
         var task = await scheduleStore.GetByIdAsync(id);
         if (task is null)
@@ -105,7 +105,7 @@ public class SchedulesController(
     }
 
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Delete(Guid id)
+    public async Task<IResult> Delete(Guid id)
     {
         var task = await scheduleStore.GetByIdAsync(id);
         if (task is null)
@@ -121,7 +121,7 @@ public class SchedulesController(
 
     /// <summary>启用 / 停用切换：停用即从调度器移除触发器。</summary>
     [HttpPost("{id:guid}/Toggle")]
-    public async Task<IActionResult> Toggle(Guid id)
+    public async Task<IResult> Toggle(Guid id)
     {
         var task = await scheduleStore.GetByIdAsync(id);
         if (task is null)
@@ -138,7 +138,7 @@ public class SchedulesController(
 
     /// <summary>立即执行一次（不影响 Cron 计划）。</summary>
     [HttpPost("{id:guid}/RunNow")]
-    public async Task<IActionResult> RunNow(Guid id)
+    public async Task<IResult> RunNow(Guid id)
     {
         var task = await scheduleStore.GetByIdAsync(id);
         if (task is null)
@@ -153,7 +153,7 @@ public class SchedulesController(
 
     /// <summary>定时任务的执行记录。</summary>
     [HttpGet("{id:guid}/Records")]
-    public async Task<IActionResult> Records(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    public async Task<IResult> Records(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
     {
         var result = await executionStore.QueryAsync(new ExecuteHistoryQuery
         {

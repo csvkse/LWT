@@ -1,4 +1,5 @@
-﻿using LinuxWebTool.Infrastructure.Support;
+﻿using LinuxWebTool.WebHost.MinimalApi;
+using LinuxWebTool.Infrastructure.Support;
 using LinuxWebTool.WebHost.Middleware;
 using Scalar.AspNetCore;
 
@@ -37,17 +38,11 @@ public static class PipelineExtensions
         });
 
         var swaggerEnabled = app.Configuration.GetValue("Swagger:Enabled", true);
-        if (swaggerEnabled)
-        {
-            // MapOpenApi 提供 /openapi/v1.json（AOT 兼容，替代 UseSwagger）
-            app.MapOpenApi();
-            // Scalar UI 替代 Swagger UI，默认访问路径 /scalar/v1
-            app.MapScalarApiReference();
-        }
+        
 
         app.UseAuthentication();
         app.UseAuthorization();
-        app.MapControllers();
+        app.MapAutoControllers();
 
         // 未匹配的 API 必须返回 JSON 404，不能被 SPA fallback 返回 index.html（否则前端会把 HTML 当业务数据）。
         // 以 /api/{*path} 作为较具体的 fallback endpoint：正常 Controller 路由优先，未知 API 才落到这里。
@@ -62,3 +57,7 @@ public static class PipelineExtensions
         return app;
     }
 }
+
+
+
+

@@ -24,3 +24,5 @@ public record TranscodeJobBrief(Guid Id, string SourcePath, string OutputPath, s
 
 
 public record GroupBrief(Guid Id, string Name, int SortOrder, DateTime CreateTime, int UsageCount);
+
+public record EnqueueResponse(string message, int count, Guid? jobId = null);

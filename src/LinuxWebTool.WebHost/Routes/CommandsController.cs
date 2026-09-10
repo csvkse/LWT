@@ -11,10 +11,10 @@ public class CommandsController(
     GroupStore groupStore,
     ExecutionStore executionStore,
     IShellExecutor shellExecutor,
-    IOperationLogger operationLogger) : ControllerBase
+    IOperationLogger operationLogger) : MinimalApi.ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] Guid? groupId, [FromQuery] string? keyword)
+    public async Task<IResult> GetAll([FromQuery] Guid? groupId, [FromQuery] string? keyword)
     {
         var commands = await commandStore.GetAllAsync();
         IEnumerable<LinuxCommand> query = commands;
@@ -51,7 +51,7 @@ public class CommandsController(
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] SaveCommandRequest request)
+    public async Task<IResult> Create([FromBody] SaveCommandRequest request)
     {
         var (valid, message) = await ValidateAsync(request, excludeId: null);
         if (!valid)
@@ -75,7 +75,7 @@ public class CommandsController(
     }
 
     [HttpPut("{id:guid}")]
-    public async Task<IActionResult> Update(Guid id, [FromBody] SaveCommandRequest request)
+    public async Task<IResult> Update(Guid id, [FromBody] SaveCommandRequest request)
     {
         var command = await commandStore.GetByIdAsync(id);
         if (command is null)
@@ -102,7 +102,7 @@ public class CommandsController(
     }
 
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Delete(Guid id)
+    public async Task<IResult> Delete(Guid id)
     {
         var command = await commandStore.GetByIdAsync(id);
         if (command is null)
@@ -117,7 +117,7 @@ public class CommandsController(
 
     /// <summary>执行已保存的指令并记录调用历史；脚本类型可携带位置参数。</summary>
     [HttpPost("{id:guid}/Execute")]
-    public async Task<IActionResult> Execute(Guid id, [FromBody] ExecuteCommandRequest? request)
+    public async Task<IResult> Execute(Guid id, [FromBody] ExecuteCommandRequest? request)
     {
         var command = await commandStore.GetByIdAsync(id);
         if (command is null)
@@ -137,7 +137,7 @@ public class CommandsController(
 
     /// <summary>快速执行临时指令（不保存，仅记录调用历史；仅命令行模式）。</summary>
     [HttpPost("QuickExecute")]
-    public async Task<IActionResult> QuickExecute([FromBody] QuickExecuteRequest request)
+    public async Task<IResult> QuickExecute([FromBody] QuickExecuteRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.CommandText))
         {
@@ -159,7 +159,7 @@ public class CommandsController(
 
     /// <summary>单条指令的执行历史。</summary>
     [HttpGet("{id:guid}/History")]
-    public async Task<IActionResult> History(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    public async Task<IResult> History(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
     {
         var result = await executionStore.QueryAsync(new ExecuteHistoryQuery
         {

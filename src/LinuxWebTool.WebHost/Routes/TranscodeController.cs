@@ -1,4 +1,4 @@
-using LinuxWebTool.Contracts.Models;
+﻿using LinuxWebTool.Contracts.Models;
 using LinuxWebTool.Infrastructure.Persistence;
 using LinuxWebTool.Infrastructure.Transcode;
 using LinuxWebTool.WebHost.Extensions;
@@ -23,12 +23,12 @@ public class TranscodeController(
     TranscodeQueueService queueService,
     FfmpegLocator locator,
     TranscodeOptions transcodeOptions,
-    IOperationLogger operationLogger) : ControllerBase
+    IOperationLogger operationLogger) : MinimalApi.ControllerBase
 {
     // ---------- 转码任务 ----------
 
     [HttpGet("Jobs")]
-    public async Task<IActionResult> Jobs([FromQuery] int page = 1, [FromQuery] int pageSize = 20,
+    public async Task<IResult> Jobs([FromQuery] int page = 1, [FromQuery] int pageSize = 20,
         [FromQuery] TranscodeJobStatus? status = null, [FromQuery] Guid? watchRuleId = null)
     {
         var (items, total) = await jobStore.QueryAsync(page, pageSize, status, watchRuleId);
@@ -58,20 +58,20 @@ public class TranscodeController(
             j.FallbackFromCommand,
             j.IsFullCommand
         ));
-        return Ok(new { items = mapped, total });
+        return Ok(new PagedResponse<TranscodeJobBrief>(mapped, total));
     }
 
     /// <summary>一次性转码提交：SourcePath 为文件 → 单任务；为文件夹 → 按扩展名过滤扫描批量入队。</summary>
     [HttpPost("Submit")]
-    public async Task<IActionResult> Submit([FromBody] TranscodeSubmitRequest request)
+    public async Task<IResult> Submit([FromBody] TranscodeSubmitRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.SourcePath))
         {
-            return BadRequest(new { message = "请填写源文件 / 源文件夹路径" });
+            return BadRequest(new MessageResponse("请填写源文件 / 源文件夹路径" ));
         }
         if (string.IsNullOrWhiteSpace(request.CustomArgs) && request.PresetId is null)
         {
-            return BadRequest(new { message = "请选择预设或填写自定义 ffmpeg 参数" });
+            return BadRequest(new MessageResponse("请选择预设或填写自定义 ffmpeg 参数" ));
         }
         // 预设与自定义参数可共存（预设作为模板快照展开到自定义参数后，以自定义参数为准）。
         // 仅当两者同时明确非空且分属不同来源（未展开）时，视为互斥；这里放宽——自定义参数优先。
@@ -83,7 +83,7 @@ public class TranscodeController(
             var (valid, message) = await ValidateSubmitPresetAsync(request);
             if (!valid)
             {
-                return BadRequest(new { message });
+                return BadRequest(new MessageResponse(message));
             }
             var preset = request.PresetId is { } presetId ? await presetStore.GetByIdAsync(presetId) : null;
             var job = await CreateJobAsync(source, preset, preset?.Name ?? request.PresetName, request.CustomArgs,
@@ -91,7 +91,7 @@ public class TranscodeController(
                 request.UseHardwareAccel, request.HardwareBackend, request.IsFullCommand);
             await operationLogger.LogAsync("提交转码", "转码任务", Path.GetFileName(source),
                 $"{source}（预设: {request.PresetId?.ToString() ?? "自定义参数"}）", clientIp: HttpContext.GetClientIp());
-            return Ok(new { message = "已加入转码队列", count = 1, jobId = job.Id });
+            return Ok(new EnqueueResponse("已加入转码队列", 1, job.Id));
         }
 
         if (Directory.Exists(source))
@@ -99,7 +99,7 @@ public class TranscodeController(
             var (valid, message) = await ValidateSubmitPresetAsync(request);
             if (!valid)
             {
-                return BadRequest(new { message });
+                return BadRequest(new MessageResponse(message));
             }
             var extensions = MediaExtensions.Parse(request.FilePatterns);
             var preset = request.PresetId is { } presetId ? await presetStore.GetByIdAsync(presetId) : null;
@@ -127,49 +127,49 @@ public class TranscodeController(
             }
             await operationLogger.LogAsync("提交文件夹转码", "转码任务", source,
                 $"批量入队 {count} 个文件", count > 0, clientIp: HttpContext.GetClientIp());
-            return Ok(new { message = count > 0 ? $"已加入转码队列 {count} 个文件" : "未发现匹配的媒体文件", count });
+            return Ok(new EnqueueResponse(count > 0 ? $"已加入转码队列 {count} 个文件" : "未发现匹配的媒体文件", count));
         }
 
-        return BadRequest(new { message = "源路径不存在（文件或文件夹均未找到），请检查路径是否为服务器本地可访问路径" });
+        return BadRequest(new MessageResponse("源路径不存在（文件或文件夹均未找到），请检查路径是否为服务器本地可访问路径" ));
     }
 
     [HttpPost("Jobs/{id:guid}/Cancel")]
-    public async Task<IActionResult> Cancel(Guid id)
+    public async Task<IResult> Cancel(Guid id)
     {
         var job = await jobStore.GetByIdAsync(id);
         if (job is null)
         {
-            return NotFound(new { message = "任务不存在" });
+            return NotFound(new MessageResponse("任务不存在" ));
         }
         if (job.Status != (int)TranscodeJobStatus.Queued && job.Status != (int)TranscodeJobStatus.Running)
         {
-            return BadRequest(new { message = "任务已结束，无需取消" });
+            return BadRequest(new MessageResponse("任务已结束，无需取消" ));
         }
         var cancelled = await queueService.CancelAsync(id);
         if (!cancelled)
         {
-            return BadRequest(new { message = "任务状态已变化，请刷新后重试" });
+            return BadRequest(new MessageResponse("任务状态已变化，请刷新后重试" ));
         }
         await operationLogger.LogAsync("取消转码任务", "转码任务", job.SourcePath, clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = job.Status == (int)TranscodeJobStatus.Running ? "已发出取消指令，等待进程终止" : "已取消" });
+        return Ok(new MessageResponse(job.Status == (int)TranscodeJobStatus.Running ? "已发出取消指令，等待进程终止" : "已取消" ));
     }
 
     [HttpPost("Jobs/Retry/{id:guid}")]
-    public async Task<IActionResult> Retry(Guid id)
+    public async Task<IResult> Retry(Guid id)
     {
         var job = await jobStore.GetByIdAsync(id);
         if (job is null)
         {
-            return NotFound(new { message = "任务不存在" });
+            return NotFound(new MessageResponse("任务不存在" ));
         }
         if (job.Status != (int)TranscodeJobStatus.Failed && job.Status != (int)TranscodeJobStatus.Cancelled
             && job.Status != (int)TranscodeJobStatus.Interrupted)
         {
-            return BadRequest(new { message = "仅失败的 / 已取消 / 已中断的任务可重试" });
+            return BadRequest(new MessageResponse("仅失败的 / 已取消 / 已中断的任务可重试" ));
         }
         if (!System.IO.File.Exists(job.SourcePath))
         {
-            return BadRequest(new { message = "源文件不存在，无法重试" });
+            return BadRequest(new MessageResponse("源文件不存在，无法重试" ));
         }
 
         job.Status = (int)TranscodeJobStatus.Queued;
@@ -182,15 +182,15 @@ public class TranscodeController(
         await jobStore.UpdateAsync(job);
         queueService.Enqueue(job.Id);
         await operationLogger.LogAsync("重试转码任务", "转码任务", job.SourcePath, clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = "已重新加入转码队列" });
+        return Ok(new MessageResponse("已重新加入转码队列" ));
     }
 
     [HttpPost("Jobs/ClearFinished")]
-    public async Task<IActionResult> ClearFinished()
+    public async Task<IResult> ClearFinished()
     {
         var deleted = await jobStore.DeleteFinishedAsync();
         await operationLogger.LogAsync("清理转码记录", "转码任务", $"{deleted} 条", clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = $"已清理 {deleted} 条已结束记录" });
+        return Ok(new MessageResponse($"已清理 {deleted} 条已结束记录"));
     }
 
     private async Task<TranscodeJob> CreateJobAsync(string source, TranscodePreset? preset, string? presetName,
@@ -272,7 +272,7 @@ public class TranscodeController(
     // ---------- 转码预设 ----------
 
     [HttpGet("Presets")]
-    public async Task<IActionResult> Presets()
+    public async Task<IResult> Presets()
     {
         var presets = await presetStore.GetAllAsync();
         return Ok(presets.Select(p => new
@@ -292,12 +292,12 @@ public class TranscodeController(
     }
 
     [HttpPost("Presets")]
-    public async Task<IActionResult> CreatePreset([FromBody] SavePresetRequest request)
+    public async Task<IResult> CreatePreset([FromBody] SavePresetRequest request)
     {
         var (valid, message) = await ValidatePresetAsync(request);
         if (!valid)
         {
-            return BadRequest(new { message });
+            return BadRequest(new MessageResponse(message));
         }
         var preset = new TranscodePreset
         {
@@ -313,21 +313,21 @@ public class TranscodeController(
         };
         await presetStore.InsertAsync(preset);
         await operationLogger.LogAsync("新增转码预设", "转码预设", preset.Name, DescribePreset(preset), clientIp: HttpContext.GetClientIp());
-        return Ok(new { preset.Id });
+        return Ok(new IdResponse(preset.Id));
     }
 
     [HttpPut("Presets/{id:guid}")]
-    public async Task<IActionResult> UpdatePreset(Guid id, [FromBody] SavePresetRequest request)
+    public async Task<IResult> UpdatePreset(Guid id, [FromBody] SavePresetRequest request)
     {
         var preset = await presetStore.GetByIdAsync(id);
         if (preset is null)
         {
-            return NotFound(new { message = "转码预设不存在" });
+            return NotFound(new MessageResponse("转码预设不存在" ));
         }
         var (valid, message) = await ValidatePresetAsync(request, excludeId: id);
         if (!valid)
         {
-            return BadRequest(new { message });
+            return BadRequest(new MessageResponse(message));
         }
         preset.Name = request.Name.Trim();
         preset.Container = request.Container.Trim().TrimStart('.');
@@ -339,33 +339,33 @@ public class TranscodeController(
         preset.Description = request.Description?.Trim();
         await presetStore.UpdateAsync(preset);
         await operationLogger.LogAsync("修改转码预设", "转码预设", preset.Name, DescribePreset(preset), clientIp: HttpContext.GetClientIp());
-        return Ok(new { preset.Id });
+        return Ok(new IdResponse(preset.Id));
     }
 
     [HttpDelete("Presets/{id:guid}")]
-    public async Task<IActionResult> DeletePreset(Guid id)
+    public async Task<IResult> DeletePreset(Guid id)
     {
         var preset = await presetStore.GetByIdAsync(id);
         if (preset is null)
         {
-            return NotFound(new { message = "转码预设不存在" });
+            return NotFound(new MessageResponse("转码预设不存在" ));
         }
         if (await presetStore.CountWatchRuleUsageAsync(id) > 0)
         {
-            return BadRequest(new { message = "该预设正被监听规则使用，无法删除（请先修改或删除对应规则）" });
+            return BadRequest(new MessageResponse("该预设正被监听规则使用，无法删除（请先修改或删除对应规则）" ));
         }
         if (await jobStore.ExistsActiveForPresetAsync(id))
         {
-            return BadRequest(new { message = "该预设存在排队 / 运行中的任务，无法删除" });
+            return BadRequest(new MessageResponse("该预设存在排队 / 运行中的任务，无法删除" ));
         }
         await presetStore.DeleteAsync(id);
         await operationLogger.LogAsync("删除转码预设", "转码预设", preset.Name, DescribePreset(preset), clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = "已删除" });
+        return Ok(new MessageResponse("已删除" ));
     }
 
     /// <summary>导出全部预设为 JSON 文件（含内置），供备份 / 迁移 / 导入。</summary>
     [HttpGet("Presets/Export")]
-    public async Task<IActionResult> ExportPresets()
+    public async Task<IResult> ExportPresets()
     {
         var presets = await presetStore.GetAllAsync();
         var items = presets.Select(p => new PresetImportItem
@@ -388,15 +388,15 @@ public class TranscodeController(
 
     /// <summary>从 JSON 数组导入预设。同名预设跳过（含内置，不覆盖）；内置标记按文件还原。</summary>
     [HttpPost("Presets/Import")]
-    public async Task<IActionResult> ImportPresets([FromBody] List<PresetImportItem> items)
+    public async Task<IResult> ImportPresets([FromBody] List<PresetImportItem> items)
     {
         if (items is null)
         {
-            return BadRequest(new { message = "导入内容为空" });
+            return BadRequest(new MessageResponse("导入内容为空" ));
         }
         if (items.Count > 500)
         {
-            return BadRequest(new { message = "单次最多导入 500 个预设" });
+            return BadRequest(new MessageResponse("单次最多导入 500 个预设" ));
         }
 
         var imported = 0;
@@ -454,7 +454,7 @@ public class TranscodeController(
         }
 
         await operationLogger.LogAsync("导入转码预设", "转码预设", $"导入 {imported} 个 / 跳过 {skipped} 个", string.Empty, clientIp: HttpContext.GetClientIp());
-        return Ok(new { imported, skipped, messages });
+        return Ok(new ImportResponse(imported, skipped, messages));
     }
 
     private async Task<(bool Valid, string Message)> ValidatePresetAsync(SavePresetRequest request, Guid? excludeId = null)
@@ -505,7 +505,7 @@ public class TranscodeController(
     // ---------- 监听规则 ----------
 
     [HttpGet("WatchRules")]
-    public async Task<IActionResult> WatchRules()
+    public async Task<IResult> WatchRules()
     {
         var rules = await watchRuleStore.GetAllAsync();
         return Ok(rules.Select(r => new
@@ -527,12 +527,12 @@ public class TranscodeController(
     }
 
     [HttpPost("WatchRules")]
-    public async Task<IActionResult> CreateWatchRule([FromBody] SaveWatchRuleRequest request)
+    public async Task<IResult> CreateWatchRule([FromBody] SaveWatchRuleRequest request)
     {
         var (valid, message) = await ValidateWatchRuleAsync(request);
         if (!valid)
         {
-            return BadRequest(new { message });
+            return BadRequest(new MessageResponse(message));
         }
         var rule = new WatchRule
         {
@@ -551,21 +551,21 @@ public class TranscodeController(
         await watchRuleStore.InsertAsync(rule);
         await operationLogger.LogAsync("新增监听规则", "监听转码", rule.Name,
             $"{rule.WatchPath} → 预设 {request.PresetId}", clientIp: HttpContext.GetClientIp());
-        return Ok(new { rule.Id });
+        return Ok(new IdResponse(rule.Id));
     }
 
     [HttpPut("WatchRules/{id:guid}")]
-    public async Task<IActionResult> UpdateWatchRule(Guid id, [FromBody] SaveWatchRuleRequest request)
+    public async Task<IResult> UpdateWatchRule(Guid id, [FromBody] SaveWatchRuleRequest request)
     {
         var rule = await watchRuleStore.GetByIdAsync(id);
         if (rule is null)
         {
-            return NotFound(new { message = "监听规则不存在" });
+            return NotFound(new MessageResponse("监听规则不存在" ));
         }
         var (valid, message) = await ValidateWatchRuleAsync(request, excludeId: id);
         if (!valid)
         {
-            return BadRequest(new { message });
+            return BadRequest(new MessageResponse(message));
         }
         rule.Name = request.Name.Trim();
         rule.WatchPath = request.WatchPath.Trim().TrimEnd('/');
@@ -580,33 +580,33 @@ public class TranscodeController(
         rule.HardwareBackend = string.IsNullOrWhiteSpace(request.HardwareBackend) ? "auto" : request.HardwareBackend.Trim();
         await watchRuleStore.UpdateAsync(rule);
         await operationLogger.LogAsync("修改监听规则", "监听转码", rule.Name, $"{rule.WatchPath}", clientIp: HttpContext.GetClientIp());
-        return Ok(new { rule.Id });
+        return Ok(new IdResponse(rule.Id));
     }
 
     [HttpDelete("WatchRules/{id:guid}")]
-    public async Task<IActionResult> DeleteWatchRule(Guid id)
+    public async Task<IResult> DeleteWatchRule(Guid id)
     {
         var rule = await watchRuleStore.GetByIdAsync(id);
         if (rule is null)
         {
-            return NotFound(new { message = "监听规则不存在" });
+            return NotFound(new MessageResponse("监听规则不存在" ));
         }
         await watchRuleStore.DeleteAsync(id);
         await operationLogger.LogAsync("删除监听规则", "监听转码", rule.Name, $"{rule.WatchPath}", clientIp: HttpContext.GetClientIp());
-        return Ok(new { message = "已删除" });
+        return Ok(new MessageResponse("已删除" ));
     }
 
     [HttpPost("WatchRules/{id:guid}/Toggle")]
-    public async Task<IActionResult> ToggleWatchRule(Guid id)
+    public async Task<IResult> ToggleWatchRule(Guid id)
     {
         var rule = await watchRuleStore.GetByIdAsync(id);
         if (rule is null)
         {
-            return NotFound(new { message = "监听规则不存在" });
+            return NotFound(new MessageResponse("监听规则不存在" ));
         }
         rule.Enabled = !rule.Enabled;
         await watchRuleStore.UpdateAsync(rule);
-        return Ok(new { rule.Enabled, rule.Id });
+        return Ok(new RuleStatusResponse(rule.Enabled, rule.Id));
     }
 
     private async Task<(bool Valid, string Message)> ValidateWatchRuleAsync(SaveWatchRuleRequest request, Guid? excludeId = null)
@@ -642,9 +642,14 @@ public class TranscodeController(
     // ---------- ffmpeg 检测 ----------
 
     [HttpGet("DetectFfmpeg")]
-    public async Task<IActionResult> DetectFfmpeg()
+    public async Task<IResult> DetectFfmpeg()
     {
         var detection = await locator.DetectAsync();
         return Ok(detection);
     }
 }
+
+
+
+
+

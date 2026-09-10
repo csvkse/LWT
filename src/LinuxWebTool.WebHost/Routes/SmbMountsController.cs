@@ -12,11 +12,11 @@ namespace LinuxWebTool.WebHost.Routes;
 public class SmbMountsController(
     SmbMountStore mountStore,
     SmbMountService mountService,
-    IOperationLogger operationLogger) : ControllerBase
+    IOperationLogger operationLogger) : MinimalApi.ControllerBase
 {
     /// <summary>当前环境是否支持挂载管理（Windows 开发机为 false，UI 据此显示提示）。</summary>
     [HttpGet("Support")]
-    public IActionResult Support()
+    public IResult Support()
     {
         return Ok(new
         {
@@ -28,7 +28,7 @@ public class SmbMountsController(
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetAll()
+    public async Task<IResult> GetAll()
     {
         var mounts = await mountStore.GetAllAsync();
         var items = mounts.Select(m =>
@@ -57,7 +57,7 @@ public class SmbMountsController(
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] SaveSmbMountRequest request)
+    public async Task<IResult> Create([FromBody] SaveSmbMountRequest request)
     {
         var (valid, message, server, localPath) = Validate(request);
         if (!valid)
@@ -94,7 +94,7 @@ public class SmbMountsController(
     }
 
     [HttpPut("{id:guid}")]
-    public async Task<IActionResult> Update(Guid id, [FromBody] SaveSmbMountRequest request)
+    public async Task<IResult> Update(Guid id, [FromBody] SaveSmbMountRequest request)
     {
         var mount = await mountStore.GetByIdAsync(id);
         if (mount is null)
@@ -143,7 +143,7 @@ public class SmbMountsController(
     }
 
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Delete(Guid id)
+    public async Task<IResult> Delete(Guid id)
     {
         var mount = await mountStore.GetByIdAsync(id);
         if (mount is null)
@@ -172,7 +172,7 @@ public class SmbMountsController(
 
     /// <summary>执行挂载。</summary>
     [HttpPost("{id:guid}/Mount")]
-    public async Task<IActionResult> Mount(Guid id)
+    public async Task<IResult> Mount(Guid id)
     {
         var mount = await mountStore.GetByIdAsync(id);
         if (mount is null)
@@ -188,7 +188,7 @@ public class SmbMountsController(
 
     /// <summary>执行卸载（body {lazy:true} 懒卸载）。</summary>
     [HttpPost("{id:guid}/Unmount")]
-    public async Task<IActionResult> Unmount(Guid id, [FromBody] UnmountRequest? request)
+    public async Task<IResult> Unmount(Guid id, [FromBody] UnmountRequest? request)
     {
         var mount = await mountStore.GetByIdAsync(id);
         if (mount is null)

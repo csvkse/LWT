@@ -6,17 +6,17 @@ namespace LinuxWebTool.WebHost.Routes;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class HistoryController(ExecutionStore executionStore, IOperationLogger operationLogger) : ControllerBase
+public class HistoryController(ExecutionStore executionStore, IOperationLogger operationLogger) : MinimalApi.ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] ExecuteHistoryQuery query)
+    public async Task<IResult> GetAll([FromQuery] ExecuteHistoryQuery query)
     {
         var result = await executionStore.QueryAsync(query);
         return Ok(result);
     }
 
     [HttpDelete]
-    public async Task<IActionResult> Clear([FromQuery] int? olderThanDays)
+    public async Task<IResult> Clear([FromQuery] int? olderThanDays)
     {
         if (olderThanDays is < 1)
         {

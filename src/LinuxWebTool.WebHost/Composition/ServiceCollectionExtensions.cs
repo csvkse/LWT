@@ -1,3 +1,4 @@
+﻿using LinuxWebTool.WebHost.MinimalApi;
 using LinuxWebTool.WebHost.Middleware;
 using LinuxWebTool.Infrastructure.Support;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -89,28 +90,14 @@ public static class ServiceCollectionExtensions
         builder.Services.AddScheduling();
 
         // MVC + OpenAPI（AOT 兼容，替代 Swashbuckle）
-        builder.Services.AddControllers()
-            .AddJsonOptions(options =>
-            {
-                options.JsonSerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);
-            });
+        builder.Services.AddAutoControllers();
         
         builder.Services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);
         });
         builder.Services.AddHttpContextAccessor();
-        builder.Services.AddOpenApi(options =>
-        {
-            options.AddDocumentTransformer((document, context, ct) =>
-            {
-                document.Info.Title = "LinuxWebTool API";
-                document.Info.Version = "v1";
-                return Task.CompletedTask;
-            });
-            // JWT Bearer 安全方案
-            options.AddDocumentTransformer<BearerSecuritySchemeTransformer>();
-        });
+        
 
         return builder;
     }
@@ -133,3 +120,9 @@ internal sealed class BearerSecuritySchemeTransformer : IOpenApiDocumentTransfor
         return Task.CompletedTask;
     }
 }
+
+
+
+
+
+

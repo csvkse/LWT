@@ -15,7 +15,7 @@ namespace LinuxWebTool.WebHost.Routes;
 [Authorize]
 public class FilesController(
     DataPaths dataPaths,
-    IOperationLogger operationLogger) : ControllerBase
+    IOperationLogger operationLogger) : MinimalApi.ControllerBase
 {
     /// <summary>文本查看 / 编辑上限（2MB），超限提示下载而不是误读大文件。</summary>
     private const long MaxTextBytes = 2 * 1024 * 1024;
@@ -24,7 +24,7 @@ public class FilesController(
 
     /// <summary>列出目录内容。path 必须是存在的目录。</summary>
     [HttpGet]
-    public IActionResult List([FromQuery] string path)
+    public IResult List([FromQuery] string path)
     {
         var normalized = NormalizePosix(path);
         if (!Directory.Exists(normalized))
@@ -89,7 +89,7 @@ public class FilesController(
 
     /// <summary>读取文本文件内容（二进制 / 超限拒绝）。</summary>
     [HttpGet("Content")]
-    public async Task<IActionResult> ReadContent([FromQuery] string path)
+    public async Task<IResult> ReadContent([FromQuery] string path)
     {
         var normalized = NormalizePosix(path);
         if (!System.IO.File.Exists(normalized))
@@ -120,7 +120,7 @@ public class FilesController(
 
     /// <summary>写文本文件（新建或覆盖）。父目录必须存在。</summary>
     [HttpPost("Content")]
-    public async Task<IActionResult> WriteContent([FromBody] SaveTextRequest request)
+    public async Task<IResult> WriteContent([FromBody] SaveTextRequest request)
     {
         var normalized = NormalizePosix(request.Path);
         if (IsProtected(normalized))
@@ -146,7 +146,7 @@ public class FilesController(
 
     /// <summary>新建目录（可多级）。</summary>
     [HttpPost("Mkdir")]
-    public async Task<IActionResult> Mkdir([FromBody] PathRequest request)
+    public async Task<IResult> Mkdir([FromBody] PathRequest request)
     {
         var normalized = NormalizePosix(request.Path);
         if (IsProtected(normalized))
@@ -172,7 +172,7 @@ public class FilesController(
 
     /// <summary>重命名 / 移动文件或目录。</summary>
     [HttpPost("Rename")]
-    public async Task<IActionResult> Rename([FromBody] RenameRequest request)
+    public async Task<IResult> Rename([FromBody] RenameRequest request)
     {
         var from = NormalizePosix(request.From);
         var to = NormalizePosix(request.To);
@@ -205,7 +205,7 @@ public class FilesController(
 
     /// <summary>删除文件或目录（目录递归需 recursive=true）。</summary>
     [HttpDelete]
-    public async Task<IActionResult> Delete([FromQuery] string path, [FromQuery] bool recursive = false)
+    public async Task<IResult> Delete([FromQuery] string path, [FromQuery] bool recursive = false)
     {
         var normalized = NormalizePosix(path);
         if (normalized == "/")
@@ -239,7 +239,7 @@ public class FilesController(
 
     /// <summary>上传文件到目录（一次一个）。重名自动加序号。</summary>
     [HttpPost("Upload")]
-    public async Task<IActionResult> Upload([FromQuery] string path, IFormFile? file)
+    public async Task<IResult> Upload([FromQuery] string path, IFormFile? file)
     {
         var normalized = NormalizePosix(path);
         if (!Directory.Exists(normalized))

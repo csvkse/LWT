@@ -10,10 +10,10 @@ public class GroupsController(
     GroupStore groupStore,
     CommandStore commandStore,
     ScheduleStore scheduleStore,
-    IOperationLogger operationLogger) : ControllerBase
+    IOperationLogger operationLogger) : MinimalApi.ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] GroupBizType bizType = GroupBizType.Command)
+    public async Task<IResult> GetAll([FromQuery] GroupBizType bizType = GroupBizType.Command)
     {
         var groups = (await groupStore.GetByTypeAsync(bizType)).ToList();
         var items = new List<LinuxWebTool.WebHost.Routes.GroupBrief>(groups.Count);
@@ -34,7 +34,7 @@ public class GroupsController(
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] SaveGroupRequest request)
+    public async Task<IResult> Create([FromBody] SaveGroupRequest request)
     {
         var (valid, message) = await ValidateAsync(request, excludeId: null);
         if (!valid)
@@ -54,7 +54,7 @@ public class GroupsController(
     }
 
     [HttpPut("{id:guid}")]
-    public async Task<IActionResult> Update(Guid id, [FromBody] SaveGroupRequest request)
+    public async Task<IResult> Update(Guid id, [FromBody] SaveGroupRequest request)
     {
         var group = await groupStore.GetByIdAsync(id);
         if (group is null)
@@ -76,7 +76,7 @@ public class GroupsController(
     }
 
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> Delete(Guid id)
+    public async Task<IResult> Delete(Guid id)
     {
         var group = await groupStore.GetByIdAsync(id);
         if (group is null)

@@ -7,10 +7,10 @@ namespace LinuxWebTool.WebHost.Routes;
 public class OverviewController(
     CommandStore commandStore,
     ScheduleStore scheduleStore,
-    ExecutionStore executionStore) : ControllerBase
+    ExecutionStore executionStore) : MinimalApi.ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> Get()
+    public async Task<IResult> Get()
     {
         var schedules = await scheduleStore.GetAllAsync();
         var recent = await executionStore.GetRecentAsync(8);

@@ -7,11 +7,11 @@ namespace LinuxWebTool.WebHost.Routes;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class LogsController(OperationLogStore operationLogStore, LogFileService logFileService) : ControllerBase
+public class LogsController(OperationLogStore operationLogStore, LogFileService logFileService) : MinimalApi.ControllerBase
 {
     /// <summary>操作日志分页查询。</summary>
     [HttpGet("Operations")]
-    public async Task<IActionResult> Operations([FromQuery] OperationLogQuery query)
+    public async Task<IResult> Operations([FromQuery] OperationLogQuery query)
     {
         var result = await operationLogStore.QueryAsync(query);
         return Ok(result);
@@ -19,14 +19,14 @@ public class LogsController(OperationLogStore operationLogStore, LogFileService 
 
     /// <summary>日志文件列表（app-* 程序日志、debug-* 调试日志）。</summary>
     [HttpGet("Files")]
-    public IActionResult Files()
+    public IResult Files()
     {
         return Ok(logFileService.List());
     }
 
     /// <summary>查看日志文件末尾 N 行（默认 300）。</summary>
     [HttpGet("Files/{name}")]
-    public IActionResult FileContent(string name, [FromQuery] int tail = 300)
+    public IResult FileContent(string name, [FromQuery] int tail = 300)
     {
         var content = logFileService.ReadTail(name, tail);
         if (content is null)

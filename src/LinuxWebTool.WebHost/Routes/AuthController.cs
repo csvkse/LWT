@@ -9,7 +9,7 @@ namespace LinuxWebTool.WebHost.Routes;
 public class AuthController(
     AdminCredentialService adminCredential,
     JwtIssuer jwtIssuer,
-    IOperationLogger operationLogger) : ControllerBase
+    IOperationLogger operationLogger) : MinimalApi.ControllerBase
 {
     private const int MaxFailures = 10;
     private static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(5);
@@ -17,7 +17,7 @@ public class AuthController(
 
     [AllowAnonymous]
     [HttpPost("Login")]
-    public async Task<IActionResult> Login([FromBody] LoginRequest request)
+    public async Task<IResult> Login([FromBody] LoginRequest request)
     {
         var ip = HttpContext.GetClientIp();
         var userName = request.UserName?.Trim() ?? string.Empty;
@@ -44,7 +44,7 @@ public class AuthController(
 
     [HttpGet("Check")]
     [Authorize]
-    public IActionResult Check()
+    public IResult Check()
     {
         return Ok(new UserInfoResponse(User.Identity?.Name ?? string.Empty));
     }
@@ -54,7 +54,7 @@ public class AuthController(
     /// </summary>
     [HttpPost("ChangeCredential")]
     [Authorize]
-    public async Task<IActionResult> ChangeCredential([FromBody] ChangeCredentialRequest request)
+    public async Task<IResult> ChangeCredential([FromBody] ChangeCredentialRequest request)
     {
         var newUserName = request.NewUserName?.Trim();
         var newPassword = request.NewPassword;
