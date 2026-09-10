@@ -5,6 +5,9 @@
 为支持 Native AOT 部署，必须将所有 MVC Controller 改为 Minimal API。鉴于项目已有十余个 Controller 和数百个接口，手动重写工作量巨大且易错。
 
 ## 2. 封装转换器方案 (最少代码修改)
+
+> 💡 **附录**：所有在迁移过程中编写的 Python 自动化脚本，均已归档保存至 [docs/references/](../references/) 目录。详情可参阅该目录下的 README.md。
+
 为了最大限度复用现有的 MVC 代码，我们采用了一种“封装器 + 自动生成”的策略：
 
 1. **实现伪装基类 (MinimalApi.ControllerBase)**：
