@@ -39,6 +39,15 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<ExecutionStore>();
         builder.Services.AddSingleton<OperationLogStore>();
         builder.Services.AddSingleton<IOperationLogger, OperationLogger>();
+        var retentionOptions = new LogRetentionOptions
+        {
+            FileLogDays = ReadPositiveInt(configuration, "Retention:FileLogDays", 30),
+            ExecutionHistoryDays = ReadPositiveInt(configuration, "Retention:ExecutionHistoryDays", 90),
+            OperationLogDays = ReadPositiveInt(configuration, "Retention:OperationLogDays", 180),
+            CleanupIntervalHours = ReadPositiveInt(configuration, "Retention:CleanupIntervalHours", 24),
+        };
+        builder.Services.AddSingleton(retentionOptions);
+        builder.Services.AddHostedService<LogRetentionService>();
 
         // SMB 挂载管理
         builder.Services.AddSingleton<SmbMountStore>();
@@ -101,6 +110,9 @@ public static class ServiceCollectionExtensions
 
         return builder;
     }
+
+    private static int ReadPositiveInt(IConfiguration configuration, string key, int fallback) =>
+        int.TryParse(configuration[key], out var value) && value > 0 ? value : fallback;
 }
 
 /// <summary>为 OpenAPI 文档注入 JWT Bearer 安全方案。</summary>

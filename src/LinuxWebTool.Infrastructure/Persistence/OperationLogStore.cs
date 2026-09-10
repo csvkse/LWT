@@ -48,4 +48,10 @@ VALUES (@Id, @Time, @Action, @TargetType, @TargetName, @Detail, @ClientIp, @Succ
             PageSize = pageSize,
         };
     }
+
+    public async Task ClearOlderThanAsync(DateTime cutoff)
+    {
+        using var db = factory.CreateConnection();
+        await db.ExecuteAsync("DELETE FROM operation_log WHERE Time < @Cutoff", new { Cutoff = cutoff });
+    }
 }

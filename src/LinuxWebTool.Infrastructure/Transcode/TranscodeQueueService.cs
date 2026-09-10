@@ -89,7 +89,6 @@ public sealed class TranscodeQueueService(
         try
         {
             await RecoverAsync(stoppingToken);
-            CleanOldLogs();
 
             var workers = Enumerable.Range(0, _gate.CurrentCount)
                 .Select(_ => WorkerLoopAsync(stoppingToken));
@@ -629,28 +628,4 @@ public sealed class TranscodeQueueService(
         }
     }
 
-    /// <summary>清理过期转码日志（Media:LogRetentionDays，默认 7 天）。</summary>
-    private void CleanOldLogs()
-    {
-        try
-        {
-            if (!Directory.Exists(LogDirectory))
-            {
-                return;
-            }
-            var deadline = DateTime.Now.AddDays(-Math.Max(1, options.LogRetentionDays));
-            foreach (var file in Directory.EnumerateFiles(LogDirectory))
-            {
-                var info = new FileInfo(file);
-                if (info.LastWriteTime < deadline)
-                {
-                    info.Delete();
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "转码日志清理失败");
-        }
-    }
 }

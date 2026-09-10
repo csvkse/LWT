@@ -377,3 +377,8 @@ dotnet test LinuxWebTool.slnx -c Release # 运行全部单元/架构/集成测�
 | `Jwt:ExpireHours` | 12 | 登录有效期 |
 | `FileLog:Directory` | `logs` | 日志目录（相对路径锚定到数据目录） |
 | `Logging:LogFile:LinuxWebTool` | Debug | 调试日志开关（写入 debug-*.txt） |
+| `Retention:FileLogDays` | 30 | 程序日志和调试日志保留天数 |
+| `Media:LogRetentionDays` | 7 | 转码日志保留天数 |
+| `Retention:ExecutionHistoryDays` | 90 | 指令执行历史保留天数 |
+| `Retention:OperationLogDays` | 180 | 操作审计日志保留天数 |
+| `Retention:CleanupIntervalHours` | 24 | 自动清理执行间隔（小时） |

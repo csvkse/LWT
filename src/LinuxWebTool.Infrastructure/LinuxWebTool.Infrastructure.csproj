@@ -19,4 +19,8 @@
     <ProjectReference Include="..\LinuxWebTool.Contracts\LinuxWebTool.Contracts.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="LinuxWebTool.ArchitectureTests" />
+  </ItemGroup>
+
 </Project>

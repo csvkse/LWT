@@ -101,4 +101,10 @@ public partial class ExecutionStore(DbConnectionFactory factory)
             await db.ExecuteAsync("DELETE FROM execution_record");
         }
     }
+
+    public async Task ClearOlderThanAsync(DateTime cutoff)
+    {
+        using var db = factory.CreateConnection();
+        await db.ExecuteAsync("DELETE FROM execution_record WHERE StartTime < @Cutoff", new { Cutoff = cutoff });
+    }
 }
