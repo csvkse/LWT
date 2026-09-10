@@ -68,7 +68,7 @@ RUN addgroup -g 1001 appgroup && \
 USER appuser
 
 # ---------- 阶段 2：构建与发布 ----------
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
@@ -99,9 +99,8 @@ FROM base AS final
 WORKDIR /app
 COPY --from=build --chown=appuser:appgroup /app/publish .
 
-# 容器必须绑定 0.0.0.0:5270：appsettings 的 "Urls"(localhost:5270，面向桌面端) 在 .NET 8+ hosting 中
-# 优先级高于 ASPNETCORE_URLS 环境变量（实测），因此发布后直接改写该值，否则端口映射完全失效。
-RUN sed -i 's|"Urls": "http://localhost:5270"|"Urls": "http://0.0.0.0:5270"|' /app/appsettings.json
+# appsettings.json 已将 Urls 设为 http://0.0.0.0:5270，容器内直接生效，
+# 本地开发由 launchSettings.json 的 applicationUrl 覆盖，二者互不干扰。
 
 # data/ 聚合全部持久化数据：SQLite、admin.json、jwt 密钥、logs/ —— 单卷挂载即可完整持久化
 VOLUME ["/app/data"]
