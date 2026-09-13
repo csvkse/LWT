@@ -6,6 +6,7 @@ using LinuxWebTool.WebHost.Composition;
 using LinuxWebTool.WebHost;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Xunit;
 
@@ -13,11 +14,11 @@ namespace LinuxWebTool.IntegrationTests;
 
 public sealed class ApiIntegrationTests
 {
+    private static readonly string DataDirectory = Path.Combine(Path.GetTempPath(), "linuxwebtool-tests", Guid.NewGuid().ToString("N"));
     private static readonly Lazy<Task<HttpClient>> Client = new(CreateClientAsync);
 
     private static async Task<HttpClient> CreateClientAsync()
     {
-        var dataDirectory = Path.Combine(Path.GetTempPath(), "linuxwebtool-tests", Guid.NewGuid().ToString("N"));
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             ApplicationName = typeof(Program).Assembly.GetName().Name,
@@ -27,7 +28,7 @@ public sealed class ApiIntegrationTests
         builder.WebHost.UseTestServer();
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["Data:Directory"] = dataDirectory,
+            ["Data:Directory"] = DataDirectory,
             ["Admin:UserName"] = "admin",
             ["Admin:Password"] = "integration-test-password",
             ["Swagger:Enabled"] = "false",
@@ -100,6 +101,32 @@ public sealed class ApiIntegrationTests
 
         Assert.Equal(HttpStatusCode.OK, (await client.DeleteAsync($"/api/Commands/{commandId}")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.DeleteAsync($"/api/Groups/{groupId}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Legacy_lowercase_smb_mount_id_can_be_looked_up_by_route_guid()
+    {
+        var client = await Client.Value;
+        await LoginAsync(client);
+
+        var create = await client.PostAsync("/api/SmbMounts", Json("{\"name\":\"integration-smb\",\"server\":\"//server/share\",\"localPath\":\"/mnt/integration-smb\",\"autoMount\":false,\"enabled\":true}"));
+        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+        using var document = JsonDocument.Parse(await create.Content.ReadAsStringAsync());
+        var mountId = document.RootElement.GetProperty("id").GetGuid();
+
+        await using (var db = new SqliteConnection($"Data Source={Path.Combine(DataDirectory, "linuxweb.db")}"))
+        {
+            await db.OpenAsync();
+            await using var normalize = db.CreateCommand();
+            normalize.CommandText = "UPDATE smb_mount SET Id = lower(Id) WHERE Id = $id";
+            normalize.Parameters.AddWithValue("$id", mountId.ToString().ToUpperInvariant());
+            Assert.Equal(1, await normalize.ExecuteNonQueryAsync());
+        }
+
+        var update = await client.PutAsync($"/api/SmbMounts/{mountId}", Json("{\"name\":\"integration-smb-updated\",\"server\":\"//server/share\",\"localPath\":\"/mnt/integration-smb\",\"autoMount\":false,\"enabled\":true}"));
+
+        Assert.Equal(HttpStatusCode.OK, update.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.DeleteAsync($"/api/SmbMounts/{mountId}")).StatusCode);
     }
 
     [Fact]
