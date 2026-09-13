@@ -11,6 +11,8 @@ public sealed class StartupInitializerService(AdminCredentialService adminCreden
 {
     public Task StartAsync(CancellationToken cancellationToken)
     {
+        // 通过构造函数触发 AdminCredentialService 的凭据初始化。
+        _ = adminCredential;
         logger.LogInformation("数据目录（数据库 / 凭据 / 密钥 / 日志）: {DataDir}", dataPaths.Root);
         return Task.CompletedTask;
     }

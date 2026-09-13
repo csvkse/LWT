@@ -1,6 +1,10 @@
 using LinuxWebTool.Contracts.Models;
 using LinuxWebTool.Infrastructure.Persistence;
 using LinuxWebTool.Infrastructure.SystemInfo;
+using Polly;
+using Polly.CircuitBreaker;
+using Polly.Retry;
+using Polly.Timeout;
 
 namespace LinuxWebTool.Infrastructure.Mount;
 
@@ -14,6 +18,9 @@ public sealed class SmbMountStartupService(
     SmbMountService mountService,
     ILogger<SmbMountStartupService> logger) : BackgroundService
 {
+    private const int MaxRetries = 10;
+    private const int MountAttemptTimeoutSeconds = 45;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // 等待数据库 / 网络就绪，避开启动尖峰
@@ -63,15 +70,81 @@ public sealed class SmbMountStartupService(
                 continue;
             }
 
-            var (success, message) = await mountService.MountAsync(mount);
-            if (success)
-            {
-                logger.LogInformation("SMB 自动重挂成功：{Name} → {LocalPath}", mount.Name, mount.LocalPath);
-            }
-            else
-            {
-                logger.LogWarning("SMB 自动重挂失败：{Name} → {LocalPath}，原因：{Message}", mount.Name, mount.LocalPath, message);
-            }
+            await AutoMountWithRetryAsync(mount, stoppingToken);
         }
     }
+
+    private async Task AutoMountWithRetryAsync(SmbMount mount, CancellationToken stoppingToken)
+    {
+        var retryCount = 0;
+        var pipeline = new ResiliencePipelineBuilder()
+            .AddTimeout(TimeSpan.FromSeconds(MountAttemptTimeoutSeconds))
+            .AddRetry(new RetryStrategyOptions
+            {
+                MaxRetryAttempts = MaxRetries,
+                ShouldHandle = new PredicateBuilder()
+                    .Handle<SmbMountRetryException>()
+                    .Handle<TimeoutRejectedException>(),
+                DelayGenerator = args =>
+                {
+                    var attempt = args.AttemptNumber + 1;
+                    var delay = attempt <= 5
+                        ? TimeSpan.FromMinutes(attempt)
+                        : TimeSpan.FromMinutes((attempt - 5) * 10);
+                    return new ValueTask<TimeSpan?>(delay);
+                },
+                OnRetry = args =>
+                {
+                    retryCount = args.AttemptNumber + 1;
+                    logger.LogWarning(args.Outcome.Exception,
+                        "SMB 自动挂载失败，将在 {Delay} 后进行第 {Attempt}/{Max} 次重试：{Name} → {LocalPath}",
+                        args.RetryDelay, retryCount, MaxRetries, mount.Name, mount.LocalPath);
+                    return default;
+                },
+            })
+            .AddCircuitBreaker(new CircuitBreakerStrategyOptions
+            {
+                FailureRatio = 1.0,
+                MinimumThroughput = MaxRetries + 1,
+                SamplingDuration = TimeSpan.FromHours(1),
+                BreakDuration = TimeSpan.FromHours(1),
+                ShouldHandle = new PredicateBuilder().Handle<SmbMountRetryException>(),
+            })
+            .Build();
+
+        try
+        {
+            await pipeline.ExecuteAsync(async cancellationToken =>
+            {
+                if (mountService.GetStatus(mount) == SmbMountStatus.Mounted)
+                {
+                    return;
+                }
+
+                var (success, message) = await mountService.MountAsync(mount);
+                if (!success)
+                {
+                    throw new SmbMountRetryException(message);
+                }
+            }, stoppingToken);
+
+            logger.LogInformation("SMB 自动重挂成功：{Name} → {LocalPath}，重试次数：{Retries}",
+                mount.Name, mount.LocalPath, retryCount);
+        }
+        catch (BrokenCircuitException ex)
+        {
+            logger.LogError(ex, "SMB 自动重挂连续失败，熔断并停止重试：{Name} → {LocalPath}", mount.Name, mount.LocalPath);
+        }
+        catch (SmbMountRetryException ex)
+        {
+            logger.LogError(ex, "SMB 自动重挂在 {Attempts} 次尝试后仍失败，停止重试：{Name} → {LocalPath}",
+                MaxRetries + 1, mount.Name, mount.LocalPath);
+        }
+        catch (TimeoutRejectedException ex)
+        {
+            logger.LogError(ex, "SMB 自动重挂超时并停止：{Name} → {LocalPath}", mount.Name, mount.LocalPath);
+        }
+    }
+
+    private sealed class SmbMountRetryException(string message) : Exception(message);
 }

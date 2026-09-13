@@ -5,6 +5,8 @@
     <IsAotCompatible>true</IsAotCompatible>
     <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- EndpointsMapper.g.cs 使用 ASP.NET Delegate 路由 API；运行时路由已由项目生成器验证。 -->
+    <NoWarn>$(NoWarn);IL2026;IL3050</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
