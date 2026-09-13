@@ -111,6 +111,7 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(TranscodeJobBrief))]
 [JsonSerializable(typeof(TranscodeSubmitRequest))]
 [JsonSerializable(typeof(LinuxWebTool.WebHost.Routes.SmbMountsController.UnmountRequest))]
+[JsonSerializable(typeof(LinuxWebTool.WebHost.Routes.HealthResponse))]
 [JsonSerializable(typeof(System.Collections.Generic.List<LinuxWebTool.Contracts.Models.PresetImportItem>))]
 public partial class AppJsonSerializerContext
  : JsonSerializerContext

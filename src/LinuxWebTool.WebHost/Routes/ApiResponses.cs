@@ -25,6 +25,15 @@ public record TranscodeJobBrief(Guid Id, string SourcePath, string? OutputPath, 
 
 public record GroupBrief(Guid Id, string Name, int SortOrder, DateTime CreateTime, int UsageCount);
 public record SmbMountItemResponse(Guid Id, string Name, string Server, string LocalPath, string? Username, string? Domain, string? Options, bool AutoMount, bool Enabled, string? Description, bool HasPassword, int Status, string StatusText, DateTime CreateTime, DateTime UpdateTime);
+
+public sealed record HealthResponse(
+    string Status,
+    string Version,
+    string Framework,
+    string Os,
+    string Architecture,
+    long UptimeSeconds,
+    bool Database);
 public record SmbSupportResponse(bool Supported, string Message);
 public record ResourceHistoryResponse(IEnumerable<StatusSnapshotPoint> System, IEnumerable<DiskSnapshotPoint> Disks, IEnumerable<NetSnapshotPoint> Networks, IEnumerable<ProcessSnapshotPoint> Processes);
 public record PresetItemResponse(Guid Id, string Name, string Container, string? VideoCodec, int? VideoQuality, string? AudioCodec, string? AudioBitrate, string? ExtraArgs, string? Description, bool IsBuiltin, DateTime CreateTime);

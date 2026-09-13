@@ -3,6 +3,9 @@ using LinuxWebTool.Infrastructure.Support;
 using LinuxWebTool.WebHost.Middleware;
 using Microsoft.Extensions.FileProviders;
 using Scalar.AspNetCore;
+using System.Diagnostics;
+using System.Reflection;
+using LinuxWebTool.Infrastructure.Persistence;
 
 namespace LinuxWebTool.WebHost.Composition;
 
@@ -12,6 +15,33 @@ public static class PipelineExtensions
     public static WebApplication UseApplicationPipeline(this WebApplication app)
     {
         app.UseMiddleware<ExceptionHandlingMiddleware>();
+
+        app.MapGet("/health", async (DbConnectionFactory factory) =>
+        {
+            var database = false;
+            try
+            {
+                using var connection = factory.CreateConnection();
+                await connection.OpenAsync();
+                database = connection.State == System.Data.ConnectionState.Open;
+            }
+            catch
+            {
+                // 健康检查必须返回可消费的 503，而不是抛出未处理异常。
+            }
+
+            var response = new Routes.HealthResponse(
+                database ? "healthy" : "unhealthy",
+                Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "unknown",
+                Environment.Version.ToString(),
+                OperatingSystem.IsLinux() ? "Linux" : Environment.OSVersion.Platform.ToString(),
+                System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString(),
+                (long)Environment.TickCount64 / 1000,
+                database);
+            return database
+                ? Results.Ok(response)
+                : Results.Json(response, Composition.AppJsonSerializerContext.Default.HealthResponse, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }).AllowAnonymous();
 
         // 根路径跳转到前端入口
         app.Use(async (context, next) =>
