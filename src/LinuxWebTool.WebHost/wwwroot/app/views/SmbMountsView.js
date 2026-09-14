@@ -13,6 +13,17 @@ const STATUS_META = {
   3: { label: '不支持', class: 'border-amber-500/50 text-amber-300', dot: 'bg-amber-400' },
 };
 
+const HEALTH_META = {
+  Unknown: { label: '检测中', class: 'border-slate-600/60 text-slate-400', dot: 'bg-slate-500' },
+  Healthy: { label: '可访问', class: 'border-emerald-500/50 text-emerald-300', dot: 'bg-emerald-400' },
+  NotMounted: { label: '未挂载', class: 'border-slate-600/60 text-slate-400', dot: 'bg-slate-500' },
+  ServerUnreachable: { label: '服务器不可达', class: 'border-amber-500/50 text-amber-300', dot: 'bg-amber-400' },
+  Stale: { label: '挂载失效', class: 'border-rose-500/50 text-rose-300', dot: 'bg-rose-500' },
+  Recovering: { label: '恢复中', class: 'border-cyan-500/50 text-cyan-300', dot: 'bg-cyan-400' },
+  RecoveryFailed: { label: '恢复失败', class: 'border-rose-500/50 text-rose-300', dot: 'bg-rose-500' },
+  Unsupported: { label: '不支持', class: 'border-amber-500/50 text-amber-300', dot: 'bg-amber-400' },
+};
+
 const emptyForm = () => ({
   name: '', server: '', localPath: '', username: '', password: '', domain: '', options: 'vers=3.0,uid=1001,gid=1001',
   autoMount: false, enabled: true, description: '',
@@ -62,6 +73,10 @@ export default defineComponent({
 
     function statusMeta(status) {
       return STATUS_META[status] || STATUS_META[0];
+    }
+
+    function healthMeta(health) {
+      return HEALTH_META[health?.state] || HEALTH_META.Unknown;
     }
 
     function openCreate() {
@@ -179,7 +194,7 @@ export default defineComponent({
 
     return {
       items, loading, actingId, unsupported, loadError, showEditor, editingId, saving, form,
-      load, openCreate, openEdit, save, remove, mountNow, browse, unmount, statusMeta, formatTime,
+      load, openCreate, openEdit, save, remove, mountNow, browse, unmount, statusMeta, healthMeta, formatTime,
     };
   },
   template: `
@@ -210,6 +225,14 @@ export default defineComponent({
                 <span class="badge" :class="statusMeta(mount.status).class">
                   <span class="inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle" :class="statusMeta(mount.status).dot"></span>{{ statusMeta(mount.status).label }}
                 </span>
+                <div class="mt-1">
+                  <span class="badge" :class="healthMeta(mount.health).class">
+                    <span class="inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle" :class="healthMeta(mount.health).dot"></span>{{ healthMeta(mount.health).label }}
+                  </span>
+                  <div v-if="mount.health?.lastError" class="mt-1 max-w-[12rem] truncate text-rose-300/80 text-[11px]" :title="mount.health.lastError">
+                    {{ mount.health.lastError }}
+                  </div>
+                </div>
               </td>
               <td class="text-slate-200">{{ mount.name }}</td>
               <td class="font-mono text-xs text-cyan-300/80">{{ mount.server }}</td>

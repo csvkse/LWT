@@ -11,7 +11,7 @@ namespace LinuxWebTool.Infrastructure.Mount;
 /// 仅 Linux 可用；Docker 部署需要 --privileged（或 --cap-add SYS_ADMIN）+ --user root，且镜像内含 cifs-utils。
 /// 挂载点同时注册到 SystemStatusProvider.ManagedMountPoints，使状态页磁盘明细展示 SMB 挂载。
 /// </summary>
-public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService> logger)
+public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService> logger) : ISmbMountOperations
 {
     private const int ProcessTimeoutMs = 30_000;
 

@@ -24,7 +24,23 @@ public record TranscodeJobBrief(Guid Id, string SourcePath, string? OutputPath, 
 
 
 public record GroupBrief(Guid Id, string Name, int SortOrder, DateTime CreateTime, int UsageCount);
-public record SmbMountItemResponse(Guid Id, string Name, string Server, string LocalPath, string? Username, string? Domain, string? Options, bool AutoMount, bool Enabled, string? Description, bool HasPassword, int Status, string StatusText, DateTime CreateTime, DateTime UpdateTime);
+public record SmbMountItemResponse(
+    Guid Id,
+    string Name,
+    string Server,
+    string LocalPath,
+    string? Username,
+    string? Domain,
+    string? Options,
+    bool AutoMount,
+    bool Enabled,
+    string? Description,
+    bool HasPassword,
+    int Status,
+    string StatusText,
+    DateTime CreateTime,
+    DateTime UpdateTime,
+    MountHealthSnapshot? Health = null);
 
 public sealed record HealthResponse(
     string Status,

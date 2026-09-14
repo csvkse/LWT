@@ -47,7 +47,12 @@ public sealed record DiskStatus
     public long FreeBytes { get; init; }
     /// <summary>使用率（0~100）。</summary>
     public double UsagePercent { get; init; }
+    /// <summary>采集健康状态；异常时容量字段可能为 0。</summary>
+    public string Health { get; init; } = MountHealthState.Unknown.ToString();
+    public string? Error { get; init; }
+    public DateTime? LastCheckedAt { get; init; }
 }
+
 
 /// <summary>网卡速率状态。</summary>
 public sealed record NetworkStatus

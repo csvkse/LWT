@@ -50,9 +50,14 @@ public static class ServiceCollectionExtensions
         builder.Services.AddHostedService<LogRetentionService>();
 
         // SMB 挂载管理
+        builder.Services.AddSingleton<MountOperationCoordinator>();
         builder.Services.AddSingleton<SmbMountStore>();
         builder.Services.AddSingleton<SmbMountService>();
+        builder.Services.AddSingleton<ISmbMountOperations>(sp => sp.GetRequiredService<SmbMountService>());
+        builder.Services.AddSingleton<IMountRuntimeProbe, SmbMountRuntimeProbe>();
+        builder.Services.AddSingleton<MountHealthService>();
         builder.Services.AddHostedService<SmbMountStartupService>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<MountHealthService>());
 
         // FFmpeg 转码：预设 / 队列执行 / 监听自动转码
         TranscodePresetSeeder.Seed(dbFactory); // 内置预设播种（表为空时）
@@ -75,10 +80,13 @@ public static class ServiceCollectionExtensions
         var systemStatusOptions = configuration.GetSection(SystemStatusOptions.SectionName).Get<SystemStatusOptions>() ?? new SystemStatusOptions();
         builder.Services.AddSingleton(systemStatusOptions);
         builder.Services.AddSingleton<ISystemStatusProvider, SystemStatusProvider>();
+        builder.Services.AddSingleton<DiskStatusCache>();
+        builder.Services.AddSingleton<IDiskStatusCache>(sp => sp.GetRequiredService<DiskStatusCache>());
         builder.Services.AddSingleton<SystemStatusStore>();
         builder.Services.AddSingleton<SystemStatusDiskStore>();
         builder.Services.AddSingleton<SystemStatusNetStore>();
         builder.Services.AddSingleton<SystemStatusProcessStore>();
+        builder.Services.AddHostedService<DiskStatusCacheService>();
         builder.Services.AddHostedService<SystemStatusSampleService>();
 
         // 认证：单管理员 + JWT（凭据在启动阶段即初始化，见 StartupInitializerService）

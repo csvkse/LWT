@@ -90,6 +90,7 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(NetSnapshotPoint))]
 [JsonSerializable(typeof(NetworkStatus))]
 [JsonSerializable(typeof(OperationLogQuery))]
+[JsonSerializable(typeof(MountHealthSnapshot))]
 [JsonSerializable(typeof(OverviewResult))]
 [JsonSerializable(typeof(LinuxWebTool.WebHost.Routes.FilesController.PathRequest))]
 [JsonSerializable(typeof(ProcessSnapshotPoint))]

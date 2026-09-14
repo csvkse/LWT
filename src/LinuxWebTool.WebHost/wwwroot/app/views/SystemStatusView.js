@@ -25,6 +25,16 @@ const NET_SERIES = [
 
 const DISK_COLORS = ['#34d399', '#fbbf24', '#22d3ee', '#a78bfa', '#fb7185', '#38bdf8', '#f97316', '#a3e635'];
 
+const DISK_HEALTH_META = {
+  Unknown: { label: '检测中', class: 'border-slate-600/60 text-slate-400' },
+  Healthy: { label: '正常', class: 'border-emerald-500/50 text-emerald-300' },
+  NotMounted: { label: '未挂载', class: 'border-slate-600/60 text-slate-400' },
+  ServerUnreachable: { label: '服务器不可达', class: 'border-amber-500/50 text-amber-300' },
+  Stale: { label: '挂载失效', class: 'border-rose-500/50 text-rose-300' },
+  Recovering: { label: '恢复中', class: 'border-cyan-500/50 text-cyan-300' },
+  RecoveryFailed: { label: '恢复失败', class: 'border-rose-500/50 text-rose-300' },
+};
+
 const PROCESS_SORTS = [
   { value: 'cpu', label: '按 CPU' },
   { value: 'mem', label: '按内存' },
@@ -64,6 +74,10 @@ export default defineComponent({
     let netChart = null;
     let diskChart = null;
     let refreshTimer = null;
+
+    function diskHealthMeta(disk) {
+      return DISK_HEALTH_META[disk?.health] || DISK_HEALTH_META.Unknown;
+    }
 
     async function load() {
       loading.value = true;
@@ -264,7 +278,7 @@ export default defineComponent({
       status, loading, autoRefresh, historyRange, usageChartEl, netChartEl, diskChartEl,
       processPoints, selectedPoint, processSort, PROCESS_SORTS,
       overviewProcessSort, overviewProcesses,
-      load, loadHistory, setRange, selectPoint, sortedProcesses, RANGES,
+      load, loadHistory, setRange, selectPoint, sortedProcesses, RANGES, diskHealthMeta,
       formatBps, formatBytes, formatTime, formatUptime, usageColor,
     };
   },
@@ -363,12 +377,18 @@ export default defineComponent({
               <p v-if="!status.disks.length" class="text-slate-600 text-sm">未采集到磁盘信息</p>
               <div v-for="disk in status.disks" :key="disk.mount">
                 <div class="flex justify-between text-xs mb-1">
-                  <span class="font-mono text-cyan-300/80">{{ disk.mount }} <span class="text-slate-600">({{ disk.fileSystem }})</span></span>
-                  <span :class="usageColor(disk.usagePercent).text">{{ formatBytes(disk.usedBytes) }} / {{ formatBytes(disk.totalBytes) }} · {{ disk.usagePercent }}%</span>
+                  <span class="font-mono text-cyan-300/80">
+                    {{ disk.mount }} <span class="text-slate-600">({{ disk.fileSystem }})</span>
+                    <span class="badge ml-2" :class="diskHealthMeta(disk).class">{{ diskHealthMeta(disk).label }}</span>
+                  </span>
+                  <span v-if="disk.health === 'Healthy'" :class="usageColor(disk.usagePercent).text">
+                    {{ formatBytes(disk.usedBytes) }} / {{ formatBytes(disk.totalBytes) }} · {{ disk.usagePercent }}%
+                  </span>
                 </div>
-                <div class="h-1.5 bg-cyber-line rounded overflow-hidden">
+                <div v-if="disk.health === 'Healthy'" class="h-1.5 bg-cyber-line rounded overflow-hidden">
                   <div class="h-full rounded transition-all" :class="usageColor(disk.usagePercent).bar" :style="{ width: disk.usagePercent + '%' }"></div>
                 </div>
+                <p v-if="disk.error" class="mt-1 text-[11px] text-rose-300/80 truncate" :title="disk.error">{{ disk.error }}</p>
               </div>
             </div>
           </div>

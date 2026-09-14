@@ -16,6 +16,7 @@ namespace LinuxWebTool.Infrastructure.Mount;
 public sealed class SmbMountStartupService(
     SmbMountStore store,
     SmbMountService mountService,
+    MountOperationCoordinator coordinator,
     ILogger<SmbMountStartupService> logger) : BackgroundService
 {
     private const int MaxRetries = 10;
@@ -41,6 +42,7 @@ public sealed class SmbMountStartupService(
         catch (Exception ex)
         {
             logger.LogError(ex, "SMB 挂载配置读取失败，跳过启动重挂");
+            coordinator.MarkStartupReady();
             return;
         }
 
@@ -58,6 +60,9 @@ public sealed class SmbMountStartupService(
             }
         }
 
+        // 配置清单注册完成后即可启动健康监控；正在重试的路径通过 StartupRunning 防止并发恢复。
+        coordinator.MarkStartupReady();
+
         foreach (var mount in mounts.Where(m => m.Enabled && m.AutoMount))
         {
             if (stoppingToken.IsCancellationRequested)
@@ -70,7 +75,16 @@ public sealed class SmbMountStartupService(
                 continue;
             }
 
-            await AutoMountWithRetryAsync(mount, stoppingToken);
+            var localPath = mount.LocalPath.Trim().TrimEnd('/');
+            coordinator.BeginStartup(localPath);
+            try
+            {
+                await AutoMountWithRetryAsync(mount, stoppingToken);
+            }
+            finally
+            {
+                coordinator.EndStartup(localPath);
+            }
         }
     }
 
@@ -121,11 +135,19 @@ public sealed class SmbMountStartupService(
                     return;
                 }
 
-                var (success, message) = await mountService.MountAsync(mount);
-                if (!success)
+                await coordinator.RunWithMountLockAsync(mount.LocalPath, async () =>
                 {
-                    throw new SmbMountRetryException(message);
-                }
+                    if (mountService.GetStatus(mount) == SmbMountStatus.Mounted)
+                    {
+                        return;
+                    }
+
+                    var (success, message) = await mountService.MountAsync(mount);
+                    if (!success)
+                    {
+                        throw new SmbMountRetryException(message);
+                    }
+                }, cancellationToken);
             }, stoppingToken);
 
             logger.LogInformation("SMB 自动重挂成功：{Name} → {LocalPath}，重试次数：{Retries}",

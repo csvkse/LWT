@@ -12,6 +12,8 @@ namespace LinuxWebTool.WebHost.Routes;
 public class SmbMountsController(
     SmbMountStore mountStore,
     SmbMountService mountService,
+    MountHealthService mountHealth,
+    MountOperationCoordinator coordinator,
     IOperationLogger operationLogger) : MinimalApi.ControllerBase
 {
     /// <summary>当前环境是否支持挂载管理（Windows 开发机为 false，UI 据此显示提示）。</summary>
@@ -32,7 +34,7 @@ public class SmbMountsController(
         var items = mounts.Select(m =>
         {
             var status = mountService.GetStatus(m);
-            return new SmbMountItemResponse(m.Id, m.Name, m.Server, m.LocalPath, m.Username, m.Domain, m.Options, m.AutoMount, m.Enabled, m.Description, !string.IsNullOrEmpty(m.Password), (int)status, StatusText(status), m.CreateTime, m.UpdateTime);
+            return new SmbMountItemResponse(m.Id, m.Name, m.Server, m.LocalPath, m.Username, m.Domain, m.Options, m.AutoMount, m.Enabled, m.Description, !string.IsNullOrEmpty(m.Password), (int)status, StatusText(status), m.CreateTime, m.UpdateTime, mountHealth.GetSnapshot(m.LocalPath));
         });
         return Ok(items.ToList());
     }
@@ -117,7 +119,9 @@ public class SmbMountsController(
         if (oldPath != localPath)
         {
             SystemStatusProvider.ManagedMountPoints.TryRemove(oldPath.Trim().TrimEnd('/'), out _);
+            mountHealth.RemoveSnapshot(oldPath);
         }
+        mountHealth.RemoveSnapshot(localPath);
         await operationLogger.LogAsync("修改挂载配置", "SMB挂载", mount.Name,
             $"{mount.Server} → {mount.LocalPath}", clientIp: HttpContext.GetClientIp());
         return Ok(new IdResponse(mount.Id));
@@ -132,23 +136,27 @@ public class SmbMountsController(
             return NotFound(new MessageResponse("挂载配置不存在"));
         }
 
-        // 挂载中先卸载，避免留下游离挂载点
-        var status = mountService.GetStatus(mount);
-        if (status == SmbMountStatus.Mounted)
+        return await coordinator.RunWithMountLockAsync(mount.LocalPath, async () =>
         {
-            var (unmounted, message) = await mountService.UnmountAsync(mount, lazy: true);
-            if (!unmounted)
+            // 挂载中先卸载，避免留下游离挂载点
+            var status = mountService.GetStatus(mount);
+            if (status == SmbMountStatus.Mounted)
             {
-                return BadRequest(new MessageResponse($"删除前卸载失败：{message}"));
+                var (unmounted, message) = await mountService.UnmountAsync(mount, lazy: true);
+                if (!unmounted)
+                {
+                    return BadRequest(new MessageResponse($"删除前卸载失败：{message}"));
+                }
             }
-        }
 
-        await mountStore.DeleteAsync(id);
-        mountService.DeleteCredentialFile(id);
-        SystemStatusProvider.ManagedMountPoints.TryRemove(mount.LocalPath.Trim().TrimEnd('/'), out _);
-        await operationLogger.LogAsync("删除挂载配置", "SMB挂载", mount.Name,
-            $"{mount.Server} → {mount.LocalPath}", clientIp: HttpContext.GetClientIp());
-        return Ok(new MessageResponse("已删除"));
+            await mountStore.DeleteAsync(id);
+            mountService.DeleteCredentialFile(id);
+            SystemStatusProvider.ManagedMountPoints.TryRemove(mount.LocalPath.Trim().TrimEnd('/'), out _);
+            mountHealth.RemoveSnapshot(mount.LocalPath);
+            await operationLogger.LogAsync("删除挂载配置", "SMB挂载", mount.Name,
+                $"{mount.Server} → {mount.LocalPath}", clientIp: HttpContext.GetClientIp());
+            return Ok(new MessageResponse("已删除"));
+        });
     }
 
     /// <summary>执行挂载。</summary>
@@ -161,7 +169,12 @@ public class SmbMountsController(
             return NotFound(new MessageResponse("挂载配置不存在"));
         }
 
-        var (success, message) = await mountService.MountAsync(mount);
+        var (success, message) = await coordinator.RunWithMountLockAsync(
+            mount.LocalPath,
+            () => mountService.MountAsync(mount));
+        RecordManualResult(mount, success
+            ? MountHealthState.Healthy
+            : MountHealthState.RecoveryFailed, message);
         await operationLogger.LogAsync("挂载", "SMB挂载", mount.Name,
             $"{mount.Server} → {mount.LocalPath}", success, clientIp: HttpContext.GetClientIp());
         return success ? Ok(new MessageResponse(message)) : BadRequest(new MessageResponse(message));
@@ -177,7 +190,12 @@ public class SmbMountsController(
             return NotFound(new MessageResponse("挂载配置不存在"));
         }
 
-        var (success, message) = await mountService.UnmountAsync(mount, request?.Lazy == true);
+        var (success, message) = await coordinator.RunWithMountLockAsync(
+            mount.LocalPath,
+            () => mountService.UnmountAsync(mount, request?.Lazy == true));
+        RecordManualResult(mount, success
+            ? MountHealthState.NotMounted
+            : MountHealthState.RecoveryFailed, message);
         await operationLogger.LogAsync("卸载", "SMB挂载", mount.Name,
             $"{mount.Server} → {mount.LocalPath}", success, clientIp: HttpContext.GetClientIp());
         return success ? Ok(new MessageResponse(message)) : BadRequest(new MessageResponse(message));
@@ -236,4 +254,15 @@ public class SmbMountsController(
         SmbMountStatus.Unsupported => "当前系统不支持",
         _ => "未知",
     };
+
+    private void RecordManualResult(SmbMount mount, MountHealthState state, string message)
+    {
+        mountHealth.SetSnapshot(new MountHealthSnapshot
+        {
+            LocalPath = mount.LocalPath.Trim().TrimEnd('/'),
+            State = state,
+            LastCheckedAt = DateTime.Now,
+            LastError = state == MountHealthState.Healthy ? null : message,
+        });
+    }
 }
