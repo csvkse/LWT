@@ -51,43 +51,181 @@ public sealed class FfmpegLocator(TranscodeOptions options)
             Message = probeExit != 0 ? "ffprobe 不可用（进度将无法显示百分比，转码本身不受影响）" : string.Empty,
         };
 
-        // 探测硬件加速：解码加速方式（-hwaccels）、硬件编码器（-encoders 过滤）、及"设备就绪且编码器存在"的后端。
+        // 探测硬件加速：解码加速方式（-hwaccels）、硬件编码器（-encoders 过滤）、GPU 元数据，
+        // 最后用真实编码探针确认驱动初始化和编码链路可用。
         // 任何失败静默降级为空。
         var hwEncoders = await RunHwEncodersAsync(options.FfmpegPath);
         detection = detection with
         {
             HardwareAccels = await RunFfmpegListAsync(options.FfmpegPath, "-hide_banner -hwaccels"),
             HwEncoders = hwEncoders,
-            HwBackends = DetectReadyHwBackends(hwEncoders),
             GpuVendor = DetectGpuVendor(),
         };
-        return detection;
+        return await BuildHardwareDetectionAsync(detection, options.FfmpegPath, RunCommandAsync);
     }
 
     /// <summary>
-    /// 探测"设备节点真实存在 且 对应编码器在 -encoders 里也有"的后端集合（双重校验）。
-    /// 空 = 无可用硬件后端（将回退软件编码）。仅识别 nvenc / qsv / vaapi / v4l2m2m / mfx。
+    /// 用真实编码探针过滤硬件后端：编码器存在仅是候选条件，探针成功才进入 HwBackends。
+    /// 空 = 无可用硬件后端（将回退软件编码）。当前覆盖 nvenc / qsv / vaapi。
     /// </summary>
-    private static List<string> DetectReadyHwBackends(List<string> hwEncoders)
+    internal sealed record CommandResult(int ExitCode, string Stdout, string Stderr);
+
+    internal static async Task<FfmpegDetection> BuildHardwareDetectionAsync(
+        FfmpegDetection detection,
+        string ffmpeg,
+        Func<string, string, CancellationToken, Task<CommandResult>> commandRunner)
     {
         var ready = new List<string>();
-        if (HasNvidiaDevice() && hwEncoders.Any(c => c.Contains("nvenc", StringComparison.OrdinalIgnoreCase)))
+        var failures = new List<string>();
+        var candidates = new[]
         {
-            ready.Add("nvenc");
-        }
-        if (HasDriBackend() && hwEncoders.Any(c => c.Contains("_vaapi", StringComparison.OrdinalIgnoreCase)))
+            ("nvenc", "nvenc"),
+            ("vaapi", "_vaapi"),
+            ("qsv", "_qsv"),
+        };
+
+        foreach (var (backend, keyword) in candidates)
         {
-            ready.Add("vaapi");
+            if (!detection.HwEncoders.Any(c => c.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            var result = await commandRunner(ffmpeg, BuildEncodeProbeArguments(backend), CancellationToken.None);
+            if (result.ExitCode == 0)
+            {
+                ready.Add(backend);
+            }
+            else
+            {
+                failures.Add($"{backend}: {SelectProbeError(result)}");
+            }
         }
-        if (HasDriBackend() && hwEncoders.Any(c => c.Contains("_qsv", StringComparison.OrdinalIgnoreCase)))
+
+        string? gpuName = null;
+        string? gpuDriverVersion = null;
+        if (string.Equals(detection.GpuVendor, "nvidia", StringComparison.OrdinalIgnoreCase))
         {
-            ready.Add("qsv");
+            var nvidia = await commandRunner(
+                "nvidia-smi",
+                "--query-gpu=name,driver_version --format=csv,noheader,nounits",
+                CancellationToken.None);
+            if (nvidia.ExitCode == 0)
+            {
+                (gpuName, gpuDriverVersion) = ParseNvidiaGpu(nvidia.Stdout);
+            }
         }
-        if (HasVideoDevice() && hwEncoders.Any(c => c.Contains("v4l2m2m", StringComparison.OrdinalIgnoreCase)))
+        else if (!string.IsNullOrWhiteSpace(detection.GpuVendor))
         {
-            ready.Add("v4l2m2m");
+            var vainfo = await commandRunner("vainfo", "-display drm -device /dev/dri/renderD128", CancellationToken.None);
+            if (vainfo.ExitCode == 0)
+            {
+                (gpuName, gpuDriverVersion) = ParseVainfoGpu(vainfo.Stdout);
+            }
         }
-        return ready;
+
+        return detection with
+        {
+            HwBackends = ready,
+            GpuName = gpuName,
+            GpuDriverVersion = gpuDriverVersion,
+            HardwareReady = ready.Count > 0,
+            HardwareMessage = BuildHardwareMessage(ready, failures),
+        };
+    }
+
+    private static string BuildEncodeProbeArguments(string backend) => backend switch
+    {
+        "vaapi" => "-hide_banner -v error -init_hw_device vaapi=va:/dev/dri/renderD128 -filter_hw_device va "
+            + "-f lavfi -i testsrc2=size=256x256:rate=10 -t 0.1 "
+            + "-vf format=yuv420p,hwupload -c:v h264_vaapi -f null -",
+        "qsv" => "-hide_banner -v error -f lavfi -i testsrc2=size=256x256:rate=10 -t 0.1 "
+            + "-c:v h264_qsv -f null -",
+        "nvenc" => "-hide_banner -v error -f lavfi -i testsrc2=size=256x256:rate=10 -t 0.1 "
+            + "-c:v h264_nvenc -f null -",
+        _ => string.Empty,
+    };
+
+    private static string BuildHardwareMessage(IReadOnlyList<string> ready, IReadOnlyList<string> failures)
+    {
+        if (ready.Count > 0)
+        {
+            return $"已通过真实编码探针：{string.Join("、", ready)}";
+        }
+        if (failures.Count > 0)
+        {
+            return $"硬件编码器已编译，但编码探针失败（可能是驱动异常、设备不可访问或权限不足）：{string.Join("；", failures)}";
+        }
+        return "未检测到可用的硬件视频编码器，将使用软件编码。";
+    }
+
+    private static string SelectProbeError(CommandResult result)
+    {
+        var text = string.IsNullOrWhiteSpace(result.Stderr) ? result.Stdout : result.Stderr;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return $"ffmpeg 退出码 {result.ExitCode}";
+        }
+
+        var details = text.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .Where(l => l.Length > 0)
+            .Take(2);
+        var value = string.Join(" / ", details);
+        return value.Length > 180 ? value[..177] + "..." : value;
+    }
+
+    private static (string? Name, string? DriverVersion) ParseNvidiaGpu(string stdout)
+    {
+        var line = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim();
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return (null, null);
+        }
+
+        var values = line.Split(',', StringSplitOptions.TrimEntries);
+        return (values.Length > 0 ? values[0] : null, values.Length > 1 ? values[1] : null);
+    }
+
+    private static (string? Name, string? DriverVersion) ParseVainfoGpu(string stdout)
+    {
+        var line = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .FirstOrDefault(l => l.Contains("Driver version:", StringComparison.OrdinalIgnoreCase));
+        if (line is null)
+        {
+            return (null, null);
+        }
+
+        var index = line.IndexOf("Driver version:", StringComparison.OrdinalIgnoreCase);
+        var value = line[(index + "Driver version:".Length)..].Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return (null, null);
+        }
+
+        // Mesa 常见格式：Mesa Gallium driver 24.0.9 for AMD Radeon Graphics (renoir, LLVM 15.0.7)
+        if (value.StartsWith("Mesa Gallium driver ", StringComparison.OrdinalIgnoreCase) &&
+            value.Contains(" for ", StringComparison.OrdinalIgnoreCase))
+        {
+            var forIndex = value.IndexOf(" for ", StringComparison.OrdinalIgnoreCase);
+            return (value[(forIndex + 5)..].Trim(), value[..forIndex].Trim());
+        }
+
+        // iHD 常见格式：Intel iHD driver for Intel(R) Gen Graphics - 24.1.0
+        var forMarker = " for ";
+        if (value.Contains(forMarker, StringComparison.OrdinalIgnoreCase))
+        {
+            var startIndex = value.IndexOf(forMarker, StringComparison.OrdinalIgnoreCase);
+            var endIndex = value.IndexOf(" - ", startIndex + forMarker.Length, StringComparison.Ordinal);
+            if (endIndex > startIndex)
+            {
+                var name = value[(startIndex + forMarker.Length)..endIndex].Trim();
+                return (string.IsNullOrWhiteSpace(name) ? null : name, value);
+            }
+        }
+
+        return (null, value);
     }
 
     /// <summary>探测 GPU 厂商：nvidia / intel / amd；未探测到（无设备节点且无内核模块）返回 null。</summary>
@@ -128,6 +266,48 @@ public sealed class FfmpegLocator(TranscodeOptions options)
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>运行硬件探测命令。探针应在页面刷新内完成，超时从常规探测的 10 秒压缩到 5 秒。</summary>
+    private static async Task<CommandResult> RunCommandAsync(string fileName, string arguments, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = fileName,
+                    Arguments = arguments,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                },
+            };
+            process.Start();
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
+            var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
+            try
+            {
+                await process.WaitForExitAsync(timeoutCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                return new CommandResult(-1, string.Empty, "探测超时（5 秒）");
+            }
+
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
+            return new CommandResult(process.HasExited ? process.ExitCode : -1, stdout, stderr);
+        }
+        catch (Exception ex)
+        {
+            return new CommandResult(-1, string.Empty, ex.Message);
         }
     }
 

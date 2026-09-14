@@ -17,7 +17,7 @@ public static class FfmpegArgsBuilder
     /// <summary>
     /// 硬件加速上下文：UseHardwareAccel=用户是否请求；AvailableHwEncoders=当前环境探测到的可用硬件编码器；
     /// PreferredBackend=用户指定的后端（auto/nvenc/qsv/vaapi/v4l2m2m，空=auto 自动排优）；
-    /// ReadyHwBackends=设备就绪且编码器存在的后端集合（无硬门槛，仅用于排序优先级）。
+    /// ReadyHwBackends=真实编码探针通过的后端集合（用于排序优先级）。
     /// DevicePresent=测试注入的设备存在性覆盖；null=按真实文件系统探测（生产默认）。
     /// </summary>
     public sealed record HwEncodeContext(bool UseHardwareAccel, IReadOnlyList<string> AvailableHwEncoders,
@@ -287,7 +287,7 @@ public static class FfmpegArgsBuilder
 
     /// <summary>
     /// 软件预设 + 请求加速时：从可用硬件编码器里找同家族硬件编码器。
-    /// 手动指定后端（preferred）时优先该后端，且该后端须设备就绪；auto 时按 OrderBackends 顺序选首个设备就绪者。
+    /// 手动指定后端（preferred）时优先该后端，且该后端须通过就绪集合；auto 时按 OrderBackends 顺序选首个就绪者。
     /// 返回 (硬编编码器 + 后端)；无可用返回 null。
     /// </summary>
     private static (string Codec, string Backend)? ResolveSoftwareHw(HwEncodeContext hw,

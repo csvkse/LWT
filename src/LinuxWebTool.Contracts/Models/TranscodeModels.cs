@@ -182,10 +182,22 @@ public sealed record FfmpegDetection
     /// <summary>可用的硬件视频编码器（ffmpeg -encoders 过滤 nvenc / vaapi / qsv / videotoolbox），如 h264_nvenc / hevc_vaapi。</summary>
     public List<string> HwEncoders { get; init; } = [];
 
-    /// <summary>设备节点真实存在、且对应编码器在 -encoders 里也有的后端（已双重校验，可直接用于选择）。
+    /// <summary>真实编码探针通过的后端（驱动初始化和编码链路均已验证，可直接用于选择）。
     /// 仅含 nvenc / qsv / vaapi / v4l2m2m 等；空 = 无可用硬件后端（将回退软件编码）。</summary>
     public List<string> HwBackends { get; init; } = [];
 
     /// <summary>探测到的 GPU 厂商（nvidia / intel / amd），用于提示展示；未探测到为 null。</summary>
     public string? GpuVendor { get; init; }
+
+    /// <summary>GPU 显示名（如 NVIDIA GeForce RTX 3060）；未探测到为 null。</summary>
+    public string? GpuName { get; init; }
+
+    /// <summary>GPU 驱动 / VA-API 驱动版本；未探测到为 null。</summary>
+    public string? GpuDriverVersion { get; init; }
+
+    /// <summary>至少有一个硬件后端通过真实编码探针；仅“编码器存在 + 设备存在”不再视为可用。</summary>
+    public bool HardwareReady { get; init; }
+
+    /// <summary>硬件探测结论；成功时列出已验证后端，失败时给出可读原因。</summary>
+    public string HardwareMessage { get; init; } = string.Empty;
 }

@@ -1,4 +1,4 @@
-import { computed, defineComponent, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, defineComponent, onMounted, onUnmounted, reactive, ref, shallowRef } from 'vue';
 import { http, httpDownload } from '../api/client.js';
 import { API } from '../config.js';
 import { openConfirm } from '../store/modal.js';
@@ -36,10 +36,11 @@ export default defineComponent({
     const submitting = ref(false);
 
     // ---- 队列 ----
-    const jobs = ref([]);
+    const jobs = shallowRef([]);
     const jobTotal = ref(0);
     const jobQuery = reactive({ page: 1, pageSize: 20, status: '' });
     const jobLoading = ref(false);
+    const jobsLoaded = ref(false);
     const actJobId = ref(null);
     const commandView = reactive({ show: false, command: '', label: '', fallbackReason: '', fallbackFrom: '' });
 
@@ -159,8 +160,14 @@ export default defineComponent({
       await loadPresets();
     }
 
+    let jobRefreshing = false;
+    let jobPollingActive = false;
+
     async function loadJobs() {
-      jobLoading.value = true;
+      // 轮询/手动刷新重叠时保留第一个请求的结果，避免慢响应互相覆盖造成闪烁。
+      if (jobRefreshing) return;
+      jobRefreshing = true;
+      if (!jobsLoaded.value) jobLoading.value = true;
       try {
         const result = await http(API.transcode.jobs, {
           params: {
@@ -171,6 +178,7 @@ export default defineComponent({
         if (result.ok && result.data && Array.isArray(result.data.items) && Number.isFinite(Number(result.data.total))) {
           jobs.value = result.data.items;
           jobTotal.value = Number(result.data.total);
+          loadError.value = '';
         } else if (!result.ok) {
           throw new Error(result.message || '转码任务加载失败');
         } else {
@@ -179,8 +187,19 @@ export default defineComponent({
       } catch (error) {
         loadError.value = error?.message || '转码任务加载失败';
       } finally {
+        jobRefreshing = false;
+        jobsLoaded.value = true;
         jobLoading.value = false;
       }
+    }
+
+    function scheduleJobRefresh(delay = 5000) {
+      if (!jobPollingActive) return;
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        await loadJobs();
+        scheduleJobRefresh();
+      }, delay);
     }
 
     async function loadWatch() {
@@ -620,12 +639,13 @@ export default defineComponent({
     onMounted(() => {
       resetSubmit();
       loadAll();
-      timer = setInterval(() => {
-        loadJobs();
-      }, 5000);
+      jobPollingActive = true;
+      scheduleJobRefresh();
     });
     onUnmounted(() => {
-      if (timer) clearInterval(timer);
+      jobPollingActive = false;
+      clearTimeout(timer);
+      timer = null;
     });
 
     return {
@@ -648,10 +668,12 @@ export default defineComponent({
         <h2 class="text-sm text-slate-400">FFmpeg 媒体转码</h2>
         <span v-if="ffmpeg.available" class="badge border-emerald-500/50 text-emerald-300">● ffmpeg 可用</span>
         <span v-else class="badge border-rose-500/50 text-rose-300">○ ffmpeg 不可用</span>
-        <span v-if="ffmpeg.available && ffmpeg.hwEncoders && ffmpeg.hwEncoders.length"
-              class="badge border-cyan-500/50 text-cyan-300" title="已检测到硬件视频编码器">⚡ 硬件加速可用</span>
+        <span v-if="ffmpeg.available && ffmpeg.hardwareReady"
+              class="badge border-cyan-500/50 text-cyan-300" title="已通过真实编码探针验证">⚡ 硬件加速可用</span>
         <span v-if="ffmpeg.available && (!ffmpeg.hwEncoders || !ffmpeg.hwEncoders.length)"
               class="badge border-slate-500/40 text-slate-400" title="未检测到可用的硬件视频编码器（需 GPU 直通，见文档）">○ 未检测到硬件加速</span>
+        <span v-if="ffmpeg.available && !ffmpeg.hardwareReady && ffmpeg.hwEncoders && ffmpeg.hwEncoders.length"
+              class="badge border-amber-500/50 text-amber-300" title="编码器存在，但真实编码探针未通过">△ 硬件驱动异常</span>
         <div class="ml-auto flex gap-1">
           <button v-for="t in TABS" :key="t.key" class="btn btn-xs"
                   :class="tab === t.key ? 'btn-primary' : ''" @click="tab = t.key">{{ t.label }}</button>
@@ -669,10 +691,20 @@ export default defineComponent({
         <div class="flex flex-wrap items-center gap-2">
           <span class="text-slate-500">硬件加速：</span>
           <template v-if="ffmpeg.hwEncoders && ffmpeg.hwEncoders.length">
-            <span class="text-cyan-300 font-mono">{{ ffmpeg.hwEncoders.join(' · ') }}</span>
-            <span class="text-slate-600">（需 GPU 直通，转码预设可选对应编码器）</span>
+            <span class="font-mono" :class="ffmpeg.hardwareReady ? 'text-cyan-300' : 'text-amber-300'">
+              {{ (ffmpeg.hardwareReady && ffmpeg.hwBackends.length ? ffmpeg.hwBackends : ffmpeg.hwEncoders).join(' · ') }}
+            </span>
+            <span class="text-slate-600">{{ ffmpeg.hardwareReady ? '（真实编码探针已通过）' : '（真实编码探针未通过，仍会回退软件编码）' }}</span>
           </template>
           <span v-else class="text-slate-600">当前环境未检测到硬件编码器，将使用软件编码（libx264/libx265）。GPU 直通见 README「GPU（NVIDIA/Intel/AMD）」节。</span>
+        </div>
+        <div v-if="ffmpeg.gpuName || ffmpeg.gpuDriverVersion" class="mt-2 flex flex-wrap items-center gap-x-2">
+          <span class="text-slate-500">GPU：</span>
+          <span class="font-mono text-slate-300">{{ [ffmpeg.gpuName, ffmpeg.gpuDriverVersion].filter(Boolean).join(' / ') }}</span>
+        </div>
+        <div v-if="ffmpeg.available && !ffmpeg.hardwareReady && ffmpeg.hardwareMessage"
+             class="mt-2 rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1 text-amber-200/90">
+          {{ ffmpeg.hardwareMessage }}
         </div>
       </div>
       <div v-if="loadError" class="panel !border-amber-500/40 bg-amber-500/5 text-amber-200/90 text-xs px-4 py-3 flex items-center gap-3">

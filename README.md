@@ -274,7 +274,7 @@ volumes:
 
 **Intel/AMD 核显**（`--device=/dev/dri` 透传）：镜像已内置 VA-API 用户态库（`libva`）与 核显驱动（`mesa-va-gallium`），ffmpeg 已启用 vaapi 编码支持，透传 `/dev/dri` 后即可走 VA-API 硬件编码。核显路径**不需要** nvidia-container-toolkit。若自行裁剪镜像后遇到 "Cannot load libva" / "device not found"，需保留 `apk add libva mesa-va-gallium`。
 
-**应用侧行为（已实现）**：转码页顶部会检测当前环境的硬件编码器——若容器成功拿到 GPU（`--gpus all` 或 `--device=/dev/dri` 且用户态库齐全），显示「⚡ 硬件加速可用」并列出 `h264_nvenc`/`h264_vaapi` 等；若未透传或库缺失，显示「未检测到硬件加速」，转码自动回退软件编码（libx264/libx265），任务仍能正常执行，仅在日志提示。系统状态页「硬件」区块会标记 GPU（VGA/3D/Display 类）。
+**应用侧行为（已实现）**：转码页会对 NVIDIA/Intel/AMD 硬件编码器执行真实编码探针，并读取 `nvidia-smi` 或 `vainfo` 的 GPU/驱动信息。只有探针通过才显示「⚡ 硬件加速可用」；驱动初始化、设备权限或 VA 用户态库异常时显示「△ 硬件驱动异常」和失败原因，转码自动回退软件编码（libx264/libx265），任务仍能正常执行。系统状态页「硬件」区块会标记 GPU（VGA/3D/Display 类）。
 
 **宿主机磁盘自动采集 —— 完整示例**（三个参数缺一不可，作用：`--privileged` 授予 nsenter 权限；`--pid=host` 让容器看到宿主 PID 1 以定位其命名空间；`--user root` 非 root 无权切换命名空间）：
 
