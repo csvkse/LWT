@@ -208,12 +208,14 @@ public class TranscodeController(
                 var container = preset.Container.Trim().Length > 0 ? preset.Container.Trim() : (outputContainer ?? "mp4");
                 var (finalPath, _) = OutputPathPlanner.Plan(source, container, outputMode, outputDir);
                 customArgs = FfmpegArgsBuilder.BuildFullCommand(preset, source, finalPath, hardwareBackend,
-                    detection.HwBackends, detection.HwEncoders, useHardwareAccel);
+                    detection.HwBackends, detection.HwEncoders, useHardwareAccel,
+                    detection.HwBackendDevices);
             }
             else
             {
                 customArgs = FfmpegArgsBuilder.BuildArgsFromPreset(preset, hardwareBackend,
-                    detection.HwBackends, detection.HwEncoders, useHardwareAccel);
+                    detection.HwBackends, detection.HwEncoders, useHardwareAccel,
+                    detection.HwBackendDevices);
             }
         }
 

@@ -67,7 +67,7 @@ public class FfmpegArgsFilterTests
         Assert.NotNull(global);
         Assert.NotNull(filter);
 
-        var g = (IEnumerable<string>)global!.Invoke(null, new object[] { "vaapi" })!;
+        var g = (IEnumerable<string>)global!.Invoke(null, new object[] { "vaapi", "/dev/dri/renderD128" })!;
         var f = (IEnumerable<string>)filter!.Invoke(null, new object[] { "vaapi" })!;
 
         var gCmd = string.Join(' ', g);

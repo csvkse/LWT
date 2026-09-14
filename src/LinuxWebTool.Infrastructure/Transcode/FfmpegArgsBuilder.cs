@@ -18,10 +18,12 @@ public static class FfmpegArgsBuilder
     /// 硬件加速上下文：UseHardwareAccel=用户是否请求；AvailableHwEncoders=当前环境探测到的可用硬件编码器；
     /// PreferredBackend=用户指定的后端（auto/nvenc/qsv/vaapi/v4l2m2m，空=auto 自动排优）；
     /// ReadyHwBackends=真实编码探针通过的后端集合（用于排序优先级）。
+    /// HwBackendDevices=各就绪后端在真实探针中验证过的设备路径（VAAPI/QSV 必须复用）。
     /// DevicePresent=测试注入的设备存在性覆盖；null=按真实文件系统探测（生产默认）。
     /// </summary>
     public sealed record HwEncodeContext(bool UseHardwareAccel, IReadOnlyList<string> AvailableHwEncoders,
-        string? PreferredBackend = null, IReadOnlyList<string>? ReadyHwBackends = null, bool? DevicePresent = null);
+        string? PreferredBackend = null, IReadOnlyList<string>? ReadyHwBackends = null, bool? DevicePresent = null,
+        IReadOnlyDictionary<string, string>? HwBackendDevices = null);
 
     /// <summary>构造结果：args=首选执行的命令行参数（不含 ffmpeg 可执行文件名），UsedHardwareAccel=Args 是否为硬件命令。</summary>
     /// <param name="FallbackReason">回退原因：请求硬件加速但实际用软件编码时的说明文本；未回退为 null。</param>
@@ -114,9 +116,11 @@ public static class FfmpegArgsBuilder
     /// </summary>
     public static string BuildFullCommand(TranscodePreset preset, string input, string output,
         string? preferredBackend, IReadOnlyList<string>? readyBackends,
-        IReadOnlyList<string> hwEncoders, bool useHardwareAccel)
+        IReadOnlyList<string> hwEncoders, bool useHardwareAccel,
+        IReadOnlyDictionary<string, string>? readyDevices = null)
     {
-        var hw = new HwEncodeContext(useHardwareAccel, hwEncoders, preferredBackend, readyBackends);
+        var hw = new HwEncodeContext(useHardwareAccel, hwEncoders, preferredBackend, readyBackends,
+            HwBackendDevices: readyDevices);
         var r = BuildPresetTokens(preset, hw);
         var parts = new List<string> { "ffmpeg", "-y" };
         // 硬件全局/解码选项（-vaapi_device -hwaccel）置于 -i 前
@@ -138,9 +142,11 @@ public static class FfmpegArgsBuilder
     /// </summary>
     public static string BuildArgsFromPreset(TranscodePreset preset,
         string? preferredBackend, IReadOnlyList<string>? readyBackends,
-        IReadOnlyList<string> hwEncoders, bool useHardwareAccel)
+        IReadOnlyList<string> hwEncoders, bool useHardwareAccel,
+        IReadOnlyDictionary<string, string>? readyDevices = null)
     {
-        var hw = new HwEncodeContext(useHardwareAccel, hwEncoders, preferredBackend, readyBackends);
+        var hw = new HwEncodeContext(useHardwareAccel, hwEncoders, preferredBackend, readyBackends,
+            HwBackendDevices: readyDevices);
         var r = BuildPresetTokens(preset, hw);
         return string.Join(' ', r.Item1);
     }
@@ -170,7 +176,7 @@ public static class FfmpegArgsBuilder
                 if (HwDeviceExists(hw, backend))
                 {
                     // 设备真实存在：注入硬件全局/解码选项，剥离软件专属项，标记实际用了硬件。
-                    head.AddRange(BuildHwGlobalArgs(backend));
+                    head.AddRange(BuildHwGlobalArgs(backend, GetHwDevicePath(hw, backend)));
                     tokens = FilterHwCompatibleArgs(tokens);
                     usedHardware = true;
                 }
@@ -316,6 +322,15 @@ public static class FfmpegArgsBuilder
         {
             return present;
         }
+
+        if (!string.IsNullOrWhiteSpace(backend) &&
+            hw.HwBackendDevices is { } devices &&
+            devices.TryGetValue(backend, out var probedDevice) &&
+            !string.IsNullOrWhiteSpace(probedDevice))
+        {
+            return true;
+        }
+
         var path = backend?.ToLowerInvariant();
         try
         {
@@ -335,6 +350,24 @@ public static class FfmpegArgsBuilder
             // 探测设备目录权限受限时视为不存在（安全降级为软件编码）
             return false;
         }
+    }
+
+    /// <summary>优先返回探针成功时使用的设备；没有映射时保留旧的默认设备作为兼容兜底。</summary>
+    private static string? GetHwDevicePath(HwEncodeContext hw, string? backend)
+    {
+        if (!string.IsNullOrWhiteSpace(backend) &&
+            hw.HwBackendDevices is { } devices &&
+            devices.TryGetValue(backend, out var device) &&
+            !string.IsNullOrWhiteSpace(device))
+        {
+            return device;
+        }
+
+        return backend?.ToLowerInvariant() switch
+        {
+            "vaapi" or "qsv" or "mfx" => "/dev/dri/renderD128",
+            _ => null,
+        };
     }
 
     /// <summary>
@@ -399,7 +432,7 @@ public static class FfmpegArgsBuilder
         else if (hwPlan is { } plan)
         {
             // 硬编：全局/解码选项（-vaapi_device -hwaccel）置于 -i 前；滤镜(-vf)+编码器(-c:v -qp)置于输入后
-            preInputArgs.AddRange(BuildHwGlobalArgs(plan.Backend));
+                preInputArgs.AddRange(BuildHwGlobalArgs(plan.Backend, GetHwDevicePath(hw, plan.Backend)));
             hardwareVideo.AddRange(BuildHwFilterArgs(plan.Backend));
             hardwareVideo.AddRange(["-c:v", plan.Codec]);
             if (preset.VideoQuality is >= 0 and <= 51)
@@ -447,7 +480,7 @@ public static class FfmpegArgsBuilder
             // 记录意图的硬件命令（供展示"回退前硬件命令"）
             if (isHwCodec)
             {
-                preInputArgs.AddRange(BuildHwGlobalArgs(hardwareBackend!));
+                preInputArgs.AddRange(BuildHwGlobalArgs(hardwareBackend!, GetHwDevicePath(hw, hardwareBackend!)));
                 hardwareVideo.AddRange(BuildHwFilterArgs(hardwareBackend!));
                 hardwareVideo.AddRange(["-c:v", video]);
                 if (preset.VideoQuality is >= 0 and <= 51)
@@ -687,11 +720,11 @@ public static class FfmpegArgsBuilder
 
     /// <summary>按硬件后端附加解码/设备/像素格式上下文参数（保证硬编不是"名字在但跑不了"）。</summary>
     /// <summary>应置于 -i（输入）之前的硬件全局/解码选项（如 -vaapi_device -hwaccel）。非硬件后端返回空。</summary>
-    private static IEnumerable<string> BuildHwGlobalArgs(string backend) => backend.ToLowerInvariant() switch
+    private static IEnumerable<string> BuildHwGlobalArgs(string backend, string? devicePath) => backend.ToLowerInvariant() switch
     {
-        "vaapi" => ["-vaapi_device", "/dev/dri/renderD128", "-hwaccel", "vaapi"],
+        "vaapi" => ["-vaapi_device", devicePath ?? "/dev/dri/renderD128", "-hwaccel", "vaapi"],
         "nvenc" => ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"],
-        "qsv" => ["-hwaccel", "qsv"],
+        "qsv" => ["-init_hw_device", $"qsv=hw,child_device={devicePath ?? "/dev/dri/renderD128"}", "-hwaccel", "qsv"],
         "v4l2m2m" => ["-hwaccel", "v4l2m2m"],
         _ => [],
     };

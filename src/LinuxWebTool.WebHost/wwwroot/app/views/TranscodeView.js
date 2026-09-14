@@ -392,13 +392,16 @@ export default defineComponent({
     };
     // 后端优先级（auto 时按就绪后端 + 此顺序选）
     const BACKEND_PRIORITY = ['vaapi', 'nvenc', 'qsv', 'v4l2m2m', 'mfx', 'amf', 'videotoolbox'];
-    // 后端 → 硬件编码器家族名（用于从"家族_后端"找到正确编码器）
-    const HW_BACKEND_CODE = {
-      vaapi: '-vaapi_device /dev/dri/renderD128 -hwaccel vaapi -vf format=nv12,hwupload',
-      nvenc: '-hwaccel cuda -hwaccel_output_format cuda',
-      qsv: '-hwaccel qsv -vf format=nv12',
-      v4l2m2m: '-hwaccel v4l2m2m',
-    };
+    // 后端 → 硬件全局/滤镜参数；DRI 设备路径必须复用后端探针结果，不能固定 renderD128。
+    function hwBackendCode(backend) {
+      const device = ffmpeg.hwBackendDevices?.[backend] || '/dev/dri/renderD128';
+      return {
+        vaapi: `-vaapi_device ${device} -hwaccel vaapi -vf format=nv12,hwupload`,
+        nvenc: '-hwaccel cuda -hwaccel_output_format cuda',
+        qsv: `-init_hw_device qsv=hw,child_device=${device} -hwaccel qsv -vf format=nv12`,
+        v4l2m2m: '-hwaccel v4l2m2m',
+      }[backend] || '';
+    }
 
     /// 预测输出真实路径（复刻后端 OutputPathPlanner.Plan：替换/并存/重名避让）
     function predictOutputPath(input, container, outputMode, outputDir) {
@@ -433,13 +436,13 @@ export default defineComponent({
           : [pref];
         for (const b of candidates) {
           const codec = family + '_' + b;
-          if (hwList.includes(codec)) { hwCodec = codec; hwCtx = HW_BACKEND_CODE[b] || ''; break; }
+          if (hwList.includes(codec)) { hwCodec = codec; hwCtx = hwBackendCode(b); break; }
         }
       }
       // 预设本身是硬件编码器（如 h264_vaapi）→ 直接用
       if (!hwCodec && /_(nvenc|vaapi|qsv|v4l2m2m|mfx|amf)$/.test(video)) {
         const b = video.slice(video.lastIndexOf('_') + 1);
-        if (hwList.includes(video)) { hwCodec = video; hwCtx = HW_BACKEND_CODE[b] || ''; }
+        if (hwList.includes(video)) { hwCodec = video; hwCtx = hwBackendCode(b); }
       }
 
       const parts = ['ffmpeg', '-y'];
@@ -700,7 +703,7 @@ export default defineComponent({
         </div>
         <div v-if="ffmpeg.gpuName || ffmpeg.gpuDriverVersion" class="mt-2 flex flex-wrap items-center gap-x-2">
           <span class="text-slate-500">GPU：</span>
-          <span class="font-mono text-slate-300">{{ [ffmpeg.gpuName, ffmpeg.gpuDriverVersion].filter(Boolean).join(' / ') }}</span>
+          <span class="font-mono text-slate-300">{{ [ffmpeg.gpuName, ffmpeg.gpuDriverVersion, ffmpeg.gpuDevice].filter(Boolean).join(' / ') }}</span>
         </div>
         <div v-if="ffmpeg.available && !ffmpeg.hardwareReady && ffmpeg.hardwareMessage"
              class="mt-2 rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1 text-amber-200/90">

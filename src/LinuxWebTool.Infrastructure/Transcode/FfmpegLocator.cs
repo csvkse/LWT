@@ -55,28 +55,36 @@ public sealed class FfmpegLocator(TranscodeOptions options)
         // 最后用真实编码探针确认驱动初始化和编码链路可用。
         // 任何失败静默降级为空。
         var hwEncoders = await RunHwEncodersAsync(options.FfmpegPath);
+        var driDevices = DiscoverDriDevices();
         detection = detection with
         {
             HardwareAccels = await RunFfmpegListAsync(options.FfmpegPath, "-hide_banner -hwaccels"),
             HwEncoders = hwEncoders,
-            GpuVendor = DetectGpuVendor(),
         };
-        return await BuildHardwareDetectionAsync(detection, options.FfmpegPath, RunCommandAsync);
+        var detectionWithVendor = detection with { GpuVendor = DetectGpuVendor(driDevices) };
+        return await BuildHardwareDetectionAsync(detectionWithVendor, options.FfmpegPath, RunCommandAsync, () => driDevices);
     }
 
     /// <summary>
-    /// 用真实编码探针过滤硬件后端：编码器存在仅是候选条件，探针成功才进入 HwBackends。
+    /// 用真实编码探针过滤硬件后端：编码器存在仅是候选条件，探针成功才进入 HwBackends；
+    /// DRI 后端会记录探针成功的 render 设备，真实转码必须复用同一设备。
     /// 空 = 无可用硬件后端（将回退软件编码）。当前覆盖 nvenc / qsv / vaapi。
     /// </summary>
     internal sealed record CommandResult(int ExitCode, string Stdout, string Stderr);
+    internal sealed record DriDevice(string Path, string? Vendor = null, string? Driver = null);
 
     internal static async Task<FfmpegDetection> BuildHardwareDetectionAsync(
         FfmpegDetection detection,
         string ffmpeg,
-        Func<string, string, CancellationToken, Task<CommandResult>> commandRunner)
+        Func<string, string, CancellationToken, Task<CommandResult>> commandRunner,
+        Func<IReadOnlyList<DriDevice>>? driDeviceProvider = null)
     {
         var ready = new List<string>();
         var failures = new List<string>();
+        var backendDevices = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        DriDevice? selectedDevice = null;
+        string? selectedVendor = null;
+        var driDevices = driDeviceProvider?.Invoke() ?? DiscoverDriDevices();
         var candidates = new[]
         {
             ("nvenc", "nvenc"),
@@ -91,20 +99,56 @@ public sealed class FfmpegLocator(TranscodeOptions options)
                 continue;
             }
 
-            var result = await commandRunner(ffmpeg, BuildEncodeProbeArguments(backend), CancellationToken.None);
-            if (result.ExitCode == 0)
+            IEnumerable<DriDevice?> deviceCandidates = backend.ToLowerInvariant() switch
             {
-                ready.Add(backend);
+                "vaapi" => driDevices.Where(d => !string.Equals(d.Vendor, "nvidia", StringComparison.OrdinalIgnoreCase)),
+                "qsv" => driDevices.Where(d => string.IsNullOrWhiteSpace(d.Vendor)
+                    || string.Equals(d.Vendor, "intel", StringComparison.OrdinalIgnoreCase)),
+                _ => Enumerable.Repeat<DriDevice?>(null, 1),
+            };
+
+            CommandResult? lastFailure = null;
+            var probedAnyDevice = false;
+            foreach (var device in deviceCandidates)
+            {
+                probedAnyDevice = true;
+                var result = await commandRunner(
+                    ffmpeg,
+                    BuildEncodeProbeArguments(backend, device?.Path),
+                    CancellationToken.None);
+                if (result.ExitCode == 0)
+                {
+                    if (!ready.Contains(backend, StringComparer.OrdinalIgnoreCase))
+                    {
+                        ready.Add(backend);
+                    }
+                    if (device is not null)
+                    {
+                        backendDevices.TryAdd(backend, device.Path);
+                        selectedDevice ??= device;
+                        selectedVendor ??= device.Vendor;
+                    }
+                    lastFailure = null;
+                    break;
+                }
+
+                lastFailure = result;
             }
-            else
+
+            if (!probedAnyDevice && backend is "vaapi" or "qsv")
             {
-                failures.Add($"{backend}: {SelectProbeError(result)}");
+                failures.Add($"{backend}: 未发现可用的 DRI 渲染设备");
+            }
+            else if (lastFailure is { } failure)
+            {
+                failures.Add($"{backend}: {SelectProbeError(failure)}");
             }
         }
 
         string? gpuName = null;
         string? gpuDriverVersion = null;
-        if (string.Equals(detection.GpuVendor, "nvidia", StringComparison.OrdinalIgnoreCase))
+        if (ready.Contains("nvenc", StringComparer.OrdinalIgnoreCase) ||
+            string.Equals(detection.GpuVendor, "nvidia", StringComparison.OrdinalIgnoreCase))
         {
             var nvidia = await commandRunner(
                 "nvidia-smi",
@@ -115,9 +159,10 @@ public sealed class FfmpegLocator(TranscodeOptions options)
                 (gpuName, gpuDriverVersion) = ParseNvidiaGpu(nvidia.Stdout);
             }
         }
-        else if (!string.IsNullOrWhiteSpace(detection.GpuVendor))
+        else if (!string.IsNullOrWhiteSpace(detection.GpuVendor) || selectedDevice is not null)
         {
-            var vainfo = await commandRunner("vainfo", "-display drm -device /dev/dri/renderD128", CancellationToken.None);
+            var vainfoDevice = selectedDevice?.Path ?? driDevices.FirstOrDefault()?.Path ?? "/dev/dri/renderD128";
+            var vainfo = await commandRunner("vainfo", $"-display drm -device {vainfoDevice}", CancellationToken.None);
             if (vainfo.ExitCode == 0)
             {
                 (gpuName, gpuDriverVersion) = ParseVainfoGpu(vainfo.Stdout);
@@ -127,19 +172,22 @@ public sealed class FfmpegLocator(TranscodeOptions options)
         return detection with
         {
             HwBackends = ready,
+            GpuDevice = selectedDevice?.Path,
+            GpuVendor = selectedVendor ?? detection.GpuVendor,
             GpuName = gpuName,
             GpuDriverVersion = gpuDriverVersion,
+            HwBackendDevices = backendDevices,
             HardwareReady = ready.Count > 0,
             HardwareMessage = BuildHardwareMessage(ready, failures),
         };
     }
 
-    private static string BuildEncodeProbeArguments(string backend) => backend switch
+    private static string BuildEncodeProbeArguments(string backend, string? devicePath) => backend switch
     {
-        "vaapi" => "-hide_banner -v error -init_hw_device vaapi=va:/dev/dri/renderD128 -filter_hw_device va "
+        "vaapi" => $"-hide_banner -v error -init_hw_device vaapi=va:{devicePath ?? "/dev/dri/renderD128"} -filter_hw_device va "
             + "-f lavfi -i testsrc2=size=256x256:rate=10 -t 0.1 "
-            + "-vf format=yuv420p,hwupload -c:v h264_vaapi -f null -",
-        "qsv" => "-hide_banner -v error -f lavfi -i testsrc2=size=256x256:rate=10 -t 0.1 "
+            + "-vf format=nv12,hwupload -c:v h264_vaapi -f null -",
+        "qsv" => $"-hide_banner -v error -init_hw_device qsv=hw,child_device={devicePath ?? "/dev/dri/renderD128"} "
             + "-c:v h264_qsv -f null -",
         "nvenc" => "-hide_banner -v error -f lavfi -i testsrc2=size=256x256:rate=10 -t 0.1 "
             + "-c:v h264_nvenc -f null -",
@@ -228,16 +276,92 @@ public sealed class FfmpegLocator(TranscodeOptions options)
         return (null, value);
     }
 
+    /// <summary>
+    /// 枚举所有 DRI 渲染节点，并尽量通过 sysfs 读取 PCI vendor 与内核驱动。
+    /// 枚举失败时安全返回空列表；此时不会误报某个具体设备可用。
+    /// </summary>
+    internal static List<DriDevice> DiscoverDriDevices()
+    {
+        try
+        {
+            if (!Directory.Exists("/dev/dri"))
+            {
+                return [];
+            }
+
+            return Directory.EnumerateFiles("/dev/dri", "renderD*")
+                .OrderBy(Path.GetFileName, StringComparer.Ordinal)
+                .Select(path => new DriDevice(path, ReadDriVendor(path), ReadDriDriver(path)))
+                .ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static string? ReadDriVendor(string devicePath)
+    {
+        var name = Path.GetFileName(devicePath);
+        return NormalizePciVendor(ReadSmallTextFile($"/sys/class/drm/{name}/device/vendor"));
+    }
+
+    private static string? ReadDriDriver(string devicePath)
+    {
+        var name = Path.GetFileName(devicePath);
+        foreach (var line in (ReadSmallTextFile($"/sys/class/drm/{name}/device/uevent") ?? string.Empty).Split('\n'))
+        {
+            if (line.StartsWith("DRIVER=", StringComparison.OrdinalIgnoreCase))
+            {
+                return line["DRIVER=".Length..].Trim();
+            }
+        }
+        return null;
+    }
+
+    private static string? ReadSmallTextFile(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? File.ReadAllText(path).Trim() : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? NormalizePciVendor(string? vendor)
+    {
+        if (string.IsNullOrWhiteSpace(vendor))
+        {
+            return null;
+        }
+
+        return vendor.Trim().ToLowerInvariant() switch
+        {
+            "0x8086" => "intel",
+            "0x1002" or "0x1022" => "amd",
+            "0x10de" => "nvidia",
+            _ => vendor.Trim(),
+        };
+    }
+
     /// <summary>探测 GPU 厂商：nvidia / intel / amd；未探测到（无设备节点且无内核模块）返回 null。</summary>
-    private static string? DetectGpuVendor()
+    private static string? DetectGpuVendor(IReadOnlyList<DriDevice> driDevices)
     {
         if (HasNvidiaDevice())
         {
             return "nvidia";
         }
-        if (HasDriBackend())
+        if (driDevices.FirstOrDefault(d => !string.IsNullOrWhiteSpace(d.Vendor)) is { } device)
         {
-            // /dev/dri 存在，结合内核模块区分 Intel（i915）/ AMD（amdgpu）
+            return device.Vendor;
+        }
+        if (driDevices.Count > 0)
+        {
+            // sysfs 不可读时不再假定厂商；vendor 为 null 的设备仍会跑 VAAPI 探针，
+            // 但 QSV 保守地不启用，避免 AMD 环境出现误导性的 MFX 错误。
             if (IsModuleLoaded("i915"))
             {
                 return "intel";
@@ -246,7 +370,7 @@ public sealed class FfmpegLocator(TranscodeOptions options)
             {
                 return "amd";
             }
-            return "intel"; // 有 dri 但模块不可读时，兜底视为 intel（最常见场景）
+            return null;
         }
         return null;
     }
@@ -256,18 +380,6 @@ public sealed class FfmpegLocator(TranscodeOptions options)
 
     private static bool HasDriBackend()
         => Directory.Exists("/dev/dri");
-
-    private static bool HasVideoDevice()
-    {
-        try
-        {
-            return Directory.Exists("/dev") && Directory.EnumerateFiles("/dev", "video*").Any();
-        }
-        catch
-        {
-            return false;
-        }
-    }
 
     /// <summary>运行硬件探测命令。探针应在页面刷新内完成，超时从常规探测的 10 秒压缩到 5 秒。</summary>
     private static async Task<CommandResult> RunCommandAsync(string fileName, string arguments, CancellationToken cancellationToken)

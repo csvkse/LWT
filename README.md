@@ -274,7 +274,7 @@ volumes:
 
 **Intel/AMD 核显**（`--device=/dev/dri` 透传）：镜像已内置 VA-API 用户态库（`libva`）与 核显驱动（`mesa-va-gallium`），ffmpeg 已启用 vaapi 编码支持，透传 `/dev/dri` 后即可走 VA-API 硬件编码。核显路径**不需要** nvidia-container-toolkit。若自行裁剪镜像后遇到 "Cannot load libva" / "device not found"，需保留 `apk add libva mesa-va-gallium`。
 
-**应用侧行为（已实现）**：转码页会对 NVIDIA/Intel/AMD 硬件编码器执行真实编码探针，并读取 `nvidia-smi` 或 `vainfo` 的 GPU/驱动信息。只有探针通过才显示「⚡ 硬件加速可用」；驱动初始化、设备权限或 VA 用户态库异常时显示「△ 硬件驱动异常」和失败原因，转码自动回退软件编码（libx264/libx265），任务仍能正常执行。系统状态页「硬件」区块会标记 GPU（VGA/3D/Display 类）。
+**应用侧行为（已实现）**：应用会枚举 `/dev/dri/renderD*` 渲染设备，按 PCI vendor 区分 Intel / AMD，并对 NVIDIA/Intel/AMD 硬件编码器执行真实编码探针，同时读取 `nvidia-smi` 或 `vainfo` 的 GPU/驱动信息。VAAPI/QSV 探针成功时记录实际设备路径，真实转码会复用同一设备，避免多显卡环境探 A 卡、实际转码用 B 卡。只有探针通过才显示「⚡ 硬件加速可用」；驱动初始化、设备权限或 VA 用户态库异常时显示「△ 硬件驱动异常」和失败原因，转码自动回退软件编码（libx264/libx265）。AMD 不探测 QSV；系统状态页「硬件」区块会标记 GPU（VGA/3D/Display 类）。
 
 **宿主机磁盘自动采集 —— 完整示例**（三个参数缺一不可，作用：`--privileged` 授予 nsenter 权限；`--pid=host` 让容器看到宿主 PID 1 以定位其命名空间；`--user root` 非 root 无权切换命名空间）：
 

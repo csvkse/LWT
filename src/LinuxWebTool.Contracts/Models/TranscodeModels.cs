@@ -198,6 +198,12 @@ public sealed record FfmpegDetection
     /// <summary>至少有一个硬件后端通过真实编码探针；仅“编码器存在 + 设备存在”不再视为可用。</summary>
     public bool HardwareReady { get; init; }
 
+    /// <summary>选中的 DRI 渲染设备路径（如 /dev/dri/renderD129）；NVIDIA 或未探测到为 null。</summary>
+    public string? GpuDevice { get; init; }
+
+    /// <summary>各就绪硬件后端在编码探针中验证过的设备路径，用于真实转码使用同一设备。</summary>
+    public Dictionary<string, string> HwBackendDevices { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>硬件探测结论；成功时列出已验证后端，失败时给出可读原因。</summary>
     public string HardwareMessage { get; init; } = string.Empty;
 }

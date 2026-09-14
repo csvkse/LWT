@@ -267,7 +267,7 @@ public sealed class TranscodeQueueService(
 
         var buildResult = FfmpegArgsBuilder.BuildWithHw(job.SourcePath, tempPath ?? finalPath, preset, job.CustomArgs,
             new FfmpegArgsBuilder.HwEncodeContext(job.UseHardwareAccel, detection.HwEncoders,
-                job.HardwareBackend, detection.HwBackends));
+                job.HardwareBackend, detection.HwBackends, HwBackendDevices: detection.HwBackendDevices));
         var args = buildResult.Args;
         // 记录实际执行的完整命令（供任务队列回显）与实际是否用了硬件编码器
         job.CommandLine = string.Join(' ', (new[] { detection.FfmpegPath }).Concat(args));
