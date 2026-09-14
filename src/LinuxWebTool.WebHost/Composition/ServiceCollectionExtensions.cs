@@ -94,6 +94,7 @@ public static class ServiceCollectionExtensions
                 options.TokenValidationParameters = jwtIssuer.BuildValidationParameters();
             });
         builder.Services.AddAuthorization();
+        builder.Services.AddAntiforgery();
 
         // Quartz 定时调度
         builder.Services.AddScheduling();

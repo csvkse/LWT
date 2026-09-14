@@ -81,6 +81,7 @@ public static class PipelineExtensions
 
         app.UseAuthentication();
         app.UseAuthorization();
+        app.UseAntiforgery();
         app.MapAutoControllers();
 
         // 未匹配的 API 必须返回 JSON 404，不能被 SPA fallback 返回 index.html（否则前端会把 HTML 当业务数据）。

@@ -139,6 +139,22 @@ public sealed class ApiIntegrationTests
     }
 
     [Fact]
+    public async Task File_upload_requires_authentication_and_reaches_upload_logic()
+    {
+        var client = await Client.Value;
+        await LoginAsync(client);
+
+        using var content = new MultipartFormDataContent();
+        using var file = new ByteArrayContent(Encoding.UTF8.GetBytes("upload-test"));
+        content.Add(file, "file", "upload-test.txt");
+
+        var response = await client.PostAsync("/api/Files/Upload?path=/directory-that-does-not-exist", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("目录不存在", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task Schedule_crud_validates_command_reference_and_persists()
     {
         var client = await Client.Value;

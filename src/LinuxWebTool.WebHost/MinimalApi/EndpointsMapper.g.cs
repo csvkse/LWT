@@ -63,7 +63,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_FilesController.MapPost("Mkdir", async ([FromServices] FilesController ctrl, HttpContext ctx, [FromBody] PathRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Mkdir(request); });
             group_FilesController.MapPost("Rename", async ([FromServices] FilesController ctrl, HttpContext ctx, [FromBody] RenameRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Rename(request); });
             group_FilesController.MapDelete("", async ([FromServices] FilesController ctrl, HttpContext ctx, [FromQuery] string path, [FromQuery] bool recursive = false) => { ctrl.HttpContext = ctx; return await ctrl.Delete(path, recursive); });
-            group_FilesController.MapPost("Upload", async ([FromServices] FilesController ctrl, HttpContext ctx, [FromQuery] string path, IFormFile? file) => { ctrl.HttpContext = ctx; return await ctrl.Upload(path, file); });
+            group_FilesController.MapPost("Upload", async ([FromServices] FilesController ctrl, HttpContext ctx, [FromQuery] string path, IFormFile? file) => { ctrl.HttpContext = ctx; return await ctrl.Upload(path, file); }).DisableAntiforgery();
             var group_GroupsController = app.MapGroup("/api/Groups");
             group_GroupsController.RequireAuthorization();
             group_GroupsController.MapGet("", async ([FromServices] GroupsController ctrl, HttpContext ctx, [FromQuery] GroupBizType bizType = GroupBizType.Command) => { ctrl.HttpContext = ctx; return await ctrl.GetAll(bizType); });
