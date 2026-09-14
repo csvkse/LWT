@@ -33,7 +33,12 @@ export async function http(url, { method = 'GET', params, body } = {}) {
 
   let response;
   try {
-    response = await fetch(buildUrl(url, params), { method, headers, body: payload });
+      response = await fetch(buildUrl(url, params), {
+        method,
+        headers,
+        body: payload,
+        ...(method === 'GET' ? { cache: 'no-store' } : {}),
+      });
   } catch {
     toast.error('网络请求失败，请检查服务是否可达');
     return { ok: false, status: 0, data: null, message: '网络请求失败' };

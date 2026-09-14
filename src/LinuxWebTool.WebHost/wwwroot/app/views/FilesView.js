@@ -228,10 +228,11 @@ export default defineComponent({
         confirmText: '删除',
         danger: true,
         onConfirm: async () => {
+          const parentPath = currentPath.value;
           const result = await http(API.files.remove(), { params: { path: entry.path } });
           if (result.ok) {
             toast.success('已删除');
-            await load();
+            await load(parentPath);
           } else if (result && result.data && result.data.needRecursive) {
             // 目录非空，需递归删除
             openConfirm({
@@ -243,7 +244,7 @@ export default defineComponent({
                 const r2 = await http(API.files.remove(), { params: { path: entry.path, recursive: true } });
                 if (r2.ok) {
                   toast.success('已删除');
-                  await load();
+                  await load(parentPath);
                 }
               },
             });
