@@ -48,9 +48,9 @@ export default defineComponent({
       loading.value = true;
       try {
         const [taskResult, commandResult, groupResult] = await Promise.all([
-          http(API.schedules.list),
-          http(API.commands.list),
-          http(API.groups.list, { params: { bizType: 1 } }),
+          http(API.schedules.list, { method: 'GET' }),
+          http(API.commands.list, { method: 'GET' }),
+          http(API.groups.list, { method: 'GET', params: { bizType: 1 } }),
         ]);
         if (taskResult.ok) tasks.value = taskResult.data;
         if (commandResult.ok) commands.value = commandResult.data;

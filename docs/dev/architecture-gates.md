@@ -28,12 +28,14 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + wwwroot �
 | `LinuxArch004` | 下层反向引用上层 | xUnit |
 | `LinuxArch005` | Routes(Controller) 直接 using SqlSugar | xUnit（源码扫描） |
 | `LinuxArch007` | 命名空间与物理路径不一致 | xUnit（源码扫描） |
+| `LinuxArch012` | Controller `Http*` 特性与 `EndpointsMapper.g.cs` 方法/路径不一致 | xUnit（源码契约检查） |
 | `FE-HTML-INLINE` | index.html 内联脚本（importmap 除外）/ 内联事件 | frontend-gate.cjs |
 | `FE-API-OWNERSHIP` | API 路径字符串出现在 config.js 之外 | frontend-gate.cjs |
 | `FE-NO-FETCH` | fetch() 出现在 api/client.js 之外 | frontend-gate.cjs |
 | `FE-STORAGE` | Web Storage 出现在 client.js / auth.js 之外 | frontend-gate.cjs |
 | `FE-IMPORT-BOUNDARY` | 跨层 import（store→views 等） | frontend-gate.cjs |
 | `FE-TEMPLATE-REF` | 模板事件绑定使用裸标识符（Vue 运行时编译会错误提升导致 handler 丢失，必须 `method()`） | frontend-gate.cjs |
+| `FE-API-METHOD` | 前端 `http/httpUpload/httpDownload` 动词与后端 mapper 契约不一致 | frontend-gate.cjs |
 
 ## 约定要点
 

@@ -49,13 +49,14 @@ export default defineComponent({
     const filteredCommands = computed(() => commands.value);
 
     async function loadGroups() {
-      const result = await http(API.groups.list, { params: { bizType: 0 } });
+      const result = await http(API.groups.list, { method: 'GET', params: { bizType: 0 } });
       if (result.ok) groups.value = result.data;
     }
 
     async function loadCommands() {
       loading.value = true;
       const result = await http(API.commands.list, {
+        method: 'GET',
         params: { groupId: activeGroupId.value || undefined, keyword: keyword.value || undefined },
       });
       loading.value = false;

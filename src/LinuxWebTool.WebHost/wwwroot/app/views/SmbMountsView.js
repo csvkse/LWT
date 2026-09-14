@@ -39,7 +39,7 @@ export default defineComponent({
       try {
         const [supportResult, listResult] = await Promise.all([
           http(API.smbMounts.support),
-          http(API.smbMounts.list),
+          http(API.smbMounts.list, { method: 'GET' }),
         ]);
         if (supportResult.ok && supportResult.data && typeof supportResult.data.supported === 'boolean') {
           unsupported.value = !supportResult.data.supported;

@@ -109,7 +109,7 @@ export default defineComponent({
     }
 
     async function loadPresets() {
-      const result = await http(API.transcode.presets);
+      const result = await http(API.transcode.presets, { method: 'GET' });
       if (result.ok && Array.isArray(result.data)) {
         presets.value = result.data;
       } else if (!result.ok) {
@@ -184,7 +184,7 @@ export default defineComponent({
     }
 
     async function loadWatch() {
-      const result = await http(API.transcode.watchRules);
+      const result = await http(API.transcode.watchRules, { method: 'GET' });
       if (result.ok && Array.isArray(result.data)) {
         watchRules.value = result.data;
       } else if (!result.ok) {

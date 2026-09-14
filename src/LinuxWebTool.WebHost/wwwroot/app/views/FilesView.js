@@ -59,7 +59,7 @@ export default defineComponent({
       loading.value = true;
       loadError.value = '';
       try {
-        const result = await http(API.files.list, { params: { path: target } });
+        const result = await http(API.files.list, { method: 'GET', params: { path: target } });
         if (result.ok && result.data && Array.isArray(result.data.entries)) {
           currentPath.value = result.data.path;
           entries.value = result.data.entries;
@@ -130,7 +130,7 @@ export default defineComponent({
       editorContent.value = '';
       editorLoading.value = true;
       try {
-        const result = await http(API.files.content, { params: { path } });
+        const result = await http(API.files.content, { method: 'GET', params: { path } });
         if (result.ok && result.data) {
           editorContent.value = result.data.content ?? '';
         } else if (result.ok && result.data.tooLarge) {
@@ -229,7 +229,7 @@ export default defineComponent({
         danger: true,
         onConfirm: async () => {
           const parentPath = currentPath.value;
-          const result = await http(API.files.remove(), { params: { path: entry.path } });
+          const result = await http(API.files.remove(), { method: 'DELETE', params: { path: entry.path } });
           if (result.ok) {
             toast.success('已删除');
             await load(parentPath);
@@ -241,7 +241,7 @@ export default defineComponent({
               confirmText: '强制删除',
               danger: true,
               onConfirm: async () => {
-                const r2 = await http(API.files.remove(), { params: { path: entry.path, recursive: true } });
+                const r2 = await http(API.files.remove(), { method: 'DELETE', params: { path: entry.path, recursive: true } });
                 if (r2.ok) {
                   toast.success('已删除');
                   await load(parentPath);

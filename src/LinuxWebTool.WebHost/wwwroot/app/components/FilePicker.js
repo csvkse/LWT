@@ -38,7 +38,7 @@ export default defineComponent({
       loading.value = true;
       error.value = '';
       try {
-        const result = await http(API.files.list, { params: { path: currentPath.value } });
+        const result = await http(API.files.list, { method: 'GET', params: { path: currentPath.value } });
         if (result.ok && result.data && Array.isArray(result.data.entries)) {
           entries.value = result.data.entries;
           breadcrumbs.value = buildBreadcrumbs(result.data.path);

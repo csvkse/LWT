@@ -9,6 +9,7 @@
  *  FE-STORAGE         localStorage / sessionStorage 只允许出现在 api/client.js 与 store/auth.js
  *  FE-IMPORT-BOUNDARY 跨层 import 限制（store→views 禁止、api→views/components 禁止、views 互引禁止）
  *  FE-TEMPLATE-REF    模板事件绑定必须使用内联调用（method()），避免运行时编译提升裸标识符导致 handler 丢失
+ *  FE-API-METHOD      前端 HTTP 动词必须匹配 EndpointsMapper.g.cs 声明的后端路由
  *
  * 基线：frontend-gate-baseline.json 冻结存量债务，只允许删除条目，不允许新增。
  */
@@ -16,6 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 const appDir = path.join(__dirname, 'app');
 const baselineFile = path.join(__dirname, 'frontend-gate-baseline.json');
@@ -39,6 +41,93 @@ function readBaseline() {
   } catch {
     return {};
   }
+}
+
+function findCallEnd(source, start) {
+  let depth = 0;
+  let quote = null;
+  for (let i = start; i < source.length; i++) {
+    const char = source[i];
+    const previous = source[i - 1];
+    if (quote) {
+      if (char === '\\') {
+        i++;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === '\'' || char === '"' || char === '`') {
+      quote = char;
+      continue;
+    }
+    if (char === '/' && source[i + 1] === '/') {
+      const newline = source.indexOf('\n', i);
+      if (newline === -1) break;
+      i = newline;
+      continue;
+    }
+    if (char === '/' && source[i + 1] === '*') {
+      const end = source.indexOf('*/', i + 2);
+      if (end === -1) break;
+      i = end + 1;
+      continue;
+    }
+    if (char === '(') depth++;
+    if (char === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function normalizeRoute(pathValue) {
+  return pathValue
+    .replace(/^\/api(?=\/)/, '')
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => (segment.startsWith('{') || segment.startsWith(':') || /^%3a/i.test(segment) ? '*' : segment))
+    .join('/');
+}
+
+function loadApiConfig(configFile) {
+  const source = fs.readFileSync(configFile, 'utf8').replace(/\bexport\s+const\s+/g, 'const ');
+  const sandbox = { window: { location: { origin: 'http://frontend-gate.local' } } };
+  const result = new vm.Script(`${source}; ({ API });`).runInNewContext(sandbox);
+  return result.API;
+}
+
+function resolveApiPath(api, expression) {
+  const match = expression.match(/^API\.([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)/);
+  if (!match) return null;
+
+  let value = api;
+  for (const segment of match[1].split('.')) {
+    value = value?.[segment];
+    if (value === undefined) return null;
+  }
+  if (typeof value === 'function') {
+    value = value(...Array.from({ length: value.length }, () => ':param'));
+  }
+  return typeof value === 'string' ? value : null;
+}
+
+function loadBackendRouteTable(mapperFile) {
+  const routes = new Map();
+  let currentGroup = '';
+  for (const line of fs.readFileSync(mapperFile, 'utf8').split(/\r?\n/)) {
+    const group = line.match(/MapGroup\("([^"]+)"\)/);
+    if (group) currentGroup = group[1];
+
+    const endpoint = line.match(/\.Map(Get|Post|Put|Delete)\("([^"]*)"/);
+    if (!endpoint) continue;
+
+    const route = normalizeRoute(`${currentGroup}/${endpoint[2]}`);
+    if (!routes.has(route)) routes.set(route, new Set());
+    routes.get(route).add(endpoint[1].toUpperCase());
+  }
+  return routes;
 }
 
 const files = walk(appDir);
@@ -103,6 +192,55 @@ for (const file of files) {
       add('FE-TEMPLATE-REF', file, `事件绑定使用了裸标识符 "${name}"，必须写成 "${name}()"`);
     }
   }
+}
+
+// FE-API-METHOD：以前端 config 为调用点索引、后端 mapper 为契约，防止 GET 默认值误调写接口。
+const configFile = path.join(__dirname, 'app', 'config.js');
+const mapperFile = path.join(__dirname, '..', 'MinimalApi', 'EndpointsMapper.g.cs');
+try {
+  const api = loadApiConfig(configFile);
+  const backendRoutes = loadBackendRouteTable(mapperFile);
+
+  for (const file of files) {
+    if (!file.endsWith('.js') || path.relative(appDir, file).replace(/\\/g, '/') === 'api/client.js') continue;
+    const content = fs.readFileSync(file, 'utf8');
+    const callPattern = /\b(httpUpload|httpDownload|http)\s*\(/g;
+    let callMatch;
+    while ((callMatch = callPattern.exec(content))) {
+      const openParen = callMatch.index + callMatch[0].length - 1;
+      const endParen = findCallEnd(content, openParen);
+      if (endParen === -1) continue;
+
+      const call = content.slice(callMatch.index, endParen + 1);
+      const apiExpression = call.slice(callMatch[0].length).match(/^API\.[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*/);
+      if (!apiExpression) continue;
+
+      const configuredPath = resolveApiPath(api, apiExpression[0]);
+      if (!configuredPath) {
+        add('FE-API-METHOD', file, `无法解析 API 路径：${apiExpression[0]}`);
+        continue;
+      }
+
+      const explicitMethod = call.match(/\bmethod\s*:\s*(['"])([A-Za-z]+)\1/)?.[2];
+      const actualMethod = callMatch[1] === 'httpUpload'
+        ? 'POST'
+        : callMatch[1] === 'httpDownload'
+          ? 'GET'
+          : (explicitMethod || 'GET').toUpperCase();
+      const route = normalizeRoute(configuredPath);
+      const allowedMethods = backendRoutes.get(route);
+
+      if (!allowedMethods) {
+        add('FE-API-METHOD', file, `${configuredPath} 在后端路由表中不存在`);
+      } else if (!allowedMethods.has(actualMethod)) {
+        add('FE-API-METHOD', file, `${actualMethod} ${configuredPath} 不匹配后端 ${[...allowedMethods].sort().join('/')} ${configuredPath}`);
+      } else if (allowedMethods.size > 1 && !explicitMethod) {
+        add('FE-API-METHOD', file, `${configuredPath} 支持多个方法（${[...allowedMethods].sort().join('/')}），必须显式声明 method`);
+      }
+    }
+  }
+} catch (error) {
+  add('FE-API-METHOD', configFile, `契约检查失败：${error.message}`);
 }
 
 // 基线比对

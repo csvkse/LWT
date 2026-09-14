@@ -20,7 +20,7 @@ export default defineComponent({
     async function load() {
       loading.value = true;
       try {
-        const result = await http(API.history.list, {
+        const result = await http(API.history.list, { method: 'GET',
           params: {
             page: query.page,
             pageSize: query.pageSize,

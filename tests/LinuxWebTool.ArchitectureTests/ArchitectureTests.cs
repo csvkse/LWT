@@ -152,4 +152,61 @@ public class ArchitectureTests
         Assert.Contains("docker build", verifier);
         Assert.Contains("PublishAot", File.ReadAllText(Path.Combine(RepoRoot, "Dockerfile")));
     }
+
+    [Fact]
+    public void LinuxArch011_文件删除请求必须使用DELETE方法()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            RepoRoot, "src", "LinuxWebTool.WebHost", "wwwroot", "app", "views", "FilesView.js"));
+        var deleteCalls = Regex.Matches(
+            source,
+            @"http\(API\.files\.remove\(\),\s*\{\s*method:\s*'DELETE'");
+        Assert.Equal(2, deleteCalls.Count);
+    }
+
+    [Fact]
+    public void LinuxArch012_ControllerHttp特性和生成映射必须一致()
+    {
+        var routesDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Routes");
+        var mapper = File.ReadAllText(Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "MinimalApi", "EndpointsMapper.g.cs"));
+        var mapperRoutes = ParseMapperRoutes(mapper);
+        var controllerRoutes = new HashSet<string>();
+        foreach (var file in Directory.EnumerateFiles(routesDir, "*Controller.cs", SearchOption.TopDirectoryOnly))
+        {
+            var source = File.ReadAllText(file);
+            var className = Regex.Match(source, @"\bclass\s+(\w+Controller)\b").Groups[1].Value;
+            Assert.Contains("[Route(\"api/[controller]\")]", source);
+            var baseRoute = $"/api/{className[..^"Controller".Length]}";
+            foreach (Match endpoint in Regex.Matches(source, @"\[Http(Get|Post|Put|Delete)(?:\(""([^""]*)""\))?\]"))
+                controllerRoutes.Add($"{className}|{endpoint.Groups[1].Value.ToUpperInvariant()}|{NormalizeRoute(baseRoute, endpoint.Groups[2].Value)}");
+        }
+        var missingMapper = controllerRoutes.Except(mapperRoutes).ToList();
+        var missingController = mapperRoutes.Except(controllerRoutes).ToList();
+        Assert.True(missingMapper.Count == 0 && missingController.Count == 0,
+            $"Http 特性与 mapper 不一致：缺映射 {string.Join(", ", missingMapper)}；缺控制器 {string.Join(", ", missingController)}");
+    }
+
+    private static HashSet<string> ParseMapperRoutes(string mapper)
+    {
+        var routes = new HashSet<string>();
+        var controller = string.Empty;
+        foreach (var line in mapper.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var group = Regex.Match(line, @"var group_(\w+) = app\.MapGroup\(""([^""]+)""\)");
+            if (group.Success) controller = group.Groups[1].Value;
+            var endpoint = Regex.Match(line, @"\.Map(Get|Post|Put|Delete)\(""([^""]*)""" );
+            if (endpoint.Success && controller.Length > 0)
+            {
+                var baseRoute = $"/api/{controller[..^"Controller".Length]}";
+                routes.Add($"{controller}|{endpoint.Groups[1].Value.ToUpperInvariant()}|{NormalizeRoute(baseRoute, endpoint.Groups[2].Value)}");
+            }
+        }
+        return routes;
+    }
+
+    private static string NormalizeRoute(string basePath, string route)
+    {
+        var segments = $"{basePath.Trim('/')}/{route.Trim('/')}".Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return string.Join('/', segments.Select(s => s.StartsWith('{') ? "*" : s));
+    }
 }
