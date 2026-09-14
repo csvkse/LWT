@@ -10,6 +10,16 @@ namespace LinuxWebTool.ArchitectureTests;
 public sealed class MountHealthTests
 {
     [Fact]
+    public void Startup_retry_uses_quick_bounded_delays_then_hands_off_to_health_service()
+    {
+        Assert.Equal(3, SmbMountStartupRetryPlan.AttemptCount);
+        Assert.Null(SmbMountStartupRetryPlan.GetDelayBeforeAttempt(1));
+        Assert.Equal(TimeSpan.FromSeconds(5), SmbMountStartupRetryPlan.GetDelayBeforeAttempt(2));
+        Assert.Equal(TimeSpan.FromSeconds(15), SmbMountStartupRetryPlan.GetDelayBeforeAttempt(3));
+        Assert.Null(SmbMountStartupRetryPlan.GetDelayBeforeAttempt(4));
+    }
+
+    [Fact]
     public void Linux_mountinfo_parser_decodes_escapes_and_keeps_real_mounts()
     {
         const string content = """

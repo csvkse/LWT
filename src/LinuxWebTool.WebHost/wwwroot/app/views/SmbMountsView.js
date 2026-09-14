@@ -24,6 +24,11 @@ const HEALTH_META = {
   Unsupported: { label: '不支持', class: 'border-amber-500/50 text-amber-300', dot: 'bg-amber-400' },
 };
 
+const HEALTH_ENUM = [
+  'Unknown', 'Healthy', 'NotMounted', 'ServerUnreachable',
+  'Stale', 'Recovering', 'RecoveryFailed', 'Unsupported',
+];
+
 const emptyForm = () => ({
   name: '', server: '', localPath: '', username: '', password: '', domain: '', options: 'vers=3.0,uid=1001,gid=1001',
   autoMount: false, enabled: true, description: '',
@@ -76,7 +81,10 @@ export default defineComponent({
     }
 
     function healthMeta(health) {
-      return HEALTH_META[health?.state] || HEALTH_META.Unknown;
+      const state = typeof health?.state === 'number'
+        ? HEALTH_ENUM[health.state]
+        : health?.state;
+      return HEALTH_META[state] || HEALTH_META.Unknown;
     }
 
     function openCreate() {

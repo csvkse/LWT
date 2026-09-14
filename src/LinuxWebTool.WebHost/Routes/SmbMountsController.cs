@@ -145,6 +145,9 @@ public class SmbMountsController(
                 var (unmounted, message) = await mountService.UnmountAsync(mount, lazy: true);
                 if (!unmounted)
                 {
+                    await operationLogger.LogAsync("删除挂载配置", "SMB挂载", mount.Name,
+                        $"{mount.Server} → {mount.LocalPath}；删除前卸载失败：{message}",
+                        false, clientIp: HttpContext.GetClientIp());
                     return BadRequest(new MessageResponse($"删除前卸载失败：{message}"));
                 }
             }
@@ -175,8 +178,13 @@ public class SmbMountsController(
         RecordManualResult(mount, success
             ? MountHealthState.Healthy
             : MountHealthState.RecoveryFailed, message);
+        var mountDetail = $"{mount.Server} → {mount.LocalPath}";
+        if (!success)
+        {
+            mountDetail += $"；失败原因：{message}";
+        }
         await operationLogger.LogAsync("挂载", "SMB挂载", mount.Name,
-            $"{mount.Server} → {mount.LocalPath}", success, clientIp: HttpContext.GetClientIp());
+            mountDetail, success, clientIp: HttpContext.GetClientIp());
         return success ? Ok(new MessageResponse(message)) : BadRequest(new MessageResponse(message));
     }
 
@@ -196,8 +204,13 @@ public class SmbMountsController(
         RecordManualResult(mount, success
             ? MountHealthState.NotMounted
             : MountHealthState.RecoveryFailed, message);
+        var unmountDetail = $"{mount.Server} → {mount.LocalPath}";
+        if (!success)
+        {
+            unmountDetail += $"；失败原因：{message}";
+        }
         await operationLogger.LogAsync("卸载", "SMB挂载", mount.Name,
-            $"{mount.Server} → {mount.LocalPath}", success, clientIp: HttpContext.GetClientIp());
+            unmountDetail, success, clientIp: HttpContext.GetClientIp());
         return success ? Ok(new MessageResponse(message)) : BadRequest(new MessageResponse(message));
     }
 
