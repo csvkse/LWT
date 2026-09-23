@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
+using System.Threading.Channels;
 using LinuxWebTool.Contracts.Models;
 using LinuxWebTool.Infrastructure.Persistence;
 using LinuxWebTool.Infrastructure.Persistence.Entities;
+using LinuxWebTool.Infrastructure.SystemInfo;
 
 namespace LinuxWebTool.Infrastructure.Mount;
 
@@ -35,6 +37,18 @@ public sealed class MountHealthService(
     private static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(30);
 
     private readonly ConcurrentDictionary<string, MountHealthSnapshot> _snapshots = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _pendingChecks = new(StringComparer.Ordinal);
+    private readonly Channel<string> _checkRequests = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
+
+    public void RequestImmediateCheck(string localPath)
+    {
+        var path = MountOperationCoordinator.NormalizePath(localPath);
+        if (!SystemStatusProvider.ManagedMountPoints.ContainsKey(path)) return;
+        if (_pendingChecks.TryAdd(path, 0) && !_checkRequests.Writer.TryWrite(path))
+        {
+            _pendingChecks.TryRemove(path, out _);
+        }
+    }
 
     public MountHealthSnapshot? GetSnapshot(string localPath) =>
         _snapshots.TryGetValue(MountOperationCoordinator.NormalizePath(localPath), out var snapshot) ? snapshot : null;
@@ -58,6 +72,7 @@ public sealed class MountHealthService(
             return;
         }
 
+        _ = ProcessRequestsAsync(stoppingToken);
         using var timer = new PeriodicTimer(ProbeInterval);
         do
         {
@@ -75,6 +90,27 @@ public sealed class MountHealthService(
             }
         }
         while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+
+    private async Task ProcessRequestsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var path in _checkRequests.Reader.ReadAllAsync(cancellationToken))
+            {
+                try
+                {
+                    if (store is null) continue;
+                    var mount = (await store.GetAllAsync()).FirstOrDefault(m =>
+                        m.Enabled && MountOperationCoordinator.NormalizePath(m.LocalPath) == path);
+                    if (mount is not null) await CheckMountAsync(mount, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
+                catch (Exception ex) { logger.LogWarning(ex, "SMB 挂载即时复查失败：{LocalPath}", path); }
+                finally { _pendingChecks.TryRemove(path, out _); }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
 
     private async Task RefreshAllAsync(CancellationToken cancellationToken)
@@ -122,6 +158,11 @@ public sealed class MountHealthService(
             return Update(previous, mount, MountHealthState.Unsupported, "当前系统不支持挂载管理");
         }
 
+        if (status == SmbMountStatus.Abnormal)
+        {
+            return Update(previous, mount, MountHealthState.Stale, "挂载点被非 CIFS 文件系统占用", failureCount: 0);
+        }
+
         if (status == SmbMountStatus.NotMounted)
         {
             if (!mount.AutoMount || !mount.Enabled)
@@ -130,9 +171,12 @@ public sealed class MountHealthService(
             }
 
             var mounted = await operations.MountAsync(mount);
-            return mounted.Success
-                ? Update(previous, mount, MountHealthState.Healthy, null)
-                : Fail(previous, mount, $"自动挂载失败：{mounted.Message}", previous.RecoveryAttemptCount + 1);
+            if (!mounted.Success)
+                return Fail(previous, mount, $"自动挂载失败：{mounted.Message}", previous.RecoveryAttemptCount + 1);
+            var mountedProbe = await runtimeProbe.IsFileSystemAccessibleAsync(mount, cancellationToken);
+            return mountedProbe.Success
+                ? Update(previous, mount, MountHealthState.Healthy, null, failureCount: 0)
+                : Fail(previous, mount, $"自动挂载后目录不可访问：{mountedProbe.Error}", previous.RecoveryAttemptCount + 1);
         }
 
         var serverReachable = await runtimeProbe.IsServerReachableAsync(mount, cancellationToken);
@@ -151,7 +195,7 @@ public sealed class MountHealthService(
         var accessible = await runtimeProbe.IsFileSystemAccessibleAsync(mount, cancellationToken);
         if (accessible.Success)
         {
-            return Update(previous, mount, MountHealthState.Healthy, null);
+            return Update(previous, mount, MountHealthState.Healthy, null, failureCount: 0);
         }
 
         var failureCount = previous.FailureCount + 1;
@@ -185,9 +229,12 @@ public sealed class MountHealthService(
         }
 
         var mountResult = await operations.MountAsync(mount);
-        return mountResult.Success
+        if (!mountResult.Success)
+            return (false, $"重新挂载失败：{mountResult.Message}");
+        var probe = await runtimeProbe.IsFileSystemAccessibleAsync(mount, cancellationToken);
+        return probe.Success
             ? (true, mountResult.Message)
-            : (false, $"重新挂载失败：{mountResult.Message}");
+            : (false, $"重新挂载后目录不可访问：{probe.Error}");
     }
 
     private static MountHealthSnapshot Create(

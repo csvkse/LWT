@@ -97,6 +97,7 @@ public sealed class MountHealthTests
         var mount = CreateMount(autoMount: true);
         var operations = new TestMountOperations(SmbMountStatus.Mounted);
         var probes = new TestMountProbe { ServerReachable = true, FileSystemAccessible = false };
+        operations.OnMount = () => probes.FileSystemAccessible = true;
         var service = CreateHealthService(operations, probes);
 
         var first = await service.CheckMountAsync(mount, CancellationToken.None);
@@ -160,6 +161,7 @@ public sealed class MountHealthTests
 
     private sealed class TestMountOperations(SmbMountStatus status) : ISmbMountOperations
     {
+        public Action? OnMount { get; set; }
         public int MountCalls { get; private set; }
 
         public int UnmountCalls { get; private set; }
@@ -171,6 +173,7 @@ public sealed class MountHealthTests
         public Task<(bool Success, string Message)> MountAsync(SmbMount mount)
         {
             MountCalls++;
+            OnMount?.Invoke();
             return Task.FromResult((true, "mounted"));
         }
 
@@ -186,7 +189,7 @@ public sealed class MountHealthTests
     {
         public bool ServerReachable { get; init; } = true;
 
-        public bool FileSystemAccessible { get; init; } = true;
+        public bool FileSystemAccessible { get; set; } = true;
 
         public Task<bool> IsServerReachableAsync(SmbMount mount, CancellationToken cancellationToken = default) =>
             Task.FromResult(ServerReachable);

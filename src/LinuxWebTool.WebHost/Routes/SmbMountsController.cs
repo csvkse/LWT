@@ -175,9 +175,20 @@ public class SmbMountsController(
         var (success, message) = await coordinator.RunWithMountLockAsync(
             mount.LocalPath,
             () => mountService.MountAsync(mount));
-        RecordManualResult(mount, success
-            ? MountHealthState.Healthy
-            : MountHealthState.RecoveryFailed, message);
+        if (success)
+        {
+            mountHealth.RemoveSnapshot(mount.LocalPath);
+            var health = await mountHealth.CheckMountAsync(mount);
+            if (health.State != MountHealthState.Healthy)
+            {
+                success = false;
+                message = $"挂载后目录不可访问：{health.LastError ?? health.State.ToString()}";
+            }
+        }
+        else
+        {
+            RecordManualResult(mount, MountHealthState.RecoveryFailed, message);
+        }
         var mountDetail = $"{mount.Server} → {mount.LocalPath}";
         if (!success)
         {

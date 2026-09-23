@@ -48,20 +48,19 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
             {
                 StartInfo = new ProcessStartInfo
                 {
-                    FileName = "stat",
+                    FileName = "ls",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     CreateNoWindow = true,
                 },
             };
-            process.StartInfo.ArgumentList.Add("-f");
-            process.StartInfo.ArgumentList.Add("-c");
-            process.StartInfo.ArgumentList.Add("%T");
+            // 读取目录项会经过 CIFS readdir，statfs 成功并不能证明共享目录可用。
+            process.StartInfo.ArgumentList.Add("-A");
             process.StartInfo.ArgumentList.Add("--");
             process.StartInfo.ArgumentList.Add(mount.LocalPath);
             process.Start();
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var stdoutTask = process.StandardOutput.BaseStream.CopyToAsync(Stream.Null, cancellationToken);
             var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
 
             try
@@ -73,12 +72,17 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
                 try { process.Kill(entireProcessTree: true); } catch { }
                 return (false, "文件系统探测超时，挂载可能已失效");
             }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                throw;
+            }
 
-            var stdout = await stdoutTask;
+            await stdoutTask;
             var stderr = await stderrTask;
             return process.HasExited && process.ExitCode == 0
                 ? (true, null)
-                : (false, stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? $"stat 退出码 {process.ExitCode}");
+                : (false, stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? $"ls 退出码 {process.ExitCode}");
         }
         catch (Exception ex)
         {
