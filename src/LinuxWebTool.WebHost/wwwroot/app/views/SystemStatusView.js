@@ -381,11 +381,11 @@ export default defineComponent({
                     {{ disk.mount }} <span class="text-slate-600">({{ disk.fileSystem }})</span>
                     <span class="badge ml-2" :class="diskHealthMeta(disk).class">{{ diskHealthMeta(disk).label }}</span>
                   </span>
-                  <span v-if="disk.health === 'Healthy'" :class="usageColor(disk.usagePercent).text">
+                  <span v-if="disk.health === 'Healthy' && disk.totalBytes > 0" :class="usageColor(disk.usagePercent).text">
                     {{ formatBytes(disk.usedBytes) }} / {{ formatBytes(disk.totalBytes) }} · {{ disk.usagePercent }}%
                   </span>
                 </div>
-                <div v-if="disk.health === 'Healthy'" class="h-1.5 bg-cyber-line rounded overflow-hidden">
+                <div v-if="disk.health === 'Healthy' && disk.totalBytes > 0" class="h-1.5 bg-cyber-line rounded overflow-hidden">
                   <div class="h-full rounded transition-all" :class="usageColor(disk.usagePercent).bar" :style="{ width: disk.usagePercent + '%' }"></div>
                 </div>
                 <p v-if="disk.error" class="mt-1 text-[11px] text-rose-300/80 truncate" :title="disk.error">{{ disk.error }}</p>

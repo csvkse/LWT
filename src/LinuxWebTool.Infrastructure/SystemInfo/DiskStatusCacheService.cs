@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using LinuxWebTool.Contracts.Models;
 using LinuxWebTool.Infrastructure.Mount;
@@ -15,6 +16,12 @@ public sealed class DiskStatusCacheService(
 {
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(30);
     private static readonly int ProbeTimeoutMs = 5_000;
+
+    /// <summary>df 探测失败后的重试冷却：挂载会话卡死时，避免每轮刷新都被阻塞的 df 拖满整个周期。</summary>
+    private static readonly TimeSpan CapacityProbeRetryDelay = TimeSpan.FromMinutes(2);
+
+    private readonly ConcurrentDictionary<string, (DateTime RetryAfter, string Error)> _capacityProbeFailures =
+        new(StringComparer.Ordinal);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -68,17 +75,10 @@ public sealed class DiskStatusCacheService(
                 continue;
             }
 
-            var capacity = await ProbeCapacityAsync(mount, cancellationToken);
+            var capacity = await ProbeCapacityWithRetryBackoffAsync(mount, cancellationToken);
             disks.Add(capacity.Success
                 ? capacity.Disk!
-                : new DiskStatus
-                {
-                    Mount = mount.MountPoint,
-                    FileSystem = mount.FileSystem,
-                    Health = MountHealthState.Unknown.ToString(),
-                    Error = capacity.Error ?? "磁盘容量探测失败",
-                    LastCheckedAt = DateTime.Now,
-                });
+                : CreateCapacityFailedDisk(mount, health, capacity.Error ?? "磁盘容量探测失败"));
         }
 
         foreach (var health in mountHealth.GetSnapshots())
@@ -149,6 +149,42 @@ public sealed class DiskStatusCacheService(
         Health = health.State.ToString(),
         Error = health.LastError,
         LastCheckedAt = health.LastCheckedAt,
+    };
+
+    /// <summary>容量探测带失败冷却：df 卡死时先停探两分钟，冷却期内直接复用上次错误，避免刷新周期被拖满。</summary>
+    private async Task<(bool Success, DiskStatus? Disk, string? Error)> ProbeCapacityWithRetryBackoffAsync(
+        MountMetadata mount,
+        CancellationToken cancellationToken)
+    {
+        if (_capacityProbeFailures.TryGetValue(mount.MountPoint, out var failure) && DateTime.Now < failure.RetryAfter)
+        {
+            return (false, null, failure.Error);
+        }
+
+        var result = await ProbeCapacityAsync(mount, cancellationToken);
+        if (result.Success)
+        {
+            _capacityProbeFailures.TryRemove(mount.MountPoint, out _);
+        }
+        else
+        {
+            _capacityProbeFailures[mount.MountPoint] =
+                (DateTime.Now.Add(CapacityProbeRetryDelay), result.Error ?? "磁盘容量探测失败");
+        }
+
+        return result;
+    }
+
+    /// <summary>容量探测失败时：挂载本身健康（健康检查走 ls 且已通过）就保留"正常"，只标注容量不可用，不误报"检测中"。</summary>
+    private static DiskStatus CreateCapacityFailedDisk(MountMetadata mount, MountHealthSnapshot? health, string error) => new()
+    {
+        Mount = mount.MountPoint,
+        FileSystem = mount.FileSystem,
+        Health = health is { State: MountHealthState.Healthy }
+            ? MountHealthState.Healthy.ToString()
+            : MountHealthState.Unknown.ToString(),
+        Error = error,
+        LastCheckedAt = DateTime.Now,
     };
 
     private static async Task<(bool Success, DiskStatus? Disk, string? Error)> ProbeCapacityAsync(

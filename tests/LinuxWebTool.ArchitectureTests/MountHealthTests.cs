@@ -1,5 +1,6 @@
 using LinuxWebTool.Contracts.Models;
 using LinuxWebTool.Infrastructure.Mount;
+using LinuxWebTool.Infrastructure.Persistence;
 using LinuxWebTool.Infrastructure.Persistence.Entities;
 using LinuxWebTool.Infrastructure.SystemInfo;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -132,15 +133,83 @@ public sealed class MountHealthTests
         Assert.Equal(1, operations.MountCalls);
     }
 
+    [Fact]
+    public async Task Capacity_probe_failure_accumulates_three_times_then_lazy_remounts()
+    {
+        var mount = CreateMount(autoMount: true);
+        var operations = new TestMountOperations(SmbMountStatus.Mounted);
+        var probes = new TestMountProbe { ServerReachable = true, FileSystemAccessible = true, CapacityProbeOk = false };
+        operations.OnMount = () => probes.CapacityProbeOk = true;
+        var logs = new TestOperationLogger();
+        var service = CreateHealthService(operations, probes, logs);
+
+        var first = await service.CheckMountAsync(mount, CancellationToken.None);
+        var second = await service.CheckMountAsync(mount, CancellationToken.None);
+        Assert.Equal(MountHealthState.Stale, first.State);
+        Assert.Equal(MountHealthState.Stale, second.State);
+        Assert.Equal(0, operations.UnmountCalls);
+
+        var third = await service.CheckMountAsync(mount, CancellationToken.None);
+
+        Assert.Equal(MountHealthState.Healthy, third.State);
+        Assert.Equal(1, operations.UnmountCalls);
+        Assert.True(operations.LastUnmountWasLazy);
+        Assert.Equal(1, operations.MountCalls);
+        Assert.Equal(0, third.FailureCount);
+        var entry = Assert.Single(logs.Entries);
+        Assert.Equal("健康检测-自动重挂", entry.Action);
+        Assert.True(entry.Success);
+    }
+
+    [Fact]
+    public async Task Recovery_requires_capacity_probe_to_pass_after_remount()
+    {
+        var mount = CreateMount(autoMount: true);
+        var operations = new TestMountOperations(SmbMountStatus.Mounted);
+        var probes = new TestMountProbe { ServerReachable = true, FileSystemAccessible = true, CapacityProbeOk = false };
+        var logs = new TestOperationLogger();
+        var service = CreateHealthService(operations, probes, logs);
+
+        var first = await service.CheckMountAsync(mount, CancellationToken.None);
+        var second = await service.CheckMountAsync(mount, CancellationToken.None);
+        var third = await service.CheckMountAsync(mount, CancellationToken.None);
+
+        Assert.Equal(MountHealthState.RecoveryFailed, third.State);
+        Assert.Equal(1, operations.UnmountCalls);
+        Assert.Equal(1, operations.MountCalls);
+        var entry = Assert.Single(logs.Entries);
+        Assert.Equal("健康检测-自动重挂", entry.Action);
+        Assert.False(entry.Success);
+    }
+
+    [Fact]
+    public async Task Not_mounted_automount_records_operation_log()
+    {
+        var mount = CreateMount(autoMount: true);
+        var operations = new TestMountOperations(SmbMountStatus.NotMounted);
+        var probes = new TestMountProbe();
+        var logs = new TestOperationLogger();
+        var service = CreateHealthService(operations, probes, logs);
+
+        var health = await service.CheckMountAsync(mount, CancellationToken.None);
+
+        Assert.Equal(MountHealthState.Healthy, health.State);
+        var entry = Assert.Single(logs.Entries);
+        Assert.Equal("健康检测-自动挂载", entry.Action);
+        Assert.True(entry.Success);
+    }
+
     private static MountHealthService CreateHealthService(
         TestMountOperations operations,
-        TestMountProbe probes)
+        TestMountProbe probes,
+        TestOperationLogger? operationLogger = null)
     {
         return new MountHealthService(
             store: null!,
             operations,
             probes,
             new MountOperationCoordinator(),
+            operationLogger ?? new TestOperationLogger(),
             NullLogger<MountHealthService>.Instance);
     }
 
@@ -185,16 +254,32 @@ public sealed class MountHealthTests
         }
     }
 
+    private sealed class TestOperationLogger : IOperationLogger
+    {
+        public List<(string Action, string TargetType, string TargetName, string? Detail, bool Success)> Entries { get; } = [];
+
+        public Task LogAsync(string action, string targetType, string targetName, string? detail = null, bool success = true, string? clientIp = null)
+        {
+            Entries.Add((action, targetType, targetName, detail, success));
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class TestMountProbe : IMountRuntimeProbe
     {
         public bool ServerReachable { get; init; } = true;
 
         public bool FileSystemAccessible { get; set; } = true;
 
+        public bool CapacityProbeOk { get; set; } = true;
+
         public Task<bool> IsServerReachableAsync(SmbMount mount, CancellationToken cancellationToken = default) =>
             Task.FromResult(ServerReachable);
 
         public Task<(bool Success, string? Error)> IsFileSystemAccessibleAsync(SmbMount mount, CancellationToken cancellationToken = default) =>
             Task.FromResult((FileSystemAccessible, FileSystemAccessible ? null : "probe timeout"));
+
+        public Task<(bool Success, string? Error)> IsCapacityProbeOkAsync(SmbMount mount, CancellationToken cancellationToken = default) =>
+            Task.FromResult((CapacityProbeOk, CapacityProbeOk ? null : "capacity probe timeout"));
     }
 }

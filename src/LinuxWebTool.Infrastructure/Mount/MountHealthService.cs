@@ -21,6 +21,9 @@ public interface IMountRuntimeProbe
     Task<bool> IsServerReachableAsync(SmbMount mount, CancellationToken cancellationToken = default);
 
     Task<(bool Success, string? Error)> IsFileSystemAccessibleAsync(SmbMount mount, CancellationToken cancellationToken = default);
+
+    /// <summary>文件系统容量探测（statfs）：目录可读但该请求卡死/失败，说明 SMB 会话已退化，需重挂恢复。</summary>
+    Task<(bool Success, string? Error)> IsCapacityProbeOkAsync(SmbMount mount, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -32,6 +35,7 @@ public sealed class MountHealthService(
     ISmbMountOperations operations,
     IMountRuntimeProbe runtimeProbe,
     MountOperationCoordinator coordinator,
+    IOperationLogger operationLogger,
     ILogger<MountHealthService> logger) : BackgroundService
 {
     private static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(30);
@@ -172,11 +176,20 @@ public sealed class MountHealthService(
 
             var mounted = await operations.MountAsync(mount);
             if (!mounted.Success)
+            {
+                await LogHealthActionAsync(mount, "健康检测-自动挂载", $"自动挂载失败：{mounted.Message}", success: false);
                 return Fail(previous, mount, $"自动挂载失败：{mounted.Message}", previous.RecoveryAttemptCount + 1);
+            }
+
             var mountedProbe = await runtimeProbe.IsFileSystemAccessibleAsync(mount, cancellationToken);
-            return mountedProbe.Success
-                ? Update(previous, mount, MountHealthState.Healthy, null, failureCount: 0)
-                : Fail(previous, mount, $"自动挂载后目录不可访问：{mountedProbe.Error}", previous.RecoveryAttemptCount + 1);
+            if (!mountedProbe.Success)
+            {
+                await LogHealthActionAsync(mount, "健康检测-自动挂载", $"自动挂载后目录不可访问：{mountedProbe.Error}", success: false);
+                return Fail(previous, mount, $"自动挂载后目录不可访问：{mountedProbe.Error}", previous.RecoveryAttemptCount + 1);
+            }
+
+            await LogHealthActionAsync(mount, "健康检测-自动挂载", "自动挂载完成", success: true);
+            return Update(previous, mount, MountHealthState.Healthy, null, failureCount: 0);
         }
 
         var serverReachable = await runtimeProbe.IsServerReachableAsync(mount, cancellationToken);
@@ -193,20 +206,32 @@ public sealed class MountHealthService(
         }
 
         var accessible = await runtimeProbe.IsFileSystemAccessibleAsync(mount, cancellationToken);
-        if (accessible.Success)
+        if (!accessible.Success)
+        {
+            return await HandleProbeFailureAsync(previous, mount, accessible.Error ?? "文件系统访问超时", cancellationToken);
+        }
+
+        // 目录可读不一定代表会话健康：statfs 每次必须上线路由，能暴露目录缓存掩盖的退化连接。
+        var capacityOk = await runtimeProbe.IsCapacityProbeOkAsync(mount, cancellationToken);
+        if (capacityOk.Success)
         {
             return Update(previous, mount, MountHealthState.Healthy, null, failureCount: 0);
         }
 
+        return await HandleProbeFailureAsync(previous, mount, capacityOk.Error ?? "文件系统容量探测超时", cancellationToken);
+    }
+
+    /// <summary>探测失败累计到三次且允许自动挂载时，懒卸载并重挂恢复；否则保持 Stale 等待。</summary>
+    private async Task<MountHealthSnapshot> HandleProbeFailureAsync(
+        MountHealthSnapshot previous,
+        SmbMount mount,
+        string error,
+        CancellationToken cancellationToken)
+    {
         var failureCount = previous.FailureCount + 1;
         if (failureCount < 3 || !mount.AutoMount || !mount.Enabled)
         {
-            return Update(
-                previous,
-                mount,
-                MountHealthState.Stale,
-                accessible.Error ?? "文件系统访问超时",
-                failureCount: failureCount);
+            return Update(previous, mount, MountHealthState.Stale, error, failureCount: failureCount);
         }
 
         var recovered = await RecoverAsync(mount, cancellationToken);
@@ -225,16 +250,41 @@ public sealed class MountHealthService(
         var unmount = await operations.UnmountAsync(mount, lazy: true);
         if (!unmount.Success)
         {
+            await LogHealthActionAsync(mount, "健康检测-自动重挂", $"懒卸载失败：{unmount.Message}", success: false);
             return (false, $"懒卸载失败：{unmount.Message}");
         }
 
         var mountResult = await operations.MountAsync(mount);
         if (!mountResult.Success)
+        {
+            await LogHealthActionAsync(mount, "健康检测-自动重挂", $"重新挂载失败：{mountResult.Message}", success: false);
             return (false, $"重新挂载失败：{mountResult.Message}");
+        }
+
         var probe = await runtimeProbe.IsFileSystemAccessibleAsync(mount, cancellationToken);
-        return probe.Success
-            ? (true, mountResult.Message)
-            : (false, $"重新挂载后目录不可访问：{probe.Error}");
+        if (!probe.Success)
+        {
+            await LogHealthActionAsync(mount, "健康检测-自动重挂", $"重挂后目录不可访问：{probe.Error}", success: false);
+            return (false, $"重新挂载后目录不可访问：{probe.Error}");
+        }
+
+        // 只验目录可读可能掩盖未恢复的退化会话，重挂后 statfs 仍卡死视为恢复失败，进入退避等待。
+        var capacityOk = await runtimeProbe.IsCapacityProbeOkAsync(mount, cancellationToken);
+        if (!capacityOk.Success)
+        {
+            await LogHealthActionAsync(mount, "健康检测-自动重挂", $"重挂后容量探测仍失败：{capacityOk.Error}", success: false);
+            return (false, $"重新挂载后容量探测仍失败：{capacityOk.Error}");
+        }
+
+        await LogHealthActionAsync(mount, "健康检测-自动重挂", "懒卸载 → 重挂 → 目录与容量验证通过", success: true);
+        return (true, mountResult.Message);
+    }
+
+    /// <summary>健康检测触发的自动动作写入操作日志，与手动挂载/卸载入口保持同样的审计口径。</summary>
+    private async Task LogHealthActionAsync(SmbMount mount, string action, string detail, bool success)
+    {
+        await operationLogger.LogAsync(action, "SMB挂载", mount.Name,
+            $"{mount.Server} → {mount.LocalPath}；{detail}", success);
     }
 
     private static MountHealthSnapshot Create(

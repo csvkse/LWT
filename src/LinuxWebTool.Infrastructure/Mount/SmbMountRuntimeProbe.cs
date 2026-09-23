@@ -4,12 +4,11 @@ using LinuxWebTool.Infrastructure.Persistence.Entities;
 
 namespace LinuxWebTool.Infrastructure.Mount;
 
-/// <summary>SMB 运行期探针：TCP 探测不会触碰失效挂载，文件系统探测由有超时的子进程执行。</summary>
+/// <summary>SMB 运行期探针：TCP 探测不会触碰失效挂载，文件系统与容量探测由有超时的子进程执行。</summary>
 public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
 {
     private static readonly TimeSpan TcpTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan FsProbeTimeout = TimeSpan.FromSeconds(5);
-
     public async Task<bool> IsServerReachableAsync(SmbMount mount, CancellationToken cancellationToken = default)
     {
         if (!OperatingSystem.IsLinux())
@@ -42,35 +41,65 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
             return (false, "当前系统不支持文件系统探测");
         }
 
+        // 读取目录项会经过 CIFS readdir，statfs 成功并不能证明共享目录可用。
+        return await RunFsProbeAsync(
+            ["ls", "-A", "--", mount.LocalPath],
+            FsProbeTimeout,
+            "文件系统探测超时，挂载可能已失效",
+            cancellationToken);
+    }
+
+    public async Task<(bool Success, string? Error)> IsCapacityProbeOkAsync(SmbMount mount, CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return (false, "当前系统不支持容量探测");
+        }
+
+        // statfs 每次必须上线路由，目录缓存掩盖不了退化会话；该请求卡死/失败即触发重挂恢复。
+        return await RunFsProbeAsync(
+            ["df", "-P", "--", mount.LocalPath],
+            FsProbeTimeout,
+            "容量探测超时，SMB 会话可能已退化",
+            cancellationToken);
+    }
+
+    private static async Task<(bool Success, string? Error)> RunFsProbeAsync(
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        string timeoutError,
+        CancellationToken cancellationToken)
+    {
         try
         {
             using var process = new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
-                    FileName = "ls",
+                    FileName = arguments[0],
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     CreateNoWindow = true,
                 },
             };
-            // 读取目录项会经过 CIFS readdir，statfs 成功并不能证明共享目录可用。
-            process.StartInfo.ArgumentList.Add("-A");
-            process.StartInfo.ArgumentList.Add("--");
-            process.StartInfo.ArgumentList.Add(mount.LocalPath);
+            foreach (var argument in arguments.Skip(1))
+            {
+                process.StartInfo.ArgumentList.Add(argument);
+            }
+
             process.Start();
             var stdoutTask = process.StandardOutput.BaseStream.CopyToAsync(Stream.Null, cancellationToken);
             var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
 
             try
             {
-                await process.WaitForExitAsync(cancellationToken).WaitAsync(FsProbeTimeout, cancellationToken);
+                await process.WaitForExitAsync(cancellationToken).WaitAsync(timeout, cancellationToken);
             }
             catch (TimeoutException)
             {
                 try { process.Kill(entireProcessTree: true); } catch { }
-                return (false, "文件系统探测超时，挂载可能已失效");
+                return (false, timeoutError);
             }
             catch (OperationCanceledException)
             {
@@ -82,7 +111,7 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
             var stderr = await stderrTask;
             return process.HasExited && process.ExitCode == 0
                 ? (true, null)
-                : (false, stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? $"ls 退出码 {process.ExitCode}");
+                : (false, stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? $"退出码 {process.ExitCode}");
         }
         catch (Exception ex)
         {
