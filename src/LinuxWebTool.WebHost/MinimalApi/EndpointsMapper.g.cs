@@ -38,6 +38,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             services.AddScoped<SmbMountsController>();
             services.AddScoped<SystemStatusController>();
             services.AddScoped<TranscodeController>();
+            services.AddScoped<TerminalController>();
         }
 
         public static void MapAutoControllers(this WebApplication app)
@@ -127,6 +128,10 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_TranscodeController.MapDelete("WatchRules/{id:guid}", async ([FromServices] TranscodeController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.DeleteWatchRule(id); });
             group_TranscodeController.MapPost("WatchRules/{id:guid}/Toggle", async ([FromServices] TranscodeController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.ToggleWatchRule(id); });
             group_TranscodeController.MapGet("DetectFfmpeg", async ([FromServices] TranscodeController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.DetectFfmpeg(); });
+            var group_TerminalController = app.MapGroup("/api/Terminal");
+            group_TerminalController.RequireAuthorization();
+            group_TerminalController.MapPost("Sessions", async ([FromServices] TerminalController ctrl, HttpContext ctx, [FromBody] LinuxWebTool.Contracts.Terminal.TerminalSessionCreateRequest request) => { ctrl.HttpContext = ctx; return await ctrl.CreateSession(request); });
+            group_TerminalController.MapDelete("Sessions/{sessionId}", async ([FromServices] TerminalController ctrl, HttpContext ctx, string sessionId) => { ctrl.HttpContext = ctx; return await ctrl.CloseSession(sessionId); });
         }
     }
 }

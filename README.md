@@ -9,6 +9,7 @@
 | 模块 | 能力 |
 |---|---|
 | 指令 | 保存 Linux 指令为功能；增删改查；分组 / 命名 / 置顶；一键执行（超时可配、输出截断 64KB、并发上限 4） |
+| **交互式终端** | 网页内置完整 PTY 交互式命令行终端（基于 xterm.js 与 WebSocket），支持多标签页、全屏、智能快捷指令、现代双行输入提示符与跨平台（Linux/Windows）原生 Shell 会话 |
 | **Bash 脚本** | 支持多行脚本类型：写临时文件 `bash script.sh $1 $2...` 执行（位置参数、引号感知拆分、不经二次 shell 解释）；Windows 开发机自动探测 Git Bash |
 | 快速执行 | 临时指令不保存直接跑，自动记入调用历史 |
 | 定时任务 | 引用已保存指令/脚本 + Cron（支持 Unix 5 段 / Quartz 6 段，自动归一化）；启停 / 立即运行 / 下次执行时间；常用 Cron 预设 |
@@ -102,7 +103,7 @@ docker run -e Admin__UserName=ops -e Admin__Password=你的密码 ghcr.io/csvkse
 
 ### 方式一：桌面端（推荐，开箱即用）
 
-从 [Releases](https://github.com/csvkse/LWT/releases) 下载对应平台压缩包（当前最新版本 `v0.1.7`）。桌面端包为**Native AOT 自包含单文件发布**，目标机无需安装 .NET 运行时，解压即可运行：
+从 [Releases](https://github.com/csvkse/LWT/releases) 下载对应平台压缩包（当前最新版本 `v0.1.20`）。桌面端包为**Native AOT 自包含单文件发布**，目标机无需安装 .NET 运行时，解压即可运行：
 
 | 平台 | 包 | 运行方式 |
 |---|---|---|

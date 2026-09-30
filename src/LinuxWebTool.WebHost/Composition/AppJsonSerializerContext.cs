@@ -114,6 +114,8 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(LinuxWebTool.WebHost.Routes.SmbMountsController.UnmountRequest))]
 [JsonSerializable(typeof(LinuxWebTool.WebHost.Routes.HealthResponse))]
 [JsonSerializable(typeof(System.Collections.Generic.List<LinuxWebTool.Contracts.Models.PresetImportItem>))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Terminal.TerminalSessionCreateRequest))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Terminal.TerminalSessionCreateResponse))]
 public partial class AppJsonSerializerContext
  : JsonSerializerContext
 {

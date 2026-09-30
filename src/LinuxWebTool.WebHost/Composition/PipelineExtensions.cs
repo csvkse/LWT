@@ -1,3 +1,4 @@
+using LinuxWebTool.WebHost.Endpoints;
 ﻿using LinuxWebTool.WebHost.MinimalApi;
 using LinuxWebTool.Infrastructure.Support;
 using LinuxWebTool.WebHost.Middleware;
@@ -79,10 +80,12 @@ public static class PipelineExtensions
         var swaggerEnabled = app.Configuration.GetValue("Swagger:Enabled", true);
         
 
+        app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseAntiforgery();
         app.MapAutoControllers();
+        app.MapTerminalEndpoints();
 
         // 未匹配的 API 必须返回 JSON 404，不能被 SPA fallback 返回 index.html（否则前端会把 HTML 当业务数据）。
         // 以 /api/{*path} 作为较具体的 fallback endpoint：正常 Controller 路由优先，未知 API 才落到这里。

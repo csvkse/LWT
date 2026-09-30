@@ -76,6 +76,10 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton(shellOptions);
         builder.Services.AddSingleton<IShellExecutor, ShellExecutor>();
 
+        // 终端 PTY 引擎与会话管理
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Terminal.IPtyEngine, LinuxWebTool.Infrastructure.Terminal.CrossPlatformPtyEngine>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Terminal.IPtySessionManager, LinuxWebTool.Infrastructure.Terminal.PtySessionManager>();
+
         // 系统状态采集与历史采样
         var systemStatusOptions = configuration.GetSection(SystemStatusOptions.SectionName).Get<SystemStatusOptions>() ?? new SystemStatusOptions();
         builder.Services.AddSingleton(systemStatusOptions);

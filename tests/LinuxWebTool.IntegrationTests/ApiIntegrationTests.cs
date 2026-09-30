@@ -17,6 +17,9 @@ public sealed class ApiIntegrationTests
     private static readonly string DataDirectory = Path.Combine(Path.GetTempPath(), "linuxwebtool-tests", Guid.NewGuid().ToString("N"));
     private static readonly Lazy<Task<HttpClient>> Client = new(CreateClientAsync);
 
+    private static WebApplication? _app;
+    private static string? _lastToken;
+
     private static async Task<HttpClient> CreateClientAsync()
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -37,6 +40,7 @@ public sealed class ApiIntegrationTests
         var app = builder.Build();
         app.UseApplicationPipeline();
         await app.StartAsync();
+        _app = app;
         return app.GetTestClient();
     }
 
@@ -222,6 +226,37 @@ public sealed class ApiIntegrationTests
         var token = document.RootElement.GetProperty("token").GetString();
         Assert.False(string.IsNullOrWhiteSpace(token));
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        _lastToken = token;
+    }
+
+    [Fact]
+    public async Task Terminal_session_and_websocket_roundtrip()
+    {
+        var client = await Client.Value;
+        await LoginAsync(client);
+
+        var createResponse = await client.PostAsync("/api/Terminal/Sessions", Json("{\"columns\":80,\"rows\":24}"));
+        Assert.Equal(HttpStatusCode.OK, createResponse.StatusCode);
+        using var doc = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var sessionId = (doc.RootElement.TryGetProperty("sessionId", out var s) ? s.GetString() : null)
+            ?? doc.RootElement.GetProperty("SessionId").GetString();
+        Assert.False(string.IsNullOrEmpty(sessionId));
+
+        var testServer = _app!.GetTestServer();
+        var wsClient = testServer.CreateWebSocketClient();
+        var wsUri = new Uri(testServer.BaseAddress, $"/api/terminal/ws/{sessionId}?token={_lastToken}");
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var ws = await wsClient.ConnectAsync(wsUri, cts.Token);
+        Assert.Equal(System.Net.WebSockets.WebSocketState.Open, ws.State);
+
+        var buffer = new byte[1024];
+        var receiveResult = await ws.ReceiveAsync(buffer, cts.Token);
+        Assert.True(receiveResult.Count > 0, "Received bytes from terminal WebSocket");
+
+        if (ws.State == System.Net.WebSockets.WebSocketState.Open)
+        {
+            await ws.CloseOutputAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "test-done", CancellationToken.None);
+        }
     }
 
     private static StringContent Json(string value) => new(value, Encoding.UTF8, "application/json");

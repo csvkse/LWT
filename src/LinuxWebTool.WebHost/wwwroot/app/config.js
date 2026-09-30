@@ -60,6 +60,15 @@ export const API = {
     remove: () => '/Files',
     upload: () => '/Files/Upload',
   },
+  terminal: {
+    sessions: '/Terminal/Sessions',
+    session: (id) => '/Terminal/Sessions/' + encodeURIComponent(id),
+    ws: (id, token) => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const query = token ? '?token=' + encodeURIComponent(token) : '';
+      return protocol + '//' + window.location.host + '/api/terminal/ws/' + encodeURIComponent(id) + query;
+    },
+  },
   transcode: {
     jobs: '/Transcode/Jobs',
     jobCancel: (id) => `/Transcode/Jobs/${id}/Cancel`,

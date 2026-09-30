@@ -73,6 +73,48 @@ public sealed class CoreUnitTests
         }
     }
 
+    [Fact]
+    public async Task Pty_engine_starts_and_reads_session()
+    {
+        var engine = new LinuxWebTool.Infrastructure.Terminal.CrossPlatformPtyEngine();
+        var session = await engine.StartSessionAsync(new LinuxWebTool.Contracts.Terminal.PtyStartOptions());
+        Assert.NotNull(session);
+        Assert.False(session.HasExited);
+
+        var cmdBytes = System.Text.Encoding.UTF8.GetBytes("\r\n");
+        await session.StandardInput.WriteAsync(cmdBytes);
+        await session.StandardInput.FlushAsync();
+
+        var buffer = new byte[4096];
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var initialRead = await session.StandardOutput.ReadAsync(buffer, cts.Token);
+        Assert.True(initialRead > 0);
+
+        await session.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Jwt_validation_roundtrip()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "linuxwebtool-jwt-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var config = new ConfigurationBuilder().Build();
+            var dataPaths = new DataPaths(config, new TestHostEnvironment(tempDir));
+            var issuer = new JwtIssuer(config, dataPaths);
+            var (token, _) = issuer.Issue("admin");
+
+            var handler = new Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler();
+            var result = await handler.ValidateTokenAsync(token, issuer.BuildValidationParameters());
+            Assert.True(result.IsValid, $"Validation failed: {result.Exception?.Message}");
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
     private sealed class TestHostEnvironment(string root) : IHostEnvironment
     {
         public string ApplicationName { get; set; } = "LinuxWebTool.Tests";
