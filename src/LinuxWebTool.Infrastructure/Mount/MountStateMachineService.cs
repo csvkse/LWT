@@ -347,8 +347,34 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
         }
         if (status == SmbMountStatus.Mounted)
         {
+            var startupSmb = job.Trigger == "Startup" && job.Action == "Check" && descriptor.Key.Backend == "smb";
+            var startupIdentity = startupSmb ? SmbMountService.ReadIdentity(descriptor.Path) : null;
+            if (startupSmb)
+                logger.LogInformation("SMB startup existing mount CorrelationId={CorrelationId} MountId={MountId} Identity={Identity}",
+                    job.CorrelationId, descriptor.Key.Id, startupIdentity);
             var verified = await descriptor.Verify(ct);
             ct.ThrowIfCancellationRequested();
+            var fastRecovery = false;
+            if (startupSmb && automatic && verified.Kind == MountFailureKind.Timeout)
+            {
+                logger.LogWarning("SMB startup recheck CorrelationId={CorrelationId} MountId={MountId} Error={Error} DelayMs=1500",
+                    job.CorrelationId, descriptor.Key.Id, verified.Error);
+                await Task.Delay(1500, ct);
+                if (MountProbeProcessGuard.IsBlocked(descriptor.Path))
+                {
+                    Failed(job, new(false, MountFailureKind.Busy, "启动探针尚未退出，暂停快速恢复")); return;
+                }
+                if (startupIdentity is null || SmbMountService.ReadIdentity(descriptor.Path) != startupIdentity)
+                {
+                    Failed(job, new(false, MountFailureKind.Conflict, "启动复检时挂载身份变化，停止快速恢复")); return;
+                }
+                verified = await descriptor.Verify(ct);
+                ct.ThrowIfCancellationRequested();
+                fastRecovery = verified.Kind == MountFailureKind.Timeout;
+                if (fastRecovery)
+                    logger.LogWarning("SMB startup fast recovery CorrelationId={CorrelationId} MountId={MountId} Identity={Identity} Reason=TwoAccessTimeouts",
+                        job.CorrelationId, descriptor.Key.Id, startupIdentity);
+            }
             if (verified.Kind == MountFailureKind.PermissionDenied) { Failed(job, verified); return; }
             if (verified.Success) { Finish(runtime, job, MountHealthState.Healthy, "现有挂载访问验证通过，本轮未重新挂载"); return; }
             int failures;
@@ -357,7 +383,7 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
                 failures = Math.Min(1000, runtime.Snapshot.FailureCount + 1);
                 runtime.Snapshot = runtime.Snapshot with { FailureCount = failures };
             }
-            if (failures < 3 || !automatic)
+            if ((!fastRecovery && failures < 3) || !automatic)
             {
                 Failed(job, verified, MountHealthState.Stale, incrementAttempt: false); return;
             }

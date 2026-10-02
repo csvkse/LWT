@@ -429,7 +429,28 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
             timeoutCts.CancelAfter(ProcessTimeoutMs);
             try
             {
-                await process.WaitForExitAsync(timeoutCts.Token);
+                var exitTask = process.WaitForExitAsync(timeoutCts.Token);
+                if (fileName == "umount")
+                {
+                    while (!exitTask.IsCompleted)
+                    {
+                        await Task.WhenAny(exitTask, Task.Delay(250, timeoutCts.Token));
+                        timeoutCts.Token.ThrowIfCancellationRequested();
+                        if (!exitTask.IsCompleted && ReadIdentity(path) is null)
+                        {
+                            logger.LogInformation("SMB unmount detached early Path={Path} PID={Pid} ElapsedMs={Elapsed}; stopping remaining command before reconciliation",
+                                path, process.Id, elapsed.ElapsedMilliseconds);
+                            try { process.Kill(entireProcessTree: true); } catch { }
+                            // Reconciliation below still requires both no mount and no surviving process.
+                            try { await exitTask.WaitAsync(TimeSpan.FromSeconds(1), cancellationToken); }
+                            catch (TimeoutException) { }
+                            MountProbeProcessGuard.RecordIfAlive(path, process);
+                            cancellationToken.ThrowIfCancellationRequested();
+                            return (-1, string.Empty, "挂载已解除，提前结束卸载命令并核验");
+                        }
+                    }
+                }
+                await exitTask;
             }
             catch (OperationCanceledException)
             {
