@@ -13,6 +13,7 @@ public sealed class DiskStatusCacheService(
     DiskStatusCache cache,
     MountHealthService mountHealth,
     WebDavMountHealthService webDavHealth,
+    RcloneMountHealthService rcloneHealth,
     ILogger<DiskStatusCacheService> logger) : BackgroundService
 {
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(30);
@@ -69,14 +70,15 @@ public sealed class DiskStatusCacheService(
                 continue;
             }
 
-            var health = mountHealth.GetSnapshot(mount.MountPoint) ?? webDavHealth.GetSnapshot(mount.MountPoint);
+            var health = mountHealth.GetSnapshot(mount.MountPoint) ?? webDavHealth.GetSnapshot(mount.MountPoint)
+                ?? rcloneHealth.GetSnapshot(mount.MountPoint);
             if (isManaged && health is { State: not MountHealthState.Healthy })
             {
                 disks.Add(CreateUnavailableDisk(mount, health));
                 continue;
             }
 
-            // rclone 对不支持 about 的 WebDAV 远端可能报告合成容量，不显示为真实磁盘用量。
+            // rclone 对不支持 about 的远端可能报告合成容量，不显示为真实磁盘用量。
             if (isManaged && mount.FileSystem == "fuse.rclone")
             {
                 disks.Add(new DiskStatus
@@ -95,7 +97,7 @@ public sealed class DiskStatusCacheService(
                 : CreateCapacityFailedDisk(mount, health, capacity.Error ?? "磁盘容量探测失败"));
         }
 
-        foreach (var health in mountHealth.GetSnapshots().Concat(webDavHealth.GetSnapshots()))
+        foreach (var health in mountHealth.GetSnapshots().Concat(webDavHealth.GetSnapshots()).Concat(rcloneHealth.GetSnapshots()))
         {
             if (disks.Any(d => MountOperationCoordinator.NormalizePath(d.Mount) == health.LocalPath))
             {
@@ -105,7 +107,8 @@ public sealed class DiskStatusCacheService(
             disks.Add(new DiskStatus
             {
                 Mount = health.LocalPath,
-                FileSystem = webDavHealth.GetSnapshot(health.LocalPath) is not null ? "fuse.rclone" : "cifs",
+                FileSystem = webDavHealth.GetSnapshot(health.LocalPath) is not null
+                    || rcloneHealth.GetSnapshot(health.LocalPath) is not null ? "fuse.rclone" : "cifs",
                 Health = health.State.ToString(),
                 Error = health.LastError,
                 LastCheckedAt = health.LastCheckedAt,

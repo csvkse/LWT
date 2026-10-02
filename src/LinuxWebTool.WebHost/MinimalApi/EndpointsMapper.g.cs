@@ -37,6 +37,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             services.AddScoped<SchedulesController>();
             services.AddScoped<SmbMountsController>();
             services.AddScoped<WebDavMountsController>();
+            services.AddScoped<RcloneMountsController>();
             services.AddScoped<SystemStatusController>();
             services.AddScoped<TranscodeController>();
             services.AddScoped<TerminalController>();
@@ -111,6 +112,15 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_WebDavMountsController.MapDelete("{id:guid}", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Delete(id); });
             group_WebDavMountsController.MapPost("{id:guid}/Mount", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Mount(id); });
             group_WebDavMountsController.MapPost("{id:guid}/Unmount", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, Guid id, [FromBody] WebDavMountsController.WebDavUnmountRequest? request) => { ctrl.HttpContext = ctx; return await ctrl.Unmount(id, request); });
+            var group_RcloneMountsController = app.MapGroup("/api/RcloneMounts");
+            group_RcloneMountsController.RequireAuthorization();
+            group_RcloneMountsController.MapGet("Support", ([FromServices] RcloneMountsController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.Support(); });
+            group_RcloneMountsController.MapGet("", async ([FromServices] RcloneMountsController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.GetAll(); });
+            group_RcloneMountsController.MapPost("", async ([FromServices] RcloneMountsController ctrl, HttpContext ctx, [FromBody] SaveRcloneMountRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Create(request); });
+            group_RcloneMountsController.MapPut("{id:guid}", async ([FromServices] RcloneMountsController ctrl, HttpContext ctx, Guid id, [FromBody] SaveRcloneMountRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Update(id, request); });
+            group_RcloneMountsController.MapDelete("{id:guid}", async ([FromServices] RcloneMountsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Delete(id); });
+            group_RcloneMountsController.MapPost("{id:guid}/Mount", async ([FromServices] RcloneMountsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Mount(id); });
+            group_RcloneMountsController.MapPost("{id:guid}/Unmount", async ([FromServices] RcloneMountsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Unmount(id); });
             var group_SystemStatusController = app.MapGroup("/api/SystemStatus");
             group_SystemStatusController.RequireAuthorization();
             group_SystemStatusController.MapGet("", async ([FromServices] SystemStatusController ctrl, HttpContext ctx, CancellationToken cancellationToken) => { ctrl.HttpContext = ctx; return await ctrl.Get(cancellationToken); });

@@ -18,7 +18,8 @@ public class FilesController(
     DataPaths dataPaths,
     IOperationLogger operationLogger,
     MountHealthService mountHealth,
-    WebDavMountHealthService webDavHealth) : MinimalApi.ControllerBase
+    WebDavMountHealthService webDavHealth,
+    RcloneMountHealthService rcloneHealth) : MinimalApi.ControllerBase
 {
     /// <summary>文本查看 / 编辑上限（2MB），超限提示下载而不是误读大文件。</summary>
     private const long MaxTextBytes = 2 * 1024 * 1024;
@@ -34,6 +35,7 @@ public class FilesController(
         {
             mountHealth.RequestImmediateCheck(normalized);
             webDavHealth.RequestImmediateCheck(normalized);
+            rcloneHealth.RequestImmediateCheck(normalized);
             return NotFound(new MessageResponse($"路径不存在或不是目录：{normalized}"));
         }
 
@@ -46,12 +48,14 @@ public class FilesController(
         {
             mountHealth.RequestImmediateCheck(normalized);
             webDavHealth.RequestImmediateCheck(normalized);
+            rcloneHealth.RequestImmediateCheck(normalized);
             return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse($"无权限读取该目录：{normalized}"));
         }
         catch (IOException ex)
         {
             mountHealth.RequestImmediateCheck(normalized);
             webDavHealth.RequestImmediateCheck(normalized);
+            rcloneHealth.RequestImmediateCheck(normalized);
             return StatusCode(StatusCodes.Status500InternalServerError, new MessageResponse($"读取目录失败：{ex.Message}"));
         }
 

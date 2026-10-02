@@ -46,6 +46,13 @@ public record WebDavMountItemResponse(
     bool AutoMount, bool Enabled, string? Description, bool HasPassword,
     int Status, string StatusText, DateTime CreateTime, DateTime UpdateTime,
     MountHealthSnapshot? Health = null);
+public record RcloneMountItemResponse(
+    Guid Id, string Name, string Kind, string LocalPath, string RemotePath,
+    string? Host, int Port, string? Username, string? KeyFile, string? HostKey,
+    string? Endpoint, string? Bucket, string? Region, string? AccessKeyId,
+    bool HasPassword, bool HasSecretAccessKey, bool AutoMount, bool Enabled,
+    string? Description, int Status, string StatusText, DateTime CreateTime,
+    DateTime UpdateTime, MountHealthSnapshot? Health = null);
 
 public sealed record HealthResponse(
     string Status,

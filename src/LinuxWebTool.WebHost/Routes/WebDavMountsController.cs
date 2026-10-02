@@ -14,6 +14,7 @@ namespace LinuxWebTool.WebHost.Routes;
 public class WebDavMountsController(
     WebDavMountStore store,
     SmbMountStore smbStore,
+    RcloneMountStore rcloneStore,
     WebDavMountService operations,
     WebDavMountHealthService health,
     MountOperationCoordinator coordinator,
@@ -160,7 +161,8 @@ public class WebDavMountsController(
     public sealed record WebDavUnmountRequest(bool Lazy);
 
     private async Task<bool> PathInUseAsync(string path, Guid? excludeId) =>
-        await store.ExistsLocalPathAsync(path, excludeId) || await smbStore.ExistsLocalPathAsync(path, null);
+        await store.ExistsLocalPathAsync(path, excludeId) || await smbStore.ExistsLocalPathAsync(path, null)
+        || await rcloneStore.ExistsLocalPathAsync(path, null);
 
     private bool IsProtected(string path)
     {

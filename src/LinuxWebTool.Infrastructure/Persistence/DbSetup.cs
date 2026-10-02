@@ -127,6 +127,29 @@ CREATE TABLE IF NOT EXISTS webdav_mount (
   CreateTime TEXT,
   UpdateTime TEXT
 );
+CREATE TABLE IF NOT EXISTS rclone_mount (
+  Id TEXT PRIMARY KEY,
+  Name TEXT,
+  Kind TEXT,
+  LocalPath TEXT,
+  RemotePath TEXT,
+  Host TEXT,
+  Port INTEGER,
+  Username TEXT,
+  Password TEXT,
+  KeyFile TEXT,
+  HostKey TEXT,
+  Endpoint TEXT,
+  Bucket TEXT,
+  Region TEXT,
+  AccessKeyId TEXT,
+  SecretAccessKey TEXT,
+  AutoMount INTEGER,
+  Enabled INTEGER,
+  Description TEXT,
+  CreateTime TEXT,
+  UpdateTime TEXT
+);
 CREATE TABLE IF NOT EXISTS system_status_disk_snapshot (
   Id TEXT PRIMARY KEY,
   Time TEXT,

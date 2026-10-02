@@ -12,6 +12,7 @@ namespace LinuxWebTool.WebHost.Routes;
 public class SmbMountsController(
     SmbMountStore mountStore,
     WebDavMountStore webDavStore,
+    RcloneMountStore rcloneStore,
     SmbMountService mountService,
     MountHealthService mountHealth,
     MountOperationCoordinator coordinator,
@@ -58,6 +59,8 @@ public class SmbMountsController(
         }
         if (await webDavStore.ExistsLocalPathAsync(localPath, null))
             return BadRequest(new MessageResponse("本地挂载点已被 WebDAV 配置使用"));
+        if (await rcloneStore.ExistsLocalPathAsync(localPath, null))
+            return BadRequest(new MessageResponse("本地挂载点已被 SFTP/S3 配置使用"));
 
         var mount = new SmbMount
         {
@@ -103,6 +106,8 @@ public class SmbMountsController(
         }
         if (await webDavStore.ExistsLocalPathAsync(localPath, null))
             return BadRequest(new MessageResponse("本地挂载点已被 WebDAV 配置使用"));
+        if (await rcloneStore.ExistsLocalPathAsync(localPath, null))
+            return BadRequest(new MessageResponse("本地挂载点已被 SFTP/S3 配置使用"));
 
         var oldPath = mount.LocalPath;
         mount.Name = request.Name.Trim();

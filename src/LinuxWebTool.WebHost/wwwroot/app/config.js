@@ -59,6 +59,13 @@ export const API = {
     mount: (id) => `/WebDavMounts/${id}/Mount`,
     unmount: (id) => `/WebDavMounts/${id}/Unmount`,
   },
+  rcloneMounts: {
+    list: '/RcloneMounts',
+    support: '/RcloneMounts/Support',
+    item: (id) => `/RcloneMounts/${id}`,
+    mount: (id) => `/RcloneMounts/${id}/Mount`,
+    unmount: (id) => `/RcloneMounts/${id}/Unmount`,
+  },
   files: {
     list: '/Files',
     content: '/Files/Content',
