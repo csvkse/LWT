@@ -23,4 +23,11 @@ public sealed record MountHealthSnapshot
     public string? LastError { get; init; }
     public int FailureCount { get; init; }
     public int RecoveryAttemptCount { get; init; }
+    public MountExecutionPhase ExecutionPhase { get; init; }
+    public MountManagementMode ManagementMode { get; init; }
+    public MountFailureKind FailureKind { get; init; }
+    public string? Trigger { get; init; }
+    public DateTime? NextCheckAt { get; init; }
+    public Guid? TaskId { get; init; }
+    public string? Backend { get; init; }
 }

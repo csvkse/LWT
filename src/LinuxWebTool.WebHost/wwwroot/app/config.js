@@ -66,6 +66,7 @@ export const API = {
     mount: (id) => `/RcloneMounts/${id}/Mount`,
     unmount: (id) => `/RcloneMounts/${id}/Unmount`,
   },
+  mountTasks: { item: (id) => `/MountTasks/${id}` },
   files: {
     list: '/Files',
     content: '/Files/Content',

@@ -38,6 +38,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             services.AddScoped<SmbMountsController>();
             services.AddScoped<WebDavMountsController>();
             services.AddScoped<RcloneMountsController>();
+            services.AddScoped<MountTasksController>();
             services.AddScoped<SystemStatusController>();
             services.AddScoped<TranscodeController>();
             services.AddScoped<TerminalController>();
@@ -112,6 +113,8 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_WebDavMountsController.MapDelete("{id:guid}", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Delete(id); });
             group_WebDavMountsController.MapPost("{id:guid}/Mount", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Mount(id); });
             group_WebDavMountsController.MapPost("{id:guid}/Unmount", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, Guid id, [FromBody] WebDavMountsController.WebDavUnmountRequest? request) => { ctrl.HttpContext = ctx; return await ctrl.Unmount(id, request); });
+            var group_MountTasksController = app.MapGroup("/api/MountTasks").RequireAuthorization();
+            group_MountTasksController.MapGet("{id:guid}", ([FromServices] MountTasksController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return ctrl.Get(id); });
             var group_RcloneMountsController = app.MapGroup("/api/RcloneMounts");
             group_RcloneMountsController.RequireAuthorization();
             group_RcloneMountsController.MapGet("Support", ([FromServices] RcloneMountsController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.Support(); });

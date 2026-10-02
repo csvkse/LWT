@@ -11,9 +11,7 @@ namespace LinuxWebTool.Infrastructure.SystemInfo;
 /// </summary>
 public sealed class DiskStatusCacheService(
     DiskStatusCache cache,
-    MountHealthService mountHealth,
-    WebDavMountHealthService webDavHealth,
-    RcloneMountHealthService rcloneHealth,
+    MountStateMachineService mountHealth,
     ILogger<DiskStatusCacheService> logger) : BackgroundService
 {
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(30);
@@ -70,8 +68,7 @@ public sealed class DiskStatusCacheService(
                 continue;
             }
 
-            var health = mountHealth.GetSnapshot(mount.MountPoint) ?? webDavHealth.GetSnapshot(mount.MountPoint)
-                ?? rcloneHealth.GetSnapshot(mount.MountPoint);
+            var health = mountHealth.GetSnapshot(mount.MountPoint);
             if (isManaged && health is { State: not MountHealthState.Healthy })
             {
                 disks.Add(CreateUnavailableDisk(mount, health));
@@ -97,7 +94,7 @@ public sealed class DiskStatusCacheService(
                 : CreateCapacityFailedDisk(mount, health, capacity.Error ?? "磁盘容量探测失败"));
         }
 
-        foreach (var health in mountHealth.GetSnapshots().Concat(webDavHealth.GetSnapshots()).Concat(rcloneHealth.GetSnapshots()))
+        foreach (var health in mountHealth.GetSnapshots())
         {
             if (disks.Any(d => MountOperationCoordinator.NormalizePath(d.Mount) == health.LocalPath))
             {
@@ -107,8 +104,7 @@ public sealed class DiskStatusCacheService(
             disks.Add(new DiskStatus
             {
                 Mount = health.LocalPath,
-                FileSystem = webDavHealth.GetSnapshot(health.LocalPath) is not null
-                    || rcloneHealth.GetSnapshot(health.LocalPath) is not null ? "fuse.rclone" : "cifs",
+                FileSystem = health.Backend is "webdav" or "rclone" ? "fuse.rclone" : "cifs",
                 Health = health.State.ToString(),
                 Error = health.LastError,
                 LastCheckedAt = health.LastCheckedAt,

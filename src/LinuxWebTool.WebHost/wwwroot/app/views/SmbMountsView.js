@@ -14,7 +14,7 @@ const STATUS_META = {
 };
 
 const HEALTH_META = {
-  Unknown: { label: '检测中', class: 'border-slate-600/60 text-slate-400', dot: 'bg-slate-500' },
+  Unknown: { label: '未检测', class: 'border-slate-600/60 text-slate-400', dot: 'bg-slate-500' },
   Healthy: { label: '可访问', class: 'border-emerald-500/50 text-emerald-300', dot: 'bg-emerald-400' },
   NotMounted: { label: '未挂载', class: 'border-slate-600/60 text-slate-400', dot: 'bg-slate-500' },
   ServerUnreachable: { label: '服务器不可达', class: 'border-amber-500/50 text-amber-300', dot: 'bg-amber-400' },
@@ -28,6 +28,10 @@ const HEALTH_ENUM = [
   'Unknown', 'Healthy', 'NotMounted', 'ServerUnreachable',
   'Stale', 'Recovering', 'RecoveryFailed', 'Unsupported',
 ];
+const PHASES = ['空闲', '排队中', '探测中', '挂载中', '验证中', '卸载中', '等待重试', '等待处理'];
+const MODES = ['已禁用', '仅监测', '自动维护', '手动暂停'];
+const FAILURE_NAMES = ['None', 'Unreachable', 'AuthenticationFailed', 'Conflict', 'Busy', 'Timeout', 'Unsupported', 'Failed', 'Cancelled'];
+const FAILURE_LABELS = { Unreachable: '远端不可达', AuthenticationFailed: '认证或权限失败', Conflict: '挂载身份冲突', Busy: '资源占用', Timeout: '探测超时', Unsupported: '依赖不可用', Failed: '操作失败', Cancelled: '任务取消' };
 
 const emptyForm = () => ({
   kind: 'smb', name: '', server: '', url: '', localPath: '', username: '', password: '', domain: '', options: 'vers=3.0,uid=1001,gid=1001',
@@ -46,6 +50,8 @@ export default defineComponent({
     const webDavUnsupported = ref(false);
     const rcloneUnsupported = ref(false);
     const loadError = ref('');
+    let disposed = false;
+    const pendingTasks = new Map();
 
     const showEditor = ref(false);
     const editingId = ref(null);
@@ -53,6 +59,7 @@ export default defineComponent({
     const form = reactive(emptyForm());
 
     async function load() {
+      if (loading.value || disposed) return;
       loading.value = true;
       loadError.value = '';
       try {
@@ -105,6 +112,45 @@ export default defineComponent({
       editingId.value = null;
       Object.assign(form, emptyForm());
       showEditor.value = true;
+    }
+    function phaseText(health) {
+      return typeof health?.executionPhase === 'number' ? PHASES[health.executionPhase]
+        : ({ Idle: '空闲', Queued: '排队中', Probing: '探测中', Mounting: '挂载中', Verifying: '验证中', Unmounting: '卸载中', WaitingRetry: '等待重试', WaitingAction: '等待处理' }[health?.executionPhase] || '');
+    }
+    function modeText(health) {
+      return typeof health?.managementMode === 'number' ? MODES[health.managementMode]
+        : ({ Disabled: '已禁用', MonitorOnly: '仅监测', Automatic: '自动维护', ManualPaused: '手动暂停' }[health?.managementMode] || '');
+    }
+    function failureText(health) {
+      const name = typeof health?.failureKind === 'number' ? FAILURE_NAMES[health.failureKind] : health?.failureKind;
+      return FAILURE_LABELS[name] || '';
+    }
+    function trackTask(result, mount) {
+      if (!result.ok) return;
+      if (result.data?.taskId) {
+        pendingTasks.set(result.data.taskId, mount.name);
+        toast.info('操作已排队，可查看挂载状态与执行进度');
+        pollTasks();
+      } else toast.success(result.data?.message || '操作完成');
+    }
+    let pollingTasks = false;
+    async function pollTasks() {
+      if (disposed || pollingTasks) return;
+      pollingTasks = true;
+      try {
+        if (pendingTasks.size) await load();
+        for (const [taskId, name] of pendingTasks) {
+          const result = await http(API.mountTasks.item(taskId), { method: 'GET' });
+          if (!result.ok) { pendingTasks.delete(taskId); continue; }
+          if (result.data?.completed) {
+            pendingTasks.delete(taskId);
+            const message = `${name}：${result.data.message || '操作完成'}`;
+            if (result.data.success) toast.success(message);
+            else toast.error(message);
+            await load();
+          }
+        }
+      } finally { pollingTasks = false; }
     }
 
     function openEdit(mount) {
@@ -186,7 +232,7 @@ export default defineComponent({
           const endpoint = mount.kind === 'smb' ? API.smbMounts : mount.kind === 'webdav' ? API.webDavMounts : API.rcloneMounts;
           const result = await http(endpoint.item(mount.id), { method: 'DELETE' });
           if (result.ok) {
-            toast.success('配置已删除');
+            trackTask(result, mount);
             await load();
           }
         },
@@ -198,7 +244,7 @@ export default defineComponent({
       try {
         const endpoint = mount.kind === 'smb' ? API.smbMounts : mount.kind === 'webdav' ? API.webDavMounts : API.rcloneMounts;
         const result = await http(endpoint.mount(mount.id), { method: 'POST' });
-        if (result.ok) toast.success(result.data.message || '挂载成功');
+        trackTask(result, mount);
         await load();
       } finally {
         actingId.value = null;
@@ -222,7 +268,7 @@ export default defineComponent({
             method: 'POST',
             ...(mount.kind === 'smb' || mount.kind === 'webdav' ? { body: { lazy: mount.kind === 'smb' } } : {}),
           });
-          if (result.ok) toast.success(result.data.message || '已卸载');
+          trackTask(result, mount);
           await load();
         },
       });
@@ -230,17 +276,21 @@ export default defineComponent({
 
     // 挂载状态会随外部变化，打开页面期间每 10 秒刷新一次
     let timer = null;
+    let taskTimer = null;
     onMounted(() => {
       load();
       timer = setInterval(load, 10000);
+      taskTimer = setInterval(pollTasks, 2000);
     });
     onUnmounted(() => {
+      disposed = true;
       if (timer) clearInterval(timer);
+      if (taskTimer) clearInterval(taskTimer);
     });
 
     return {
       items, loading, actingId, unsupported, webDavUnsupported, rcloneUnsupported, loadError, showEditor, editingId, saving, form,
-      load, openCreate, openEdit, save, remove, mountNow, browse, unmount, statusMeta, healthMeta, formatTime,
+      load, openCreate, openEdit, save, remove, mountNow, browse, unmount, statusMeta, healthMeta, phaseText, modeText, failureText, formatTime,
     };
   },
   template: `
@@ -284,6 +334,10 @@ export default defineComponent({
                   <div v-if="mount.health?.lastError" class="mt-1 max-w-[12rem] truncate text-rose-300/80 text-[11px]" :title="mount.health.lastError">
                     {{ mount.health.lastError }}
                   </div>
+                  <div v-if="mount.health" class="mt-1 text-slate-400 text-[11px]">{{ modeText(mount.health) }} · {{ phaseText(mount.health) }}</div>
+                  <div v-if="failureText(mount.health)" class="text-rose-300 text-[11px]">{{ failureText(mount.health) }}</div>
+                  <div v-if="mount.health?.nextAttemptAt" class="text-amber-300 text-[11px]">下次尝试 {{ formatTime(mount.health.nextAttemptAt) }}</div>
+                  <div v-if="mount.health?.lastCheckedAt" class="text-slate-500 text-[11px]">检测 {{ formatTime(mount.health.lastCheckedAt) }}</div>
                 </div>
               </td>
               <td class="text-slate-400 text-xs">{{ mount.kind.toUpperCase() }}</td>
@@ -400,7 +454,7 @@ export default defineComponent({
                 <input type="checkbox" v-model="form.enabled" class="accent-cyan-400" /> 启用配置
               </label>
               <label class="flex items-center gap-2 text-sm text-slate-400">
-                <input type="checkbox" v-model="form.autoMount" class="accent-cyan-400" /> 应用启动时自动挂载
+                <input type="checkbox" v-model="form.autoMount" class="accent-cyan-400" /> 自动挂载与故障恢复
               </label>
             </div>
             <label class="block">

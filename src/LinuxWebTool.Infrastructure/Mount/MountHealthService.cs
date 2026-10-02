@@ -1,9 +1,7 @@
 using System.Collections.Concurrent;
-using System.Threading.Channels;
 using LinuxWebTool.Contracts.Models;
 using LinuxWebTool.Infrastructure.Persistence;
 using LinuxWebTool.Infrastructure.Persistence.Entities;
-using LinuxWebTool.Infrastructure.SystemInfo;
 
 namespace LinuxWebTool.Infrastructure.Mount;
 
@@ -27,8 +25,8 @@ public interface IMountRuntimeProbe
 }
 
 /// <summary>
-/// 运行期挂载健康监控。先探测、后恢复；服务器不可达绝不卸载，
-/// 文件系统连续三次不可访问才懒卸载并重挂。所有操作与启动重挂共享挂载点锁。
+/// Legacy explicit checker retained for existing contract tests. Not registered by the application.
+/// All application startup, periodic and manual operations use MountStateMachineService.
 /// </summary>
 public sealed class MountHealthService(
     SmbMountStore? store,
@@ -36,23 +34,9 @@ public sealed class MountHealthService(
     IMountRuntimeProbe runtimeProbe,
     MountOperationCoordinator coordinator,
     IOperationLogger operationLogger,
-    ILogger<MountHealthService> logger) : BackgroundService
+    ILogger<MountHealthService> logger)
 {
-    private static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(30);
-
     private readonly ConcurrentDictionary<string, MountHealthSnapshot> _snapshots = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, byte> _pendingChecks = new(StringComparer.Ordinal);
-    private readonly Channel<string> _checkRequests = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
-
-    public void RequestImmediateCheck(string localPath)
-    {
-        var path = MountOperationCoordinator.NormalizePath(localPath);
-        if (!SystemStatusProvider.ManagedMountPoints.ContainsKey(path)) return;
-        if (_pendingChecks.TryAdd(path, 0) && !_checkRequests.Writer.TryWrite(path))
-        {
-            _pendingChecks.TryRemove(path, out _);
-        }
-    }
 
     public MountHealthSnapshot? GetSnapshot(string localPath) =>
         _snapshots.TryGetValue(MountOperationCoordinator.NormalizePath(localPath), out var snapshot) ? snapshot : null;
@@ -65,74 +49,9 @@ public sealed class MountHealthService(
     public void RemoveSnapshot(string localPath) =>
         _snapshots.TryRemove(MountOperationCoordinator.NormalizePath(localPath), out _);
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        try
-        {
-            await coordinator.WaitStartupReadyAsync(stoppingToken);
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-
-        _ = ProcessRequestsAsync(stoppingToken);
-        using var timer = new PeriodicTimer(ProbeInterval);
-        do
-        {
-            try
-            {
-                await RefreshAllAsync(stoppingToken);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "挂载健康巡检失败");
-            }
-        }
-        while (await timer.WaitForNextTickAsync(stoppingToken));
-    }
-
-    private async Task ProcessRequestsAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await foreach (var path in _checkRequests.Reader.ReadAllAsync(cancellationToken))
-            {
-                try
-                {
-                    if (store is null) continue;
-                    var mount = (await store.GetAllAsync()).FirstOrDefault(m =>
-                        m.Enabled && MountOperationCoordinator.NormalizePath(m.LocalPath) == path);
-                    if (mount is not null) await CheckMountAsync(mount, cancellationToken);
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
-                catch (Exception ex) { logger.LogWarning(ex, "SMB 挂载即时复查失败：{LocalPath}", path); }
-                finally { _pendingChecks.TryRemove(path, out _); }
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-    }
-
-    private async Task RefreshAllAsync(CancellationToken cancellationToken)
-    {
-        if (store is null)
-        {
-            return;
-        }
-
-        var mounts = (await store.GetAllAsync()).Where(m => m.Enabled).ToArray();
-        foreach (var mount in mounts)
-        {
-            await CheckMountAsync(mount, cancellationToken);
-        }
-    }
-
     public async Task<MountHealthSnapshot> CheckMountAsync(SmbMount mount, CancellationToken cancellationToken = default)
     {
+        if (store is not null) throw new InvalidOperationException("Use MountStateMachineService for managed mounts");
         var localPath = MountOperationCoordinator.NormalizePath(mount.LocalPath);
         var snapshot = await coordinator.RunWithMountLockAsync(localPath, () => CheckLockedAsync(mount, cancellationToken), cancellationToken);
         _snapshots[localPath] = snapshot;

@@ -73,7 +73,6 @@ const LINUX_COMMANDS = [
   { label: '内存 (free -h)', cmd: 'free -h\n' },
   { label: '容器 (docker ps)', cmd: 'docker ps\n' },
   { label: '网络 (ip a)', cmd: 'ip a\n' },
-  { label: '清理屏幕', cmd: 'clear\n' },
 ];
 
 const WINDOWS_COMMANDS = [
@@ -82,7 +81,6 @@ const WINDOWS_COMMANDS = [
   { label: '驱动磁盘 (Get-PSDrive)', cmd: 'Get-PSDrive -PSProvider FileSystem\r' },
   { label: '网络配置 (ipconfig)', cmd: 'ipconfig\r' },
   { label: '环境变量 (env:)', cmd: 'Get-ChildItem env:\r' },
-  { label: '清理屏幕 (cls)', cmd: 'cls\r' },
 ];
 
 export default defineComponent({
@@ -106,6 +104,8 @@ export default defineComponent({
     const listError = ref('');
     const capabilities = ref(null);
     const supportBusy = ref(false);
+    const supportCheckedAt = ref('');
+    const supportError = ref('');
     const sessionBusy = ref(false);
     const renameDrafts = ref({});
     let disposed = false;
@@ -131,15 +131,27 @@ export default defineComponent({
 
     function rememberTabs() { saveTerminalTabs(tabs.value); }
 
-    async function refreshSupport() {
+    async function refreshSupport(notify = false) {
       if (supportBusy.value || disposed) return;
       supportBusy.value = true;
+      supportError.value = '';
       try {
         const support = await http(API.terminal.support, { method: 'GET' });
         if (support.ok) {
           capabilities.value = support.data;
           activeCommandSet.value = support.data.platform === 'Windows' ? 'windows' : 'linux';
+          supportCheckedAt.value = new Date().toLocaleTimeString();
+          if (notify) {
+            const message = `环境检测完成：${support.data.platform} · ${support.data.nativePty ? '支持原生 PTY' : '未检测到原生 PTY，当前使用管道模式'}`;
+            if (support.data.nativePty) toast.success(message);
+            else toast.info(message);
+          }
+        } else {
+          supportError.value = support.message || '环境检测失败，请重试';
         }
+      } catch {
+        supportError.value = '环境检测失败，请重试';
+        if (notify) toast.error(supportError.value);
       } finally { supportBusy.value = false; }
     }
 
@@ -632,7 +644,7 @@ export default defineComponent({
       toggleCommandSet,
       backgroundSessions, showBackground, listBusy, listError, refreshSessions,
       attachBackground, endSession, retainSession, stateText,
-      capabilities, supportBusy, refreshSupport, openCurrentDirectory, renameSession,
+      capabilities, supportBusy, supportCheckedAt, supportError, refreshSupport, openCurrentDirectory, renameSession,
       sessionBusy, renameDrafts,
     };
   },
@@ -714,16 +726,19 @@ export default defineComponent({
           <span v-if="session.state === 'Exited'">退出码 {{ session.exitCode ?? '未知' }}</span>
           <span v-if="session.bufferTruncated" class="text-amber-300">历史输出已截断</span>
           <button class="btn btn-xs" :disabled="session.state === 'Exited'" @click="attachBackground(session)">重新连接</button>
-          <button class="btn btn-xs" :disabled="sessionBusy || session.state === 'Exited'" @click="retainSession(session)">{{ session.keepAlive ? '取消保留' : '保留' }}</button>
+          <span v-if="session.hasUserInput && session.state !== 'Exited'" class="text-slate-400">自动保留</span>
+          <button v-else-if="!session.hasUserInput" class="btn btn-xs" :disabled="sessionBusy || session.state === 'Exited'" @click="retainSession(session)">{{ session.keepAlive ? '取消保留' : '保留空会话' }}</button>
           <button class="btn btn-xs btn-danger" @click="endSession(session.sessionId)">结束</button>
         </div>
       </div>
 
-      <div v-if="capabilities" class="panel p-3 text-xs space-y-2">
-        <div class="flex flex-wrap items-center gap-2"><span>终端环境 · {{ capabilities.platform }} · {{ capabilities.nativePty ? '完整交互' : '交互受限' }}</span>
-          <button class="btn btn-xs" :disabled="supportBusy" @click="refreshSupport()">检测环境</button>
+      <div class="panel p-3 text-xs space-y-2">
+        <div class="flex flex-wrap items-center gap-2"><span>终端环境<span v-if="capabilities"> · {{ capabilities.platform }} · {{ capabilities.nativePty ? '支持原生 PTY' : '管道模式' }}</span></span>
+          <button class="btn btn-xs" :disabled="supportBusy" @click="refreshSupport(true)">{{ supportBusy ? '检测中…' : '检测环境' }}</button>
+          <span v-if="supportCheckedAt" class="text-slate-400">上次成功检测 {{ supportCheckedAt }}</span>
         </div>
-        <p class="text-slate-400">{{ capabilities.message }}</p>
+        <p v-if="supportError" role="alert" class="text-red-400">{{ supportError }}</p>
+        <p v-if="capabilities" class="text-slate-400">{{ capabilities.message }}</p>
       </div>
 
       <!-- 快捷常用指令按钮栏（根据宿主环境可切换 Windows/Linux 指令） -->
@@ -745,6 +760,12 @@ export default defineComponent({
         >
           {{ item.label }}
         </button>
+        <button
+          type="button"
+          class="px-2 py-0.5 rounded bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 text-slate-300 font-mono text-[11px] transition-colors cursor-pointer"
+          title="清除当前显示和滚动历史，保留当前光标所在行"
+          @click="clearOutput()"
+        >清理屏幕</button>
       </div>
 
       <!-- 终端主显示区域 -->

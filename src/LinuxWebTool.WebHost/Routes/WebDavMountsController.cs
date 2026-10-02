@@ -16,7 +16,8 @@ public class WebDavMountsController(
     SmbMountStore smbStore,
     RcloneMountStore rcloneStore,
     WebDavMountService operations,
-    WebDavMountHealthService health,
+    MountStateMachineService health,
+    MountBackendCatalog catalog,
     MountOperationCoordinator coordinator,
     DataPaths dataPaths,
     IOperationLogger operationLogger) : MinimalApi.ControllerBase
@@ -31,7 +32,7 @@ public class WebDavMountsController(
         var mounts = await store.GetAllAsync();
         return Ok(mounts.Select(m =>
         {
-            var status = operations.GetStatus(m);
+            var status = health.GetCachedStatus("webdav", m.Id);
             return new WebDavMountItemResponse(m.Id, m.Name, m.Url, m.LocalPath, m.Username,
                 m.AutoMount, m.Enabled, m.Description, !string.IsNullOrEmpty(m.Password),
                 (int)status, StatusText(status), m.CreateTime, m.UpdateTime, health.GetSnapshot(m.LocalPath));
@@ -62,6 +63,8 @@ public class WebDavMountsController(
     [HttpPut("{id:guid}")]
     public async Task<IResult> Update(Guid id, [FromBody] SaveWebDavMountRequest request)
     {
+        return await coordinator.RunWithConfigurationLockAsync("webdav", id, async () =>
+        {
         var mount = await store.GetByIdAsync(id);
         if (mount is null) return NotFound(new MessageResponse("挂载配置不存在"));
         var validation = Validate(request);
@@ -69,7 +72,9 @@ public class WebDavMountsController(
         if (IsProtected(validation.Path)) return BadRequest(new MessageResponse("程序数据目录及其父目录不能作为挂载点"));
         if (await store.ExistsNameAsync(request.Name.Trim(), id)) return BadRequest(new MessageResponse("挂载名称已存在"));
         if (await PathInUseAsync(validation.Path, id)) return BadRequest(new MessageResponse("本地挂载点已被其他配置使用"));
-        if (operations.GetStatus(mount) == SmbMountStatus.Mounted)
+        var connectionChanged = mount.LocalPath != validation.Path || mount.Url != validation.Url
+            || mount.Username != request.Username?.Trim() || !string.IsNullOrEmpty(request.Password) && mount.Password != request.Password;
+        if (connectionChanged && operations.GetStatus(mount) == SmbMountStatus.Mounted)
             return BadRequest(new MessageResponse("请先卸载，再修改 WebDAV 配置"));
 
         var oldPath = mount.LocalPath;
@@ -85,77 +90,32 @@ public class WebDavMountsController(
         if (oldPath != mount.LocalPath || !mount.Enabled)
             SystemStatusProvider.ManagedMountPoints.TryRemove(oldPath, out _);
         if (mount.Enabled) SystemStatusProvider.ManagedMountPoints[mount.LocalPath] = 0;
-        health.RemoveSnapshot(oldPath);
-        health.ResumeAutoMount(oldPath);
-        health.ResumeAutoMount(mount.LocalPath);
+        if (await catalog.LoadAsync(new("webdav", id)) is { } descriptor) health.ConfigurationChanged(descriptor);
         await operationLogger.LogAsync("修改挂载配置", "WebDAV挂载", mount.Name,
             $"{mount.Url} → {mount.LocalPath}", clientIp: HttpContext.GetClientIp());
         return Ok(new IdResponse(id));
+        });
     }
 
     [HttpDelete("{id:guid}")]
     public async Task<IResult> Delete(Guid id)
     {
-        var mount = await store.GetByIdAsync(id);
-        if (mount is null) return NotFound(new MessageResponse("挂载配置不存在"));
-        return await coordinator.RunWithMountLockAsync(mount.LocalPath, async () =>
-        {
-            if (operations.GetStatus(mount) == SmbMountStatus.Mounted)
-            {
-                var unmounted = await operations.UnmountAsync(mount, lazy: false);
-                if (!unmounted.Success)
-                {
-                    await operationLogger.LogAsync("删除挂载配置", "WebDAV挂载", mount.Name,
-                        $"{mount.Url} → {mount.LocalPath}；卸载失败：{unmounted.Message}", false,
-                        clientIp: HttpContext.GetClientIp());
-                    return BadRequest(new MessageResponse(unmounted.Message));
-                }
-            }
-            operations.DeleteConfig(id);
-            await store.DeleteAsync(id);
-            SystemStatusProvider.ManagedMountPoints.TryRemove(mount.LocalPath, out _);
-            health.RemoveSnapshot(mount.LocalPath);
-            health.ResumeAutoMount(mount.LocalPath);
-            await operationLogger.LogAsync("删除挂载配置", "WebDAV挂载", mount.Name,
-                $"{mount.Url} → {mount.LocalPath}", clientIp: HttpContext.GetClientIp());
-            return Ok(new MessageResponse("已删除；待上传缓存未清理"));
-        });
+        var task = await health.SubmitAsync("webdav", id, "Delete", lazy: false, clientIp: HttpContext.GetClientIp());
+        return task is null ? NotFound(new MessageResponse("挂载配置不存在")) : StatusCode(202, task);
     }
 
     [HttpPost("{id:guid}/Mount")]
     public async Task<IResult> Mount(Guid id)
     {
-        var mount = await store.GetByIdAsync(id);
-        if (mount is null) return NotFound(new MessageResponse("挂载配置不存在"));
-        health.ResumeAutoMount(mount.LocalPath);
-        var result = await coordinator.RunWithMountLockAsync(mount.LocalPath, () => operations.MountAsync(mount));
-        if (result.Success)
-        {
-            health.RemoveSnapshot(mount.LocalPath);
-            var snapshot = await health.CheckMountAsync(mount);
-            if (snapshot.State != MountHealthState.Healthy)
-                result = (false, snapshot.LastError ?? "挂载后健康检查失败");
-        }
-        await operationLogger.LogAsync("挂载", "WebDAV挂载", mount.Name,
-            $"{mount.Url} → {mount.LocalPath}；{result.Message}", result.Success, clientIp: HttpContext.GetClientIp());
-        return result.Success ? Ok(new MessageResponse(result.Message)) : BadRequest(new MessageResponse(result.Message));
+        var task = await health.SubmitAsync("webdav", id, "Mount", clientIp: HttpContext.GetClientIp());
+        return task is null ? NotFound(new MessageResponse("挂载配置不存在")) : StatusCode(202, task);
     }
 
     [HttpPost("{id:guid}/Unmount")]
     public async Task<IResult> Unmount(Guid id, [FromBody] WebDavUnmountRequest? request)
     {
-        var mount = await store.GetByIdAsync(id);
-        if (mount is null) return NotFound(new MessageResponse("挂载配置不存在"));
-        var result = await coordinator.RunWithMountLockAsync(mount.LocalPath,
-            () => operations.UnmountAsync(mount, request?.Lazy == true));
-        if (result.Success)
-        {
-            health.SuppressAutoMount(mount.LocalPath);
-            health.RemoveSnapshot(mount.LocalPath);
-        }
-        await operationLogger.LogAsync("卸载", "WebDAV挂载", mount.Name,
-            $"{mount.Url} → {mount.LocalPath}；{result.Message}", result.Success, clientIp: HttpContext.GetClientIp());
-        return result.Success ? Ok(new MessageResponse(result.Message)) : BadRequest(new MessageResponse(result.Message));
+        var task = await health.SubmitAsync("webdav", id, "Unmount", clientIp: HttpContext.GetClientIp());
+        return task is null ? NotFound(new MessageResponse("挂载配置不存在")) : StatusCode(202, task);
     }
 
     public sealed record WebDavUnmountRequest(bool Lazy);

@@ -33,6 +33,7 @@ public sealed class WebDavMountProbe
                 return new(false, true, true, $"WebDAV 认证或权限失败（HTTP {(int)response.StatusCode}）");
             return new(false, false, false, $"WebDAV PROPFIND 返回 HTTP {(int)response.StatusCode}");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             return new(false, false, false, ex is TaskCanceledException ? "WebDAV 远端探测超时" : "WebDAV 远端连接或 TLS 验证失败");

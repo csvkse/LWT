@@ -17,6 +17,7 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
 
     /// <summary>当前环境是否支持（Linux；Windows 开发机返回 Unsupported 状态）。</summary>
     public static bool IsSupported => OperatingSystem.IsLinux();
+    public static bool HasMountDependencies => IsSupported && new[] { "/sbin/mount.cifs", "/usr/sbin/mount.cifs", "/bin/mount.cifs", "/usr/bin/mount.cifs" }.Any(File.Exists);
 
     /// <summary>凭据文件目录：&lt;data&gt;/mount-creds。</summary>
     private string CredsDirectory => dataPaths.Resolve("mount-creds");
@@ -24,18 +25,36 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
     // ---------- 挂载 / 卸载 ----------
 
     /// <summary>挂载。返回 (成功, 提示消息)。</summary>
-    public async Task<(bool Success, string Message)> MountAsync(SmbMount mount)
+    public Task<(bool Success, string Message)> MountAsync(SmbMount mount) => MountAsync(mount, CancellationToken.None);
+
+    public async Task<MountOperationResult> MountResultAsync(SmbMount mount, CancellationToken cancellationToken)
     {
+        var result = await MountAsync(mount, cancellationToken);
+        // mount.cifs exposes errno in its diagnostic. Classification stays at this process boundary.
+        var kind = result.Message.Contains("mount error(13)", StringComparison.Ordinal)
+            ? Contracts.Models.MountFailureKind.AuthenticationFailed : Contracts.Models.MountFailureKind.Failed;
+        return MountOperationResult.From(result, kind);
+    }
+
+    public async Task<(bool Success, string Message)> MountAsync(SmbMount mount, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!IsSupported)
         {
             return (false, "当前系统不支持 SMB 挂载管理（仅 Linux；Windows 开发机不可用）");
         }
 
+        var status = GetStatus(mount);
+        if (status == SmbMountStatus.Mounted) return (true, "已挂载");
+        if (status == SmbMountStatus.Abnormal) return (false, "挂载身份冲突，拒绝覆盖挂载");
         // 挂载点必须存在（无权限创建时给出明确指引）
         try
         {
-            Directory.CreateDirectory(mount.LocalPath);
+            var created = await SmbMountRuntimeProbe.RunFsProbeAsync(["mkdir", "-p", "--", mount.LocalPath],
+                TimeSpan.FromSeconds(5), "创建挂载目录超时", cancellationToken);
+            if (!created.Success) return (false, created.Error ?? "无法创建挂载目录");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             return (false, $"挂载点目录不可创建（{mount.LocalPath}）：{ex.Message}。请先以有权限的用户创建该目录，或以 root 运行应用");
@@ -43,9 +62,11 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
 
         // TCP 445 连通性预检，失败时给出可读的错误而不是 mount 的原始报错
         var host = ExtractHost(mount.Server);
-        if (!await IsPortOpenAsync(host, 445))
+        var portOption = (mount.Options ?? "").Split(',').FirstOrDefault(o => o.Trim().StartsWith("port=", StringComparison.Ordinal));
+        var port = portOption is not null && int.TryParse(portOption.Trim()[5..], out var configuredPort) ? configuredPort : 445;
+        if (!await IsPortOpenAsync(host, port, cancellationToken))
         {
-            return (false, $"服务器 {host}:445 不可达：请检查主机地址、防火墙与 NAS 的 SMB 服务是否开启");
+            return (false, $"服务器 {host}:{port} 不可达：请检查主机地址、防火墙与 NAS 的 SMB 服务是否开启");
         }
 
         EnsureCredentialFile(mount);
@@ -59,14 +80,14 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
         }
 
         logger.LogInformation("SMB 挂载：{Server} → {LocalPath}", mount.Server, mount.LocalPath);
-        var (exitCode, _, stderr) = await RunAsync("mount", args);
+        var (exitCode, _, stderr) = await RunAsync("mount", args, cancellationToken, mount.LocalPath);
         if (exitCode != 0)
         {
             var reason = FirstLine(stderr);
             return (false, $"挂载失败（exit {exitCode}）：{reason}");
         }
 
-        if (GetMountedFsType(mount.LocalPath) != "cifs")
+        if (GetStatus(mount) != SmbMountStatus.Mounted)
         {
             return (false, "mount 命令成功但未在 /proc/self/mounts 中发现 cifs 挂载，请检查挂载点");
         }
@@ -77,21 +98,26 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
     }
 
     /// <summary>卸载。busy 时可用 lazy（umount -l）。</summary>
-    public async Task<(bool Success, string Message)> UnmountAsync(SmbMount mount, bool lazy)
+    public Task<(bool Success, string Message)> UnmountAsync(SmbMount mount, bool lazy) => UnmountAsync(mount, lazy, CancellationToken.None);
+
+    public async Task<(bool Success, string Message)> UnmountAsync(SmbMount mount, bool lazy, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!IsSupported)
         {
             return (false, "当前系统不支持 SMB 挂载管理（仅 Linux）");
         }
 
-        if (GetMountedFsType(mount.LocalPath) is null)
+        var status = GetStatus(mount);
+        if (status == SmbMountStatus.Abnormal) return (false, "挂载身份冲突，拒绝卸载");
+        if (status == SmbMountStatus.NotMounted)
         {
             SystemStatusProvider.ManagedMountPoints.TryRemove(NormalizePath(mount.LocalPath), out _);
             return (true, "挂载点当前未挂载");
         }
 
         var args = lazy ? new List<string> { "-l", mount.LocalPath } : new List<string> { mount.LocalPath };
-        var (exitCode, _, stderr) = await RunAsync("umount", args);
+        var (exitCode, _, stderr) = await RunAsync("umount", args, cancellationToken, mount.LocalPath);
         if (exitCode != 0)
         {
             var reason = FirstLine(stderr);
@@ -113,13 +139,16 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
             return SmbMountStatus.Unsupported;
         }
 
-        var fsType = GetMountedFsType(mount.LocalPath);
-        return fsType switch
+        try
         {
-            "cifs" => SmbMountStatus.Mounted,
-            null => SmbMountStatus.NotMounted,
-            _ => SmbMountStatus.Abnormal,
-        };
+            var entry = LinuxMountInfoParser.Parse(File.ReadAllText("/proc/self/mountinfo"), includeVirtual: true)
+                .LastOrDefault(e => NormalizePath(e.MountPoint) == NormalizePath(mount.LocalPath));
+            if (entry is null) return SmbMountStatus.NotMounted;
+            return entry.FileSystem == "cifs" && string.Equals(entry.Source.Replace('\\', '/').TrimEnd('/'),
+                mount.Server.Replace('\\', '/').TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
+                ? SmbMountStatus.Mounted : SmbMountStatus.Abnormal;
+        }
+        catch { return SmbMountStatus.Abnormal; }
     }
 
     /// <summary>挂载点被占用的文件系统名；未挂载返回 null。</summary>
@@ -293,22 +322,24 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
         return host;
     }
 
-    private static async Task<bool> IsPortOpenAsync(string host, int port)
+    private static async Task<bool> IsPortOpenAsync(string host, int port, CancellationToken cancellationToken)
     {
         try
         {
             using var client = new TcpClient();
-            var connectTask = client.ConnectAsync(host, port);
-            var completed = await Task.WhenAny(connectTask, Task.Delay(3000));
-            return completed == connectTask && client.Connected;
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            budget.CancelAfter(3000);
+            await client.ConnectAsync(host, port, budget.Token);
+            return client.Connected;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch
         {
             return false;
         }
     }
 
-    private static string NormalizePath(string path) => path.Trim().TrimEnd('/');
+    private static string NormalizePath(string path) => MountOperationCoordinator.NormalizePath(path);
 
     private static string FirstLine(string text)
     {
@@ -317,7 +348,7 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
     }
 
     /// <summary>挂载命令执行（mount/umount），ArgumentList 传参避免注入与转义问题。</summary>
-    private static async Task<(int ExitCode, string Stdout, string Stderr)> RunAsync(string fileName, List<string> args)
+    private static async Task<(int ExitCode, string Stdout, string Stderr)> RunAsync(string fileName, List<string> args, CancellationToken cancellationToken, string path)
     {
         try
         {
@@ -339,7 +370,8 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
             process.Start();
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
             var stderrTask = process.StandardError.ReadToEndAsync();
-            using var timeoutCts = new CancellationTokenSource(ProcessTimeoutMs);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(ProcessTimeoutMs);
             try
             {
                 await process.WaitForExitAsync(timeoutCts.Token);
@@ -347,12 +379,15 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
             catch (OperationCanceledException)
             {
                 try { process.Kill(entireProcessTree: true); } catch { }
+                MountProbeProcessGuard.RecordIfAlive(path, process);
+                cancellationToken.ThrowIfCancellationRequested();
                 return (-1, string.Empty, "命令执行超时");
             }
             var stdout = await stdoutTask;
             var stderr = await stderrTask;
             return (process.HasExited ? process.ExitCode : -1, stdout, stderr);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             return (-1, string.Empty, ex.Message);

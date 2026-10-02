@@ -10,9 +10,9 @@ import ModalHost from './ModalHost.js';
 const NAV_ITEMS = [
   { path: '/', label: '概览' },
   { path: '/commands', label: '指令' },
-  { path: '/terminal', label: '终端' },
   { path: '/schedules', label: '定时任务' },
   { path: '/system', label: '系统状态' },
+  { path: '/terminal', label: '终端' },
   { path: '/files', label: '文件管理' },
   { path: '/mounts', label: '挂载管理' },
   { path: '/transcode', label: '转码' },

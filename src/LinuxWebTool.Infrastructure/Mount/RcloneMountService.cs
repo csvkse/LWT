@@ -21,7 +21,7 @@ public sealed class RcloneMountService(DataPaths dataPaths, ILogger<RcloneMountS
         try
         {
             var path = MountOperationCoordinator.NormalizePath(mount.LocalPath);
-            var entry = LinuxMountInfoParser.Parse(File.ReadAllText("/proc/self/mountinfo"))
+            var entry = LinuxMountInfoParser.Parse(File.ReadAllText("/proc/self/mountinfo"), includeVirtual: true)
                 .LastOrDefault(m => MountOperationCoordinator.NormalizePath(m.MountPoint) == path);
             if (entry is null) return SmbMountStatus.NotMounted;
             return entry.FileSystem == "fuse.rclone" && entry.Source.Contains(mount.Id.ToString("N"), StringComparison.OrdinalIgnoreCase)
@@ -38,13 +38,15 @@ public sealed class RcloneMountService(DataPaths dataPaths, ILogger<RcloneMountS
         if (status == SmbMountStatus.Abnormal) return (false, "挂载点已被其他文件系统占用");
         try
         {
-            Directory.CreateDirectory(mount.LocalPath);
+            var created = await SmbMountRuntimeProbe.RunFsProbeAsync(["mkdir", "-p", "--", mount.LocalPath],
+                TimeSpan.FromSeconds(5), "创建挂载目录超时", cancellationToken);
+            if (!created.Success) return (false, created.Error ?? "无法创建挂载目录");
             var config = await EnsureConfigAsync(mount, cancellationToken);
             var cache = Path.Combine(dataPaths.Resolve(CacheFolder), mount.Id.ToString("N"));
             Directory.CreateDirectory(cache);
             var result = await RunAsync(["--config", config, "mount", Remote(mount), mount.LocalPath,
                 "--daemon", "--daemon-wait", "30s", "--vfs-cache-mode", "writes",
-                "--cache-dir", cache, "--vfs-cache-max-size", "1G"], null, TimeSpan.FromSeconds(40), cancellationToken);
+                "--cache-dir", cache, "--vfs-cache-max-size", "1G"], null, TimeSpan.FromSeconds(40), cancellationToken, guardedPath: mount.LocalPath);
             if (result.ExitCode != 0) return (false, $"rclone 挂载失败（exit {result.ExitCode}）：{Redact(result.Stderr, mount)}");
             if (GetStatus(mount) != SmbMountStatus.Mounted)
                 return (false, "rclone 返回成功，但未找到匹配的 FUSE 挂载记录");
@@ -52,6 +54,7 @@ public sealed class RcloneMountService(DataPaths dataPaths, ILogger<RcloneMountS
             logger.LogInformation("{Kind} 挂载成功：{Name} → {Path}", mount.Kind, mount.Name, mount.LocalPath);
             return (true, "挂载成功");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex) { return (false, $"挂载失败：{Redact(ex.Message, mount)}"); }
     }
 
@@ -60,7 +63,7 @@ public sealed class RcloneMountService(DataPaths dataPaths, ILogger<RcloneMountS
         var status = GetStatus(mount);
         if (status == SmbMountStatus.NotMounted) return (true, "挂载点当前未挂载");
         if (status != SmbMountStatus.Mounted) return (false, "挂载点并非当前配置，拒绝卸载");
-        var result = await RunProcessAsync("umount", ["--", mount.LocalPath], null, TimeSpan.FromSeconds(40), cancellationToken);
+        var result = await RunProcessAsync("umount", ["--", mount.LocalPath], null, TimeSpan.FromSeconds(40), cancellationToken, guardedPath: mount.LocalPath);
         if (result.ExitCode != 0) return (false, $"卸载失败（exit {result.ExitCode}）：{Redact(result.Stderr, mount)}");
         return (true, "已卸载；待上传缓存保留");
     }
@@ -73,7 +76,8 @@ public sealed class RcloneMountService(DataPaths dataPaths, ILogger<RcloneMountS
         {
             var config = await EnsureConfigAsync(mount, cancellationToken);
             var result = await RunAsync(["--config", config, "lsf", Remote(mount), "--max-depth", "1"],
-                null, TimeSpan.FromSeconds(10), cancellationToken, captureStdout: false);
+                null, TimeSpan.FromSeconds(10), cancellationToken, captureStdout: false,
+                guardedPath: mount.LocalPath, stopAfterFirstEntry: true);
             if (result.ExitCode == 0) return (true, false, null);
             var error = Redact(result.Stderr, mount);
             var rejected = error.Contains("permission denied", StringComparison.OrdinalIgnoreCase)
@@ -83,6 +87,7 @@ public sealed class RcloneMountService(DataPaths dataPaths, ILogger<RcloneMountS
                 || error.Contains("key mismatch", StringComparison.OrdinalIgnoreCase);
             return (false, rejected, $"远端目录读取失败（exit {result.ExitCode}）：{error}");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex) { return (false, false, $"远端探测失败：{Redact(ex.Message, mount)}"); }
     }
 
@@ -171,12 +176,12 @@ public sealed class RcloneMountService(DataPaths dataPaths, ILogger<RcloneMountS
 
     private static Task<(int ExitCode, string Stdout, string Stderr)> RunAsync(
         IReadOnlyList<string> args, string? stdin, TimeSpan timeout, CancellationToken cancellationToken,
-        bool captureStdout = true) =>
-        RunProcessAsync("rclone", args, stdin, timeout, cancellationToken, captureStdout);
+        bool captureStdout = true, string? guardedPath = null, bool stopAfterFirstEntry = false) =>
+        RunProcessAsync("rclone", args, stdin, timeout, cancellationToken, captureStdout, guardedPath, stopAfterFirstEntry);
 
     private static async Task<(int ExitCode, string Stdout, string Stderr)> RunProcessAsync(
         string fileName, IReadOnlyList<string> args, string? stdin, TimeSpan timeout, CancellationToken cancellationToken,
-        bool captureStdout = true)
+        bool captureStdout = true, string? guardedPath = null, bool stopAfterFirstEntry = false)
     {
         using var process = new Process { StartInfo = new ProcessStartInfo
         {
@@ -186,21 +191,39 @@ public sealed class RcloneMountService(DataPaths dataPaths, ILogger<RcloneMountS
         foreach (var arg in args) process.StartInfo.ArgumentList.Add(arg);
         process.Start();
         if (stdin is not null) { await process.StandardInput.WriteAsync(stdin); process.StandardInput.Close(); }
-        var stdout = captureStdout ? process.StandardOutput.ReadToEndAsync(cancellationToken)
+        var observedEntry = false;
+        var stdout = stopAfterFirstEntry ? ReadFirstEntryAsync(process, () => observedEntry = true, cancellationToken)
+            : captureStdout ? process.StandardOutput.ReadToEndAsync(cancellationToken)
             : DrainAsync(process.StandardOutput, cancellationToken);
         var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
         try { await process.WaitForExitAsync(cancellationToken).WaitAsync(timeout, cancellationToken); }
         catch (TimeoutException)
         {
             try { process.Kill(entireProcessTree: true); } catch { }
+            if (guardedPath is not null) MountProbeProcessGuard.RecordIfAlive(guardedPath, process);
             return (-1, string.Empty, "命令执行超时");
         }
         catch (OperationCanceledException)
         {
             try { process.Kill(entireProcessTree: true); } catch { }
+            if (guardedPath is not null) MountProbeProcessGuard.RecordIfAlive(guardedPath, process);
             throw;
         }
-        return (process.ExitCode, await stdout, await stderr);
+        var output = await stdout;
+        var error = await stderr;
+        return (observedEntry ? 0 : process.ExitCode, output, error);
+    }
+
+    private static async Task<string> ReadFirstEntryAsync(Process process, Action onEntry, CancellationToken cancellationToken)
+    {
+        // One visible entry proves directory listing access; an empty directory must exit successfully.
+        var entry = await process.StandardOutput.ReadLineAsync(cancellationToken);
+        if (entry is not null)
+        {
+            onEntry();
+            try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+        }
+        return string.Empty;
     }
 
     private static async Task<string> DrainAsync(StreamReader reader, CancellationToken cancellationToken)

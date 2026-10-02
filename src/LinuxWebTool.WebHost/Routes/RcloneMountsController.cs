@@ -16,7 +16,8 @@ public class RcloneMountsController(
     SmbMountStore smbStore,
     WebDavMountStore webDavStore,
     RcloneMountService operations,
-    RcloneMountHealthService health,
+    MountStateMachineService health,
+    MountBackendCatalog catalog,
     MountOperationCoordinator coordinator,
     DataPaths dataPaths,
     IOperationLogger operationLogger) : MinimalApi.ControllerBase
@@ -31,7 +32,7 @@ public class RcloneMountsController(
         var mounts = await store.GetAllAsync();
         return Ok(mounts.Select(m =>
         {
-            var status = operations.GetStatus(m);
+            var status = health.GetCachedStatus("rclone", m.Id);
             return new RcloneMountItemResponse(m.Id, m.Name, m.Kind, m.LocalPath, m.RemotePath,
                 m.Host, m.Port, m.Username, m.KeyFile, m.HostKey, m.Endpoint, m.Bucket, m.Region,
                 m.AccessKeyId, !string.IsNullOrEmpty(m.Password), !string.IsNullOrEmpty(m.SecretAccessKey),
@@ -59,6 +60,8 @@ public class RcloneMountsController(
     [HttpPut("{id:guid}")]
     public async Task<IResult> Update(Guid id, [FromBody] SaveRcloneMountRequest request)
     {
+        return await coordinator.RunWithConfigurationLockAsync("rclone", id, async () =>
+        {
         var mount = await store.GetByIdAsync(id);
         if (mount is null) return NotFound(new MessageResponse("挂载配置不存在"));
         if (!string.Equals(mount.Kind, request.Kind, StringComparison.Ordinal))
@@ -68,7 +71,15 @@ public class RcloneMountsController(
         if (IsProtected(validation.Path)) return BadRequest(new MessageResponse("程序数据目录及其父目录不能作为挂载点"));
         if (await store.ExistsNameAsync(request.Name.Trim(), id)) return BadRequest(new MessageResponse("挂载名称已存在"));
         if (await PathInUseAsync(validation.Path, id)) return BadRequest(new MessageResponse("本地挂载点已被其他配置使用"));
-        if (operations.GetStatus(mount) == SmbMountStatus.Mounted)
+        var remotePath = request.Kind == "sftp" ? "/" + (request.RemotePath ?? "").Trim().Trim('/') : (request.RemotePath ?? "").Trim().Trim('/');
+        var endpoint = string.IsNullOrWhiteSpace(request.Endpoint) ? null : request.Endpoint.Trim().TrimEnd('/');
+        var connectionChanged = mount.LocalPath != validation.Path || mount.RemotePath != remotePath
+            || mount.Host != request.Host?.Trim() || mount.Port != request.Port || mount.Username != request.Username?.Trim()
+            || mount.KeyFile != request.KeyFile?.Trim() || mount.HostKey != request.HostKey?.Trim()
+            || mount.Endpoint != endpoint || mount.Bucket != request.Bucket?.Trim() || mount.Region != request.Region?.Trim()
+            || mount.AccessKeyId != request.AccessKeyId?.Trim() || !string.IsNullOrEmpty(request.Password) && mount.Password != request.Password
+            || !string.IsNullOrEmpty(request.SecretAccessKey) && mount.SecretAccessKey != request.SecretAccessKey;
+        if (connectionChanged && operations.GetStatus(mount) == SmbMountStatus.Mounted)
             return BadRequest(new MessageResponse("请先卸载，再修改配置"));
         var oldPath = mount.LocalPath;
         Assign(mount, request, validation.Path);
@@ -76,70 +87,31 @@ public class RcloneMountsController(
         if (oldPath != mount.LocalPath || !mount.Enabled)
             SystemStatusProvider.ManagedMountPoints.TryRemove(oldPath, out _);
         if (mount.Enabled) SystemStatusProvider.ManagedMountPoints[mount.LocalPath] = 0;
-        health.RemoveSnapshot(oldPath);
-        health.ResumeAutoMount(oldPath);
-        health.ResumeAutoMount(mount.LocalPath);
+        if (await catalog.LoadAsync(new("rclone", id)) is { } descriptor) health.ConfigurationChanged(descriptor);
         await LogAsync("修改挂载配置", mount, "已保存", true);
         return Ok(new IdResponse(id));
+        });
     }
 
     [HttpDelete("{id:guid}")]
     public async Task<IResult> Delete(Guid id)
     {
-        var mount = await store.GetByIdAsync(id);
-        if (mount is null) return NotFound(new MessageResponse("挂载配置不存在"));
-        return await coordinator.RunWithMountLockAsync(mount.LocalPath, async () =>
-        {
-            if (operations.GetStatus(mount) == SmbMountStatus.Mounted)
-            {
-                var unmounted = await operations.UnmountAsync(mount);
-                if (!unmounted.Success)
-                {
-                    await LogAsync("删除挂载配置", mount, unmounted.Message, false);
-                    return BadRequest(new MessageResponse(unmounted.Message));
-                }
-            }
-            operations.DeleteConfig(id);
-            await store.DeleteAsync(id);
-            SystemStatusProvider.ManagedMountPoints.TryRemove(mount.LocalPath, out _);
-            health.RemoveSnapshot(mount.LocalPath);
-            health.ResumeAutoMount(mount.LocalPath);
-            await LogAsync("删除挂载配置", mount, "已删除", true);
-            return Ok(new MessageResponse("已删除；待上传缓存未清理"));
-        });
+        var task = await health.SubmitAsync("rclone", id, "Delete", lazy: false, clientIp: HttpContext.GetClientIp());
+        return task is null ? NotFound(new MessageResponse("挂载配置不存在")) : StatusCode(202, task);
     }
 
     [HttpPost("{id:guid}/Mount")]
     public async Task<IResult> Mount(Guid id)
     {
-        var mount = await store.GetByIdAsync(id);
-        if (mount is null) return NotFound(new MessageResponse("挂载配置不存在"));
-        health.ResumeAutoMount(mount.LocalPath);
-        var result = await coordinator.RunWithMountLockAsync(mount.LocalPath, () => operations.MountAsync(mount));
-        if (result.Success)
-        {
-            health.RemoveSnapshot(mount.LocalPath);
-            var snapshot = await health.CheckMountAsync(mount);
-            if (snapshot.State != MountHealthState.Healthy)
-                result = (false, snapshot.LastError ?? "挂载后健康检查失败");
-        }
-        await LogAsync("挂载", mount, result.Message, result.Success);
-        return result.Success ? Ok(new MessageResponse(result.Message)) : BadRequest(new MessageResponse(result.Message));
+        var task = await health.SubmitAsync("rclone", id, "Mount", clientIp: HttpContext.GetClientIp());
+        return task is null ? NotFound(new MessageResponse("挂载配置不存在")) : StatusCode(202, task);
     }
 
     [HttpPost("{id:guid}/Unmount")]
     public async Task<IResult> Unmount(Guid id)
     {
-        var mount = await store.GetByIdAsync(id);
-        if (mount is null) return NotFound(new MessageResponse("挂载配置不存在"));
-        var result = await coordinator.RunWithMountLockAsync(mount.LocalPath, () => operations.UnmountAsync(mount));
-        if (result.Success)
-        {
-            health.SuppressAutoMount(mount.LocalPath);
-            health.RemoveSnapshot(mount.LocalPath);
-        }
-        await LogAsync("卸载", mount, result.Message, result.Success);
-        return result.Success ? Ok(new MessageResponse(result.Message)) : BadRequest(new MessageResponse(result.Message));
+        var task = await health.SubmitAsync("rclone", id, "Unmount", clientIp: HttpContext.GetClientIp());
+        return task is null ? NotFound(new MessageResponse("挂载配置不存在")) : StatusCode(202, task);
     }
 
     private Task LogAsync(string action, RcloneMount mount, string detail, bool success) =>

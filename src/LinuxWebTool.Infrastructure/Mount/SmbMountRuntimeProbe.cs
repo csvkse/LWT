@@ -28,6 +28,7 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
         {
             return false;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch
         {
             return false;
@@ -70,6 +71,8 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
         string timeoutError,
         CancellationToken cancellationToken)
     {
+        var path = arguments[^1];
+        if (MountProbeProcessGuard.IsBlocked(path)) return (false, "上次文件系统探针尚未退出");
         try
         {
             using var process = new Process
@@ -99,11 +102,13 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
             catch (TimeoutException)
             {
                 try { process.Kill(entireProcessTree: true); } catch { }
+                MountProbeProcessGuard.RecordIfAlive(path, process);
                 return (false, timeoutError);
             }
             catch (OperationCanceledException)
             {
                 try { process.Kill(entireProcessTree: true); } catch { }
+                MountProbeProcessGuard.RecordIfAlive(path, process);
                 throw;
             }
 
@@ -113,6 +118,7 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
                 ? (true, null)
                 : (false, stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? $"退出码 {process.ExitCode}");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             return (false, ex.Message);

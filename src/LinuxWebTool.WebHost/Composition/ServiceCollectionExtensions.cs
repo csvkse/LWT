@@ -54,21 +54,15 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<SmbMountStore>();
         builder.Services.AddSingleton<SmbMountService>();
         builder.Services.AddSingleton<ISmbMountOperations>(sp => sp.GetRequiredService<SmbMountService>());
-        builder.Services.AddSingleton<IMountRuntimeProbe, SmbMountRuntimeProbe>();
-        builder.Services.AddSingleton<MountHealthService>();
-        builder.Services.AddHostedService<SmbMountStartupService>();
-        builder.Services.AddHostedService(sp => sp.GetRequiredService<MountHealthService>());
+        builder.Services.AddSingleton<SmbMountRuntimeProbe>();
         builder.Services.AddSingleton<WebDavMountStore>();
         builder.Services.AddSingleton<WebDavMountService>();
         builder.Services.AddSingleton<WebDavMountProbe>();
-        builder.Services.AddSingleton<WebDavMountStartupService>();
-        builder.Services.AddSingleton<WebDavMountHealthService>();
-        builder.Services.AddHostedService(sp => sp.GetRequiredService<WebDavMountStartupService>());
-        builder.Services.AddHostedService(sp => sp.GetRequiredService<WebDavMountHealthService>());
         builder.Services.AddSingleton<RcloneMountStore>();
         builder.Services.AddSingleton<RcloneMountService>();
-        builder.Services.AddSingleton<RcloneMountHealthService>();
-        builder.Services.AddHostedService(sp => sp.GetRequiredService<RcloneMountHealthService>());
+        builder.Services.AddSingleton<MountBackendCatalog>();
+        builder.Services.AddSingleton<MountStateMachineService>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<MountStateMachineService>());
 
         // FFmpeg 转码：预设 / 队列执行 / 监听自动转码
         TranscodePresetSeeder.Seed(dbFactory); // 内置预设播种（表为空时）

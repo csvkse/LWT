@@ -14,7 +14,8 @@ public class SmbMountsController(
     WebDavMountStore webDavStore,
     RcloneMountStore rcloneStore,
     SmbMountService mountService,
-    MountHealthService mountHealth,
+    MountStateMachineService mountHealth,
+    MountBackendCatalog catalog,
     MountOperationCoordinator coordinator,
     IOperationLogger operationLogger) : MinimalApi.ControllerBase
 {
@@ -35,7 +36,7 @@ public class SmbMountsController(
         var mounts = await mountStore.GetAllAsync();
         var items = mounts.Select(m =>
         {
-            var status = mountService.GetStatus(m);
+            var status = mountHealth.GetCachedStatus("smb", m.Id);
             return new SmbMountItemResponse(m.Id, m.Name, m.Server, m.LocalPath, m.Username, m.Domain, m.Options, m.AutoMount, m.Enabled, m.Description, !string.IsNullOrEmpty(m.Password), (int)status, StatusText(status), m.CreateTime, m.UpdateTime, mountHealth.GetSnapshot(m.LocalPath));
         });
         return Ok(items.ToList());
@@ -85,6 +86,8 @@ public class SmbMountsController(
     [HttpPut("{id:guid}")]
     public async Task<IResult> Update(Guid id, [FromBody] SaveSmbMountRequest request)
     {
+        return await coordinator.RunWithConfigurationLockAsync("smb", id, async () =>
+        {
         var mount = await mountStore.GetByIdAsync(id);
         if (mount is null)
         {
@@ -110,6 +113,11 @@ public class SmbMountsController(
             return BadRequest(new MessageResponse("本地挂载点已被 SFTP/S3 配置使用"));
 
         var oldPath = mount.LocalPath;
+        var connectionChanged = oldPath != localPath || mount.Server != server || mount.Username != request.Username?.Trim()
+            || mount.Domain != request.Domain?.Trim() || mount.Options != request.Options?.Trim()
+            || !string.IsNullOrEmpty(request.Password) && mount.Password != request.Password;
+        if (connectionChanged && mountService.GetStatus(mount) == SmbMountStatus.Mounted)
+            return BadRequest(new MessageResponse("请先卸载，再修改 SMB 配置"));
         mount.Name = request.Name.Trim();
         mount.Server = server;
         mount.LocalPath = localPath;
@@ -129,110 +137,35 @@ public class SmbMountsController(
         if (oldPath != localPath)
         {
             SystemStatusProvider.ManagedMountPoints.TryRemove(oldPath.Trim().TrimEnd('/'), out _);
-            mountHealth.RemoveSnapshot(oldPath);
         }
-        mountHealth.RemoveSnapshot(localPath);
+        if (await catalog.LoadAsync(new("smb", id)) is { } descriptor) mountHealth.ConfigurationChanged(descriptor);
         await operationLogger.LogAsync("修改挂载配置", "SMB挂载", mount.Name,
             $"{mount.Server} → {mount.LocalPath}", clientIp: HttpContext.GetClientIp());
         return Ok(new IdResponse(mount.Id));
+        });
     }
 
     [HttpDelete("{id:guid}")]
     public async Task<IResult> Delete(Guid id)
     {
-        var mount = await mountStore.GetByIdAsync(id);
-        if (mount is null)
-        {
-            return NotFound(new MessageResponse("挂载配置不存在"));
-        }
-
-        return await coordinator.RunWithMountLockAsync(mount.LocalPath, async () =>
-        {
-            // 挂载中先卸载，避免留下游离挂载点
-            var status = mountService.GetStatus(mount);
-            if (status == SmbMountStatus.Mounted)
-            {
-                var (unmounted, message) = await mountService.UnmountAsync(mount, lazy: true);
-                if (!unmounted)
-                {
-                    await operationLogger.LogAsync("删除挂载配置", "SMB挂载", mount.Name,
-                        $"{mount.Server} → {mount.LocalPath}；删除前卸载失败：{message}",
-                        false, clientIp: HttpContext.GetClientIp());
-                    return BadRequest(new MessageResponse($"删除前卸载失败：{message}"));
-                }
-            }
-
-            await mountStore.DeleteAsync(id);
-            mountService.DeleteCredentialFile(id);
-            SystemStatusProvider.ManagedMountPoints.TryRemove(mount.LocalPath.Trim().TrimEnd('/'), out _);
-            mountHealth.RemoveSnapshot(mount.LocalPath);
-            await operationLogger.LogAsync("删除挂载配置", "SMB挂载", mount.Name,
-                $"{mount.Server} → {mount.LocalPath}", clientIp: HttpContext.GetClientIp());
-            return Ok(new MessageResponse("已删除"));
-        });
+        var task = await mountHealth.SubmitAsync("smb", id, "Delete", lazy: true, clientIp: HttpContext.GetClientIp());
+        return task is null ? NotFound(new MessageResponse("挂载配置不存在")) : StatusCode(202, task);
     }
 
     /// <summary>执行挂载。</summary>
     [HttpPost("{id:guid}/Mount")]
     public async Task<IResult> Mount(Guid id)
     {
-        var mount = await mountStore.GetByIdAsync(id);
-        if (mount is null)
-        {
-            return NotFound(new MessageResponse("挂载配置不存在"));
-        }
-
-        var (success, message) = await coordinator.RunWithMountLockAsync(
-            mount.LocalPath,
-            () => mountService.MountAsync(mount));
-        if (success)
-        {
-            mountHealth.RemoveSnapshot(mount.LocalPath);
-            var health = await mountHealth.CheckMountAsync(mount);
-            if (health.State != MountHealthState.Healthy)
-            {
-                success = false;
-                message = $"挂载后目录不可访问：{health.LastError ?? health.State.ToString()}";
-            }
-        }
-        else
-        {
-            RecordManualResult(mount, MountHealthState.RecoveryFailed, message);
-        }
-        var mountDetail = $"{mount.Server} → {mount.LocalPath}";
-        if (!success)
-        {
-            mountDetail += $"；失败原因：{message}";
-        }
-        await operationLogger.LogAsync("挂载", "SMB挂载", mount.Name,
-            mountDetail, success, clientIp: HttpContext.GetClientIp());
-        return success ? Ok(new MessageResponse(message)) : BadRequest(new MessageResponse(message));
+        var task = await mountHealth.SubmitAsync("smb", id, "Mount", clientIp: HttpContext.GetClientIp());
+        return task is null ? NotFound(new MessageResponse("挂载配置不存在")) : StatusCode(202, task);
     }
 
     /// <summary>执行卸载（body {lazy:true} 懒卸载）。</summary>
     [HttpPost("{id:guid}/Unmount")]
     public async Task<IResult> Unmount(Guid id, [FromBody] UnmountRequest? request)
     {
-        var mount = await mountStore.GetByIdAsync(id);
-        if (mount is null)
-        {
-            return NotFound(new MessageResponse("挂载配置不存在"));
-        }
-
-        var (success, message) = await coordinator.RunWithMountLockAsync(
-            mount.LocalPath,
-            () => mountService.UnmountAsync(mount, request?.Lazy == true));
-        RecordManualResult(mount, success
-            ? MountHealthState.NotMounted
-            : MountHealthState.RecoveryFailed, message);
-        var unmountDetail = $"{mount.Server} → {mount.LocalPath}";
-        if (!success)
-        {
-            unmountDetail += $"；失败原因：{message}";
-        }
-        await operationLogger.LogAsync("卸载", "SMB挂载", mount.Name,
-            unmountDetail, success, clientIp: HttpContext.GetClientIp());
-        return success ? Ok(new MessageResponse(message)) : BadRequest(new MessageResponse(message));
+        var task = await mountHealth.SubmitAsync("smb", id, "Unmount", request?.Lazy == true, clientIp: HttpContext.GetClientIp());
+        return task is null ? NotFound(new MessageResponse("挂载配置不存在")) : StatusCode(202, task);
     }
 
     public sealed record UnmountRequest(bool Lazy);
@@ -289,14 +222,4 @@ public class SmbMountsController(
         _ => "未知",
     };
 
-    private void RecordManualResult(SmbMount mount, MountHealthState state, string message)
-    {
-        mountHealth.SetSnapshot(new MountHealthSnapshot
-        {
-            LocalPath = mount.LocalPath.Trim().TrimEnd('/'),
-            State = state,
-            LastCheckedAt = DateTime.Now,
-            LastError = state == MountHealthState.Healthy ? null : message,
-        });
-    }
 }

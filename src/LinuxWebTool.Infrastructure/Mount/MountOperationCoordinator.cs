@@ -9,6 +9,16 @@ namespace LinuxWebTool.Infrastructure.Mount;
 public sealed class MountOperationCoordinator
 {
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _configurationLocks = new(StringComparer.Ordinal);
+
+    public async Task<T> RunWithConfigurationLockAsync<T>(string backend, Guid id, Func<Task<T>> action,
+        CancellationToken cancellationToken = default)
+    {
+        var semaphore = _configurationLocks.GetOrAdd($"{backend}:{id:N}", _ => new SemaphoreSlim(1, 1));
+        await semaphore.WaitAsync(cancellationToken);
+        try { return await action(); }
+        finally { semaphore.Release(); }
+    }
     private readonly ConcurrentDictionary<string, byte> _startupRunning = new(StringComparer.Ordinal);
     private readonly TaskCompletionSource _startupReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -53,5 +63,9 @@ public sealed class MountOperationCoordinator
             },
             cancellationToken);
 
-    public static string NormalizePath(string path) => path.Trim().TrimEnd('/');
+    public static string NormalizePath(string path)
+    {
+        var value = path.Trim();
+        return (value.StartsWith('/') ? "/" : "") + string.Join('/', value.Split('/', StringSplitOptions.RemoveEmptyEntries));
+    }
 }

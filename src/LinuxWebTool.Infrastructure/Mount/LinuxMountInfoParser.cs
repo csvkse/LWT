@@ -11,7 +11,7 @@ internal static class LinuxMountInfoParser
         "squashfs", "securityfs", "pstore", "bpf", "tracefs", "debugfs", "configfs", "fusectl", "hugetlbfs", "ramfs",
     };
 
-    public static IReadOnlyList<MountMetadata> Parse(string content)
+    public static IReadOnlyList<MountMetadata> Parse(string content, bool includeVirtual = false)
     {
         if (string.IsNullOrWhiteSpace(content))
         {
@@ -35,7 +35,7 @@ internal static class LinuxMountInfoParser
             }
 
             var fileSystem = suffix[0];
-            if (VirtualFileSystems.Contains(fileSystem))
+            if (!includeVirtual && VirtualFileSystems.Contains(fileSystem))
             {
                 continue;
             }

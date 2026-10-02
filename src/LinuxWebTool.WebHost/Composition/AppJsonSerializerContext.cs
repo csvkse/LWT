@@ -54,6 +54,7 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(WatchRule))]
 [JsonSerializable(typeof(CommandItemResponse))]
 [JsonSerializable(typeof(SmbMountItemResponse))]
+[JsonSerializable(typeof(MountTaskInfo))]
 [JsonSerializable(typeof(WebDavMountItemResponse))]
 [JsonSerializable(typeof(RcloneMountItemResponse))]
 [JsonSerializable(typeof(SmbSupportResponse))]

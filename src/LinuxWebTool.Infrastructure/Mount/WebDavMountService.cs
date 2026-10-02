@@ -22,7 +22,9 @@ public sealed class WebDavMountService(DataPaths dataPaths, ILogger<WebDavMountS
     public SmbMountStatus GetStatus(WebDavMount mount)
     {
         if (!OperatingSystem.IsLinux()) return SmbMountStatus.Unsupported;
-        var entry = ReadMount(mount.LocalPath);
+        MountMetadata? entry;
+        try { entry = ReadMount(mount.LocalPath); }
+        catch { return SmbMountStatus.Abnormal; }
         if (entry is null) return SmbMountStatus.NotMounted;
         return entry.FileSystem == "fuse.rclone" && entry.Source.Contains(mount.Id.ToString("N"), StringComparison.OrdinalIgnoreCase)
             ? SmbMountStatus.Mounted
@@ -37,7 +39,9 @@ public sealed class WebDavMountService(DataPaths dataPaths, ILogger<WebDavMountS
 
         try
         {
-            Directory.CreateDirectory(mount.LocalPath);
+            var created = await SmbMountRuntimeProbe.RunFsProbeAsync(["mkdir", "-p", "--", mount.LocalPath],
+                TimeSpan.FromSeconds(5), "创建挂载目录超时", cancellationToken);
+            if (!created.Success) return (false, created.Error ?? "无法创建挂载目录");
             var configPath = await EnsureConfigAsync(mount, cancellationToken);
             var cachePath = Path.Combine(CacheDirectory, mount.Id.ToString("N"));
             Directory.CreateDirectory(cachePath);
@@ -47,7 +51,7 @@ public sealed class WebDavMountService(DataPaths dataPaths, ILogger<WebDavMountS
                 "--daemon", "--daemon-wait", "30s", "--vfs-cache-mode", "writes",
                 "--cache-dir", cachePath, "--vfs-cache-max-size", "1G",
             };
-            var result = await RunAsync("rclone", args, null, cancellationToken);
+            var result = await RunAsync("rclone", args, null, cancellationToken, mount.LocalPath);
             if (result.ExitCode != 0)
                 return (false, $"rclone 挂载失败（exit {result.ExitCode}）：{Redact(result.Stderr, mount)}");
             if (GetStatus(mount) != SmbMountStatus.Mounted)
@@ -56,6 +60,7 @@ public sealed class WebDavMountService(DataPaths dataPaths, ILogger<WebDavMountS
             logger.LogInformation("WebDAV 挂载成功：{Name} → {LocalPath}", mount.Name, mount.LocalPath);
             return (true, "挂载成功");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             return (false, $"WebDAV 挂载失败：{Redact(ex.Message, mount)}");
@@ -68,7 +73,7 @@ public sealed class WebDavMountService(DataPaths dataPaths, ILogger<WebDavMountS
         if (status == SmbMountStatus.NotMounted) return (true, "挂载点当前未挂载");
         if (status != SmbMountStatus.Mounted) return (false, "挂载点并非当前 WebDAV 配置，拒绝卸载");
         var args = lazy ? new List<string> { "-l", "--", mount.LocalPath } : new List<string> { "--", mount.LocalPath };
-        var result = await RunAsync("umount", args, null, cancellationToken);
+        var result = await RunAsync("umount", args, null, cancellationToken, mount.LocalPath);
         if (result.ExitCode != 0) return (false, $"卸载失败（exit {result.ExitCode}）：{Redact(result.Stderr, mount)}");
         logger.LogInformation("WebDAV 卸载：{LocalPath}", mount.LocalPath);
         return (true, "已卸载；待上传缓存保留");
@@ -131,10 +136,10 @@ public sealed class WebDavMountService(DataPaths dataPaths, ILogger<WebDavMountS
         try
         {
             var target = MountOperationCoordinator.NormalizePath(path);
-            return LinuxMountInfoParser.Parse(File.ReadAllText("/proc/self/mountinfo"))
+            return LinuxMountInfoParser.Parse(File.ReadAllText("/proc/self/mountinfo"), includeVirtual: true)
                 .LastOrDefault(m => MountOperationCoordinator.NormalizePath(m.MountPoint) == target);
         }
-        catch { return null; }
+        catch { throw; }
     }
 
     private static string Redact(string value, WebDavMount mount)
@@ -144,7 +149,7 @@ public sealed class WebDavMountService(DataPaths dataPaths, ILogger<WebDavMountS
     }
 
     private static async Task<(int ExitCode, string Stdout, string Stderr)> RunAsync(
-        string fileName, IReadOnlyList<string> args, string? stdin, CancellationToken cancellationToken)
+        string fileName, IReadOnlyList<string> args, string? stdin, CancellationToken cancellationToken, string? guardedPath = null)
     {
         using var process = new Process
         {
@@ -171,11 +176,13 @@ public sealed class WebDavMountService(DataPaths dataPaths, ILogger<WebDavMountS
         catch (TimeoutException)
         {
             try { process.Kill(entireProcessTree: true); } catch { }
+            if (guardedPath is not null) MountProbeProcessGuard.RecordIfAlive(guardedPath, process);
             return (-1, string.Empty, "命令执行超时");
         }
         catch (OperationCanceledException)
         {
             try { process.Kill(entireProcessTree: true); } catch { }
+            if (guardedPath is not null) MountProbeProcessGuard.RecordIfAlive(guardedPath, process);
             throw;
         }
         return (process.ExitCode, await stdout, await stderr);
