@@ -8,6 +8,18 @@
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 
+static void report_child_error(int fd, int error) {
+    const unsigned char *data = (const unsigned char *)&error;
+    size_t remaining = sizeof(error);
+    while (remaining > 0) {
+        ssize_t count = write(fd, data, remaining);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) break;
+        data += count;
+        remaining -= (size_t)count;
+    }
+}
+
 /* The forked child stays entirely in native code and never returns to the CLR. */
 int lwt_pty_start(const char *exe, char *const argv[], char *const envp[], const char *cwd,
                   int columns, int rows, int *master) {
@@ -26,12 +38,12 @@ int lwt_pty_start(const char *exe, char *const argv[], char *const envp[], const
         signal(SIGPIPE, SIG_DFL);
         if (cwd && chdir(cwd) < 0) {
             int error = errno;
-            write(errors[1], &error, sizeof(error));
+            report_child_error(errors[1], error);
             _exit(127);
         }
         execve(exe, argv, envp);
         int error = errno;
-        write(errors[1], &error, sizeof(error));
+        report_child_error(errors[1], error);
         _exit(127);
     }
     int error = errno;
