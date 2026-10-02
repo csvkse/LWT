@@ -440,6 +440,7 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
                         {
                             logger.LogInformation("SMB unmount detached early Path={Path} PID={Pid} ElapsedMs={Elapsed}; stopping remaining command before reconciliation",
                                 path, process.Id, elapsed.ElapsedMilliseconds);
+                            await MountProcessDiagnostics.CaptureAsync(logger, process, fileName, path, elapsed.ElapsedMilliseconds);
                             try { process.Kill(entireProcessTree: true); } catch { }
                             // Reconciliation below still requires both no mount and no surviving process.
                             try { await exitTask.WaitAsync(TimeSpan.FromSeconds(1), cancellationToken); }
@@ -454,6 +455,7 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
             }
             catch (OperationCanceledException)
             {
+                await MountProcessDiagnostics.CaptureAsync(logger, process, fileName, path, elapsed.ElapsedMilliseconds);
                 try { process.Kill(entireProcessTree: true); } catch { }
                 MountProbeProcessGuard.RecordIfAlive(path, process);
                 logger.LogWarning("SMB command timeout Command={Command} Path={Path} PID={Pid} ElapsedMs={Elapsed} StillAlive={Alive} ProcessState={ProcessState}", fileName, path, process.Id, elapsed.ElapsedMilliseconds, MountProbeProcessGuard.IsBlocked(path), MountProbeProcessGuard.ReadState(process.Id));

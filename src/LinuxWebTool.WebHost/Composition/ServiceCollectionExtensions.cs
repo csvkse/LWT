@@ -22,6 +22,7 @@ public static class ServiceCollectionExtensions
 
         // 文件日志（程序日志 + 调试日志），相对目录锚定到数据目录
         builder.Logging.AddFileLogging(configuration, dataPaths);
+        builder.Services.AddHostedService<RunDiagnosticsService>();
 
         // SQLite（原 CodeFirst 建表，现 DDL建表）：未显式配置连接串时落在数据目录
         var rawConnectionString = configuration.GetConnectionString("SQLite");

@@ -26,6 +26,7 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
     {
         public bool DidMutate { get; set; }
         public Guid CorrelationId { get; } = Guid.NewGuid();
+        public Dictionary<string, long> StageMilliseconds { get; } = [];
     }
     private readonly object gate = new();
     private readonly Dictionary<MountKey, Runtime> runtimes = [];
@@ -260,6 +261,10 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
                     lock (gate) if (runtimes.TryGetValue(job.Key, out var current) && ReferenceEquals(current.ActiveJob, job)) current.ObservedStatus = actual;
                 }
                 logger.LogDebug("Mount task end CorrelationId={CorrelationId} ElapsedMs={Elapsed}", job.CorrelationId, taskClock.ElapsedMilliseconds);
+                if (job.DidMutate)
+                    logger.LogInformation("Mount recovery summary CorrelationId={CorrelationId} MountId={MountId} Trigger={Trigger} ElapsedMs={Elapsed} Stages={Stages} State={State}",
+                        job.CorrelationId, job.Key.Id, job.Trigger, taskClock.ElapsedMilliseconds,
+                        string.Join(",", job.StageMilliseconds.Select(s => $"{s.Key}={s.Value}ms")), GetSnapshot(job.Key.Backend, job.Key.Id)?.State);
                 if (executed is not null && (job.TaskId.HasValue || job.DidMutate))
                 {
                     var task = job.TaskId is { } taskId ? GetTask(taskId) : null;
@@ -286,6 +291,16 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
 
     private async Task ExecuteJobAsync(Job job, MountDescriptor descriptor, CancellationToken ct)
     {
+        async Task<MountOperationResult> Measure(string stage, Func<Task<MountOperationResult>> action)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            try { return await action(); }
+            finally
+            {
+                job.StageMilliseconds[stage] = job.StageMilliseconds.GetValueOrDefault(stage) + clock.ElapsedMilliseconds;
+                logger.LogDebug("Mount stage duration CorrelationId={CorrelationId} Stage={Stage} ElapsedMs={Elapsed}", job.CorrelationId, stage, clock.ElapsedMilliseconds);
+            }
+        }
         Runtime runtime;
         lock (gate) runtime = Ensure(descriptor);
         SetPhase(runtime, job, MountExecutionPhase.Probing);
@@ -340,74 +355,63 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
             || runtime.RemoteVerifiedAt is null || DateTime.UtcNow - runtime.RemoteVerifiedAt > TimeSpan.FromMinutes(5);
         if (needRemote)
         {
-            var remote = await descriptor.Remote(ct);
+            var remote = await Measure("Remote", () => descriptor.Remote(ct));
             ct.ThrowIfCancellationRequested();
             if (!remote.Success) { Failed(job, remote); return; }
             runtime.RemoteVerifiedAt = DateTime.UtcNow;
         }
         if (status == SmbMountStatus.Mounted)
         {
-            var startupSmb = job.Trigger == "Startup" && job.Action == "Check" && descriptor.Key.Backend == "smb";
+            var startupSmb = job.Trigger == "Startup" && job.Action == "Check" && descriptor.Key.Backend == "smb" && automatic;
             var startupIdentity = startupSmb ? SmbMountService.ReadIdentity(descriptor.Path) : null;
             if (startupSmb)
-                logger.LogInformation("SMB startup existing mount CorrelationId={CorrelationId} MountId={MountId} Identity={Identity}",
+                logger.LogInformation("SMB startup rebuild CorrelationId={CorrelationId} MountId={MountId} Identity={Identity} Reason=StartupPolicy SkipExistingAccessProbe=True",
                     job.CorrelationId, descriptor.Key.Id, startupIdentity);
-            var verified = await descriptor.Verify(ct);
-            ct.ThrowIfCancellationRequested();
-            var fastRecovery = false;
-            if (startupSmb && automatic && verified.Kind == MountFailureKind.Timeout)
+            if (startupSmb)
             {
-                logger.LogWarning("SMB startup recheck CorrelationId={CorrelationId} MountId={MountId} Error={Error} DelayMs=1500",
-                    job.CorrelationId, descriptor.Key.Id, verified.Error);
-                await Task.Delay(1500, ct);
-                if (MountProbeProcessGuard.IsBlocked(descriptor.Path))
-                {
-                    Failed(job, new(false, MountFailureKind.Busy, "启动探针尚未退出，暂停快速恢复")); return;
-                }
                 if (startupIdentity is null || SmbMountService.ReadIdentity(descriptor.Path) != startupIdentity)
                 {
-                    Failed(job, new(false, MountFailureKind.Conflict, "启动复检时挂载身份变化，停止快速恢复")); return;
+                    Failed(job, new(false, MountFailureKind.Conflict, "启动重建时挂载身份变化，停止操作")); return;
                 }
-                verified = await descriptor.Verify(ct);
+            }
+            else
+            {
+                var verified = await Measure("ExistingAccess", () => descriptor.Verify(ct));
                 ct.ThrowIfCancellationRequested();
-                fastRecovery = verified.Kind == MountFailureKind.Timeout;
-                if (fastRecovery)
-                    logger.LogWarning("SMB startup fast recovery CorrelationId={CorrelationId} MountId={MountId} Identity={Identity} Reason=TwoAccessTimeouts",
-                        job.CorrelationId, descriptor.Key.Id, startupIdentity);
+                if (verified.Kind == MountFailureKind.PermissionDenied) { Failed(job, verified); return; }
+                if (verified.Success) { Finish(runtime, job, MountHealthState.Healthy, "现有挂载访问验证通过，本轮未重新挂载"); return; }
+                int failures;
+                lock (gate)
+                {
+                    failures = Math.Min(1000, runtime.Snapshot.FailureCount + 1);
+                    runtime.Snapshot = runtime.Snapshot with { FailureCount = failures };
+                }
+                if (failures < 3 || !automatic)
+                {
+                    Failed(job, verified, MountHealthState.Stale, incrementAttempt: false); return;
+                }
+                var remote = await Measure("Remote", () => descriptor.Remote(ct));
+                ct.ThrowIfCancellationRequested();
+                if (!remote.Success) { Failed(job, remote); return; }
             }
-            if (verified.Kind == MountFailureKind.PermissionDenied) { Failed(job, verified); return; }
-            if (verified.Success) { Finish(runtime, job, MountHealthState.Healthy, "现有挂载访问验证通过，本轮未重新挂载"); return; }
-            int failures;
-            lock (gate)
-            {
-                failures = Math.Min(1000, runtime.Snapshot.FailureCount + 1);
-                runtime.Snapshot = runtime.Snapshot with { FailureCount = failures };
-            }
-            if ((!fastRecovery && failures < 3) || !automatic)
-            {
-                Failed(job, verified, MountHealthState.Stale, incrementAttempt: false); return;
-            }
-            var remote = await descriptor.Remote(ct);
-            ct.ThrowIfCancellationRequested();
-            if (!remote.Success) { Failed(job, remote); return; }
             SetPhase(runtime, job, MountExecutionPhase.Unmounting);
             ct.ThrowIfCancellationRequested();
             if (MountProbeProcessGuard.IsBlocked(descriptor.Path))
             {
                 Failed(job, new(false, MountFailureKind.Busy, "文件系统探针尚未退出，保留原挂载")); return;
             }
-            var unmounted = await descriptor.Unmount(descriptor.Key.Backend == "smb", ct);
+            var unmounted = await Measure("Unmount", () => descriptor.Unmount(descriptor.Key.Backend == "smb", ct));
             ct.ThrowIfCancellationRequested();
             if (!unmounted.Success) { Failed(job, unmounted); return; }
         }
         SetPhase(runtime, job, MountExecutionPhase.Mounting);
         ct.ThrowIfCancellationRequested();
-        var mounted = await descriptor.Mount(ct);
+        var mounted = await Measure("Mount", () => descriptor.Mount(ct));
         ct.ThrowIfCancellationRequested();
         if (!mounted.Success) { Failed(job, mounted); return; }
         SetPhase(runtime, job, MountExecutionPhase.Verifying);
         lock (gate) runtime.ObservedStatus = descriptor.Status();
-        var final = runtime.ObservedStatus == SmbMountStatus.Mounted ? await descriptor.Verify(ct)
+        var final = runtime.ObservedStatus == SmbMountStatus.Mounted ? await Measure("NewAccess", () => descriptor.Verify(ct))
             : new MountOperationResult(false, MountFailureKind.Conflict, "挂载后身份验证失败");
         ct.ThrowIfCancellationRequested();
         if (final.Success) Finish(runtime, job, MountHealthState.Healthy, "挂载与访问验证通过");

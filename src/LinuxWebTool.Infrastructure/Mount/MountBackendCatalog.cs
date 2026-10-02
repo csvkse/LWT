@@ -55,7 +55,7 @@ public sealed class MountBackendCatalog(SmbMountStore smbStore, WebDavMountStore
                 return new(false, MountFailureKind.PermissionDenied, "子目录探测配置必须是挂载内的相对路径，不允许 . 或 ..");
             var probePath = MountOperationCoordinator.NormalizePath(m.LocalPath) + "/" + relative.Trim('/');
             return await ProbeAsync(m.Id, "ConfiguredSubdirectory", async () => LocalResult(await SmbMountRuntimeProbe.RunFsProbeAsync(
-                ["ls", "-A", "--", probePath], TimeSpan.FromSeconds(5), "子目录探测超时", ct, m.LocalPath)));
+                ["ls", "-A", "--", probePath], TimeSpan.FromSeconds(5), "子目录探测超时", ct, m.LocalPath, logger)));
         }, async ct => await smb.MountResultAsync(m, ct),
         async (lazy, ct) => await smb.UnmountResultAsync(m, lazy, ct),
         async ct => { ct.ThrowIfCancellationRequested(); smb.DeleteCredentialFile(m.Id); await smbStore.DeleteAsync(m.Id); });

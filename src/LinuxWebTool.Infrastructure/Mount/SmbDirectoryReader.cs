@@ -76,6 +76,7 @@ public sealed class SmbDirectoryReader(ILogger<SmbDirectoryReader> logger, Mount
             }
             catch (Exception ex)
             {
+                await MountProcessDiagnostics.CaptureAsync(logger, process, "find", root, clock.ElapsedMilliseconds);
                 try { process.Kill(entireProcessTree: true); } catch (Exception killError) { logger.LogWarning(killError, "SMB directory process kill failed PID={Pid}", process.Id); }
                 MountProbeProcessGuard.RecordIfAlive(root, process);
                 logger.LogWarning(ex, "SMB directory failed Request={RequestId} Root={Root} Path={Path} PID={Pid} ElapsedMs={Elapsed} StillAlive={StillAlive}",

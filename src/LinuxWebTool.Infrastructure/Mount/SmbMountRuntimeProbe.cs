@@ -5,7 +5,7 @@ using LinuxWebTool.Infrastructure.Persistence.Entities;
 namespace LinuxWebTool.Infrastructure.Mount;
 
 /// <summary>SMB 运行期探针：TCP 探测不会触碰失效挂载，文件系统与容量探测由有超时的子进程执行。</summary>
-public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
+public sealed class SmbMountRuntimeProbe(ILogger<SmbMountRuntimeProbe> logger) : IMountRuntimeProbe
 {
     private static readonly TimeSpan TcpTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan FsProbeTimeout = TimeSpan.FromSeconds(5);
@@ -46,8 +46,8 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
         return await RunFsProbeAsync(
             ["ls", "-A", "--", mount.LocalPath],
             FsProbeTimeout,
-            "文件系统探测超时，挂载可能已失效",
-            cancellationToken);
+            "目录访问探测超时",
+            cancellationToken, diagnosticsLogger: logger);
     }
 
     public async Task<(bool Success, string? Error)> IsCapacityProbeOkAsync(SmbMount mount, CancellationToken cancellationToken = default)
@@ -61,15 +61,15 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
         return await RunFsProbeAsync(
             ["df", "-P", "--", mount.LocalPath],
             FsProbeTimeout,
-            "容量探测超时，SMB 会话可能已退化",
-            cancellationToken);
+            "容量探测超时",
+            cancellationToken, diagnosticsLogger: logger);
     }
 
     internal static async Task<(bool Success, string? Error)> RunFsProbeAsync(
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
         string timeoutError,
-        CancellationToken cancellationToken, string? guardedPath = null)
+        CancellationToken cancellationToken, string? guardedPath = null, ILogger? diagnosticsLogger = null)
     {
         var path = guardedPath ?? arguments[^1];
         if (MountProbeProcessGuard.IsBlocked(path)) return (false, "上次文件系统探针尚未退出");
@@ -93,6 +93,7 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
             process.StartInfo.Environment["LC_ALL"] = "C";
 
             process.Start();
+            var clock = Stopwatch.StartNew();
             var stdoutTask = process.StandardOutput.BaseStream.CopyToAsync(Stream.Null, cancellationToken);
             var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
 
@@ -102,6 +103,8 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
             }
             catch (TimeoutException)
             {
+                if (diagnosticsLogger is not null)
+                    await MountProcessDiagnostics.CaptureAsync(diagnosticsLogger, process, arguments[0], path, clock.ElapsedMilliseconds);
                 try { process.Kill(entireProcessTree: true); } catch { }
                 MountProbeProcessGuard.RecordIfAlive(path, process);
                 return (false, timeoutError);
