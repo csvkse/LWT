@@ -25,6 +25,7 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
         Guid? TaskId = null, bool Lazy = false, string? ClientIp = null)
     {
         public bool DidMutate { get; set; }
+        public Guid CorrelationId { get; } = Guid.NewGuid();
     }
     private readonly object gate = new();
     private readonly Dictionary<MountKey, Runtime> runtimes = [];
@@ -217,6 +218,9 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
                 { active.ActiveCancellation = budget; active.ActiveAction = job.Action; }
             if (job.Action == "Check" && HasManualJob(job.Key)) budget.Cancel();
             MountDescriptor? executed = null;
+            using var logScope = logger.BeginScope(new Dictionary<string, object> { ["MountCorrelationId"] = job.CorrelationId, ["MountId"] = job.Key.Id });
+            var taskClock = System.Diagnostics.Stopwatch.StartNew();
+            logger.LogDebug("Mount task start CorrelationId={CorrelationId} MountId={MountId} Action={Action} Trigger={Trigger}", job.CorrelationId, job.Key.Id, job.Action, job.Trigger);
             try
             {
                 await coordinator.RunWithConfigurationLockAsync(job.Key.Backend, job.Key.Id, async () =>
@@ -250,6 +254,12 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
             }
             finally
             {
+                if (executed is not null)
+                {
+                    var actual = executed.Status();
+                    lock (gate) if (runtimes.TryGetValue(job.Key, out var current) && ReferenceEquals(current.ActiveJob, job)) current.ObservedStatus = actual;
+                }
+                logger.LogDebug("Mount task end CorrelationId={CorrelationId} ElapsedMs={Elapsed}", job.CorrelationId, taskClock.ElapsedMilliseconds);
                 if (executed is not null && (job.TaskId.HasValue || job.DidMutate))
                 {
                     var task = job.TaskId is { } taskId ? GetTask(taskId) : null;
@@ -339,7 +349,8 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
         {
             var verified = await descriptor.Verify(ct);
             ct.ThrowIfCancellationRequested();
-            if (verified.Success) { Finish(runtime, job, MountHealthState.Healthy, "挂载验证通过"); return; }
+            if (verified.Kind == MountFailureKind.PermissionDenied) { Failed(job, verified); return; }
+            if (verified.Success) { Finish(runtime, job, MountHealthState.Healthy, "现有挂载访问验证通过，本轮未重新挂载"); return; }
             int failures;
             lock (gate)
             {
@@ -398,6 +409,7 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
         : r.Paused ? MountManagementMode.ManualPaused : r.Descriptor.AutoMount ? MountManagementMode.Automatic : MountManagementMode.MonitorOnly;
     private void SetPhase(Runtime r, Job job, MountExecutionPhase phase)
     {
+        logger.LogDebug("Mount phase CorrelationId={CorrelationId} MountId={MountId} Phase={Phase}", job.CorrelationId, job.Key.Id, phase);
         if (phase is MountExecutionPhase.Mounting or MountExecutionPhase.Unmounting) job.DidMutate = true;
         lock (gate) r.Snapshot = r.Snapshot with { ExecutionPhase = phase, Trigger = job.Trigger,
             TaskId = job.TaskId, ManagementMode = Mode(r), NextCheckAt = null, NextAttemptAt = null,
@@ -406,6 +418,8 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
     }
     private void Finish(Runtime r, Job job, MountHealthState state, string message)
     {
+        if (r.Snapshot.State != state || job.DidMutate || job.TaskId.HasValue)
+            logger.LogInformation("Mount state CorrelationId={CorrelationId} MountId={MountId} Before={Before} After={After} Reason={Reason}", job.CorrelationId, job.Key.Id, r.Snapshot.State, state, message);
         lock (gate) r.Snapshot = r.Snapshot with { State = state, ExecutionPhase = MountExecutionPhase.Idle,
             ManagementMode = Mode(r), LastCheckedAt = DateTime.UtcNow, NextCheckAt = DateTime.UtcNow.AddSeconds(30 + Random.Shared.Next(0, 6)),
             FailureKind = MountFailureKind.None, LastError = null, FailureCount = 0, RecoveryAttemptCount = 0, NextAttemptAt = null };
@@ -413,13 +427,13 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
     }
     private void Failed(Job job, MountOperationResult result, MountHealthState? state = null, bool incrementAttempt = true)
     {
-        logger.LogWarning("Mount task failed Backend={Backend} MountId={MountId} Action={Action} Trigger={Trigger} TaskId={TaskId} Kind={Kind} Error={Error}",
-            job.Key.Backend, job.Key.Id, job.Action, job.Trigger, job.TaskId, result.Kind, result.Error);
+        logger.LogWarning("Mount task failed CorrelationId={CorrelationId} Backend={Backend} MountId={MountId} Action={Action} Trigger={Trigger} TaskId={TaskId} Kind={Kind} Error={Error}",
+            job.CorrelationId, job.Key.Backend, job.Key.Id, job.Action, job.Trigger, job.TaskId, result.Kind, result.Error);
         lock (gate)
         {
             if (runtimes.TryGetValue(job.Key, out var r) && ReferenceEquals(r.ActiveJob, job))
             {
-                var waitAction = result.Kind is MountFailureKind.AuthenticationFailed or MountFailureKind.Conflict or MountFailureKind.Unsupported;
+                var waitAction = result.Kind is MountFailureKind.AuthenticationFailed or MountFailureKind.Conflict or MountFailureKind.Unsupported or MountFailureKind.PermissionDenied;
                 var attempts = r.Snapshot.RecoveryAttemptCount + (incrementAttempt && result.Kind != MountFailureKind.Cancelled ? 1 : 0);
                 var seconds = incrementAttempt ? new[] { 15, 30, 60, 120, 300, 600 }[Math.Clamp(attempts - 1, 0, 5)] : 30;
                 var due = DateTime.UtcNow.AddSeconds(seconds + Random.Shared.Next(0, Math.Max(2, seconds / 5)));
@@ -431,6 +445,8 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
                     FailureCount = result.Kind is MountFailureKind.Unreachable or MountFailureKind.AuthenticationFailed or MountFailureKind.Conflict or MountFailureKind.Unsupported ? 0 : r.Snapshot.FailureCount,
                     RecoveryAttemptCount = attempts, NextCheckAt = waitAction ? null : result.Kind == MountFailureKind.Cancelled ? DateTime.UtcNow : due,
                     NextAttemptAt = waitAction || result.Kind == MountFailureKind.Cancelled ? null : due };
+                logger.LogWarning("Mount retry CorrelationId={CorrelationId} MountId={MountId} Phase={Phase} Failures={Failures} Attempts={Attempts} NextCheck={NextCheck}",
+                    job.CorrelationId, job.Key.Id, r.Snapshot.ExecutionPhase, r.Snapshot.FailureCount, attempts, r.Snapshot.NextCheckAt);
             }
         }
         Complete(job, result);

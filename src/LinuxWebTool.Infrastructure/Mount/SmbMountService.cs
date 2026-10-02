@@ -6,6 +6,8 @@ using LinuxWebTool.Infrastructure.SystemInfo;
 
 namespace LinuxWebTool.Infrastructure.Mount;
 
+public sealed record SmbMountIdentity(string MountId, string Source, string FileSystem, string Path);
+
 /// <summary>
 /// SMB(CIFS) 挂载执行器：mount -t cifs + credentials 凭据文件（密码不进命令行，避免 /proc 泄露）。
 /// 仅 Linux 可用；Docker 部署需要 --privileged（或 --cap-add SYS_ADMIN）+ --user root，且镜像内含 cifs-utils。
@@ -32,7 +34,8 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
         var result = await MountAsync(mount, cancellationToken);
         // mount.cifs exposes errno in its diagnostic. Classification stays at this process boundary.
         var kind = result.Message.Contains("mount error(13)", StringComparison.Ordinal)
-            ? Contracts.Models.MountFailureKind.AuthenticationFailed : Contracts.Models.MountFailureKind.Failed;
+            ? Contracts.Models.MountFailureKind.AuthenticationFailed
+            : result.Message.Contains("超时", StringComparison.Ordinal) ? Contracts.Models.MountFailureKind.Timeout : Contracts.Models.MountFailureKind.Failed;
         return MountOperationResult.From(result, kind);
     }
 
@@ -81,8 +84,13 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
 
         logger.LogInformation("SMB 挂载：{Server} → {LocalPath}", mount.Server, mount.LocalPath);
         var (exitCode, _, stderr) = await RunAsync("mount", args, cancellationToken, mount.LocalPath);
+        var actual = GetStatus(mount);
+        logger.LogInformation("SMB mount reconciled MountId={MountId} Path={Path} CommandExit={Exit} Actual={Actual} Identity={Identity}",
+            mount.Id, mount.LocalPath, exitCode, actual, ReadIdentity(mount.LocalPath));
         if (exitCode != 0)
         {
+            if (actual == SmbMountStatus.Mounted && !MountProbeProcessGuard.IsBlocked(mount.LocalPath))
+                return (true, "命令未报告成功，但实际挂载已建立，等待访问验证");
             var reason = FirstLine(stderr);
             return (false, $"挂载失败（exit {exitCode}）：{reason}");
         }
@@ -95,6 +103,16 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
         SystemStatusProvider.ManagedMountPoints[NormalizePath(mount.LocalPath)] = 0;
         logger.LogInformation("SMB 挂载成功：{Server} → {LocalPath}", mount.Server, mount.LocalPath);
         return (true, "挂载成功");
+    }
+
+    public async Task<MountOperationResult> UnmountResultAsync(SmbMount mount, bool lazy, CancellationToken ct)
+    {
+        var result = await UnmountAsync(mount, lazy, ct);
+        var kind = result.Message.Contains("超时", StringComparison.Ordinal) ? Contracts.Models.MountFailureKind.Timeout
+            : result.Message.Contains("身份", StringComparison.Ordinal) ? Contracts.Models.MountFailureKind.Conflict
+            : result.Message.Contains("busy", StringComparison.OrdinalIgnoreCase) ? Contracts.Models.MountFailureKind.Busy
+            : Contracts.Models.MountFailureKind.Failed;
+        return MountOperationResult.From(result, kind);
     }
 
     /// <summary>卸载。busy 时可用 lazy（umount -l）。</summary>
@@ -117,12 +135,35 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
         }
 
         var args = lazy ? new List<string> { "-l", mount.LocalPath } : new List<string> { mount.LocalPath };
+        var before = ReadIdentity(mount.LocalPath);
         var (exitCode, _, stderr) = await RunAsync("umount", args, cancellationToken, mount.LocalPath);
+        var after = ReadIdentity(mount.LocalPath);
+        if (exitCode == -1 && stderr == "命令执行超时" && after == before)
+        {
+            foreach (var delay in new[] { 1000, 2000 })
+            {
+                await Task.Delay(delay, cancellationToken);
+                after = ReadIdentity(mount.LocalPath);
+                if (after != before) break;
+            }
+        }
+        var alive = MountProbeProcessGuard.IsBlocked(mount.LocalPath);
+        logger.LogInformation("SMB unmount reconciled MountId={MountId} Path={Path} Lazy={Lazy} CommandExit={Exit} Before={Before} After={After} StillAlive={StillAlive}",
+            mount.Id, mount.LocalPath, lazy, exitCode, before, after, alive);
+        if (after is null && !alive)
+        {
+            SystemStatusProvider.ManagedMountPoints.TryRemove(NormalizePath(mount.LocalPath), out _);
+            return (true, exitCode == 0 ? "已卸载" : "命令未报告成功，但实际挂载已解除");
+        }
+        if (after != before && after is not null) return (false, "卸载后挂载身份变化，停止操作并等待检查");
+        if (alive) return (false, "卸载命令超时，旧进程尚未退出；暂停后续操作");
         if (exitCode != 0)
         {
             var reason = FirstLine(stderr);
-            return (false, $"卸载失败（exit {exitCode}）：{reason}。目录可能正被占用，可尝试懒卸载");
+            return (false, $"卸载失败（exit {exitCode}）：{reason}" + (!lazy && reason.Contains("busy", StringComparison.OrdinalIgnoreCase) ? "。可尝试懒卸载" : ""));
         }
+
+        if (after is not null) return (false, "卸载命令成功但挂载记录仍存在");
 
         SystemStatusProvider.ManagedMountPoints.TryRemove(NormalizePath(mount.LocalPath), out _);
         logger.LogInformation("SMB 卸载：{LocalPath}", mount.LocalPath);
@@ -130,6 +171,17 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
     }
 
     // ---------- 状态探测 ----------
+
+    public static SmbMountIdentity? ReadIdentity(string path)
+    {
+        if (!OperatingSystem.IsLinux()) return null;
+        var entry = LinuxMountInfoParser.Parse(File.ReadAllText("/proc/self/mountinfo"), includeVirtual: true)
+            .LastOrDefault(e => NormalizePath(e.MountPoint) == NormalizePath(path));
+        return entry is null ? null : new(entry.MountId, entry.Source, entry.FileSystem, entry.MountPoint);
+    }
+
+    public static bool Matches(SmbMountIdentity? identity, string server) => identity is { FileSystem: "cifs" }
+        && string.Equals(identity.Source.Replace('\\', '/').TrimEnd('/'), server.Replace('\\', '/').TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>实时状态：解析 /proc/self/mounts，无需启动子进程。</summary>
     public SmbMountStatus GetStatus(SmbMount mount)
@@ -348,7 +400,7 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
     }
 
     /// <summary>挂载命令执行（mount/umount），ArgumentList 传参避免注入与转义问题。</summary>
-    private static async Task<(int ExitCode, string Stdout, string Stderr)> RunAsync(string fileName, List<string> args, CancellationToken cancellationToken, string path)
+    private async Task<(int ExitCode, string Stdout, string Stderr)> RunAsync(string fileName, List<string> args, CancellationToken cancellationToken, string path)
     {
         try
         {
@@ -367,7 +419,10 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
             {
                 process.StartInfo.ArgumentList.Add(arg);
             }
+            process.StartInfo.Environment["LC_ALL"] = "C";
             process.Start();
+            var elapsed = Stopwatch.StartNew();
+            logger.LogInformation("SMB command start Command={Command} Path={Path} PID={Pid}", fileName, path, process.Id);
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
             var stderrTask = process.StandardError.ReadToEndAsync();
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -380,11 +435,13 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
             {
                 try { process.Kill(entireProcessTree: true); } catch { }
                 MountProbeProcessGuard.RecordIfAlive(path, process);
+                logger.LogWarning("SMB command timeout Command={Command} Path={Path} PID={Pid} ElapsedMs={Elapsed} StillAlive={Alive} ProcessState={ProcessState}", fileName, path, process.Id, elapsed.ElapsedMilliseconds, MountProbeProcessGuard.IsBlocked(path), MountProbeProcessGuard.ReadState(process.Id));
                 cancellationToken.ThrowIfCancellationRequested();
                 return (-1, string.Empty, "命令执行超时");
             }
             var stdout = await stdoutTask;
             var stderr = await stderrTask;
+            logger.LogInformation("SMB command end Command={Command} Path={Path} PID={Pid} Exit={Exit} ElapsedMs={Elapsed}", fileName, path, process.Id, process.ExitCode, elapsed.ElapsedMilliseconds);
             return (process.HasExited ? process.ExitCode : -1, stdout, stderr);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }

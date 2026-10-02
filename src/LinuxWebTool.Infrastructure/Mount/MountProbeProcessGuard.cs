@@ -35,4 +35,15 @@ internal static class MountProbeProcessGuard
         catch (InvalidOperationException) { }
         catch (System.ComponentModel.Win32Exception) { }
     }
+
+    public static string ReadState(int pid)
+    {
+        if (!OperatingSystem.IsLinux()) return "unknown";
+        try
+        {
+            var stat = File.ReadAllText($"/proc/{pid}/stat");
+            return stat[(stat.LastIndexOf(')') + 1)..].TrimStart().Split(' ')[0];
+        }
+        catch { return "exited-or-unavailable"; }
+    }
 }

@@ -57,7 +57,7 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
             return (false, "当前系统不支持容量探测");
         }
 
-        // statfs 每次必须上线路由，目录缓存掩盖不了退化会话；该请求卡死/失败即触发重挂恢复。
+        // 容量探测补充目录探测，但不能证明所有子目录可用，也不能保证绕过 CIFS 缓存。
         return await RunFsProbeAsync(
             ["df", "-P", "--", mount.LocalPath],
             FsProbeTimeout,
@@ -69,9 +69,9 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
         string timeoutError,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string? guardedPath = null)
     {
-        var path = arguments[^1];
+        var path = guardedPath ?? arguments[^1];
         if (MountProbeProcessGuard.IsBlocked(path)) return (false, "上次文件系统探针尚未退出");
         try
         {
@@ -90,6 +90,7 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
             {
                 process.StartInfo.ArgumentList.Add(argument);
             }
+            process.StartInfo.Environment["LC_ALL"] = "C";
 
             process.Start();
             var stdoutTask = process.StandardOutput.BaseStream.CopyToAsync(Stream.Null, cancellationToken);

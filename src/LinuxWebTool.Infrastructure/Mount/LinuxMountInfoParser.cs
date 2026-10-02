@@ -1,6 +1,9 @@
 namespace LinuxWebTool.Infrastructure.Mount;
 
-internal sealed record MountMetadata(string MountPoint, string FileSystem, string Source, bool IsLocal);
+internal sealed record MountMetadata(string MountPoint, string FileSystem, string Source, bool IsLocal)
+{
+    public string MountId { get; init; } = "";
+}
 
 /// <summary>解析 /proc/[1|self]/mountinfo。读取文件本身不触发文件系统 stat，失效挂载不会阻塞。</summary>
 internal static class LinuxMountInfoParser
@@ -44,7 +47,7 @@ internal static class LinuxMountInfoParser
             var source = Decode(suffix[1]);
             var isLocal = source.StartsWith("/dev/", StringComparison.Ordinal)
                 && !source.StartsWith("/dev/loop", StringComparison.Ordinal);
-            result.Add(new MountMetadata(mountPoint, fileSystem, source, isLocal));
+            result.Add(new MountMetadata(mountPoint, fileSystem, source, isLocal) { MountId = prefix[0] });
         }
 
         return result;

@@ -12,6 +12,7 @@ export default defineComponent({
     const route = useRoute();
     const router = useRouter();
     const currentPath = ref('/');
+    const attemptedPath = ref('/');
     const entries = ref([]);
     const breadcrumbs = ref([]);
     const isRoot = ref(true);
@@ -45,7 +46,8 @@ export default defineComponent({
     const dirName = computed(() => breadcrumbs.value.at(-1)?.name || '/');
 
     async function load(path) {
-      const target = path ?? currentPath.value;
+      const target = path ?? (loadError.value ? attemptedPath.value : currentPath.value);
+      attemptedPath.value = target;
       loading.value = true;
       loadError.value = '';
       try {
@@ -61,8 +63,12 @@ export default defineComponent({
           return true;
         }
         loadError.value = result.message || '目录加载失败';
+        entries.value = [];
+        directoryReady.value = false;
       } catch (e) {
         loadError.value = e?.message || '目录加载失败';
+        entries.value = [];
+        directoryReady.value = false;
       } finally {
         loading.value = false;
       }
@@ -320,7 +326,7 @@ export default defineComponent({
             <tr><th>名称</th><th>大小</th><th>修改时间</th><th class="text-right">操作</th></tr>
           </thead>
           <tbody>
-            <tr v-if="!entries.length && !loading"><td colspan="4" class="text-slate-600 py-8 text-center">{{ dirName === '/' ? '根目录为空' : '此目录为空' }}</td></tr>
+            <tr v-if="!entries.length && !loading && !loadError"><td colspan="4" class="text-slate-600 py-8 text-center">{{ dirName === '/' ? '根目录为空' : '此目录为空' }}</td></tr>
             <tr v-for="entry in entries" :key="entry.path" class="hover:bg-cyan-500/5 transition cursor-pointer" @click="openEntry(entry)">
               <td>
                 <span class="mr-1.5">{{ iconFor(entry) }}</span>

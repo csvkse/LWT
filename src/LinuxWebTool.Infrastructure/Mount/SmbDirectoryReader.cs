@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
@@ -10,16 +9,31 @@ public sealed record SmbDirectoryItem(string Name, bool IsDirectory, long Size, 
 public sealed record SmbDirectoryResult(bool Success, bool Busy, string? Error, IReadOnlyList<SmbDirectoryItem> Entries);
 
 /// <summary>Keep CIFS directory and metadata syscalls outside the web process.</summary>
-public sealed class SmbDirectoryReader(ILogger<SmbDirectoryReader> logger)
+public sealed class SmbDirectoryReader(ILogger<SmbDirectoryReader> logger, MountOperationCoordinator coordinator,
+    Persistence.SmbMountStore store)
 {
     private readonly SemaphoreSlim slots = new(3);
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> paths = new(StringComparer.Ordinal);
 
     public async Task<SmbDirectoryResult> ReadAsync(string root, string path, string requestId, CancellationToken cancellationToken)
     {
         root = MountOperationCoordinator.NormalizePath(root);
-        var mutex = paths.GetOrAdd(root, _ => new(1));
-        if (!await mutex.WaitAsync(0, cancellationToken)) return new(false, true, "该 SMB 挂载正在读取目录，请稍后重试", []);
+        return await coordinator.TryRunWithMountLockAsync(root, async () =>
+        {
+            var mount = (await store.GetAllAsync()).FirstOrDefault(m => MountOperationCoordinator.NormalizePath(m.LocalPath) == root);
+            if (mount is null) return new SmbDirectoryResult(false, true, "挂载配置已变化，请刷新后重试", []);
+            var before = SmbMountService.ReadIdentity(root);
+            if (!SmbMountService.Matches(before, mount.Server))
+                return new(false, true, "SMB 未挂载或身份不匹配，等待恢复；不展示本地目录", []);
+            var result = await ReadCoreAsync(root, path, requestId, cancellationToken);
+            var after = SmbMountService.ReadIdentity(root);
+            logger.LogDebug("SMB directory identity Request={RequestId} MountId={MountId} Before={Before} After={After} Entries={Entries}",
+                requestId, mount.Id, before, after, result.Entries.Count);
+            return before == after ? result : new(false, true, "读取期间挂载已变化，请重试", []);
+        }, cancellationToken) ?? new(false, true, "挂载正在检查或恢复，请稍后重试", []);
+    }
+
+    private async Task<SmbDirectoryResult> ReadCoreAsync(string root, string path, string requestId, CancellationToken cancellationToken)
+    {
         var acquired = false;
         try
         {
@@ -66,6 +80,7 @@ public sealed class SmbDirectoryReader(ILogger<SmbDirectoryReader> logger)
                 MountProbeProcessGuard.RecordIfAlive(root, process);
                 logger.LogWarning(ex, "SMB directory failed Request={RequestId} Root={Root} Path={Path} PID={Pid} ElapsedMs={Elapsed} StillAlive={StillAlive}",
                     requestId, root, path, process.Id, clock.ElapsedMilliseconds, MountProbeProcessGuard.IsBlocked(root));
+                logger.LogWarning("SMB blocked process Request={RequestId} PID={Pid} ProcessState={ProcessState}", requestId, process.Id, MountProbeProcessGuard.ReadState(process.Id));
                 // Observe readers even when the kernel has not released the process pipes.
                 _ = output.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
                 _ = errors.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
@@ -79,7 +94,7 @@ public sealed class SmbDirectoryReader(ILogger<SmbDirectoryReader> logger)
             logger.LogWarning(ex, "SMB directory invocation failed Request={RequestId} Root={Root} Path={Path}", requestId, root, path);
             return new(false, false, "SMB 目录读取进程启动失败，请查看服务日志", []);
         }
-        finally { if (acquired) slots.Release(); mutex.Release(); }
+        finally { if (acquired) slots.Release(); }
     }
 
     private static async Task<string> ReadBoundedAsync(StreamReader reader, CancellationToken ct)

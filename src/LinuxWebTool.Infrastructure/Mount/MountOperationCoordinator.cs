@@ -63,6 +63,14 @@ public sealed class MountOperationCoordinator
             },
             cancellationToken);
 
+    public async Task<T?> TryRunWithMountLockAsync<T>(string path, Func<Task<T>> action, CancellationToken ct) where T : class
+    {
+        var semaphore = _locks.GetOrAdd(NormalizePath(path), _ => new SemaphoreSlim(1, 1));
+        if (!await semaphore.WaitAsync(0, ct)) return null;
+        try { return await action(); }
+        finally { semaphore.Release(); }
+    }
+
     public static string NormalizePath(string path)
     {
         var value = path.Trim();

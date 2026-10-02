@@ -2,7 +2,7 @@ namespace LinuxWebTool.Contracts.Models;
 
 public enum MountExecutionPhase { Idle, Queued, Probing, Mounting, Verifying, Unmounting, WaitingRetry, WaitingAction }
 public enum MountManagementMode { Disabled, MonitorOnly, Automatic, ManualPaused }
-public enum MountFailureKind { None, Unreachable, AuthenticationFailed, Conflict, Busy, Timeout, Unsupported, Failed, Cancelled }
+public enum MountFailureKind { None, Unreachable, AuthenticationFailed, Conflict, Busy, Timeout, Unsupported, Failed, Cancelled, PermissionDenied }
 
 public sealed record MountTaskInfo
 {

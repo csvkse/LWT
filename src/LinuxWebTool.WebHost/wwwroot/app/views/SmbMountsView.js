@@ -30,8 +30,8 @@ const HEALTH_ENUM = [
 ];
 const PHASES = ['空闲', '排队中', '探测中', '挂载中', '验证中', '卸载中', '等待重试', '等待处理'];
 const MODES = ['已禁用', '仅监测', '自动维护', '手动暂停'];
-const FAILURE_NAMES = ['None', 'Unreachable', 'AuthenticationFailed', 'Conflict', 'Busy', 'Timeout', 'Unsupported', 'Failed', 'Cancelled'];
-const FAILURE_LABELS = { Unreachable: '远端不可达', AuthenticationFailed: '认证或权限失败', Conflict: '挂载身份冲突', Busy: '资源占用', Timeout: '探测超时', Unsupported: '依赖不可用', Failed: '操作失败', Cancelled: '任务取消' };
+const FAILURE_NAMES = ['None', 'Unreachable', 'AuthenticationFailed', 'Conflict', 'Busy', 'Timeout', 'Unsupported', 'Failed', 'Cancelled', 'PermissionDenied'];
+const FAILURE_LABELS = { Unreachable: '远端不可达', AuthenticationFailed: '认证或权限失败', Conflict: '挂载身份冲突', Busy: '资源占用', Timeout: '操作超时', Unsupported: '依赖不可用', Failed: '操作失败', Cancelled: '任务取消', PermissionDenied: '目录权限或探测配置异常' };
 
 const emptyForm = () => ({
   kind: 'smb', name: '', server: '', url: '', localPath: '', username: '', password: '', domain: '', options: 'vers=3.0,uid=1001,gid=1001',
