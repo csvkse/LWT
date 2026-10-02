@@ -130,7 +130,38 @@ public sealed class ApiIntegrationTests
         var update = await client.PutAsync($"/api/SmbMounts/{mountId}", Json("{\"name\":\"integration-smb-updated\",\"server\":\"//server/share\",\"localPath\":\"/mnt/integration-smb\",\"autoMount\":false,\"enabled\":true}"));
 
         Assert.Equal(HttpStatusCode.OK, update.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.DeleteAsync($"/api/SmbMounts/{mountId}")).StatusCode);
+        var delete = await client.DeleteAsync($"/api/SmbMounts/{mountId}");
+        Assert.Equal(HttpStatusCode.Accepted, delete.StatusCode);
+        using var submitted = JsonDocument.Parse(await delete.Content.ReadAsStringAsync());
+        var taskId = submitted.RootElement.GetProperty("taskId").GetGuid();
+        Assert.NotEqual(Guid.Empty, taskId);
+        Assert.Equal(mountId, submitted.RootElement.GetProperty("mountId").GetGuid());
+        Assert.Equal("Delete", submitted.RootElement.GetProperty("action").GetString());
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (true)
+        {
+            var query = await client.GetAsync($"/api/MountTasks/{taskId}", timeout.Token);
+            Assert.Equal(HttpStatusCode.OK, query.StatusCode);
+            using var result = JsonDocument.Parse(await query.Content.ReadAsStringAsync(timeout.Token));
+            var task = result.RootElement;
+            Assert.Equal(taskId, task.GetProperty("taskId").GetGuid());
+            Assert.Equal(mountId, task.GetProperty("mountId").GetGuid());
+            Assert.Equal("smb", task.GetProperty("backend").GetString());
+            Assert.Equal("Delete", task.GetProperty("action").GetString());
+            if (task.GetProperty("completed").GetBoolean())
+            {
+                Assert.True(task.GetProperty("success").GetBoolean(), task.GetProperty("message").GetString());
+                Assert.NotEqual(JsonValueKind.Null, task.GetProperty("completedAt").ValueKind);
+                break;
+            }
+            await Task.Delay(50, timeout.Token);
+        }
+
+        var mounts = await client.GetAsync("/api/SmbMounts");
+        Assert.Equal(HttpStatusCode.OK, mounts.StatusCode);
+        using var remaining = JsonDocument.Parse(await mounts.Content.ReadAsStringAsync());
+        Assert.DoesNotContain(remaining.RootElement.EnumerateArray(), m => m.GetProperty("id").GetGuid() == mountId);
     }
 
     [Fact]

@@ -21,7 +21,7 @@ public abstract class ControllerBase
     protected IResult StatusCode(int statusCode) => Results.StatusCode(statusCode);
     protected IResult StatusCode(int statusCode, MessageResponse value) => new MessageJsonResult(value, statusCode);
     protected IResult StatusCode(int statusCode, LinuxWebTool.Contracts.Models.MountTaskInfo value) =>
-        Results.Json(value, AppJsonSerializerContext.Default.MountTaskInfo, statusCode: statusCode);
+        Results.Json(value, statusCode: statusCode);
     protected IResult File(byte[] fileContents, string contentType, string? fileDownloadName = null) => Results.File(fileContents, contentType, fileDownloadName);
     protected IResult File(Stream fileStream, string contentType, string? fileDownloadName = null) => Results.File(fileStream, contentType, fileDownloadName);
     protected IResult PhysicalFile(string physicalPath, string contentType, string? fileDownloadName = null) => Results.File(physicalPath, contentType, fileDownloadName);
