@@ -56,9 +56,20 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
     public void RequestImmediateCheck(string path)
     {
         lock (gate)
-            foreach (var r in runtimes.Values.Where(r => SamePath(r.Descriptor.Path, path) && r.Descriptor.Enabled))
+            foreach (var r in runtimes.Values.Where(r => ContainsPath(r.Descriptor.Path, path) && r.Descriptor.Enabled))
                 EnqueueCheck(r, "Immediate", DateTime.UtcNow);
         Signal();
+    }
+    public string? GetSmbMountRoot(string path)
+    {
+        lock (gate) return runtimes.Values.Where(r => r.Descriptor.Key.Backend == "smb" && ContainsPath(r.Descriptor.Path, path))
+            .OrderByDescending(r => r.Descriptor.Path.Length).Select(r => r.Descriptor.Path).FirstOrDefault();
+    }
+    private static bool ContainsPath(string root, string path)
+    {
+        root = MountOperationCoordinator.NormalizePath(root);
+        path = MountOperationCoordinator.NormalizePath(path);
+        return path == root || path.StartsWith(root == "/" ? "/" : root + "/", StringComparison.Ordinal);
     }
     // Called while the controller holds the configuration lock.
     public void ConfigurationChanged(MountDescriptor descriptor)
@@ -402,6 +413,8 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
     }
     private void Failed(Job job, MountOperationResult result, MountHealthState? state = null, bool incrementAttempt = true)
     {
+        logger.LogWarning("Mount task failed Backend={Backend} MountId={MountId} Action={Action} Trigger={Trigger} TaskId={TaskId} Kind={Kind} Error={Error}",
+            job.Key.Backend, job.Key.Id, job.Action, job.Trigger, job.TaskId, result.Kind, result.Error);
         lock (gate)
         {
             if (runtimes.TryGetValue(job.Key, out var r) && ReferenceEquals(r.ActiveJob, job))

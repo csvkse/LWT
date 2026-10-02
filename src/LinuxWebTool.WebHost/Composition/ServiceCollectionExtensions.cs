@@ -62,6 +62,7 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<RcloneMountService>();
         builder.Services.AddSingleton<MountBackendCatalog>();
         builder.Services.AddSingleton<MountStateMachineService>();
+        builder.Services.AddSingleton<SmbDirectoryReader>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<MountStateMachineService>());
 
         // FFmpeg 转码：预设 / 队列执行 / 监听自动转码

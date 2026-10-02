@@ -17,7 +17,9 @@ namespace LinuxWebTool.WebHost.Routes;
 public class FilesController(
     DataPaths dataPaths,
     IOperationLogger operationLogger,
-    MountStateMachineService mountHealth) : MinimalApi.ControllerBase
+    MountStateMachineService mountHealth,
+    SmbDirectoryReader smbDirectoryReader,
+    LinuxWebTool.Infrastructure.Persistence.SmbMountStore smbMountStore) : MinimalApi.ControllerBase
 {
     /// <summary>文本查看 / 编辑上限（2MB），超限提示下载而不是误读大文件。</summary>
     private const long MaxTextBytes = 2 * 1024 * 1024;
@@ -26,9 +28,28 @@ public class FilesController(
 
     /// <summary>列出目录内容。path 必须是存在的目录。</summary>
     [HttpGet]
-    public IResult List([FromQuery] string path)
+    public async Task<IResult> List([FromQuery] string path)
     {
         if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
+        var smbRoot = OperatingSystem.IsLinux() ? mountHealth.GetSmbMountRoot(normalized) : null;
+        // The first request can arrive before the scheduler has registered startup configurations.
+        if (OperatingSystem.IsLinux() && smbRoot is null)
+            smbRoot = (await smbMountStore.GetAllAsync()).Select(m => MountOperationCoordinator.NormalizePath(m.LocalPath))
+                .Where(root => normalized == root || normalized.StartsWith(root == "/" ? "/" : root + "/", StringComparison.Ordinal))
+                .OrderByDescending(root => root.Length).FirstOrDefault();
+        if (smbRoot is not null)
+        {
+            var result = await smbDirectoryReader.ReadAsync(smbRoot, normalized, HttpContext.TraceIdentifier, HttpContext.RequestAborted);
+            if (!result.Success)
+            {
+                mountHealth.RequestImmediateCheck(normalized);
+                return StatusCode(result.Busy ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status504GatewayTimeout,
+                    new MessageResponse(result.Error ?? "SMB 目录读取失败"));
+            }
+            var smbEntries = result.Entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Name, StringComparer.Ordinal)
+                .Select(e => Entry(normalized, e.Name, e.IsDirectory, e.Size, e.Modified)).ToList();
+            return Ok(new FileListResponse(normalized, Parent(normalized), Name(normalized), normalized == "/", smbEntries));
+        }
         if (OperatingSystem.IsWindows() && normalized == "/")
         {
             var roots = DriveInfo.GetDrives().Where(drive => Directory.Exists(drive.Name))
