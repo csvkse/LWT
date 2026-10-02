@@ -125,6 +125,14 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(System.Collections.Generic.List<LinuxWebTool.Contracts.Models.PresetImportItem>))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Terminal.TerminalSessionCreateRequest))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Terminal.TerminalSessionCreateResponse))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Terminal.TerminalSessionInfo))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Terminal.TerminalSessionInfo[]))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Terminal.TerminalSessionUpdateRequest))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Terminal.TerminalAttachmentTicket))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Terminal.TerminalOutputFrame))]
+[JsonSerializable(typeof(LinuxWebTool.Infrastructure.Terminal.TerminalCapabilities))]
+[JsonSerializable(typeof(LinuxWebTool.Infrastructure.Terminal.TerminalInstallStatus))]
+[JsonSerializable(typeof(LinuxWebTool.WebHost.Routes.TerminalDependencyInstallRequest))]
 public partial class AppJsonSerializerContext
  : JsonSerializerContext
 {

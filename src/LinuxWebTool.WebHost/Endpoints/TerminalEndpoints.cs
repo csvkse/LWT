@@ -23,7 +23,9 @@ public static class TerminalEndpoints
 
             // WebSocket 握手鉴权：优先检查已认证的用户，其次检查 Query Token
             var isAuthenticated = context.User?.Identity?.IsAuthenticated == true;
-            if (!isAuthenticated)
+            var ticket = context.Request.Query["ticket"].ToString();
+            if (!string.IsNullOrEmpty(ticket)) isAuthenticated = pty.ConsumeAttachmentTicket(sessionId, ticket);
+            if (!isAuthenticated && string.IsNullOrEmpty(ticket))
             {
                 var tokenQuery = context.Request.Query["token"].ToString();
                 if (!string.IsNullOrWhiteSpace(tokenQuery))
@@ -54,49 +56,33 @@ public static class TerminalEndpoints
                 return;
             }
 
+            var framed = context.Request.Query["v"] == "2";
+            var after = long.TryParse(context.Request.Query["after"], out var requestedSequence) ? Math.Max(0, requestedSequence) : 0;
+            IPtyAttachment? attached;
+            try { attached = pty.Attach(sessionId, after); }
+            catch (InvalidOperationException)
+            {
+                context.Response.StatusCode = StatusCodes.Status409Conflict;
+                return;
+            }
+            if (attached is null) { context.Response.StatusCode = StatusCodes.Status404NotFound; return; }
+            await using var attachment = attached;
             using var webSocket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
 
             var sendTask = Task.Run(async () =>
             {
-                var outBuffer = new byte[4096];
-                var charBuffer = new char[4096];
-                var decoder = Encoding.UTF8.GetDecoder();
                 try
                 {
-                    while (!cts.IsCancellationRequested && webSocket.State == WebSocketState.Open)
+                    await foreach (var frame in attachment.ReadAllAsync(cts.Token).ConfigureAwait(false))
                     {
-                        var read = await session.StandardOutput.ReadAsync(outBuffer.AsMemory(0, outBuffer.Length), cts.Token).ConfigureAwait(false);
-                        if (read <= 0)
-                        {
-                            if (session.HasExited)
-                            {
-                                cts.Cancel();
-                                break;
-                            }
-                            await Task.Delay(50, cts.Token).ConfigureAwait(false);
-                            continue;
-                        }
-
-                        var charCount = decoder.GetChars(outBuffer, 0, read, charBuffer, 0, flush: false);
-                        if (charCount > 0)
-                        {
-                            var textBytes = Encoding.UTF8.GetBytes(charBuffer, 0, charCount);
-                            await webSocket.SendAsync(textBytes.AsMemory(), WebSocketMessageType.Text, true, cts.Token).ConfigureAwait(false);
-                        }
-                    }
-
-                    if (webSocket.State == WebSocketState.Open)
-                    {
-                        var remainingChars = decoder.GetChars([], 0, 0, charBuffer, 0, flush: true);
-                        if (remainingChars > 0)
-                        {
-                            var textBytes = Encoding.UTF8.GetBytes(charBuffer, 0, remainingChars);
-                            await webSocket.SendAsync(textBytes.AsMemory(), WebSocketMessageType.Text, true, CancellationToken.None).ConfigureAwait(false);
-                        }
+                        var text = framed ? JsonSerializer.Serialize(frame, AppJsonSerializerContext.Default.TerminalOutputFrame)
+                            : frame.Truncated ? "\r\n[历史输出已截断]\r\n" : frame.Data;
+                        await webSocket.SendAsync(Encoding.UTF8.GetBytes(text).AsMemory(), WebSocketMessageType.Text, true, cts.Token).ConfigureAwait(false);
                     }
                 }
-                catch { }
+                catch (Exception ex) when (ex is IOException or OperationCanceledException or WebSocketException) { }
+                finally { cts.Cancel(); }
             }, cts.Token);
 
             var inBuffer = new byte[4096];
@@ -104,33 +90,44 @@ public static class TerminalEndpoints
             {
                 while (webSocket.State == WebSocketState.Open && !cts.IsCancellationRequested)
                 {
-                    var result = await webSocket.ReceiveAsync(inBuffer.AsMemory(0, inBuffer.Length), cts.Token).ConfigureAwait(false);
-                    if (result.MessageType == WebSocketMessageType.Close) break;
-                    if (result.Count > 0)
+                    using var message = new MemoryStream();
+                    ValueWebSocketReceiveResult result;
+                    do
                     {
-                        var text = Encoding.UTF8.GetString(inBuffer, 0, result.Count);
-                        if (text.StartsWith("{\"type\":\"resize\"", StringComparison.Ordinal))
+                        result = await webSocket.ReceiveAsync(inBuffer.AsMemory(), cts.Token).ConfigureAwait(false);
+                        if (result.MessageType == WebSocketMessageType.Close) break;
+                        if (result.MessageType != WebSocketMessageType.Text || message.Length + result.Count > 65536)
+                            throw new WebSocketException("终端输入消息无效或过大");
+                        message.Write(inBuffer, 0, result.Count);
+                    } while (!result.EndOfMessage);
+                    if (result.MessageType == WebSocketMessageType.Close) break;
+                    if (message.Length > 0)
+                    {
+                        var text = Encoding.UTF8.GetString(message.ToArray());
+                        if (framed || text.StartsWith("{\"type\":\"resize\"", StringComparison.Ordinal))
                         {
-                            try
+                            using var doc = JsonDocument.Parse(text);
+                            var root = doc.RootElement;
+                            var type = root.GetProperty("type").GetString();
+                            if (type == "resize")
                             {
-                                using var doc = JsonDocument.Parse(text);
-                                var root = doc.RootElement;
                                 var cols = root.GetProperty("cols").GetInt32();
                                 var rows = root.GetProperty("rows").GetInt32();
-                                await session.ResizeAsync(cols, rows, cts.Token).ConfigureAwait(false);
+                                if (cols < 1 || cols > 500 || rows < 1 || rows > 200) continue;
+                                await attachment.ResizeAsync(cols, rows, cts.Token).ConfigureAwait(false);
                                 continue;
                             }
-                            catch { }
+                            if (type != "input") continue;
+                            text = root.GetProperty("data").GetString() ?? "";
                         }
 
-                        ReadOnlyMemory<byte> toWrite = inBuffer.AsMemory(0, result.Count);
+                        ReadOnlyMemory<byte> toWrite = Encoding.UTF8.GetBytes(text);
                         if (OperatingSystem.IsWindows() && session is not WindowsConPtySession)
                         {
                             var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\n", "\r\n");
                             toWrite = Encoding.UTF8.GetBytes(normalized);
                         }
-                        await session.StandardInput.WriteAsync(toWrite, cts.Token).ConfigureAwait(false);
-                        await session.StandardInput.FlushAsync(cts.Token).ConfigureAwait(false);
+                        await attachment.WriteInputAsync(toWrite, cts.Token).ConfigureAwait(false);
                     }
                 }
             }
@@ -141,9 +138,11 @@ public static class TerminalEndpoints
                 await sendTask.ConfigureAwait(false);
                 if (webSocket.State == WebSocketState.Open)
                 {
-                    try { await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "closed", CancellationToken.None).ConfigureAwait(false); }
+                    try { await webSocket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "closed", CancellationToken.None).ConfigureAwait(false); }
                     catch { }
                 }
+                else if (webSocket.State == WebSocketState.CloseReceived)
+                    await webSocket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "detached", CancellationToken.None).ConfigureAwait(false);
             }
         });
 

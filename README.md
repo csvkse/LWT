@@ -9,7 +9,7 @@
 | 模块 | 能力 |
 |---|---|
 | 指令 | 保存 Linux 指令为功能；增删改查；分组 / 命名 / 置顶；一键执行（超时可配、输出截断 64KB、并发上限 4） |
-| **交互式终端** | 网页内置完整 PTY 交互式命令行终端（基于 xterm.js 与 WebSocket），支持多标签页、全屏、智能快捷指令、现代双行输入提示符与跨平台（Linux/Windows）原生 Shell 会话 |
+| **交互式终端** | 网页内置终端（xterm.js 与 WebSocket），支持多标签页、全屏和后台会话；Linux 提供原生 PTY，Windows 10 1809+ 使用 ConPTY，原生创建失败时回退管道并提示限制 |
 | **Bash 脚本** | 支持多行脚本类型：写临时文件 `bash script.sh $1 $2...` 执行（位置参数、引号感知拆分、不经二次 shell 解释）；Windows 开发机自动探测 Git Bash |
 | 快速执行 | 临时指令不保存直接跑，自动记入调用历史 |
 | 定时任务 | 引用已保存指令/脚本 + Cron（支持 Unix 5 段 / Quartz 6 段，自动归一化）；启停 / 立即运行 / 下次执行时间；常用 Cron 预设 |
@@ -380,6 +380,14 @@ USB / GPU 直通的 compose 节选（叠加到上方任一示例的对应位置�
 - **SFTP / S3 挂载**：同样需要 `rclone`、`/dev/fuse` 和挂载权限。SFTP 需要用户名及密码或容器内私钥文件，并须填入从可信渠道获得的完整 SSH 主机公钥；S3 支持 AWS 区域或自定义 HTTPS 端点、存储桶及访问密钥。两者共用 `data/rclone-config`（凭据文件 600 权限）和 `data/rclone-cache`（写缓存），卸载前请确认待上传文件已同步。健康检查每 30 秒直接读取远端目录，并检查本地挂载目录；连续三次本地失败且远端正常时尝试正常卸载重挂。详见 [SFTP/S3 配置说明](docs/rclone-sftp-s3.md)。
 - **媒体转码**：依赖 ffmpeg。Docker 镜像已内置；桌面 / systemd 部署需自行安装 ffmpeg（或 `Media__FfmpegPath` 指定路径），转码页顶部显示检测状态。媒体目录建议映射进容器以便网页直接访问（如 SMB 挂载 `/mnt/media` 或 `-v /media:/media:ro`）。
 
+### 终端与目录联动
+
+在文件管理器当前目录或文件夹菜单选择“在终端打开”，会创建以该目录为起点的新终端。Linux Bash 和 Windows PowerShell 返回提示符后会报告当前目录；终端中的“打开当前目录”会先验证文件管理器能访问该目录。Windows 文件管理器首页列出可访问盘符，支持盘符绝对路径及 UNC 共享路径；系统根目录、程序数据目录和 Windows junction/符号链接路径禁止修改。
+
+终端默认以后台会话运行。关闭标签或浏览器断线只断开连接；已输入的会话可在“后台终端”列表接回，重新连接保持同一进程。未输入且空闲的会话断开超过 2 分钟后自动清理，显式“结束会话”会终止进程。后台输出持续读取并保留最近 1 MiB，较早输出截断时页面会提示；全屏程序恢复可能需要重新绘制。Web 服务或容器停止会结束会话。
+
+Linux 容器镜像内置原生 PTY 支持和 tmux。tmux 目前仅用于依赖探测，安装它不会让终端跨 Web 服务重启存活；跨重启续跑需要另行部署独立会话宿主。Linux 主机可在终端页面检测系统依赖，具备系统安装权限时可主动安装 tmux。Docker 不在网页运行时安装系统包。Windows 原生 ConPTY 无需额外安装终端依赖；后台列表按会话显示实际管道回退状态，回退模式的全屏程序、窗口缩放及 Ctrl-C 能力受限。
+
 
 ## 开发约定（门禁强制）
 
@@ -406,6 +414,10 @@ dotnet test LinuxWebTool.slnx -c Release # 运行全部单元/架构/集成测�
 | `Shell:MaxOutputBytes` | 65536 | stdout/stderr 截断上限 |
 | `Shell:MaxConcurrent` | 4 | 并发执行上限（排队等待） |
 | `Shell:WorkingDirectory` | 空 | 指令执行工作目录（空=继承进程目录） |
+| `Terminal:MaxSessions` | 16 | 同时保留的终端会话上限 |
+| `Terminal:BufferBytes` | 1048576 | 每个会话的最近输出缓存字节数 |
+| `Terminal:UnusedGraceSeconds` | 120 | 未输入且空闲的终端断开后的清理宽限秒数 |
+| `Terminal:ExitedRetentionSeconds` | 300 | 已退出会话在列表中保留的秒数 |
 | `Jwt:ExpireHours` | 12 | 登录有效期 |
 | `FileLog:Directory` | `logs` | 日志目录（相对路径锚定到数据目录） |
 | `Logging:LogFile:LinuxWebTool` | Debug | 调试日志开关（写入 debug-*.txt） |

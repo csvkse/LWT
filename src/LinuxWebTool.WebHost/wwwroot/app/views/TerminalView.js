@@ -1,10 +1,11 @@
-import { defineComponent, ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { defineComponent, ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { Terminal } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { auth } from '../store/auth.js';
-import { http } from '../api/client.js';
+import { http, readTerminalTabs, saveTerminalTabs } from '../api/client.js';
 import { API } from '../config.js';
 import { toast } from '../store/toast.js';
+import { openConfirm } from '../store/modal.js';
 
 // 参考 AITool 优化：Windows Terminal Campbell 经典高对比度配色
 // 解决 Windows PowerShell / CMD 默认 ANSI 颜色在暗色背景下对比度不足与发虚问题
@@ -87,13 +88,103 @@ const WINDOWS_COMMANDS = [
 export default defineComponent({
   name: 'TerminalView',
   setup() {
+    const route = useRoute();
+    const router = useRouter();
+    const requestedDirectory = () => typeof route.query.cwd === 'string' ? route.query.cwd : undefined;
+    const directoryRequest = () => typeof route.query.open === 'string' ? route.query.open : requestedDirectory();
+    const initialTabId = 'tab-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     const isFullscreen = ref(false);
     const terminalHost = ref(null);
     const activeCommandSet = ref(isWindowsClient ? 'windows' : 'linux');
     const tabs = ref([
-      { id: 'tab-1', title: '终端 1', sessionId: '', isConnected: false, awaitingInput: null },
+      { id: initialTabId, title: '终端 1', sessionId: '', isConnected: false, awaitingInput: null, workingDirectory: requestedDirectory(), directoryRequest: directoryRequest() },
     ]);
-    const activeTabId = ref('tab-1');
+    const activeTabId = ref(initialTabId);
+    const backgroundSessions = ref([]);
+    const showBackground = ref(false);
+    const listBusy = ref(false);
+    const listError = ref('');
+    const capabilities = ref(null);
+    const installStatus = ref({ state: 'Idle', log: '' });
+    const supportBusy = ref(false);
+    const sessionBusy = ref(false);
+    const renameDrafts = ref({});
+    let disposed = false;
+    let listTimer;
+
+    async function refreshSessions() {
+      if (listBusy.value || disposed) return;
+      listBusy.value = true;
+      try {
+        const result = await http(API.terminal.sessions, { method: 'GET' });
+        if (disposed) return;
+        if (result.ok && Array.isArray(result.data)) {
+          backgroundSessions.value = result.data;
+          for (const session of result.data) renameDrafts.value[session.sessionId] ??= session.name;
+          for (const tab of tabs.value) {
+            const session = result.data.find(s => s.sessionId === tab.sessionId);
+            tab.currentWorkingDirectory = session?.workingDirectory;
+          }
+          listError.value = '';
+        } else listError.value = result.message || '会话列表加载失败';
+      } finally { listBusy.value = false; }
+    }
+
+    function rememberTabs() { saveTerminalTabs(tabs.value); }
+
+    async function refreshSupport() {
+      if (supportBusy.value || disposed) return;
+      supportBusy.value = true;
+      try {
+        const support = await http(API.terminal.support, { method: 'GET' });
+        const installation = await http(API.terminal.installation, { method: 'GET' });
+        if (support.ok) {
+          capabilities.value = support.data;
+          activeCommandSet.value = support.data.platform === 'Windows' ? 'windows' : 'linux';
+        }
+        if (installation.ok) installStatus.value = installation.data;
+      } finally { supportBusy.value = false; }
+    }
+
+    function installDependencies() {
+      openConfirm({ title: '安装终端依赖', message: '将使用系统包管理器安装 tmux。需要系统安装权限与网络，安装后会验证分离和重新连接。安装 tmux 不会自动启用跨服务重启恢复。', confirmText: '安装',
+        onConfirm: async () => {
+          const result = await http(API.terminal.install, { method: 'POST', body: { confirm: true } });
+          if (result.ok) installStatus.value = result.data;
+          await refreshSupport();
+        },
+      });
+    }
+
+    async function openCurrentDirectory() {
+      const id = activeTab.value?.sessionId;
+      if (!id) return;
+      const details = await http(API.terminal.session(id), { method: 'GET' });
+      const path = details.data?.workingDirectory;
+      if (!details.ok) return;
+      if (!path) { toast.info('当前目录尚未确认，请等待本地 shell 返回提示符'); return; }
+      const result = await http(API.files.list, { method: 'GET', params: { path } });
+      if (result.ok) router.push({ path: '/files', query: { path: result.data.path } });
+      else toast.error(result.message || '目录无法访问');
+    }
+
+    async function renameSession(session) {
+      if (sessionBusy.value) return;
+      sessionBusy.value = true;
+      try {
+        const name = renameDrafts.value[session.sessionId]?.trim();
+        const result = await http(API.terminal.session(session.sessionId), { method: 'PATCH', body: { name } });
+        if (result.ok) {
+          const tab = tabs.value.find(t => t.sessionId === session.sessionId);
+          if (tab) tab.title = name;
+          rememberTabs();
+          await refreshSessions();
+        }
+      } finally { sessionBusy.value = false; }
+    }
+    function sendInput(runtime, data) {
+      if (runtime?.ws?.readyState === WebSocket.OPEN) runtime.ws.send(JSON.stringify({ type: 'input', data }));
+    }
 
     // 保存终端运行时的非响应式对象
     // tabRuntimes: Map<string, { term, fitAddon, ws, sessionId, containerEl, resizeObserver, awaitingTimer }>
@@ -106,13 +197,6 @@ export default defineComponent({
     const displayedCommands = computed(() => {
       return activeCommandSet.value === 'windows' ? WINDOWS_COMMANDS : LINUX_COMMANDS;
     });
-
-    async function closeSessionApi(id) {
-      if (!id) return;
-      try {
-        await http(API.terminal.session(id), { method: 'DELETE' });
-      } catch { }
-    }
 
     function createTabRuntime(tabId) {
       if (tabRuntimes.has(tabId)) return tabRuntimes.get(tabId);
@@ -175,12 +259,15 @@ export default defineComponent({
         resizeObserver: null,
         awaitingTimer: null,
         isConnecting: false,
+        lastSequence: 0,
+        retries: 0,
+        reconnectTimer: null,
       };
 
       // 单例绑定用户键盘输入，避免重连时重复注册导致按键重复发送
       term.onData((dataChunk) => {
         if (runtime.ws && runtime.ws.readyState === WebSocket.OPEN) {
-          runtime.ws.send(dataChunk);
+          sendInput(runtime, dataChunk);
         }
       });
 
@@ -197,31 +284,40 @@ export default defineComponent({
 
       try {
         if (runtime.ws) {
-          try { runtime.ws.close(); } catch { }
+          const previous = runtime.ws;
           runtime.ws = null;
+          if (previous.readyState !== WebSocket.CLOSED) await new Promise(resolve => {
+            const timeout = setTimeout(resolve, 2000);
+            previous.addEventListener('close', () => { clearTimeout(timeout); resolve(); }, { once: true });
+            try { previous.close(); } catch { clearTimeout(timeout); resolve(); }
+          });
         }
-        if (runtime.sessionId) {
-          closeSessionApi(runtime.sessionId);
-          runtime.sessionId = '';
-        }
+        if (runtime.reconnectTimer) clearTimeout(runtime.reconnectTimer);
+        runtime.sessionId ||= tab.sessionId;
 
         tab.isConnected = false;
         tab.awaitingInput = null;
-        runtime.term.writeln('\x1b[38;2;56;189;248m[正在创建终端会话 (PTY Engine)...]\x1b[0m');
+        runtime.term.writeln('\x1b[38;2;56;189;248m[正在连接后台终端...]\x1b[0m');
 
         const cols = runtime.term.cols > 0 ? runtime.term.cols : (isFullscreen.value ? 120 : 90);
         const rows = runtime.term.rows > 0 ? runtime.term.rows : (isFullscreen.value ? 36 : 28);
 
-        const res = await http(API.terminal.sessions, {
+        const res = runtime.sessionId ? await http(API.terminal.session(runtime.sessionId), { method: 'GET' }) : await http(API.terminal.sessions, {
           method: 'POST',
-          body: { columns: cols, rows },
+          body: { columns: cols, rows, workingDirectory: tab.workingDirectory },
         });
 
         if (!res.ok || !res.data) {
-          throw new Error(res.message || '创建终端会话失败');
+          runtime.retries = 3;
+          throw new Error(res.message || '会话不存在或服务已重启，请新建终端');
         }
+        if (disposed || !tabRuntimes.has(tabId)) return;
 
         const data = res.data;
+        if (data.state === 'Exited') {
+          runtime.retries = 3;
+          throw new Error('会话已退出，退出码：' + (data.exitCode ?? '未知'));
+        }
         const sessionId = data?.sessionId || data?.SessionId;
         if (!sessionId) {
           throw new Error('未获取到有效的终端会话 ID，请确认服务已更新');
@@ -229,9 +325,14 @@ export default defineComponent({
 
         runtime.sessionId = sessionId;
         tab.sessionId = sessionId;
+        tab.workingDirectory = data.workingDirectory;
 
-        const token = auth.token;
-        const wsUrl = API.terminal.ws(runtime.sessionId, token);
+        rememberTabs();
+        const ticketResponse = await http(API.terminal.attachment(runtime.sessionId), { method: 'POST' });
+        if (!ticketResponse.ok || !ticketResponse.data?.ticket) throw new Error(ticketResponse.message || '无法取得连接凭据');
+        if (disposed || !tabRuntimes.has(tabId)) return;
+        await new Promise(resolve => runtime.term.write('', resolve));
+        const wsUrl = API.terminal.ws(runtime.sessionId, ticketResponse.data.ticket, runtime.lastSequence);
 
         const ws = new WebSocket(wsUrl);
         runtime.ws = ws;
@@ -239,19 +340,27 @@ export default defineComponent({
         ws.onopen = () => {
           if (runtime.ws !== ws) return;
           tab.isConnected = true;
+          runtime.retries = 0;
           runtime.term.writeln('\x1b[38;2;16;185;129m[终端已连接成功]\x1b[0m');
           if (data.workingDirectory) {
             runtime.term.writeln(`\x1b[90m[工作目录: ${data.workingDirectory}]\x1b[0m\r\n`);
           }
           nextTick(() => {
-            try { runtime.fitAddon.fit(); } catch { }
+            try { runtime.fitAddon.fit(); } catch { /* The terminal can be hidden during navigation. */ }
+            ws.send(JSON.stringify({ type: 'resize', cols: runtime.term.cols, rows: runtime.term.rows }));
             runtime.term.focus();
           });
+          refreshSessions();
         };
 
         ws.onmessage = (event) => {
           if (runtime.ws !== ws) return;
-          runtime.term.write(event.data);
+          let frame;
+          try { frame = JSON.parse(event.data); } catch { return; }
+          if (frame.truncated) runtime.term.writeln('\r\n\x1b[33m[较早的输出已截断，全屏程序可能需要重新绘制]\x1b[0m');
+          if (typeof frame.data === 'string' && frame.sequence > runtime.lastSequence) {
+            runtime.term.write(frame.data, () => { runtime.lastSequence = frame.sequence; });
+          }
 
           // 防抖检测交互式提示输入（如确认、密码、[y/n]等）
           if (runtime.awaitingTimer) clearTimeout(runtime.awaitingTimer);
@@ -266,6 +375,11 @@ export default defineComponent({
           tab.isConnected = false;
           tab.awaitingInput = null;
           runtime.term.writeln('\r\n\x1b[38;2;244;63;94m[终端会话已断开]\x1b[0m');
+          refreshSessions();
+          if (!disposed && runtime.retries < 3 && tabRuntimes.has(tabId)) {
+            const delay = 1000 * (2 ** runtime.retries++);
+            runtime.reconnectTimer = setTimeout(() => initTabSession(tabId), delay);
+          }
         };
 
         ws.onerror = () => {
@@ -303,7 +417,7 @@ export default defineComponent({
                 rows: runtime.term.rows,
               }));
             }
-          } catch { }
+          } catch { /* Ignore resize during terminal disposal. */ }
         });
         runtime.resizeObserver.observe(runtime.containerEl);
       }
@@ -313,7 +427,7 @@ export default defineComponent({
       }
 
       nextTick(() => {
-        try { runtime.fitAddon.fit(); } catch { }
+        try { runtime.fitAddon.fit(); } catch { /* A hidden tab has no measurable dimensions. */ }
         runtime.term.focus();
       });
 
@@ -327,7 +441,7 @@ export default defineComponent({
       mountTab(tabId);
     }
 
-    function addTab() {
+    function addTab(workingDirectory) {
       const nextNum = tabs.value.length + 1;
       const newId = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       tabs.value.push({
@@ -336,6 +450,8 @@ export default defineComponent({
         sessionId: '',
         isConnected: false,
         awaitingInput: null,
+        workingDirectory,
+        directoryRequest: workingDirectory === undefined ? undefined : directoryRequest(),
       });
       switchTab(newId);
     }
@@ -347,26 +463,26 @@ export default defineComponent({
 
       const runtime = tabRuntimes.get(tabId);
       if (runtime) {
+        tabRuntimes.delete(tabId);
+        if (runtime.reconnectTimer) clearTimeout(runtime.reconnectTimer);
+        if (runtime.awaitingTimer) clearTimeout(runtime.awaitingTimer);
         if (runtime.ws) {
-          try { runtime.ws.close(); } catch { }
-        }
-        if (runtime.sessionId) {
-          closeSessionApi(runtime.sessionId);
+          try { runtime.ws.close(); } catch { /* Detach is idempotent. */ }
         }
         if (runtime.resizeObserver) {
           runtime.resizeObserver.disconnect();
         }
-        try { runtime.term.dispose(); } catch { }
+        try { runtime.term.dispose(); } catch { /* The terminal may already be disposed. */ }
         if (runtime.containerEl && runtime.containerEl.parentElement) {
           runtime.containerEl.parentElement.removeChild(runtime.containerEl);
         }
-        tabRuntimes.delete(tabId);
       }
 
       tabs.value.splice(index, 1);
+      rememberTabs();
 
       if (tabs.value.length === 0) {
-        addTab();
+        activeTabId.value = '';
       } else if (activeTabId.value === tabId) {
         const nextActive = tabs.value[Math.max(0, index - 1)];
         switchTab(nextActive.id);
@@ -376,7 +492,7 @@ export default defineComponent({
     function sendCtrlC() {
       const runtime = tabRuntimes.get(activeTabId.value);
       if (!runtime || !runtime.ws || runtime.ws.readyState !== WebSocket.OPEN) return;
-      runtime.ws.send('\x03');
+      sendInput(runtime, '\x03');
     }
 
     function clearOutput() {
@@ -389,7 +505,8 @@ export default defineComponent({
     function reconnectCurrent() {
       const runtime = tabRuntimes.get(activeTabId.value);
       if (runtime) {
-        runtime.isConnecting = false;
+        if (runtime.isConnecting) return;
+        runtime.retries = 0;
       }
       initTabSession(activeTabId.value);
     }
@@ -415,7 +532,7 @@ export default defineComponent({
                 rows: runtime.term.rows,
               }));
             }
-          } catch { }
+          } catch { /* Ignore resize during fullscreen transitions. */ }
           runtime.term.focus();
         }
       });
@@ -427,7 +544,7 @@ export default defineComponent({
         toast.warning('当前终端未连接，无法执行快捷命令');
         return;
       }
-      runtime.ws.send(cmd);
+      sendInput(runtime, cmd);
       runtime.term.focus();
     }
 
@@ -435,22 +552,75 @@ export default defineComponent({
       activeCommandSet.value = activeCommandSet.value === 'windows' ? 'linux' : 'windows';
     }
 
-    onMounted(() => {
+    function attachBackground(session) {
+      const existing = tabs.value.find(t => t.sessionId === session.sessionId);
+      if (existing) { switchTab(existing.id); return; }
+      const id = 'tab-' + session.sessionId;
+      tabs.value.push({ id, title: session.name, sessionId: session.sessionId, workingDirectory: session.workingDirectory, isConnected: false, awaitingInput: null });
+      rememberTabs();
+      switchTab(id);
+    }
+
+    function endSession(sessionId, tabId) {
+      openConfirm({ title: '结束终端', message: '将终止这个终端及其中的任务，是否继续？', confirmText: '结束会话', danger: true,
+        onConfirm: async () => {
+          const result = await http(API.terminal.session(sessionId), { method: 'DELETE' });
+          if (result.ok || result.status === 404) {
+            const tab = tabs.value.find(t => t.sessionId === sessionId);
+            if (tab) closeTab(tabId || tab.id);
+            await refreshSessions();
+          }
+        },
+      });
+    }
+
+    async function retainSession(session) {
+      if (sessionBusy.value) return;
+      sessionBusy.value = true;
+      try {
+        const result = await http(API.terminal.session(session.sessionId), { method: 'PATCH', body: { keepAlive: !session.keepAlive } });
+        if (result.ok) await refreshSessions();
+      } finally { sessionBusy.value = false; }
+    }
+
+    function stateText(state) {
+      return { RunningAttached: '已连接', RunningDetached: '后台运行', Exited: '已退出' }[state] || state;
+    }
+
+    onMounted(async () => {
+      const saved = readTerminalTabs().map(t => ({ ...t, isConnected: false, awaitingInput: null }));
+      if (saved.length) {
+        const initial = tabs.value[0];
+        const restored = saved.find(tab => tab.directoryRequest === directoryRequest());
+        const restoreOnly = requestedDirectory() === undefined || restored;
+        if (!restoreOnly) initial.title = '终端 ' + (saved.length + 1);
+        tabs.value = restoreOnly ? saved : [...saved, initial];
+        activeTabId.value = restoreOnly ? (restored || saved[0]).id : initial.id;
+      }
       mountTab(activeTabId.value);
+      await refreshSessions();
+      await refreshSupport();
+      if (!disposed) listTimer = setInterval(() => { refreshSessions(); if (installStatus.value.state === 'Running') refreshSupport(); }, 5000);
+    });
+
+    watch(() => [route.query.cwd, route.query.open], () => {
+      if (requestedDirectory() !== undefined) addTab(requestedDirectory());
     });
 
     onBeforeUnmount(() => {
+      disposed = true;
+      rememberTabs();
+      clearInterval(listTimer);
       for (const [, runtime] of tabRuntimes.entries()) {
+        if (runtime.reconnectTimer) clearTimeout(runtime.reconnectTimer);
+        if (runtime.awaitingTimer) clearTimeout(runtime.awaitingTimer);
         if (runtime.ws) {
-          try { runtime.ws.close(); } catch { }
-        }
-        if (runtime.sessionId) {
-          closeSessionApi(runtime.sessionId);
+          try { runtime.ws.close(); } catch { /* The socket may already be closed. */ }
         }
         if (runtime.resizeObserver) {
           runtime.resizeObserver.disconnect();
         }
-        try { runtime.term.dispose(); } catch { }
+        try { runtime.term.dispose(); } catch { /* Navigation can race terminal disposal. */ }
       }
       tabRuntimes.clear();
     });
@@ -473,6 +643,10 @@ export default defineComponent({
       toggleFullscreen,
       runQuickCommand,
       toggleCommandSet,
+      backgroundSessions, showBackground, listBusy, listError, refreshSessions,
+      attachBackground, endSession, retainSession, stateText,
+      capabilities, installStatus, supportBusy, refreshSupport, installDependencies, openCurrentDirectory, renameSession,
+      sessionBusy, renameDrafts,
     };
   },
   template: `
@@ -520,9 +694,13 @@ export default defineComponent({
 
         <!-- 操作按钮组 -->
         <div class="flex items-center gap-1.5 shrink-0">
+          <button type="button" class="btn btn-xs" @click="showBackground = !showBackground; refreshSessions()">后台终端 ({{ backgroundSessions.length }})</button>
+          <button v-if="activeTab && activeTab.currentWorkingDirectory" type="button" class="btn btn-xs" @click="openCurrentDirectory()" :title="activeTab.currentWorkingDirectory">打开当前目录</button>
+          <button v-if="activeTab && activeTab.sessionId" type="button" class="btn btn-xs btn-danger" @click="endSession(activeTab.sessionId, activeTab.id)">结束会话</button>
+          <button v-if="activeTab && activeTab.isConnected" type="button" class="btn btn-xs" @click="closeTab(activeTab.id)">仅断开</button>
           <button type="button" class="btn btn-xs" @click="sendCtrlC()" title="发送 SIGINT 中断信号">^C</button>
           <button type="button" class="btn btn-xs" @click="clearOutput()" title="清屏">清屏</button>
-          <button type="button" class="btn btn-xs" @click="reconnectCurrent()" title="重新建立当前终端会话">重连</button>
+          <button type="button" class="btn btn-xs" :disabled="!activeTab" @click="reconnectCurrent()" title="接回同一个终端会话">重连</button>
           <button
             type="button"
             class="btn btn-xs"
@@ -532,6 +710,37 @@ export default defineComponent({
             {{ isFullscreen ? '还原窗口' : '全屏' }}
           </button>
         </div>
+      </div>
+
+      <div v-if="showBackground" class="panel p-3 space-y-2">
+        <div class="flex justify-between items-center"><span>后台终端</span><button class="btn btn-xs" :disabled="listBusy" @click="refreshSessions()">{{ listBusy ? '加载中…' : '刷新' }}</button></div>
+        <p class="text-xs text-slate-400">已使用终端断开后继续运行；未使用且空闲的终端会自动清理。服务或容器重启后会话结束。</p>
+        <p v-if="listError" class="text-xs text-rose-400">{{ listError }}</p>
+        <p v-if="!backgroundSessions.length" class="text-xs text-slate-400">没有后台会话</p>
+        <div v-for="session in backgroundSessions" :key="session.sessionId" class="flex flex-wrap items-center gap-2 border-t border-slate-700 py-2 text-xs">
+          <input class="input !w-36 !text-xs" v-model="renameDrafts[session.sessionId]" maxlength="80" aria-label="会话名称" @keyup.enter="renameSession(session)" />
+          <button class="btn btn-xs" :disabled="sessionBusy" @click="renameSession(session)">保存名称</button>
+          <span>{{ stateText(session.state) }} · PID {{ session.processId }}</span>
+          <span v-if="!session.nativePty" class="text-amber-300">管道回退 · 全屏与中断受限</span>
+          <span class="font-mono break-all text-slate-400">{{ session.workingDirectory || session.initialWorkingDirectory || '目录未知' }}{{ session.workingDirectory ? '' : '（初始目录）' }}</span>
+          <span>创建 {{ new Date(session.createdAt).toLocaleString() }} · 最近输入 {{ session.lastInputAt ? new Date(session.lastInputAt).toLocaleString() : '未输入' }}</span>
+          <span v-if="session.state === 'Exited'">退出码 {{ session.exitCode ?? '未知' }}</span>
+          <span v-if="session.bufferTruncated" class="text-amber-300">历史输出已截断</span>
+          <button class="btn btn-xs" :disabled="session.state === 'Exited'" @click="attachBackground(session)">重新连接</button>
+          <button class="btn btn-xs" :disabled="sessionBusy || session.state === 'Exited'" @click="retainSession(session)">{{ session.keepAlive ? '取消保留' : '保留' }}</button>
+          <button class="btn btn-xs btn-danger" @click="endSession(session.sessionId)">结束</button>
+        </div>
+      </div>
+
+      <div v-if="capabilities" class="panel p-3 text-xs space-y-2">
+        <div class="flex flex-wrap items-center gap-2"><span>终端环境 · {{ capabilities.platform }} · {{ capabilities.nativePty ? '完整交互' : '交互受限' }}</span>
+          <button class="btn btn-xs" :disabled="supportBusy" @click="refreshSupport()">检测环境</button>
+          <button v-if="capabilities.canInstall" class="btn btn-xs" :disabled="installStatus.state === 'Running'" @click="installDependencies()">{{ installStatus.state === 'Running' ? '安装中…' : '安装 tmux' }}</button>
+          <span v-if="capabilities.tmuxInstalled">tmux 已安装</span>
+        </div>
+        <p class="text-slate-400">{{ capabilities.message }}</p>
+        <code v-if="!capabilities.tmuxInstalled && capabilities.installCommand && !capabilities.container" class="block break-all">{{ capabilities.installCommand }}</code>
+        <pre v-if="installStatus.log" class="max-h-40 overflow-auto whitespace-pre-wrap">{{ installStatus.state }} · {{ installStatus.log }}</pre>
       </div>
 
       <!-- 快捷常用指令按钮栏（根据宿主环境可切换 Windows/Linux 指令） -->

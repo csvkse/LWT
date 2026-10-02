@@ -75,11 +75,15 @@ export const API = {
     upload: () => '/Files/Upload',
   },
   terminal: {
+    support: '/Terminal/Support',
+    installation: '/Terminal/Dependencies/Installation',
+    install: '/Terminal/Dependencies/Install',
     sessions: '/Terminal/Sessions',
     session: (id) => '/Terminal/Sessions/' + encodeURIComponent(id),
-    ws: (id, token) => {
+    attachment: (id) => '/Terminal/Sessions/' + encodeURIComponent(id) + '/Attachment',
+    ws: (id, ticket, after = 0) => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const query = token ? '?token=' + encodeURIComponent(token) : '';
+      const query = '?v=2&ticket=' + encodeURIComponent(ticket) + '&after=' + encodeURIComponent(after);
       return protocol + '//' + window.location.host + '/api/terminal/ws/' + encodeURIComponent(id) + query;
     },
   },

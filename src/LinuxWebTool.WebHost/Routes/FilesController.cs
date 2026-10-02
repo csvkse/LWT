@@ -8,7 +8,7 @@ namespace LinuxWebTool.WebHost.Routes;
 
 /// <summary>
 /// 文件管理器：浏览系统文件夹 / 文件，常见文本文件的查看 / 编辑与增删改查。
-/// 仅 Linux 绝对路径；破坏性操作（删除 / 重命名 / 新建）守卫根目录与程序数据目录。
+/// 支持本机绝对路径；破坏性操作守卫系统根目录与程序数据目录。
 /// 与「任意指令执行」同属管理员威胁模型，页面不暴露公网即可。
 /// </summary>
 [ApiController]
@@ -30,7 +30,13 @@ public class FilesController(
     [HttpGet]
     public IResult List([FromQuery] string path)
     {
-        var normalized = NormalizePosix(path);
+        if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
+        if (OperatingSystem.IsWindows() && normalized == "/")
+        {
+            var roots = DriveInfo.GetDrives().Where(drive => Directory.Exists(drive.Name))
+                .Select(drive => new FileEntryResponse(drive.Name.Replace('\\', '/'), drive.Name.Replace('\\', '/'), true, 0, DateTime.MinValue, "", false)).ToList();
+            return Ok(new FileListResponse("/", null, "磁盘", true, roots, true));
+        }
         if (!Directory.Exists(normalized))
         {
             mountHealth.RequestImmediateCheck(normalized);
@@ -82,7 +88,7 @@ public class FilesController(
         name, Join(dir, name), isDirectory, isDirectory ? 0 : size ?? 0, modified,
         isDirectory ? string.Empty : Path.GetExtension(name), !isDirectory && IsTextExtension(name));
 
-    private static string Join(string dir, string name) => dir == "/" ? "/" + name : dir + "/" + name;
+    private static string Join(string dir, string name) => FileBrowserPath.Join(dir, name);
 
     // ---------- 文本读取 / 写入 ----------
 
@@ -90,7 +96,7 @@ public class FilesController(
     [HttpGet("Content")]
     public async Task<IResult> ReadContent([FromQuery] string path)
     {
-        var normalized = NormalizePosix(path);
+        if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
         if (!System.IO.File.Exists(normalized))
         {
             return NotFound(new MessageResponse($"文件不存在：{normalized}"));
@@ -121,7 +127,7 @@ public class FilesController(
     [HttpPost("Content")]
     public async Task<IResult> WriteContent([FromBody] SaveTextRequest request)
     {
-        var normalized = NormalizePosix(request.Path);
+        if (!TryNormalize(request.Path, out var normalized, out var failure)) return failure!;
         if (IsProtected(normalized))
         {
             return BadRequest(new MessageResponse("程序数据目录禁止写入"));
@@ -147,7 +153,7 @@ public class FilesController(
     [HttpPost("Mkdir")]
     public async Task<IResult> Mkdir([FromBody] PathRequest request)
     {
-        var normalized = NormalizePosix(request.Path);
+        if (!TryNormalize(request.Path, out var normalized, out var failure)) return failure!;
         if (IsProtected(normalized))
         {
             return BadRequest(new MessageResponse("程序数据目录禁止写入"));
@@ -173,9 +179,9 @@ public class FilesController(
     [HttpPost("Rename")]
     public async Task<IResult> Rename([FromBody] RenameRequest request)
     {
-        var from = NormalizePosix(request.From);
-        var to = NormalizePosix(request.To);
-        if (from == "/" || to == "/")
+        if (!TryNormalize(request.From, out var from, out var failure)) return failure!;
+        if (!TryNormalize(request.To, out var to, out failure)) return failure!;
+        if (FileBrowserPath.IsRoot(from) || FileBrowserPath.IsRoot(to))
         {
             return BadRequest(new MessageResponse("不能对根目录进行操作"));
         }
@@ -206,8 +212,8 @@ public class FilesController(
     [HttpDelete]
     public async Task<IResult> Delete([FromQuery] string path, [FromQuery] bool recursive = false)
     {
-        var normalized = NormalizePosix(path);
-        if (normalized == "/")
+        if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
+        if (FileBrowserPath.IsRoot(normalized))
         {
             return BadRequest(new MessageResponse("不能删除根目录"));
         }
@@ -240,11 +246,12 @@ public class FilesController(
     [HttpPost("Upload")]
     public async Task<IResult> Upload([FromQuery] string path, IFormFile? file)
     {
-        var normalized = NormalizePosix(path);
+        if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
         if (!Directory.Exists(normalized))
         {
             return BadRequest(new MessageResponse($"目录不存在：{normalized}"));
         }
+        if (IsProtected(normalized)) return BadRequest(new MessageResponse("程序数据目录禁止上传"));
         if (file is null || file.Length == 0)
         {
             return BadRequest(new MessageResponse("未选择文件"));
@@ -269,18 +276,9 @@ public class FilesController(
 
     private bool IsProtected(string normalized)
     {
-        // 本功能面向 Linux；Windows 开发机上 data 根为盘符路径，POSIX 归一化不适用，跳过保护（仅调试用）。
-        var dataRoot = dataPaths.Root.Replace('\\', '/');
-        if (!dataRoot.StartsWith("/", StringComparison.Ordinal))
-        {
-            return false;
-        }
-        dataRoot = NormalizePosix(dataRoot);
-        if (dataRoot == "/" || dataRoot.Length == 0)
-        {
-            return false;
-        }
-        return normalized == dataRoot || normalized.StartsWith(dataRoot + "/", StringComparison.Ordinal);
+        var dataRoot = FileBrowserPath.Normalize(dataPaths.Root);
+        return FileBrowserPath.IsRoot(normalized) || FileBrowserPath.IsWithin(normalized, dataRoot)
+            || FileBrowserPath.IsWithin(dataRoot, normalized) || FileBrowserPath.HasReparsePoint(normalized);
     }
 
     private static string UniquePath(string dir, string fileName)
@@ -303,53 +301,17 @@ public class FilesController(
         throw new IOException("重名文件过多，无法生成唯一文件名");
     }
 
-    /// <summary>POSIX 风格归一化：\\→/，折叠 . 与 ..，保证单斜杠前缀并去尾斜杠（根目录保留 /）。</summary>
-    private static string NormalizePosix(string? input)
+    private bool TryNormalize(string input, out string path, out IResult? failure)
     {
-        if (string.IsNullOrWhiteSpace(input))
-        {
-            throw new ArgumentException("路径不能为空");
-        }
-        var p = input.Trim().Replace('\\', '/');
-        var segments = new List<string>();
-        foreach (var seg in p.Split('/', StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (seg == ".")
-            {
-                continue;
-            }
-            if (seg == "..")
-            {
-                if (segments.Count > 0) segments.RemoveAt(segments.Count - 1);
-                continue;
-            }
-            segments.Add(seg);
-        }
-        return "/" + string.Join('/', segments);
+        try { path = FileBrowserPath.Normalize(input); failure = null; return true; }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        { path = ""; failure = BadRequest(new MessageResponse(ex.Message)); return false; }
     }
 
     /// <summary>取上一级路径；根目录返回 null。/a/b → /a；/a → /。</summary>
-    private static string? Parent(string normalized)
-    {
-        if (normalized == "/")
-        {
-            return null;
-        }
-        var trimmed = normalized.TrimEnd('/');
-        var idx = trimmed.LastIndexOf('/');
-        return idx <= 0 ? "/" : trimmed[..idx];
-    }
+    private static string? Parent(string normalized) => FileBrowserPath.Parent(normalized);
 
-    private static string Name(string normalized)
-    {
-        var trimmed = normalized.TrimEnd('/');
-        if (trimmed.Length == 0)
-        {
-            return "/";
-        }
-        var idx = trimmed.LastIndexOf('/');
-        return idx < 0 ? trimmed : trimmed[(idx + 1)..];
-    }
+    private static string Name(string normalized) => FileBrowserPath.Name(normalized);
 
     private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
     {

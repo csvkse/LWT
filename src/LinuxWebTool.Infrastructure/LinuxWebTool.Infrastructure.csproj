@@ -25,4 +25,14 @@
     <InternalsVisibleTo Include="LinuxWebTool.IntegrationTests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="Terminal/shell/terminal-bashrc.sh" Link="terminal-bashrc.sh" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(BaseIntermediateOutputPath)native/liblinuxwebtool_pty.so" Link="liblinuxwebtool_pty.so" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
+  </ItemGroup>
+  <Target Name="BuildLinuxPty" BeforeTargets="PrepareForBuild" Condition="$([MSBuild]::IsOSPlatform('Linux'))"
+          Inputs="Terminal/native/linuxwebtool_pty.c" Outputs="$(BaseIntermediateOutputPath)native/liblinuxwebtool_pty.so">
+    <MakeDir Directories="$(BaseIntermediateOutputPath)native" />
+    <Exec Command="cc -shared -fPIC -O2 -Wall -Wextra -Werror &quot;$(MSBuildProjectDirectory)/Terminal/native/linuxwebtool_pty.c&quot; -o &quot;$(BaseIntermediateOutputPath)native/liblinuxwebtool_pty.so&quot; -lutil" />
+  </Target>
+
 </Project>

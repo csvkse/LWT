@@ -152,7 +152,8 @@ public sealed class ApiIntegrationTests
         using var file = new ByteArrayContent(Encoding.UTF8.GetBytes("upload-test"));
         content.Add(file, "file", "upload-test.txt");
 
-        var response = await client.PostAsync("/api/Files/Upload?path=/directory-that-does-not-exist", content);
+        var missing = Path.Combine(Path.GetTempPath(), "directory-that-does-not-exist-" + Guid.NewGuid().ToString("N"));
+        var response = await client.PostAsync("/api/Files/Upload?path=" + Uri.EscapeDataString(missing), content);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("目录不存在", await response.Content.ReadAsStringAsync());
@@ -230,6 +231,112 @@ public sealed class ApiIntegrationTests
     }
 
     [Fact]
+    public async Task Terminal_support_is_authenticated_and_install_requires_confirmation()
+    {
+        var client = await Client.Value;
+        await LoginAsync(client);
+        var response = await client.GetAsync("/api/Terminal/Support");
+        response.EnsureSuccessStatusCode();
+        using var support = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Application", support.RootElement.GetProperty("mode").GetString());
+        if (OperatingSystem.IsWindows()) Assert.False(support.RootElement.GetProperty("canInstall").GetBoolean());
+        var refused = await client.PostAsync("/api/Terminal/Dependencies/Install", Json("{\"confirm\":false}"));
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        var status = await client.GetAsync("/api/Terminal/Dependencies/Installation");
+        status.EnsureSuccessStatusCode();
+        using var install = JsonDocument.Parse(await status.Content.ReadAsStringAsync());
+        Assert.Equal("Idle", install.RootElement.GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task Terminal_rejects_missing_working_directory_without_starting_a_session()
+    {
+        var client = await Client.Value;
+        await LoginAsync(client);
+        var missing = Path.Combine(Path.GetTempPath(), "terminal-missing-" + Guid.NewGuid().ToString("N"));
+        var response = await client.PostAsync("/api/Terminal/Sessions", Json(JsonSerializer.Serialize(new { workingDirectory = missing })));
+        if (response.IsSuccessStatusCode)
+        {
+            using var created = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            await client.DeleteAsync("/api/Terminal/Sessions/" + created.RootElement.GetProperty("sessionId").GetString());
+        }
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Terminal_accepts_an_existing_directory_with_spaces_and_unicode()
+    {
+        var client = await Client.Value;
+        await LoginAsync(client);
+        var directory = Path.Combine(Path.GetTempPath(), "terminal 中文 " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        string? sessionId = null;
+        try
+        {
+            var response = await client.PostAsync("/api/Terminal/Sessions", Json(JsonSerializer.Serialize(new { workingDirectory = directory })));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var created = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            sessionId = created.RootElement.GetProperty("sessionId").GetString();
+            Assert.Equal(directory, created.RootElement.GetProperty("workingDirectory").GetString());
+        }
+        finally
+        {
+            if (sessionId is not null) await client.DeleteAsync("/api/Terminal/Sessions/" + sessionId);
+            Directory.Delete(directory);
+        }
+    }
+
+    [Fact]
+    public async Task Terminal_lists_sessions_and_preserves_process_after_disconnect()
+    {
+        var client = await Client.Value;
+        await LoginAsync(client);
+        var response = await client.PostAsync("/api/Terminal/Sessions", Json("{}"));
+        response.EnsureSuccessStatusCode();
+        using var created = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var id = created.RootElement.GetProperty("sessionId").GetString();
+        var pid = created.RootElement.GetProperty("processId").GetInt32();
+        try
+        {
+            var list = await client.GetAsync("/api/Terminal/Sessions");
+            Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+            using var sessions = JsonDocument.Parse(await list.Content.ReadAsStringAsync());
+            Assert.Contains(sessions.RootElement.EnumerateArray(), s => s.GetProperty("sessionId").GetString() == id);
+            var server = _app!.GetTestServer();
+            var socketClient = server.CreateWebSocketClient();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            var uri = new Uri(server.BaseAddress, $"/api/terminal/ws/{id}?token={_lastToken}");
+            using (var socket = await socketClient.ConnectAsync(uri, timeout.Token))
+            {
+                var command = Encoding.UTF8.GetBytes(OperatingSystem.IsWindows() ? "Write-Output 'detached-check'\r" : "printf 'detached-check\\n'\r");
+                await socket.SendAsync(command, System.Net.WebSockets.WebSocketMessageType.Text, true, timeout.Token);
+                var output = new StringBuilder();
+                var buffer = new byte[8192];
+                while (!output.ToString().Contains("detached-check", StringComparison.Ordinal))
+                {
+                    var read = await socket.ReceiveAsync(buffer, timeout.Token);
+                    output.Append(Encoding.UTF8.GetString(buffer, 0, read.Count));
+                }
+                await socket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "detach", timeout.Token);
+            }
+            var details = await client.GetAsync("/api/Terminal/Sessions/" + id);
+            details.EnsureSuccessStatusCode();
+            using var snapshot = JsonDocument.Parse(await details.Content.ReadAsStringAsync());
+            Assert.Equal(pid, snapshot.RootElement.GetProperty("processId").GetInt32());
+            Assert.True(snapshot.RootElement.GetProperty("hasUserInput").GetBoolean());
+            using var reconnected = await socketClient.ConnectAsync(uri, timeout.Token);
+            var replayBuffer = new byte[8192];
+            var replay = await reconnected.ReceiveAsync(replayBuffer, timeout.Token);
+            Assert.True(replay.Count > 0);
+            await reconnected.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "done", timeout.Token);
+        }
+        finally
+        {
+            await client.DeleteAsync("/api/Terminal/Sessions/" + id);
+        }
+    }
+
+    [Fact]
     public async Task Terminal_session_and_websocket_roundtrip()
     {
         var client = await Client.Value;
@@ -256,6 +363,64 @@ public sealed class ApiIntegrationTests
         if (ws.State == System.Net.WebSockets.WebSocketState.Open)
         {
             await ws.CloseOutputAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "test-done", CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task Files_list_native_directory_and_windows_drive_roots()
+    {
+        var client = await Client.Value;
+        await LoginAsync(client);
+        var directory = Path.Combine(Path.GetTempPath(), "lwt-files-中文 space-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var response = await client.GetAsync("/api/Files?path=" + Uri.EscapeDataString(directory));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var listing = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal(directory.Replace('\\', '/').TrimEnd('/'), listing.RootElement.GetProperty("path").GetString());
+            if (OperatingSystem.IsWindows())
+            {
+                var roots = await client.GetAsync("/api/Files?path=%2F");
+                Assert.Equal(HttpStatusCode.OK, roots.StatusCode);
+                using var rootList = JsonDocument.Parse(await roots.Content.ReadAsStringAsync());
+                Assert.True(rootList.RootElement.GetProperty("isVirtualRoot").GetBoolean());
+                Assert.Contains(rootList.RootElement.GetProperty("entries").EnumerateArray(), entry => entry.GetProperty("path").GetString() == Path.GetPathRoot(directory)!.Replace('\\', '/'));
+            }
+        }
+        finally { Directory.Delete(directory); }
+    }
+
+    [Fact]
+    public async Task Files_native_crud_preserves_data_directory_protection()
+    {
+        var client = await Client.Value;
+        await LoginAsync(client);
+        var directory = Path.Combine(Path.GetTempPath(), "lwt-file-crud-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var file = Path.Combine(directory, "中文 space.txt");
+        var renamed = Path.Combine(directory, "renamed.txt");
+        var protectedFile = Path.Combine(DataDirectory, "guard-test-" + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/Files/Content", Json(JsonSerializer.Serialize(new { path = file, content = "中文内容" })))).StatusCode);
+            var read = await client.GetAsync("/api/Files/Content?path=" + Uri.EscapeDataString(file));
+            Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+            using var body = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
+            Assert.Equal("中文内容", body.RootElement.GetProperty("content").GetString());
+            Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/Files/Rename", Json(JsonSerializer.Serialize(new { from = file, to = renamed })))).StatusCode);
+            Assert.True(File.Exists(renamed));
+            Assert.Equal(HttpStatusCode.OK, (await client.DeleteAsync("/api/Files?path=" + Uri.EscapeDataString(renamed))).StatusCode);
+            Assert.False(File.Exists(renamed));
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/api/Files/Content", Json(JsonSerializer.Serialize(new { path = protectedFile, content = "forbidden" })))).StatusCode);
+            Assert.False(File.Exists(protectedFile));
+            if (OperatingSystem.IsWindows())
+                Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/Files?path=" + Uri.EscapeDataString("C:relative"))).StatusCode);
+        }
+        finally
+        {
+            foreach (var path in new[] { file, renamed, protectedFile }) if (File.Exists(path)) File.Delete(path);
+            Directory.Delete(directory);
         }
     }
 

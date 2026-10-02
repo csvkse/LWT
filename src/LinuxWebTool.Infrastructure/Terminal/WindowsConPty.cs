@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
+using System.Text;
 using LinuxWebTool.Contracts.Terminal;
 using Microsoft.Win32.SafeHandles;
 
@@ -15,6 +16,7 @@ internal static class WindowsConPtyNative
 {
     public const int S_OK = 0;
     public const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
+    public const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     public const int PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -97,12 +99,12 @@ internal static class WindowsConPtyNative
         IntPtr lpReturnSize);
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern bool DeleteProcThreadAttributeList(IntPtr lpAttributeList);
+    public static extern void DeleteProcThreadAttributeList(IntPtr lpAttributeList);
 
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern bool CreateProcess(
         string? lpApplicationName,
-        string? lpCommandLine,
+        StringBuilder lpCommandLine,
         IntPtr lpProcessAttributes,
         IntPtr lpThreadAttributes,
         bool bInheritHandles,
@@ -129,15 +131,31 @@ public sealed class WindowsConPtySession : IPtySession
     private readonly SafeFileHandle outPipeReadHandle;
     private readonly Stream standardInput;
     private readonly Stream standardOutput;
+    private readonly Task lifetime;
+    private int consoleClosed;
+    private int? exitCode;
     private int disposed;
+    private int resourcesDisposed;
 
     public string SessionId { get; }
     public int ProcessId { get; }
+    public bool IsNativePty => true;
+    public int? ExitCode
+    {
+        get
+        {
+            if (WindowsConPtyNative.GetExitCodeProcess(hProcess, out var code) && code != WindowsConPtyNative.STILL_ACTIVE)
+                exitCode = unchecked((int)code);
+            return exitCode;
+        }
+    }
+    public bool? IsShellIdle => HasExited ? false : ProcessChildren.HasChildren(ProcessId) is { } children ? !children : null;
 
     public bool HasExited
     {
         get
         {
+            if (Volatile.Read(ref resourcesDisposed) != 0) return true;
             if (hProcess == IntPtr.Zero) return true;
             if (WindowsConPtyNative.GetExitCodeProcess(hProcess, out var exitCode))
             {
@@ -175,6 +193,15 @@ public sealed class WindowsConPtySession : IPtySession
 
         standardInput = new FileStream(inPipeWriteHandle, FileAccess.Write, 4096, isAsync: false);
         standardOutput = new FileStream(outPipeReadHandle, FileAccess.Read, 4096, isAsync: false);
+        lifetime = Task.Run(MonitorExitAsync);
+    }
+
+    private async Task MonitorExitAsync()
+    {
+        while (Volatile.Read(ref disposed) == 0 && !HasExited) await Task.Delay(50).ConfigureAwait(false);
+        _ = ExitCode;
+        if (Interlocked.Exchange(ref consoleClosed, 1) == 0)
+            await Task.Run(() => WindowsConPtyNative.ClosePseudoConsole(hPC)).ConfigureAwait(false);
     }
 
     public Task ResizeAsync(int columns, int rows, CancellationToken cancellationToken = default)
@@ -195,9 +222,9 @@ public sealed class WindowsConPtySession : IPtySession
         return Task.CompletedTask;
     }
 
-    public Task TerminateAsync(CancellationToken cancellationToken = default)
+    public async Task TerminateAsync(CancellationToken cancellationToken = default)
     {
-        if (Interlocked.Exchange(ref disposed, 1) != 0) return Task.CompletedTask;
+        if (Interlocked.Exchange(ref disposed, 1) != 0) { await lifetime.ConfigureAwait(false); return; }
 
         try
         {
@@ -205,42 +232,30 @@ public sealed class WindowsConPtySession : IPtySession
             if (!proc.HasExited)
             {
                 proc.Kill(entireProcessTree: true);
+                await proc.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             }
         }
         catch { }
 
-        CleanupNativeHandles();
-        return Task.CompletedTask;
+        await lifetime.ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref resourcesDisposed, 1) != 0) return;
         await TerminateAsync(CancellationToken.None).ConfigureAwait(false);
         await standardInput.DisposeAsync().ConfigureAwait(false);
         await standardOutput.DisposeAsync().ConfigureAwait(false);
         inPipeWriteHandle.Dispose();
         outPipeReadHandle.Dispose();
+        if (hProcess != IntPtr.Zero) WindowsConPtyNative.CloseHandle(hProcess);
     }
 
-    private void CleanupNativeHandles()
-    {
-        if (hPC != IntPtr.Zero)
-        {
-            try { WindowsConPtyNative.ClosePseudoConsole(hPC); } catch { }
-        }
-
-        if (hProcess != IntPtr.Zero)
-        {
-            try { WindowsConPtyNative.CloseHandle(hProcess); } catch { }
-        }
-    }
 }
 
 internal static class WindowsConPtyFactory
 {
-    // ConPTY emits Win32 Input Mode (?9001h) sequences and attaches to host consoles in WebHost runners.
-    // ProcessPtySession with CombinedPtyStream provides seamless, bidirectional UTF-8 piping across all platforms.
-    public static bool IsSupported => false;
+    public static bool IsSupported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763);
 
     public static IPtySession? TryCreateSession(
         string sessionId,
@@ -259,6 +274,7 @@ internal static class WindowsConPtyFactory
         IntPtr hOutWrite = IntPtr.Zero;
         IntPtr hPC = IntPtr.Zero;
         IntPtr lpAttributeList = IntPtr.Zero;
+        IntPtr environment = IntPtr.Zero;
 
         try
         {
@@ -299,22 +315,32 @@ internal static class WindowsConPtyFactory
 
             var siex = new WindowsConPtyNative.STARTUPINFOEX();
             siex.StartupInfo.cb = Marshal.SizeOf<WindowsConPtyNative.STARTUPINFOEX>();
+            // Prevent inherited host console handles from bypassing the pseudoconsole.
+            siex.StartupInfo.dwFlags = 0x00000100; // STARTF_USESTDHANDLES
             siex.lpAttributeList = lpAttributeList;
 
-            var cmdLine = BuildCommandLine(executable, arguments);
+            var cmdLine = new StringBuilder(BuildCommandLine(executable, arguments));
+            var variables = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
+                variables[(string)entry.Key] = (string)entry.Value!;
+            variables["TERM"] = "xterm-256color";
+            variables["COLORTERM"] = "truecolor";
+            if (environmentVariables is not null)
+                foreach (var entry in environmentVariables) variables[entry.Key] = entry.Value;
+            environment = Marshal.StringToHGlobalUni(string.Join('\0', variables.Select(entry => entry.Key + "=" + entry.Value)) + "\0\0");
 
             var cwd = !string.IsNullOrWhiteSpace(workingDirectory) && Directory.Exists(workingDirectory)
                 ? workingDirectory
                 : null;
 
             if (!WindowsConPtyNative.CreateProcess(
-                null,
+                executable,
                 cmdLine,
                 IntPtr.Zero,
                 IntPtr.Zero,
                 false,
-                WindowsConPtyNative.EXTENDED_STARTUPINFO_PRESENT,
-                IntPtr.Zero,
+                WindowsConPtyNative.EXTENDED_STARTUPINFO_PRESENT | WindowsConPtyNative.CREATE_UNICODE_ENVIRONMENT,
+                environment,
                 cwd,
                 ref siex,
                 out var pi))
@@ -350,6 +376,7 @@ internal static class WindowsConPtyFactory
         }
         finally
         {
+            if (environment != IntPtr.Zero) Marshal.FreeHGlobal(environment);
             if (lpAttributeList != IntPtr.Zero)
             {
                 WindowsConPtyNative.DeleteProcThreadAttributeList(lpAttributeList);
@@ -360,25 +387,21 @@ internal static class WindowsConPtyFactory
 
     private static string BuildCommandLine(string executable, IReadOnlyList<string> arguments)
     {
-        var exeQuoted = executable.Contains(' ') && !executable.StartsWith('\"') ? $"\"{executable}\"" : executable;
-        if (arguments.Count == 0) return exeQuoted;
+        return string.Join(' ', new[] { executable }.Concat(arguments).Select(QuoteArgument));
+    }
 
-        var parts = new List<string> { exeQuoted };
-        foreach (var arg in arguments)
+    private static string QuoteArgument(string argument)
+    {
+        var quoted = new StringBuilder("\"");
+        var slashes = 0;
+        foreach (var character in argument)
         {
-            if (string.IsNullOrEmpty(arg))
-            {
-                parts.Add("\"\"");
-            }
-            else if (arg.Contains(' ') && !arg.StartsWith('\"'))
-            {
-                parts.Add($"\"{arg}\"");
-            }
-            else
-            {
-                parts.Add(arg);
-            }
+            if (character == '\\') { slashes++; continue; }
+            quoted.Append('\\', character == '"' ? slashes * 2 + 1 : slashes);
+            quoted.Append(character);
+            slashes = 0;
         }
-        return string.Join(" ", parts);
+        quoted.Append('\\', slashes * 2);
+        return quoted.Append('"').ToString();
     }
 }

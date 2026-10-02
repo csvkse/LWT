@@ -120,7 +120,7 @@ function loadBackendRouteTable(mapperFile) {
     const group = line.match(/MapGroup\("([^"]+)"\)/);
     if (group) currentGroup = group[1];
 
-    const endpoint = line.match(/\.Map(Get|Post|Put|Delete)\("([^"]*)"/);
+    const endpoint = line.match(/\.Map(Get|Post|Put|Patch|Delete)\("([^"]*)"/);
     if (!endpoint) continue;
 
     const route = normalizeRoute(`${currentGroup}/${endpoint[2]}`);

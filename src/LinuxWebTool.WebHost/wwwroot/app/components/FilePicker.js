@@ -1,7 +1,8 @@
-import { defineComponent, onMounted, reactive, ref } from 'vue';
+import { defineComponent, onMounted, ref } from 'vue';
 import { http } from '../api/client.js';
 import { API } from '../config.js';
 import { toast } from '../store/toast.js';
+import { buildFileBreadcrumbs } from '../utils/filePaths.js';
 
 // 文件/文件夹选择器弹窗：浏览服务器目录并返回所选路径。
 // mode='file' 可选中文件；mode='folder' 可选当前目录。复用 /api/Files 列表。
@@ -20,28 +21,18 @@ export default defineComponent({
     const error = ref('');
     const selectedFile = ref(''); // mode='file' 时选中的文件路径
     const breadcrumbs = ref([]);
+    const virtualRoot = ref(false);
 
-    function buildBreadcrumbs(path) {
-      const parts = [];
-      let cur = path;
-      while (cur && cur !== '/') {
-        const idx = cur.lastIndexOf('/');
-        const name = idx <= 0 ? cur : cur.slice(idx + 1);
-        parts.unshift({ name, path: cur });
-        cur = idx <= 0 ? '/' : cur.slice(0, idx);
-      }
-      parts.unshift({ name: '/', path: '/' });
-      return parts;
-    }
-
-    async function load() {
+    async function load(target = currentPath.value) {
       loading.value = true;
       error.value = '';
       try {
-        const result = await http(API.files.list, { method: 'GET', params: { path: currentPath.value } });
+        const result = await http(API.files.list, { method: 'GET', params: { path: target } });
         if (result.ok && result.data && Array.isArray(result.data.entries)) {
           entries.value = result.data.entries;
-          breadcrumbs.value = buildBreadcrumbs(result.data.path);
+          currentPath.value = result.data.path;
+          virtualRoot.value = result.data.isVirtualRoot === true;
+          breadcrumbs.value = buildFileBreadcrumbs(result.data.path);
           selectedFile.value = '';
           return;
         }
@@ -54,8 +45,7 @@ export default defineComponent({
     }
 
     function goPath(path) {
-      currentPath.value = path;
-      load();
+      load(path);
     }
 
     function goUp() {
@@ -85,6 +75,7 @@ export default defineComponent({
 
     // any 模式：选中文件则返回文件；未选中文件时返回当前目录（作为文件夹路径）。
     function confirmSelect() {
+      if (loading.value || error.value || virtualRoot.value && !selectedFile.value) return;
       if (props.mode === 'file') {
         if (!selectedFile.value) return toast.error('请选择一个文件');
         emit('select', selectedFile.value);
@@ -123,10 +114,10 @@ export default defineComponent({
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
     }
 
-    onMounted(load);
+    onMounted(() => load());
 
     return {
-      currentPath, entries, loading, error, selectedFile, breadcrumbs,
+      currentPath, entries, loading, error, selectedFile, breadcrumbs, virtualRoot,
       load, goPath, goUp, openEntry, confirmSelect, close, pickFile, pickDir, formatBytes, formatTime,
     };
   },
@@ -182,7 +173,7 @@ export default defineComponent({
           <span v-if="(mode === 'file' || mode === 'any') && selectedFile" class="text-xs text-emerald-300 truncate mr-auto">{{ selectedFile }}</span>
           <button class="btn" @click="close()">取消</button>
           <button class="btn btn-primary"
-                  :disabled="mode === 'file' && !selectedFile"
+                  :disabled="loading || !!error || (mode === 'file' && !selectedFile) || (virtualRoot && !selectedFile)"
                   @click="confirmSelect()">
             选择{{ mode === 'file' ? (selectedFile ? '' : '文件') : mode === 'any' ? (selectedFile ? '文件' : '当前文件夹') : '当前文件夹' }}
           </button>

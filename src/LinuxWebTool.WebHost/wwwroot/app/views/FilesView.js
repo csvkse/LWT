@@ -4,6 +4,7 @@ import { http, httpUpload } from '../api/client.js';
 import { API } from '../config.js';
 import { openConfirm } from '../store/modal.js';
 import { toast } from '../store/toast.js';
+import { buildFileBreadcrumbs } from '../utils/filePaths.js';
 
 export default defineComponent({
   name: 'FilesView',
@@ -16,6 +17,8 @@ export default defineComponent({
     const isRoot = ref(true);
     const loading = ref(false);
     const loadError = ref('');
+    const directoryReady = ref(false);
+    const virtualRoot = ref(false);
 
     // 文本编辑器
     const showEditor = ref(false);
@@ -39,20 +42,7 @@ export default defineComponent({
     const uploadPath = ref('');
 
     // 当前目录信息
-    const dirName = computed(() => currentPath.value === '/' ? '/' : currentPath.value.split('/').pop());
-
-    function buildBreadcrumbs(path) {
-      const parts = [];
-      let cur = path;
-      while (cur && cur !== '/') {
-        const idx = cur.lastIndexOf('/');
-        const name = idx <= 0 ? cur : cur.slice(idx + 1);
-        parts.unshift({ name, path: cur });
-        cur = idx <= 0 ? '/' : cur.slice(0, idx);
-      }
-      parts.unshift({ name: '/', path: '/' });
-      return parts;
-    }
+    const dirName = computed(() => breadcrumbs.value.at(-1)?.name || '/');
 
     async function load(path) {
       const target = path ?? currentPath.value;
@@ -63,15 +53,14 @@ export default defineComponent({
         if (result.ok && result.data && Array.isArray(result.data.entries)) {
           currentPath.value = result.data.path;
           entries.value = result.data.entries;
-          breadcrumbs.value = buildBreadcrumbs(result.data.path);
+          breadcrumbs.value = buildFileBreadcrumbs(result.data.path);
           isRoot.value = result.data.isRoot === true;
-          return;
+          virtualRoot.value = result.data.isVirtualRoot === true;
+          if (virtualRoot.value) breadcrumbs.value[0].name = '磁盘';
+          directoryReady.value = true;
+          return true;
         }
         loadError.value = result.message || '目录加载失败';
-        if (result && result.status === 404) {
-          // 路径不存在时回退到上一层
-          goUp();
-        }
       } catch (e) {
         loadError.value = e?.message || '目录加载失败';
       } finally {
@@ -79,9 +68,13 @@ export default defineComponent({
       }
     }
 
-    function goPath(path) {
-      load(path);
-      router.replace({ path: '/files', query: { path } });
+    async function goPath(path) {
+      if (await load(path)) router.replace({ path: '/files', query: { path: currentPath.value } });
+    }
+
+    function openTerminal(path = currentPath.value) {
+      if (!directoryReady.value || virtualRoot.value && path === currentPath.value || loading.value || loadError.value) return;
+      router.push({ path: '/terminal', query: { cwd: path, open: Date.now().toString(36) + Math.random().toString(36).slice(2, 8) } });
     }
 
     function goUp() {
@@ -98,7 +91,7 @@ export default defineComponent({
     }
 
     function formatTime(t) {
-      if (!t) return '';
+      if (!t || t.startsWith('0001-')) return '—';
       const d = new Date(t);
       const pad = (x) => String(x).padStart(2, '0');
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -178,7 +171,7 @@ export default defineComponent({
       const name = mkdirName.value.trim();
       if (!name) return toast.error('请输入文件夹名称');
       mkdirName.value = name;
-      const newPath = currentPath.value === '/' ? `/${name}` : `${currentPath.value}/${name}`;
+      const newPath = `${currentPath.value.replace(/\/$/, '')}/${name}`;
       try {
         const result = await http(API.files.mkdir, { method: 'POST', body: { path: newPath } });
         if (result.ok) {
@@ -281,12 +274,11 @@ export default defineComponent({
     onMounted(() => {
       const q = route.query.path;
       const start = typeof q === 'string' && q ? q : '/';
-      currentPath.value = start;
       load(start);
     });
 
     return {
-      currentPath, entries, breadcrumbs, isRoot, loading, loadError, dirName,
+      currentPath, entries, breadcrumbs, isRoot, loading, loadError, dirName, directoryReady, virtualRoot, openTerminal,
       showEditor, editorPath, editorName, editorContent, editorLoading, editorSaving,
       showMkdir, mkdirName, showRename, renameName, renamePath, uploadInput,
       load, goPath, goUp, goHome, formatBytes, formatTime, iconFor, openEntry,
@@ -299,8 +291,9 @@ export default defineComponent({
       <div class="flex items-center gap-2">
         <h2 class="text-sm text-slate-400">文件管理器</h2>
         <div class="ml-auto flex gap-1">
-          <button class="btn btn-xs" @click="openMkdir()">＋ 新建文件夹</button>
-          <button class="btn btn-xs" @click="triggerUpload()">⬆ 上传</button>
+          <button class="btn btn-xs" :disabled="!directoryReady || virtualRoot || loading || !!loadError" @click="openTerminal()">在此打开终端</button>
+          <button class="btn btn-xs" :disabled="virtualRoot" @click="openMkdir()">＋ 新建文件夹</button>
+          <button class="btn btn-xs" :disabled="virtualRoot" @click="triggerUpload()">⬆ 上传</button>
         </div>
       </div>
 
@@ -336,8 +329,9 @@ export default defineComponent({
               <td class="text-xs text-slate-500">{{ entry.isDirectory ? '—' : formatBytes(entry.size) }}</td>
               <td class="text-xs text-slate-500">{{ formatTime(entry.modified) }}</td>
               <td class="text-right whitespace-nowrap text-xs" @click.stop>
-                <button class="btn btn-xs" @click="renameEntry(entry)">重命名</button>
-                <button class="btn btn-xs btn-danger" @click="removeEntry(entry)">删除</button>
+                <button v-if="entry.isDirectory" class="btn btn-xs" @click="openTerminal(entry.path)">在终端打开</button>
+                <button v-if="!virtualRoot" class="btn btn-xs" @click="renameEntry(entry)">重命名</button>
+                <button v-if="!virtualRoot" class="btn btn-xs btn-danger" @click="removeEntry(entry)">删除</button>
               </td>
             </tr>
           </tbody>

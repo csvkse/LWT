@@ -17,6 +17,9 @@ public sealed class CrossPlatformPtyEngine : IPtyEngine
         var sessionId = Guid.NewGuid().ToString("N");
         var (shell, args) = ResolveShell(options.Executable, options.Arguments);
 
+        if (LinuxNativePty.IsSupported)
+            return Task.FromResult(LinuxNativePty.Start(sessionId, shell, args, options));
+
         if (OperatingSystem.IsWindows() && WindowsConPtyFactory.IsSupported)
         {
             var conPtySession = WindowsConPtyFactory.TryCreateSession(
@@ -89,7 +92,7 @@ public sealed class CrossPlatformPtyEngine : IPtyEngine
             // Two-line prompt for modern terminal UX with UTF-8 encoding support:
             // Line 1: current location in muted gray (\e[90m)
             // Line 2: green ❯ symbol (\e[32m) with dedicated space for typing
-            const string psPromptCommand = "$OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false); function global:prompt { [char]27 + '[90m' + (Get-Location).Path + [char]27 + '[0m' + [char]13 + [char]10 + [char]27 + '[32m❯' + [char]27 + '[0m ' }";
+            const string psPromptCommand = "$OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false); function global:prompt { $p = (Get-Location).Path; $report = ''; if ((Get-Location).Provider.Name -eq 'FileSystem') { $report = [char]27 + ']7;' + ([uri]$p).AbsoluteUri + [char]7; if (!(Get-Job | Where-Object State -in @('Running','NotStarted','Blocked'))) { $report += [char]27 + ']133;A' + [char]7 } }; $report + [char]27 + '[90m' + $p + [char]27 + '[0m' + [char]13 + [char]10 + [char]27 + '[32m❯' + [char]27 + '[0m ' }";
 
             var pwsh = FindExecutableInPath("pwsh.exe") ?? FindWellKnownPowerShell("pwsh.exe");
             if (!string.IsNullOrWhiteSpace(pwsh))
@@ -108,15 +111,21 @@ public sealed class CrossPlatformPtyEngine : IPtyEngine
 
         var shell = Environment.GetEnvironmentVariable("SHELL");
         if (!string.IsNullOrWhiteSpace(shell) && File.Exists(shell))
-            return (shell, ["-i"]);
+            return (shell, DefaultLinuxArguments(shell));
 
         if (File.Exists("/bin/bash"))
-            return ("/bin/bash", ["-i"]);
+            return ("/bin/bash", DefaultLinuxArguments("/bin/bash"));
 
         if (File.Exists("/usr/bin/bash"))
-            return ("/usr/bin/bash", ["-i"]);
+            return ("/usr/bin/bash", DefaultLinuxArguments("/usr/bin/bash"));
 
         return ("/bin/sh", ["-i"]);
+    }
+
+    private static IReadOnlyList<string> DefaultLinuxArguments(string shell)
+    {
+        var rc = Path.Combine(AppContext.BaseDirectory, "terminal-bashrc.sh");
+        return Path.GetFileName(shell) == "bash" && File.Exists(rc) ? ["--rcfile", rc, "-i"] : ["-i"];
     }
 
     private static string? FindExecutableInPath(string fileName)
@@ -181,6 +190,8 @@ internal sealed class ProcessPtySession : IPtySession
     public string SessionId { get; }
     public int ProcessId => process.Id;
     public bool HasExited => process.HasExited;
+    public int? ExitCode => process.HasExited ? process.ExitCode : null;
+    public bool? IsShellIdle => ProcessChildren.HasChildren(process.Id) is { } children ? !children : null;
     public Stream StandardInput => process.StandardInput.BaseStream;
     public Stream StandardOutput => outputStream;
 

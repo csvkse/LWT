@@ -150,6 +150,13 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_TranscodeController.MapGet("DetectFfmpeg", async ([FromServices] TranscodeController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.DetectFfmpeg(); });
             var group_TerminalController = app.MapGroup("/api/Terminal");
             group_TerminalController.RequireAuthorization();
+            group_TerminalController.MapGet("Support", ([FromServices] TerminalController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.Support(); });
+            group_TerminalController.MapGet("Dependencies/Installation", ([FromServices] TerminalController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.Installation(); });
+            group_TerminalController.MapPost("Dependencies/Install", ([FromServices] TerminalController ctrl, HttpContext ctx, [FromBody] LinuxWebTool.WebHost.Routes.TerminalDependencyInstallRequest request) => { ctrl.HttpContext = ctx; return ctrl.Install(request); });
+            group_TerminalController.MapGet("Sessions", ([FromServices] TerminalController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.ListSessions(); });
+            group_TerminalController.MapGet("Sessions/{sessionId}", ([FromServices] TerminalController ctrl, HttpContext ctx, string sessionId) => { ctrl.HttpContext = ctx; return ctrl.SessionDetails(sessionId); });
+            group_TerminalController.MapPatch("Sessions/{sessionId}", ([FromServices] TerminalController ctrl, HttpContext ctx, string sessionId, [FromBody] LinuxWebTool.Contracts.Terminal.TerminalSessionUpdateRequest request) => { ctrl.HttpContext = ctx; return ctrl.UpdateSession(sessionId, request); });
+            group_TerminalController.MapPost("Sessions/{sessionId}/Attachment", ([FromServices] TerminalController ctrl, HttpContext ctx, string sessionId) => { ctrl.HttpContext = ctx; return ctrl.AttachmentTicket(sessionId); });
             group_TerminalController.MapPost("Sessions", async ([FromServices] TerminalController ctrl, HttpContext ctx, [FromBody] LinuxWebTool.Contracts.Terminal.TerminalSessionCreateRequest request) => { ctrl.HttpContext = ctx; return await ctrl.CreateSession(request); });
             group_TerminalController.MapDelete("Sessions/{sessionId}", async ([FromServices] TerminalController ctrl, HttpContext ctx, string sessionId) => { ctrl.HttpContext = ctx; return await ctrl.CloseSession(sessionId); });
         }

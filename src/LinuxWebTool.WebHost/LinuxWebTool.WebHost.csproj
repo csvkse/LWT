@@ -11,7 +11,7 @@
 
   <ItemGroup>
     <!-- 发布时将前端资源嵌入主程序；开发环境仍保留物理 wwwroot 便于调试。 -->
-    <EmbeddedResource Include="wwwroot\**" />
+    <EmbeddedResource Include="wwwroot\**" Exclude="wwwroot\node_modules\**" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" />

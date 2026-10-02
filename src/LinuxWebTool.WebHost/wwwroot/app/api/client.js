@@ -3,6 +3,21 @@
 import { API_BASE, LS_KEYS } from '../config.js';
 import { toast } from '../store/toast.js';
 
+export function readTerminalTabs() {
+  try {
+    const value = JSON.parse(sessionStorage.getItem('linuxwebtool.terminalTabs') || '[]');
+    return Array.isArray(value) ? value.filter(t => typeof t.sessionId === 'string' && typeof t.id === 'string').slice(0, 16) : [];
+  } catch { return []; }
+}
+
+export function saveTerminalTabs(tabs) {
+  try {
+    sessionStorage.setItem('linuxwebtool.terminalTabs', JSON.stringify(tabs.map(t => ({
+      id: t.id, title: t.title, sessionId: t.sessionId, workingDirectory: t.workingDirectory, directoryRequest: t.directoryRequest,
+    }))));
+  } catch { /* Session storage can be disabled by the browser. */ }
+}
+
 function buildUrl(url, params) {
   if (!params) return API_BASE + url;
   const search = new URLSearchParams();
@@ -69,6 +84,8 @@ export async function http(url, { method = 'GET', params, body } = {}) {
     toast.error(message);
     return { ok: false, status: response.status, data, message };
   }
+
+  if (response.status === 204) return { ok: true, status: 204, data: null };
 
   // 2xx 也必须是 JSON；未知 API 被旧服务的 SPA fallback 接管时，不能把 index.html 当业务数据。
   if (!parsedJson || !contentType.toLowerCase().includes('application/json')) {
