@@ -231,7 +231,7 @@ public sealed class ApiIntegrationTests
     }
 
     [Fact]
-    public async Task Terminal_support_is_authenticated_and_install_requires_confirmation()
+    public async Task Terminal_support_reports_application_capabilities()
     {
         var client = await Client.Value;
         await LoginAsync(client);
@@ -239,13 +239,8 @@ public sealed class ApiIntegrationTests
         response.EnsureSuccessStatusCode();
         using var support = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("Application", support.RootElement.GetProperty("mode").GetString());
-        if (OperatingSystem.IsWindows()) Assert.False(support.RootElement.GetProperty("canInstall").GetBoolean());
-        var refused = await client.PostAsync("/api/Terminal/Dependencies/Install", Json("{\"confirm\":false}"));
-        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
-        var status = await client.GetAsync("/api/Terminal/Dependencies/Installation");
-        status.EnsureSuccessStatusCode();
-        using var install = JsonDocument.Parse(await status.Content.ReadAsStringAsync());
-        Assert.Equal("Idle", install.RootElement.GetProperty("state").GetString());
+        _ = support.RootElement.GetProperty("nativePty").GetBoolean();
+        Assert.False(support.RootElement.TryGetProperty("installCommand", out _));
     }
 
     [Fact]

@@ -87,22 +87,6 @@ public sealed class TerminalSessionTests
         Assert.Equal(session.ProcessId, manager.GetSessionInfo(session.SessionId)!.ProcessId);
     }
 
-    [Theory]
-    [InlineData("debian", "apt-get")]
-    [InlineData("ubuntu", "apt-get")]
-    [InlineData("fedora", "dnf")]
-    [InlineData("arch", "pacman")]
-    [InlineData("opensuse", "zypper")]
-    [InlineData("alpine", "apk")]
-    public void Dependency_install_uses_fixed_commands_for_supported_distributions(string distribution, string program)
-    {
-        var commands = TerminalDependencyService.InstallCommands(distribution);
-        Assert.NotNull(commands);
-        Assert.Equal(program, commands[0].Program);
-        Assert.Contains("tmux", commands[^1].Arguments);
-        Assert.Null(TerminalDependencyService.InstallCommands("unrecognized"));
-    }
-
     [Fact]
     public async Task Output_continues_without_attachment_and_replay_is_bounded()
     {

@@ -15,16 +15,6 @@ public class TerminalController(IPtySessionManager pty, TerminalDependencyServic
     [HttpGet("Support")]
     public IResult Support() => Results.Json(dependencies.Detect(), AppJsonSerializerContext.Default.TerminalCapabilities);
 
-    [HttpGet("Dependencies/Installation")]
-    public IResult Installation() => Results.Json(dependencies.Status(), AppJsonSerializerContext.Default.TerminalInstallStatus);
-
-    [HttpPost("Dependencies/Install")]
-    public IResult Install([FromBody] TerminalDependencyInstallRequest request)
-    {
-        if (!request.Confirm) return BadRequest(new MessageResponse("请确认安装系统依赖"));
-        if (!dependencies.StartInstall()) return StatusCode(StatusCodes.Status409Conflict, new MessageResponse("当前环境无法安装、依赖已存在或安装正在进行"));
-        return Results.Json(dependencies.Status(), AppJsonSerializerContext.Default.TerminalInstallStatus, statusCode: StatusCodes.Status202Accepted);
-    }
     [HttpGet("Sessions")]
     public IResult ListSessions() => Results.Json(pty.ListSessions().ToArray(), AppJsonSerializerContext.Default.TerminalSessionInfoArray);
 
@@ -98,5 +88,3 @@ public class TerminalController(IPtySessionManager pty, TerminalDependencyServic
         return closed ? Results.NoContent() : NotFound(new MessageResponse("会话不存在"));
     }
 }
-
-public sealed record TerminalDependencyInstallRequest([property: System.Text.Json.Serialization.JsonPropertyName("confirm")] bool Confirm);

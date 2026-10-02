@@ -45,8 +45,6 @@ const support = await api('Support');
 assert.equal(support.platform, 'Linux');
 assert.equal(support.nativePty, true, 'The container must use a real PTY.');
 assert.equal(support.container, true);
-assert.equal(support.tmuxInstalled, true, 'The Docker image must include tmux.');
-assert.equal(support.canInstall, false, 'Containers must not install system packages at runtime.');
 const session = await api('Sessions', 'POST', { workingDirectory: '/tmp' });
 let connection;
 const directory = '/tmp/lwt-terminal-中文 space-' + Date.now();

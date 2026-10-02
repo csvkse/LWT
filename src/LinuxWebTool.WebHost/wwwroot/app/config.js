@@ -76,8 +76,6 @@ export const API = {
   },
   terminal: {
     support: '/Terminal/Support',
-    installation: '/Terminal/Dependencies/Installation',
-    install: '/Terminal/Dependencies/Install',
     sessions: '/Terminal/Sessions',
     session: (id) => '/Terminal/Sessions/' + encodeURIComponent(id),
     attachment: (id) => '/Terminal/Sessions/' + encodeURIComponent(id) + '/Attachment',

@@ -105,7 +105,6 @@ export default defineComponent({
     const listBusy = ref(false);
     const listError = ref('');
     const capabilities = ref(null);
-    const installStatus = ref({ state: 'Idle', log: '' });
     const supportBusy = ref(false);
     const sessionBusy = ref(false);
     const renameDrafts = ref({});
@@ -137,23 +136,11 @@ export default defineComponent({
       supportBusy.value = true;
       try {
         const support = await http(API.terminal.support, { method: 'GET' });
-        const installation = await http(API.terminal.installation, { method: 'GET' });
         if (support.ok) {
           capabilities.value = support.data;
           activeCommandSet.value = support.data.platform === 'Windows' ? 'windows' : 'linux';
         }
-        if (installation.ok) installStatus.value = installation.data;
       } finally { supportBusy.value = false; }
-    }
-
-    function installDependencies() {
-      openConfirm({ title: '安装终端依赖', message: '将使用系统包管理器安装 tmux。需要系统安装权限与网络，安装后会验证分离和重新连接。安装 tmux 不会自动启用跨服务重启恢复。', confirmText: '安装',
-        onConfirm: async () => {
-          const result = await http(API.terminal.install, { method: 'POST', body: { confirm: true } });
-          if (result.ok) installStatus.value = result.data;
-          await refreshSupport();
-        },
-      });
     }
 
     async function openCurrentDirectory() {
@@ -600,7 +587,7 @@ export default defineComponent({
       mountTab(activeTabId.value);
       await refreshSessions();
       await refreshSupport();
-      if (!disposed) listTimer = setInterval(() => { refreshSessions(); if (installStatus.value.state === 'Running') refreshSupport(); }, 5000);
+      if (!disposed) listTimer = setInterval(() => refreshSessions(), 5000);
     });
 
     watch(() => [route.query.cwd, route.query.open], () => {
@@ -645,7 +632,7 @@ export default defineComponent({
       toggleCommandSet,
       backgroundSessions, showBackground, listBusy, listError, refreshSessions,
       attachBackground, endSession, retainSession, stateText,
-      capabilities, installStatus, supportBusy, refreshSupport, installDependencies, openCurrentDirectory, renameSession,
+      capabilities, supportBusy, refreshSupport, openCurrentDirectory, renameSession,
       sessionBusy, renameDrafts,
     };
   },
@@ -735,12 +722,8 @@ export default defineComponent({
       <div v-if="capabilities" class="panel p-3 text-xs space-y-2">
         <div class="flex flex-wrap items-center gap-2"><span>终端环境 · {{ capabilities.platform }} · {{ capabilities.nativePty ? '完整交互' : '交互受限' }}</span>
           <button class="btn btn-xs" :disabled="supportBusy" @click="refreshSupport()">检测环境</button>
-          <button v-if="capabilities.canInstall" class="btn btn-xs" :disabled="installStatus.state === 'Running'" @click="installDependencies()">{{ installStatus.state === 'Running' ? '安装中…' : '安装 tmux' }}</button>
-          <span v-if="capabilities.tmuxInstalled">tmux 已安装</span>
         </div>
         <p class="text-slate-400">{{ capabilities.message }}</p>
-        <code v-if="!capabilities.tmuxInstalled && capabilities.installCommand && !capabilities.container" class="block break-all">{{ capabilities.installCommand }}</code>
-        <pre v-if="installStatus.log" class="max-h-40 overflow-auto whitespace-pre-wrap">{{ installStatus.state }} · {{ installStatus.log }}</pre>
       </div>
 
       <!-- 快捷常用指令按钮栏（根据宿主环境可切换 Windows/Linux 指令） -->

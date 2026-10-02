@@ -151,8 +151,6 @@ namespace LinuxWebTool.WebHost.MinimalApi
             var group_TerminalController = app.MapGroup("/api/Terminal");
             group_TerminalController.RequireAuthorization();
             group_TerminalController.MapGet("Support", ([FromServices] TerminalController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.Support(); });
-            group_TerminalController.MapGet("Dependencies/Installation", ([FromServices] TerminalController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.Installation(); });
-            group_TerminalController.MapPost("Dependencies/Install", ([FromServices] TerminalController ctrl, HttpContext ctx, [FromBody] LinuxWebTool.WebHost.Routes.TerminalDependencyInstallRequest request) => { ctrl.HttpContext = ctx; return ctrl.Install(request); });
             group_TerminalController.MapGet("Sessions", ([FromServices] TerminalController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.ListSessions(); });
             group_TerminalController.MapGet("Sessions/{sessionId}", ([FromServices] TerminalController ctrl, HttpContext ctx, string sessionId) => { ctrl.HttpContext = ctx; return ctrl.SessionDetails(sessionId); });
             group_TerminalController.MapPatch("Sessions/{sessionId}", ([FromServices] TerminalController ctrl, HttpContext ctx, string sessionId, [FromBody] LinuxWebTool.Contracts.Terminal.TerminalSessionUpdateRequest request) => { ctrl.HttpContext = ctx; return ctrl.UpdateSession(sessionId, request); });

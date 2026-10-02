@@ -131,8 +131,6 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Terminal.TerminalAttachmentTicket))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Terminal.TerminalOutputFrame))]
 [JsonSerializable(typeof(LinuxWebTool.Infrastructure.Terminal.TerminalCapabilities))]
-[JsonSerializable(typeof(LinuxWebTool.Infrastructure.Terminal.TerminalInstallStatus))]
-[JsonSerializable(typeof(LinuxWebTool.WebHost.Routes.TerminalDependencyInstallRequest))]
 public partial class AppJsonSerializerContext
  : JsonSerializerContext
 {

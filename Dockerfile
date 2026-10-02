@@ -36,7 +36,7 @@ ENV TZ=Asia/Shanghai \
 #
 # 镜像瘦身：VA 驱动（intel iHD 39.5M / mesa gallium 42M）不再无条件全打包，按 VENDOR 分层选装，
 #   仅装所用 GPU 厂商的用户态驱动，避免"全能镜像"白白增容（详见 base 阶段底部"按厂商装 VA 驱动"层）。
-RUN apk add --no-cache bash tmux procps usbutils pciutils kmod util-linux-misc cifs-utils rclone fuse3 nethogs \
+RUN apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc cifs-utils rclone fuse3 nethogs \
       ffmpeg libva libva-utils tzdata icu-libs && \
     cp /usr/share/zoneinfo/$TZ /etc/localtime && \
     echo $TZ > /etc/timezone
