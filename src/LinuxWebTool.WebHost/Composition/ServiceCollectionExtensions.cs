@@ -49,7 +49,7 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton(retentionOptions);
         builder.Services.AddHostedService<LogRetentionService>();
 
-        // SMB 挂载管理
+        // SMB / WebDAV 挂载管理
         builder.Services.AddSingleton<MountOperationCoordinator>();
         builder.Services.AddSingleton<SmbMountStore>();
         builder.Services.AddSingleton<SmbMountService>();
@@ -58,6 +58,13 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<MountHealthService>();
         builder.Services.AddHostedService<SmbMountStartupService>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<MountHealthService>());
+        builder.Services.AddSingleton<WebDavMountStore>();
+        builder.Services.AddSingleton<WebDavMountService>();
+        builder.Services.AddSingleton<WebDavMountProbe>();
+        builder.Services.AddSingleton<WebDavMountStartupService>();
+        builder.Services.AddSingleton<WebDavMountHealthService>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<WebDavMountStartupService>());
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<WebDavMountHealthService>());
 
         // FFmpeg 转码：预设 / 队列执行 / 监听自动转码
         TranscodePresetSeeder.Seed(dbFactory); // 内置预设播种（表为空时）

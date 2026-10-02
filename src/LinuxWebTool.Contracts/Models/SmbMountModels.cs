@@ -41,3 +41,15 @@ public sealed record SaveSmbMountRequest
 
     public string? Description { get; init; }
 }
+
+public sealed record SaveWebDavMountRequest
+{
+    public required string Name { get; init; }
+    public required string Url { get; init; }
+    public required string LocalPath { get; init; }
+    public string? Username { get; init; }
+    public string? Password { get; init; }
+    public bool AutoMount { get; init; }
+    public bool Enabled { get; init; } = true;
+    public string? Description { get; init; }
+}

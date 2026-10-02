@@ -12,6 +12,7 @@ namespace LinuxWebTool.Infrastructure.SystemInfo;
 public sealed class DiskStatusCacheService(
     DiskStatusCache cache,
     MountHealthService mountHealth,
+    WebDavMountHealthService webDavHealth,
     ILogger<DiskStatusCacheService> logger) : BackgroundService
 {
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(30);
@@ -68,10 +69,23 @@ public sealed class DiskStatusCacheService(
                 continue;
             }
 
-            var health = mountHealth.GetSnapshot(mount.MountPoint);
+            var health = mountHealth.GetSnapshot(mount.MountPoint) ?? webDavHealth.GetSnapshot(mount.MountPoint);
             if (isManaged && health is { State: not MountHealthState.Healthy })
             {
                 disks.Add(CreateUnavailableDisk(mount, health));
+                continue;
+            }
+
+            // rclone 对不支持 about 的 WebDAV 远端可能报告合成容量，不显示为真实磁盘用量。
+            if (isManaged && mount.FileSystem == "fuse.rclone")
+            {
+                disks.Add(new DiskStatus
+                {
+                    Mount = mount.MountPoint,
+                    FileSystem = mount.FileSystem,
+                    Health = health?.State.ToString() ?? MountHealthState.Unknown.ToString(),
+                    LastCheckedAt = health?.LastCheckedAt,
+                });
                 continue;
             }
 
@@ -81,7 +95,7 @@ public sealed class DiskStatusCacheService(
                 : CreateCapacityFailedDisk(mount, health, capacity.Error ?? "磁盘容量探测失败"));
         }
 
-        foreach (var health in mountHealth.GetSnapshots())
+        foreach (var health in mountHealth.GetSnapshots().Concat(webDavHealth.GetSnapshots()))
         {
             if (disks.Any(d => MountOperationCoordinator.NormalizePath(d.Mount) == health.LocalPath))
             {
@@ -91,7 +105,7 @@ public sealed class DiskStatusCacheService(
             disks.Add(new DiskStatus
             {
                 Mount = health.LocalPath,
-                FileSystem = "cifs",
+                FileSystem = webDavHealth.GetSnapshot(health.LocalPath) is not null ? "fuse.rclone" : "cifs",
                 Health = health.State.ToString(),
                 Error = health.LastError,
                 LastCheckedAt = health.LastCheckedAt,

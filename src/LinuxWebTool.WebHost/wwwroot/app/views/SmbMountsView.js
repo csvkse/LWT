@@ -30,7 +30,7 @@ const HEALTH_ENUM = [
 ];
 
 const emptyForm = () => ({
-  name: '', server: '', localPath: '', username: '', password: '', domain: '', options: 'vers=3.0,uid=1001,gid=1001',
+  kind: 'smb', name: '', server: '', url: '', localPath: '', username: '', password: '', domain: '', options: 'vers=3.0,uid=1001,gid=1001',
   autoMount: false, enabled: true, description: '',
 });
 
@@ -42,6 +42,7 @@ export default defineComponent({
     const loading = ref(false);
     const actingId = ref(null);
     const unsupported = ref(false);
+    const webDavUnsupported = ref(false);
     const loadError = ref('');
 
     const showEditor = ref(false);
@@ -53,19 +54,25 @@ export default defineComponent({
       loading.value = true;
       loadError.value = '';
       try {
-        const [supportResult, listResult] = await Promise.all([
+        const [supportResult, listResult, webDavSupport, webDavList] = await Promise.all([
           http(API.smbMounts.support),
           http(API.smbMounts.list, { method: 'GET' }),
+          http(API.webDavMounts.support),
+          http(API.webDavMounts.list, { method: 'GET' }),
         ]);
         if (supportResult.ok && supportResult.data && typeof supportResult.data.supported === 'boolean') {
           unsupported.value = !supportResult.data.supported;
         } else if (!supportResult.ok) {
           loadError.value = supportResult.message || '挂载能力检测失败';
         }
-        if (listResult.ok && Array.isArray(listResult.data)) {
-          items.value = listResult.data;
-        } else if (!listResult.ok) {
-          loadError.value = loadError.value || listResult.message || '挂载列表加载失败';
+        webDavUnsupported.value = !webDavSupport.ok || !webDavSupport.data?.supported;
+        if (listResult.ok && Array.isArray(listResult.data) && webDavList.ok && Array.isArray(webDavList.data)) {
+          items.value = [
+            ...listResult.data.map((item) => ({ ...item, kind: 'smb' })),
+            ...webDavList.data.map((item) => ({ ...item, kind: 'webdav' })),
+          ];
+        } else if (!listResult.ok || !webDavList.ok) {
+          loadError.value = loadError.value || listResult.message || webDavList.message || '挂载列表加载失败';
         } else {
           loadError.value = '挂载列表响应格式异常';
         }
@@ -97,7 +104,9 @@ export default defineComponent({
       editingId.value = mount.id;
       Object.assign(form, {
         name: mount.name,
-        server: mount.server,
+        kind: mount.kind,
+        server: mount.server || '',
+        url: mount.url || '',
         localPath: mount.localPath,
         username: mount.username || '',
         password: '',
@@ -112,25 +121,27 @@ export default defineComponent({
 
     async function save() {
       if (!form.name.trim()) return toast.error('请输入名称');
-      if (!form.server.trim()) return toast.error('请输入服务器共享地址');
+      if (form.kind === 'smb' && !form.server.trim()) return toast.error('请输入服务器共享地址');
+      if (form.kind === 'webdav' && !form.url.trim()) return toast.error('请输入 WebDAV HTTPS 地址');
       if (!form.localPath.trim()) return toast.error('请输入本地挂载点');
       saving.value = true;
       try {
-        const payload = {
+        const shared = {
           name: form.name,
-          server: form.server,
           localPath: form.localPath,
           username: form.username || null,
           password: form.password || null,
-          domain: form.domain || null,
-          options: form.options || null,
           autoMount: form.autoMount,
           enabled: form.enabled,
           description: form.description || null,
         };
+        const payload = form.kind === 'smb'
+          ? { ...shared, server: form.server, domain: form.domain || null, options: form.options || null }
+          : { ...shared, url: form.url };
+        const endpoint = form.kind === 'smb' ? API.smbMounts : API.webDavMounts;
         const result = editingId.value
-          ? await http(API.smbMounts.item(editingId.value), { method: 'PUT', body: payload })
-          : await http(API.smbMounts.list, { method: 'POST', body: payload });
+          ? await http(endpoint.item(editingId.value), { method: 'PUT', body: payload })
+          : await http(endpoint.list, { method: 'POST', body: payload });
         if (result.ok) {
           toast.success(editingId.value ? '配置已保存' : '配置已创建');
           showEditor.value = false;
@@ -144,11 +155,12 @@ export default defineComponent({
     function remove(mount) {
       openConfirm({
         title: '删除挂载配置',
-        message: `确定删除「${mount.name}」（${mount.server} → ${mount.localPath}）？挂载中会先自动卸载。`,
+        message: `确定删除「${mount.name}」（${mount.server || mount.url} → ${mount.localPath}）？挂载中会先自动卸载。${mount.kind === 'webdav' ? '请先确认待上传文件已同步；删除配置不会清除缓存。' : ''}`,
         confirmText: '删除',
         danger: true,
         onConfirm: async () => {
-          const result = await http(API.smbMounts.item(mount.id), { method: 'DELETE' });
+          const endpoint = mount.kind === 'smb' ? API.smbMounts : API.webDavMounts;
+          const result = await http(endpoint.item(mount.id), { method: 'DELETE' });
           if (result.ok) {
             toast.success('配置已删除');
             await load();
@@ -160,7 +172,8 @@ export default defineComponent({
     async function mountNow(mount) {
       actingId.value = mount.id;
       try {
-        const result = await http(API.smbMounts.mount(mount.id), { method: 'POST' });
+        const endpoint = mount.kind === 'smb' ? API.smbMounts : API.webDavMounts;
+        const result = await http(endpoint.mount(mount.id), { method: 'POST' });
         if (result.ok) toast.success(result.data.message || '挂载成功');
         await load();
       } finally {
@@ -176,13 +189,14 @@ export default defineComponent({
     function unmount(mount) {
       openConfirm({
         title: '卸载挂载',
-        message: `确定卸载「${mount.name}」？占用中的文件访问会中断，可用懒卸载等待释放。`,
+        message: `确定卸载「${mount.name}」？${mount.kind === 'webdav' ? 'WebDAV 将尝试正常卸载，请先确认待上传文件已同步。' : '占用中的文件访问会中断，可用懒卸载等待释放。'}`,
         confirmText: '卸载',
         danger: true,
         onConfirm: async () => {
-          const result = await http(API.smbMounts.unmount(mount.id), {
+          const endpoint = mount.kind === 'smb' ? API.smbMounts : API.webDavMounts;
+          const result = await http(endpoint.unmount(mount.id), {
             method: 'POST',
-            body: { lazy: true },
+            body: { lazy: mount.kind === 'smb' },
           });
           if (result.ok) toast.success(result.data.message || '已卸载');
           await load();
@@ -201,20 +215,23 @@ export default defineComponent({
     });
 
     return {
-      items, loading, actingId, unsupported, loadError, showEditor, editingId, saving, form,
+      items, loading, actingId, unsupported, webDavUnsupported, loadError, showEditor, editingId, saving, form,
       load, openCreate, openEdit, save, remove, mountNow, browse, unmount, statusMeta, healthMeta, formatTime,
     };
   },
   template: `
     <div class="flex flex-col gap-4">
       <div class="flex flex-wrap items-center gap-2">
-        <h2 class="text-sm text-slate-400">SMB 挂载管理 <span class="text-slate-600">（mount -t cifs · 需 Linux 特权环境）</span></h2>
+        <h2 class="text-sm text-slate-400">磁盘挂载管理 <span class="text-slate-600">（SMB / WebDAV · 需 Linux 挂载权限）</span></h2>
         <button class="btn btn-primary ml-auto" @click="openCreate()">＋ 新建挂载</button>
       </div>
 
       <div v-if="unsupported" class="panel !border-amber-500/40 bg-amber-500/5 text-amber-200/90 text-xs leading-relaxed px-4 py-3">
-        当前系统不支持挂载管理（需 Linux 环境）。桌面 Windows 部署仅可维护配置；Docker 部署请以
-        <code class="font-mono text-amber-100">--privileged --user root</code> 运行（镜像含 cifs-utils）。
+        当前系统不支持 SMB 挂载。桌面 Windows 部署仅可维护配置；Docker 部署请以
+        <code class="font-mono text-amber-100">--privileged --user root</code> 运行。
+      </div>
+      <div v-if="webDavUnsupported" class="panel !border-amber-500/40 bg-amber-500/5 text-amber-200/90 text-xs leading-relaxed px-4 py-3">
+        当前系统不支持 WebDAV 挂载：需要 Linux、rclone、/dev/fuse 和挂载权限。配置仍可保存。
       </div>
       <div v-if="loadError" class="panel !border-rose-500/40 bg-rose-500/5 text-rose-200/90 text-xs px-4 py-3 flex items-center gap-3">
         <span>{{ loadError }}</span>
@@ -224,11 +241,11 @@ export default defineComponent({
       <div class="panel overflow-x-auto">
         <table class="data-table min-w-[58rem]">
           <thead>
-            <tr><th>状态</th><th>名称</th><th>共享地址</th><th>本地挂载点</th><th>账户</th><th>选项</th><th>自挂</th><th class="text-right">操作</th></tr>
+            <tr><th>状态</th><th>类型</th><th>名称</th><th>远端地址</th><th>本地挂载点</th><th>账户</th><th>选项</th><th>自挂</th><th class="text-right">操作</th></tr>
           </thead>
           <tbody>
-            <tr v-if="!items.length && !loading"><td colspan="8" class="text-slate-600 py-8 text-center">暂无挂载配置，点右上角「新建挂载」</td></tr>
-            <tr v-for="mount in items" :key="mount.id">
+            <tr v-if="!items.length && !loading"><td colspan="9" class="text-slate-600 py-8 text-center">暂无挂载配置，点右上角「新建挂载」</td></tr>
+            <tr v-for="mount in items" :key="mount.kind + mount.id">
               <td>
                 <span class="badge" :class="statusMeta(mount.status).class">
                   <span class="inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle" :class="statusMeta(mount.status).dot"></span>{{ statusMeta(mount.status).label }}
@@ -242,14 +259,15 @@ export default defineComponent({
                   </div>
                 </div>
               </td>
+              <td class="text-slate-400 text-xs">{{ mount.kind === 'smb' ? 'SMB' : 'WebDAV' }}</td>
               <td class="text-slate-200">{{ mount.name }}</td>
-              <td class="font-mono text-xs text-cyan-300/80">{{ mount.server }}</td>
+              <td class="font-mono text-xs text-cyan-300/80">{{ mount.server || mount.url }}</td>
               <td class="font-mono text-xs text-slate-400">{{ mount.localPath }}</td>
               <td class="text-slate-500 text-xs">
                 {{ mount.username || '访客' }}
                 <span v-if="mount.hasPassword" class="text-slate-600"> · <span class="text-emerald-500/70">密码已存</span></span>
               </td>
-              <td class="max-w-[10rem] truncate text-slate-600 text-xs" :title="mount.options">{{ mount.options || '—' }}</td>
+              <td class="max-w-[10rem] truncate text-slate-600 text-xs" :title="mount.options">{{ mount.kind === 'smb' ? (mount.options || '—') : '写缓存' }}</td>
               <td class="text-slate-500 text-xs">{{ mount.autoMount ? '是' : '否' }}</td>
               <td class="text-right whitespace-nowrap">
                 <template v-if="mount.status !== 3">
@@ -274,13 +292,20 @@ export default defineComponent({
           <h3 class="font-display text-base text-neon-soft mb-4">{{ editingId ? '编辑挂载' : '新建挂载' }}</h3>
           <div class="flex flex-col gap-3">
             <label class="block">
+              <span class="text-xs text-slate-500 mb-1 block">协议 *</span>
+              <select class="input" v-model="form.kind" :disabled="!!editingId">
+                <option value="smb">SMB</option><option value="webdav">WebDAV</option>
+              </select>
+            </label>
+            <label class="block">
               <span class="text-xs text-slate-500 mb-1 block">名称 *</span>
               <input class="input" v-model="form.name" placeholder="例如：NAS 影视盘" />
             </label>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label class="block">
-                <span class="text-xs text-slate-500 mb-1 block">共享地址 *</span>
-                <input class="input font-mono" v-model="form.server" placeholder="//192.168.1.10/media" />
+                <span class="text-xs text-slate-500 mb-1 block">{{ form.kind === 'smb' ? '共享地址' : 'WebDAV HTTPS 地址' }} *</span>
+                <input v-if="form.kind === 'smb'" class="input font-mono" v-model="form.server" placeholder="//192.168.1.10/media" />
+                <input v-else class="input font-mono" v-model="form.url" placeholder="https://example.com/remote.php/dav/files/user/" />
               </label>
               <label class="block">
                 <span class="text-xs text-slate-500 mb-1 block">本地挂载点 *</span>
@@ -296,12 +321,12 @@ export default defineComponent({
                 <span class="text-xs text-slate-500 mb-1 block">密码</span>
                 <input class="input" type="password" v-model="form.password" :placeholder="editingId ? '留空=保持不变' : ''" autocomplete="new-password" />
               </label>
-              <label class="block">
+              <label v-if="form.kind === 'smb'" class="block">
                 <span class="text-xs text-slate-500 mb-1 block">域</span>
                 <input class="input" v-model="form.domain" placeholder="可选" />
               </label>
             </div>
-            <label class="block">
+            <label v-if="form.kind === 'smb'" class="block">
               <span class="text-xs text-slate-500 mb-1 block">附加挂载选项（逗号分隔）</span>
               <input class="input font-mono" v-model="form.options" placeholder="vers=3.0,uid=1001,gid=1001" />
               <p class="text-[11px] text-slate-600 mt-1 leading-relaxed">
@@ -310,6 +335,9 @@ export default defineComponent({
                 密码不会出现在命令行，自动写入 data/mount-creds 凭据文件（600 权限）。
               </p>
             </label>
+            <p v-if="form.kind === 'webdav'" class="text-[11px] text-slate-500 leading-relaxed">
+              WebDAV 使用 rclone FUSE 挂载与写缓存；请使用 HTTPS 和应用密码。缓存中的待上传文件在卸载后仍会保留。
+            </p>
             <div class="flex gap-5">
               <label class="flex items-center gap-2 text-sm text-slate-400">
                 <input type="checkbox" v-model="form.enabled" class="accent-cyan-400" /> 启用配置

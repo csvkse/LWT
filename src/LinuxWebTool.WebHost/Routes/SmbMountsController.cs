@@ -11,6 +11,7 @@ namespace LinuxWebTool.WebHost.Routes;
 [Authorize]
 public class SmbMountsController(
     SmbMountStore mountStore,
+    WebDavMountStore webDavStore,
     SmbMountService mountService,
     MountHealthService mountHealth,
     MountOperationCoordinator coordinator,
@@ -55,6 +56,8 @@ public class SmbMountsController(
         {
             return BadRequest(new MessageResponse("本地挂载点已被其他配置使用"));
         }
+        if (await webDavStore.ExistsLocalPathAsync(localPath, null))
+            return BadRequest(new MessageResponse("本地挂载点已被 WebDAV 配置使用"));
 
         var mount = new SmbMount
         {
@@ -98,6 +101,8 @@ public class SmbMountsController(
         {
             return BadRequest(new MessageResponse("本地挂载点已被其他配置使用"));
         }
+        if (await webDavStore.ExistsLocalPathAsync(localPath, null))
+            return BadRequest(new MessageResponse("本地挂载点已被 WebDAV 配置使用"));
 
         var oldPath = mount.LocalPath;
         mount.Name = request.Name.Trim();

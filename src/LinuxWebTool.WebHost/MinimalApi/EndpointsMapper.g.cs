@@ -36,6 +36,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             services.AddScoped<OverviewController>();
             services.AddScoped<SchedulesController>();
             services.AddScoped<SmbMountsController>();
+            services.AddScoped<WebDavMountsController>();
             services.AddScoped<SystemStatusController>();
             services.AddScoped<TranscodeController>();
             services.AddScoped<TerminalController>();
@@ -101,6 +102,15 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_SmbMountsController.MapDelete("{id:guid}", async ([FromServices] SmbMountsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Delete(id); });
             group_SmbMountsController.MapPost("{id:guid}/Mount", async ([FromServices] SmbMountsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Mount(id); });
             group_SmbMountsController.MapPost("{id:guid}/Unmount", async ([FromServices] SmbMountsController ctrl, HttpContext ctx, Guid id, [FromBody] UnmountRequest? request) => { ctrl.HttpContext = ctx; return await ctrl.Unmount(id, request); });
+            var group_WebDavMountsController = app.MapGroup("/api/WebDavMounts");
+            group_WebDavMountsController.RequireAuthorization();
+            group_WebDavMountsController.MapGet("Support", ([FromServices] WebDavMountsController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.Support(); });
+            group_WebDavMountsController.MapGet("", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.GetAll(); });
+            group_WebDavMountsController.MapPost("", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, [FromBody] SaveWebDavMountRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Create(request); });
+            group_WebDavMountsController.MapPut("{id:guid}", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, Guid id, [FromBody] SaveWebDavMountRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Update(id, request); });
+            group_WebDavMountsController.MapDelete("{id:guid}", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Delete(id); });
+            group_WebDavMountsController.MapPost("{id:guid}/Mount", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Mount(id); });
+            group_WebDavMountsController.MapPost("{id:guid}/Unmount", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, Guid id, [FromBody] WebDavMountsController.WebDavUnmountRequest? request) => { ctrl.HttpContext = ctx; return await ctrl.Unmount(id, request); });
             var group_SystemStatusController = app.MapGroup("/api/SystemStatus");
             group_SystemStatusController.RequireAuthorization();
             group_SystemStatusController.MapGet("", async ([FromServices] SystemStatusController ctrl, HttpContext ctx, CancellationToken cancellationToken) => { ctrl.HttpContext = ctx; return await ctrl.Get(cancellationToken); });

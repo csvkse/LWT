@@ -41,6 +41,11 @@ public record SmbMountItemResponse(
     DateTime CreateTime,
     DateTime UpdateTime,
     MountHealthSnapshot? Health = null);
+public record WebDavMountItemResponse(
+    Guid Id, string Name, string Url, string LocalPath, string? Username,
+    bool AutoMount, bool Enabled, string? Description, bool HasPassword,
+    int Status, string StatusText, DateTime CreateTime, DateTime UpdateTime,
+    MountHealthSnapshot? Health = null);
 
 public sealed record HealthResponse(
     string Status,

@@ -114,6 +114,19 @@ CREATE TABLE IF NOT EXISTS smb_mount (
   CreateTime TEXT,
   UpdateTime TEXT
 );
+CREATE TABLE IF NOT EXISTS webdav_mount (
+  Id TEXT PRIMARY KEY,
+  Name TEXT,
+  Url TEXT,
+  LocalPath TEXT,
+  Username TEXT,
+  Password TEXT,
+  AutoMount INTEGER,
+  Enabled INTEGER,
+  Description TEXT,
+  CreateTime TEXT,
+  UpdateTime TEXT
+);
 CREATE TABLE IF NOT EXISTS system_status_disk_snapshot (
   Id TEXT PRIMARY KEY,
   Time TEXT,

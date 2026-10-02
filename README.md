@@ -15,6 +15,7 @@
 | 定时任务 | 引用已保存指令/脚本 + Cron（支持 Unix 5 段 / Quartz 6 段，自动归一化）；启停 / 立即运行 / 下次执行时间；常用 Cron 预设 |
 | **系统状态** | 即时查看：CPU / 内存 / 磁盘挂载点 / 网卡速率 / 进程 TOP / 主机内核信息；10s 自动刷新；历史曲线（后台 60s 采样入 SQLite，保留 7 天，uPlot 渲染，1h~7d 区间切换）；Docker 部署加 `--privileged --pid=host --user root` 可自动采集宿主机全部磁盘 |
 | **SMB 挂载** | 配置并管理 `mount -t cifs` 网络共享：完整 CRUD、挂载 / 卸载 / 懒卸载、实时状态探测、启动自动重挂（不写 /etc/fstab）、凭据落盘 `data/mount-creds`（600 权限，密码不进命令行）、系统状态页自动展示 SMB 挂载点；需 Linux 特权环境 |
+| **WebDAV 挂载** | 通过 rclone/FUSE 挂载 HTTPS WebDAV：配置管理、手动与启动自动挂载、远端与本地双重健康探测、故障恢复；写缓存保留在数据卷。需要 Linux、`/dev/fuse` 和挂载权限 |
 | **FFmpeg 转码** | 视频 / 音频格式处理：一次性文件或文件夹批量入队；转码预设（内置 MP4/H.265/MKV 重封装/MP3）+ 自定义 ffmpeg 参数；替换（先写临时文件成功后才删源）与并存两种输出模式；实时进度 / 速度 / 取消 / 重试；监听文件夹自动转码（网络盘轮询 / 本地盘文件事件两种方式）；桌面部署需安装 ffmpeg，Docker 镜像已内置 |
 | 执行历史 | 手动 / 定时 / 快速三类记录；状态筛选、关键字搜索、分页；失败详情（stdout/stderr/退出码/耗时） |
 | 日志 | 操作日志（DB，全行为审计）+ 程序日志（`logs/app-*.txt`）+ 调试日志（`logs/debug-*.txt`，网页 tail 查看） |
@@ -145,6 +146,25 @@ docker run -d --restart unless-stopped -p 5270:5270 -v linuxwebtool-data:/app/da
 # 已在运行的容器补加自启策略: docker update --restart unless-stopped linuxwebtool
 ```
 
+上面的基础命令只用于普通功能。要在容器内管理 **SMB 与 WebDAV 挂载**，请在 Linux Docker 宿主机上使用以下启动参数（WebDAV 还需宿主机支持 FUSE 并提供 `/dev/fuse`；SMB 不需要该设备）：
+
+```bash
+# 先确认宿主机存在 FUSE 设备
+ls -l /dev/fuse
+
+docker run -d --restart unless-stopped \
+  --name linuxwebtool \
+  -p 5270:5270 \
+  -v linuxwebtool-data:/app/data \
+  --privileged --user root --device /dev/fuse \
+  ghcr.io/csvkse/lwt:latest
+
+# 确认设备已透传，再在网页上配置并挂载 WebDAV
+docker exec linuxwebtool ls -l /dev/fuse
+```
+
+`--privileged` 权限较大，只在可信宿主机使用。若仅使用 SMB，保留 `--privileged --user root`，去掉 `--device /dev/fuse`。若使用本地尚未发布的 WebDAV 代码，先执行下方 `docker build -t linuxwebtool .`，再把镜像名改成 `linuxwebtool`。本机 `wslc` 不支持设备透传，不能用它验证 WebDAV 实际挂载。
+
 > 注：GHCR 包首次发布默认 private。拉取时先 `docker login ghcr.io`（用户名 GitHub 账号、密码为 PAT，需 `read:packages` 权限）；或将仓库 Packages 页中 lwt 的 visibility 改为 public 后免登录拉取。
 
 **docker compose 示例**（更新镜像：`docker compose pull && docker compose up -d`）：
@@ -158,6 +178,11 @@ services:
       - "5270:5270"
     volumes:
       - ./data:/app/data          # 单卷持久化：数据库+凭据+密钥+日志
+    # 使用 SMB/WebDAV 挂载时，取消以下配置的注释；仅 SMB 可省略 devices
+    # privileged: true
+    # user: root
+    # devices:
+    #   - /dev/fuse:/dev/fuse
     environment:
       - Admin__UserName=admin
       - Admin__Password=修改我     # 不设则自动生成，见容器日志
@@ -304,6 +329,9 @@ services:
     privileged: true      # 必需：授予 nsenter 权限
     pid: host             # 必需：共享宿主 PID 命名空间（nsenter -t 1 定位宿主）
     user: root            # 必需：非 root 无权切换命名空间
+    # 启用 WebDAV 挂载时还需宿主机支持 FUSE，并添加：
+    # devices:
+    #   - /dev/fuse:/dev/fuse
     ports:
       - "5270:5270"
     volumes:
@@ -347,6 +375,7 @@ USB / GPU 直通的 compose 节选（叠加到上方任一示例的对应位置�
 ### 挂载 / 转码的运行要求
 
 - **SMB 挂载**：仅 Linux 生效。Docker 部署需在以 `--privileged --user root` 运行时挂载（特权不足会返回 EPERM，UI 有明确提示）；镜像已内置 `cifs-utils`。挂载点需在容器内可访问（`/mnt/*`），凭据写入 `data/mount-creds/<id>`（600 权限），密码不经命令行。
+- **WebDAV 挂载**：仅 Linux 生效。镜像包含 `rclone` 和 `fuse3`；容器需提供 `/dev/fuse` 及挂载权限，例如可信环境下使用 `--privileged --device=/dev/fuse --user root`。仅接受 HTTPS WebDAV URL。配置写入数据卷中的 `webdav-config`（600 权限），写入缓存保存在 `webdav-cache`；卸载前请确认文件已上传。WebDAV 服务端不提供容量时，系统状态页不显示估算容量。容器内创建的挂载默认只在本容器可见；要供宿主机或其他容器访问，还需配置并验证 Linux 绑定挂载传播。
 - **媒体转码**：依赖 ffmpeg。Docker 镜像已内置；桌面 / systemd 部署需自行安装 ffmpeg（或 `Media__FfmpegPath` 指定路径），转码页顶部显示检测状态。媒体目录建议映射进容器以便网页直接访问（如 SMB 挂载 `/mnt/media` 或 `-v /media:/media:ro`）。
 
 

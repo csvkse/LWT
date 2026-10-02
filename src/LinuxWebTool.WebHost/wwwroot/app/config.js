@@ -52,6 +52,13 @@ export const API = {
     mount: (id) => `/SmbMounts/${id}/Mount`,
     unmount: (id) => `/SmbMounts/${id}/Unmount`,
   },
+  webDavMounts: {
+    list: '/WebDavMounts',
+    support: '/WebDavMounts/Support',
+    item: (id) => `/WebDavMounts/${id}`,
+    mount: (id) => `/WebDavMounts/${id}/Mount`,
+    unmount: (id) => `/WebDavMounts/${id}/Unmount`,
+  },
   files: {
     list: '/Files',
     content: '/Files/Content',

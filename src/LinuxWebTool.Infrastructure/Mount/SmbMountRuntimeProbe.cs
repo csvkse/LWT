@@ -64,7 +64,7 @@ public sealed class SmbMountRuntimeProbe : IMountRuntimeProbe
             cancellationToken);
     }
 
-    private static async Task<(bool Success, string? Error)> RunFsProbeAsync(
+    internal static async Task<(bool Success, string? Error)> RunFsProbeAsync(
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
         string timeoutError,
