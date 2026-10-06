@@ -1,6 +1,13 @@
-﻿using LinuxWebTool.WebHost.MinimalApi;
+using LinuxWebTool.WebHost.MinimalApi;
 using LinuxWebTool.WebHost.Middleware;
 using LinuxWebTool.Infrastructure.Support;
+using LinuxWebTool.Infrastructure.Persistence;
+using LinuxWebTool.Infrastructure.Security;
+using LinuxWebTool.Infrastructure.Tunnel;
+using LinuxWebTool.Infrastructure.Gateway;
+using LinuxWebTool.WebHost.Gateway;
+using LinuxWebTool.WebHost.Mcp;
+using Yarp.ReverseProxy.Configuration;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.OpenApi;
@@ -116,6 +123,33 @@ public static class ServiceCollectionExtensions
         builder.Services.AddAuthorization();
         builder.Services.AddAntiforgery();
 
+        // APIKey 认证与权限矩阵
+        builder.Services.AddSingleton<ApiKeyStore>();
+        builder.Services.AddSingleton<ApiKeyService>();
+
+        // FRP 内网穿透反向隧道（HTTP-over-WebSocket，纯 C# 零外部依赖）
+        builder.Services.AddSingleton<FrpTunnelConfigStore>();
+        builder.Services.AddSingleton<FrpTunnelLineStore>();
+        builder.Services.AddSingleton<FrpTunnelManager>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<FrpTunnelManager>());
+        builder.Services.AddSingleton<FrpTunnelEngine>();
+        builder.Services.AddHostedService<FrpTunnelService>();
+
+        // MCP (Model Context Protocol) 核心引擎
+        builder.Services.AddSingleton<McpServerEngine>();
+
+        // 家庭智能网关（YARP L7 反向代理、即席网站代理、L4 TCP/UDP 转发）
+        builder.Services.AddSingleton<GatewayStore>();
+        builder.Services.AddSingleton<WebsiteAllowList>();
+        builder.Services.AddSingleton<WebsiteProxyTransformProvider>();
+        builder.Services.AddSingleton<DatabaseProxyConfigProvider>();
+        builder.Services.AddSingleton<IProxyConfigProvider>(sp => sp.GetRequiredService<DatabaseProxyConfigProvider>());
+        builder.Services.AddReverseProxy().AddTransforms<WebsiteProxyTransformProvider>();
+        builder.Services.AddSingleton<TcpProxyEngine>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<TcpProxyEngine>());
+        builder.Services.AddSingleton<UdpProxyEngine>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<UdpProxyEngine>());
+
         // Quartz 定时调度
         builder.Services.AddScheduling();
 
@@ -128,7 +162,6 @@ public static class ServiceCollectionExtensions
         });
         builder.Services.AddHttpContextAccessor();
         
-
         return builder;
     }
 
@@ -153,9 +186,3 @@ internal sealed class BearerSecuritySchemeTransformer : IOpenApiDocumentTransfor
         return Task.CompletedTask;
     }
 }
-
-
-
-
-
-

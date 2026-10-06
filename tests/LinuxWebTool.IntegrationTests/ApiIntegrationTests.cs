@@ -10,11 +10,13 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Xunit;
 
+using LinuxWebTool.IntegrationTests.Support;
+
 namespace LinuxWebTool.IntegrationTests;
 
 public sealed class ApiIntegrationTests
 {
-    private static readonly string DataDirectory = Path.Combine(Path.GetTempPath(), "linuxwebtool-tests", Guid.NewGuid().ToString("N"));
+    private static string DataDirectory => TestServerFixture.DataDirectory;
     private static readonly Lazy<Task<HttpClient>> Client = new(CreateClientAsync);
 
     private static WebApplication? _app;
@@ -22,26 +24,8 @@ public sealed class ApiIntegrationTests
 
     private static async Task<HttpClient> CreateClientAsync()
     {
-        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
-        {
-            ApplicationName = typeof(Program).Assembly.GetName().Name,
-            ContentRootPath = AppContext.BaseDirectory,
-            EnvironmentName = "Testing",
-        });
-        builder.WebHost.UseTestServer();
-        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Data:Directory"] = DataDirectory,
-            ["Admin:UserName"] = "admin",
-            ["Admin:Password"] = "integration-test-password",
-            ["Swagger:Enabled"] = "false",
-        });
-        builder.AddApplicationServices();
-        var app = builder.Build();
-        app.UseApplicationPipeline();
-        await app.StartAsync();
-        _app = app;
-        return app.GetTestClient();
+        _app = await TestServerFixture.GetAppAsync();
+        return _app.GetTestClient();
     }
 
     [Fact]

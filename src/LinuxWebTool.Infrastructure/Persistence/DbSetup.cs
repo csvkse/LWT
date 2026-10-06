@@ -254,6 +254,100 @@ CREATE TABLE IF NOT EXISTS watch_rule (
   CreateTime TEXT,
   UpdateTime TEXT
 );
+CREATE TABLE IF NOT EXISTS api_key (
+  Id TEXT PRIMARY KEY,
+  Name TEXT NOT NULL,
+  KeyPrefix TEXT NOT NULL,
+  KeyHash TEXT NOT NULL UNIQUE,
+  IsEnabled INTEGER NOT NULL DEFAULT 1,
+  AllowApi INTEGER NOT NULL DEFAULT 1,
+  AllowMcp INTEGER NOT NULL DEFAULT 1,
+  AllowTerminal INTEGER NOT NULL DEFAULT 0,
+  AllowSchedules INTEGER NOT NULL DEFAULT 0,
+  AllowFiles INTEGER NOT NULL DEFAULT 0,
+  AllowTranscode INTEGER NOT NULL DEFAULT 0,
+  AllowGateway INTEGER NOT NULL DEFAULT 0,
+  CreatedAt TEXT NOT NULL,
+  LastUsedAt TEXT,
+  ExpiresAt TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_api_key_hash ON api_key(KeyHash);
+CREATE TABLE IF NOT EXISTS frp_tunnel_config (
+  Id TEXT PRIMARY KEY,
+  ServerUrl TEXT NOT NULL,
+  TunnelHost TEXT NOT NULL,
+  ApiKey TEXT NOT NULL,
+  LocalTargetUrl TEXT NOT NULL DEFAULT 'http://127.0.0.1:8080',
+  AutoStart INTEGER NOT NULL DEFAULT 0,
+  HeartbeatIntervalSeconds INTEGER NOT NULL DEFAULT 15,
+  Status INTEGER NOT NULL DEFAULT 0,
+  LastConnectedAt TEXT,
+  LastDisconnectReason TEXT,
+  UpdateTime TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS frp_tunnel_lines (
+  Id TEXT PRIMARY KEY,
+  Name TEXT NOT NULL,
+  ServerUrl TEXT NOT NULL,
+  BackupServerUrls TEXT,
+  TunnelHost TEXT NOT NULL UNIQUE,
+  ApiKey TEXT,
+  LocalTargetUrl TEXT NOT NULL DEFAULT 'http://127.0.0.1:8080',
+  AutoStart INTEGER NOT NULL DEFAULT 1,
+  HeartbeatIntervalSeconds INTEGER NOT NULL DEFAULT 15,
+  EnableLan302Proxy INTEGER NOT NULL DEFAULT 1,
+  ProxyType TEXT NOT NULL DEFAULT 'Direct',
+  ProxyUrl TEXT,
+  ProxyBypass TEXT,
+  Status TEXT NOT NULL DEFAULT 'Disconnected',
+  SortOrder INTEGER NOT NULL DEFAULT 0,
+  CreateTime TEXT NOT NULL,
+  UpdateTime TEXT NOT NULL
+);
+INSERT OR IGNORE INTO frp_tunnel_lines (Id, Name, ServerUrl, BackupServerUrls, TunnelHost, ApiKey, LocalTargetUrl, AutoStart, HeartbeatIntervalSeconds, EnableLan302Proxy, ProxyType, ProxyUrl, ProxyBypass, Status, SortOrder, CreateTime, UpdateTime)
+SELECT Id, '默认穿透线路', ServerUrl, '', TunnelHost, ApiKey, LocalTargetUrl, AutoStart, HeartbeatIntervalSeconds, 1, 'Direct', '', '', 'Disconnected', 0, UpdateTime, UpdateTime
+FROM frp_tunnel_config
+WHERE (SELECT COUNT(*) FROM frp_tunnel_lines) = 0;
+CREATE INDEX IF NOT EXISTS idx_frp_tunnel_host ON frp_tunnel_lines(TunnelHost);
+CREATE TABLE IF NOT EXISTS gateway_route (
+  Id TEXT PRIMARY KEY,
+  RouteId TEXT NOT NULL UNIQUE,
+  ClusterId TEXT NOT NULL,
+  MatchPath TEXT NOT NULL,
+  MatchHosts TEXT,
+  Transforms TEXT,
+  Metadata TEXT,
+  OrderNum INTEGER NOT NULL DEFAULT 0,
+  IsEnabled INTEGER NOT NULL DEFAULT 1,
+  UpdateTime TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS gateway_cluster (
+  Id TEXT PRIMARY KEY,
+  ClusterId TEXT NOT NULL UNIQUE,
+  LoadBalancingPolicy TEXT NOT NULL DEFAULT 'RoundRobin',
+  Destinations TEXT NOT NULL,
+  HealthCheckConfig TEXT,
+  UpdateTime TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS gateway_website (
+  Id TEXT PRIMARY KEY,
+  Name TEXT NOT NULL,
+  TargetUrl TEXT NOT NULL UNIQUE,
+  RewriteBody INTEGER NOT NULL DEFAULT 1,
+  RewriteCookie INTEGER NOT NULL DEFAULT 1,
+  IsEnabled INTEGER NOT NULL DEFAULT 1,
+  UpdateTime TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS gateway_tcp_route (
+  Id TEXT PRIMARY KEY,
+  Name TEXT NOT NULL,
+  Protocol TEXT NOT NULL DEFAULT 'TCP',
+  ListenPort INTEGER NOT NULL UNIQUE,
+  ForwardHost TEXT NOT NULL,
+  ForwardPort INTEGER NOT NULL,
+  IsEnabled INTEGER NOT NULL DEFAULT 1,
+  UpdateTime TEXT NOT NULL
+);
 ";
         cmd.ExecuteNonQuery();
     }

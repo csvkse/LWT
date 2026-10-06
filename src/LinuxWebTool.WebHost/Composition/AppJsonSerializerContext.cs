@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 using LinuxWebTool.WebHost.Routes;
 using LinuxWebTool.Infrastructure.Persistence.Entities;
 using LinuxWebTool.Contracts.Models;
@@ -6,6 +6,7 @@ using LinuxWebTool.Infrastructure.Persistence;
 
 namespace LinuxWebTool.WebHost.Composition;
 
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true)]
 [JsonSerializable(typeof(ChangeCredentialResponse))]
 [JsonSerializable(typeof(CommandGroup))]
 [JsonSerializable(typeof(CommandItemResponse))]
@@ -132,11 +133,66 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Terminal.TerminalAttachmentTicket))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Terminal.TerminalOutputFrame))]
 [JsonSerializable(typeof(LinuxWebTool.Infrastructure.Terminal.TerminalCapabilities))]
+
+// API Key Models
+[JsonSerializable(typeof(CreateApiKeyRequest))]
+[JsonSerializable(typeof(UpdateApiKeyRequest))]
+[JsonSerializable(typeof(ApiKeyItemResponse))]
+[JsonSerializable(typeof(ApiKeyCreatedResponse))]
+[JsonSerializable(typeof(List<ApiKeyItemResponse>))]
+[JsonSerializable(typeof(ApiKeyEntity))]
+[JsonSerializable(typeof(List<ApiKeyEntity>))]
+
+// FRP Tunnel Models
+[JsonSerializable(typeof(UpdateFrpConfigRequest))]
+[JsonSerializable(typeof(FrpTunnelConfigDto))]
+[JsonSerializable(typeof(FrpTunnelStatusDto))]
+[JsonSerializable(typeof(FrpTunnelLogItem))]
+[JsonSerializable(typeof(List<FrpTunnelLogItem>))]
+[JsonSerializable(typeof(FrpTunnelConfigEntity))]
+[JsonSerializable(typeof(FrpTunnelLineDto))]
+[JsonSerializable(typeof(List<FrpTunnelLineDto>))]
+[JsonSerializable(typeof(CreateFrpTunnelLineRequest))]
+[JsonSerializable(typeof(UpdateFrpTunnelLineRequest))]
+[JsonSerializable(typeof(FrpTunnelLineEntity))]
+[JsonSerializable(typeof(List<FrpTunnelLineEntity>))]
+
+// Gateway Models
+[JsonSerializable(typeof(GatewayRouteItem))]
+[JsonSerializable(typeof(List<GatewayRouteItem>))]
+[JsonSerializable(typeof(SaveGatewayRouteRequest))]
+[JsonSerializable(typeof(GatewayClusterItem))]
+[JsonSerializable(typeof(List<GatewayClusterItem>))]
+[JsonSerializable(typeof(SaveGatewayClusterRequest))]
+[JsonSerializable(typeof(GatewayWebsiteItem))]
+[JsonSerializable(typeof(List<GatewayWebsiteItem>))]
+[JsonSerializable(typeof(SaveGatewayWebsiteRequest))]
+[JsonSerializable(typeof(GatewayTcpRouteItem))]
+[JsonSerializable(typeof(List<GatewayTcpRouteItem>))]
+[JsonSerializable(typeof(SaveGatewayTcpRouteRequest))]
+[JsonSerializable(typeof(GatewayRouteEntity))]
+[JsonSerializable(typeof(List<GatewayRouteEntity>))]
+[JsonSerializable(typeof(GatewayClusterEntity))]
+[JsonSerializable(typeof(List<GatewayClusterEntity>))]
+[JsonSerializable(typeof(GatewayWebsiteEntity))]
+[JsonSerializable(typeof(List<GatewayWebsiteEntity>))]
+[JsonSerializable(typeof(GatewayTcpRouteEntity))]
+[JsonSerializable(typeof(List<GatewayTcpRouteEntity>))]
+[JsonSerializable(typeof(LinuxWebTool.WebHost.Gateway.DatabaseProxyConfigProvider.DestinationItem))]
+[JsonSerializable(typeof(List<LinuxWebTool.WebHost.Gateway.DatabaseProxyConfigProvider.DestinationItem>))]
+
+// MCP Models
+[JsonSerializable(typeof(McpRpcRequest))]
+[JsonSerializable(typeof(McpRpcResponse))]
+[JsonSerializable(typeof(McpRpcError))]
+[JsonSerializable(typeof(McpToolDefinition))]
+[JsonSerializable(typeof(McpToolContent))]
+[JsonSerializable(typeof(McpCallToolResult))]
+[JsonSerializable(typeof(McpToolsListResult))]
+[JsonSerializable(typeof(List<McpToolDefinition>))]
+[JsonSerializable(typeof(List<McpToolContent>))]
+
 public partial class AppJsonSerializerContext
  : JsonSerializerContext
 {
 }
-
-
-
-
