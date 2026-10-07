@@ -367,5 +367,83 @@ public class ArchitectureTests
             "Minimal API 要求此类可选 Body 必须通过 HttpContext 动态判断 (ctx.Request.HasJsonContentType())：\n" +
             string.Join("\n", violations));
     }
+
+    [Fact]
+    public void LinuxArch018_NativeAOT下禁止调用无显式源生成上下文的JsonSerializer重载()
+    {
+        var srcDir = Path.Combine(RepoRoot, "src");
+        Assert.True(Directory.Exists(srcDir), "src 目录不存在");
+
+        var methodRegex = new Regex(
+            @"\b(?:JsonSerializer\s*\.\s*(?:Serialize|Deserialize|SerializeAsync|DeserializeAsync|SerializeToElement|SerializeToNode|SerializeToUtf8Bytes)|WriteAsJsonAsync|ReadFromJsonAsync)\b",
+            RegexOptions.Compiled);
+        var safeContextRegex = new Regex(
+            @"(\b\w*Json(?:Serializer)?Context\b|\bJsonTypeInfo\b|\bDefault\b|\bTypeInfoResolver\b)",
+            RegexOptions.Compiled);
+
+        var violations = new List<string>();
+
+        foreach (var file in Directory.EnumerateFiles(srcDir, "*.cs", SearchOption.AllDirectories))
+        {
+            var normalizedPath = file.Replace('\\', '/');
+            if (normalizedPath.Contains("/bin/") || normalizedPath.Contains("/obj/"))
+            {
+                continue;
+            }
+
+            var content = File.ReadAllText(file);
+            var matches = methodRegex.Matches(content);
+            foreach (Match match in matches)
+            {
+                var start = match.Index + match.Length;
+
+                // 跳过泛型参数 <...>，如 Deserialize<List<string>> 或 ReadFromJsonAsync<T>
+                if (start < content.Length && content[start] == '<')
+                {
+                    var angleDepth = 1;
+                    start++;
+                    while (start < content.Length && angleDepth > 0)
+                    {
+                        if (content[start] == '<') angleDepth++;
+                        else if (content[start] == '>') angleDepth--;
+                        start++;
+                    }
+                }
+
+                while (start < content.Length && char.IsWhiteSpace(content[start]))
+                {
+                    start++;
+                }
+
+                // 寻找对应的方法参数圆括号
+                if (start < content.Length && content[start] == '(')
+                {
+                    var parenDepth = 1;
+                    var end = start + 1;
+                    while (end < content.Length && parenDepth > 0)
+                    {
+                        if (content[end] == '(') parenDepth++;
+                        else if (content[end] == ')') parenDepth--;
+                        end++;
+                    }
+
+                    var argsText = content.Substring(start + 1, end - start - 2);
+                    if (!safeContextRegex.IsMatch(argsText))
+                    {
+                        var lineNumber = content.AsSpan(0, match.Index).Count('\n') + 1;
+                        var relativePath = Path.GetRelativePath(RepoRoot, file);
+                        violations.Add($"{relativePath}:{lineNumber}: {match.Value}({argsText.Trim()})");
+                    }
+                }
+            }
+        }
+
+        Assert.True(violations.Count == 0,
+            "检测到调用了无显式源生成参数的 JsonSerializer / JSON I/O 反射重载！\n" +
+            "由于项目配置了 <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>，\n" +
+            "未传递 JsonTypeInfo 或 JsonSerializerContext 的调用将在运行时抛出 InvalidOperationException。\n" +
+            "请传入 AppJsonSerializerContext.Default.* 或自定义 *JsonContext.Default.*。\n" +
+            "违规代码：\n" + string.Join("\n", violations));
+    }
 }
 

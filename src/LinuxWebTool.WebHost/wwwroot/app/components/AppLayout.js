@@ -40,6 +40,7 @@ const NAV_GROUPS = [
     children: [
       { path: '/gateway', label: '家庭网关', desc: 'YARP 反代与网站/端口转发' },
       { path: '/frp', label: 'FRP 穿透', desc: 'ProxyByCF 隧道 / 多线路 / 302代拉' },
+      { path: '/easytier', label: 'EasyTier 组网', desc: '去中心化 P2P 虚拟局域网 / 节点与路由' },
     ],
   },
   {

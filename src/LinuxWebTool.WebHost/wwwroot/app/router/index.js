@@ -13,6 +13,7 @@ const routes = [
   { path: '/transcode', name: 'transcode', component: () => import('../views/TranscodeView.js') },
   { path: '/gateway', name: 'gateway', component: () => import('../views/GatewayView.js') },
   { path: '/frp', name: 'frp', component: () => import('../views/FrpView.js') },
+  { path: '/easytier', name: 'easytier', component: () => import('../views/EasyTierView.js') },
   { path: '/keys', name: 'keys', component: () => import('../views/ApiKeysView.js') },
   { path: '/history', name: 'history', component: () => import('../views/HistoryView.js') },
   { path: '/logs', name: 'logs', component: () => import('../views/LogsView.js') },

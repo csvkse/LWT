@@ -5,6 +5,8 @@ using LinuxWebTool.Infrastructure.Persistence;
 using LinuxWebTool.Infrastructure.Security;
 using LinuxWebTool.Infrastructure.Tunnel;
 using LinuxWebTool.Infrastructure.Gateway;
+using LinuxWebTool.Infrastructure.EasyTier;
+using LinuxWebTool.Contracts.Interfaces;
 using LinuxWebTool.WebHost.Gateway;
 using LinuxWebTool.WebHost.Mcp;
 using Yarp.ReverseProxy.Configuration;
@@ -135,6 +137,14 @@ public static class ServiceCollectionExtensions
 
         // MCP (Model Context Protocol) 核心引擎
         builder.Services.AddSingleton<McpServerEngine>();
+
+        // EasyTier 虚拟组网管理器与内核宿主
+        builder.Services.AddSingleton<EasyTierNodeStore>();
+        builder.Services.AddSingleton<EasyTierHostSupervisor>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<EasyTierHostSupervisor>());
+        builder.Services.AddSingleton<EasyTierNodeManager>();
+        builder.Services.AddSingleton<IEasyTierManager>(sp => sp.GetRequiredService<EasyTierNodeManager>());
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<EasyTierNodeManager>());
 
         // 家庭智能网关（YARP L7 反向代理、即席网站代理、L4 TCP/UDP 转发）
         builder.Services.AddSingleton<GatewayStore>();
