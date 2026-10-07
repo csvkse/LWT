@@ -78,6 +78,9 @@ public class SmbMountsController(
         };
         await mountStore.InsertAsync(mount);
         mountService.EnsureCredentialFile(mount);
+        if (mount.Enabled) SystemStatusProvider.ManagedMountPoints[localPath.Trim().TrimEnd('/')] = 0;
+        var desc = await catalog.LoadAsync(new("smb", mount.Id));
+        if (desc is not null) mountHealth.ConfigurationChanged(desc);
         await operationLogger.LogAsync("新增挂载配置", "SMB挂载", mount.Name,
             $"{mount.Server} → {mount.LocalPath}", clientIp: HttpContext.GetClientIp());
         return Ok(new IdResponse(mount.Id));
@@ -162,7 +165,7 @@ public class SmbMountsController(
 
     /// <summary>执行卸载（body {lazy:true} 懒卸载）。</summary>
     [HttpPost("{id:guid}/Unmount")]
-    public async Task<IResult> Unmount(Guid id, [FromBody] UnmountRequest? request)
+    public async Task<IResult> Unmount(Guid id, [FromBody] UnmountRequest? request = null)
     {
         var task = await mountHealth.SubmitAsync("smb", id, "Unmount", request?.Lazy == true, clientIp: HttpContext.GetClientIp());
         return task is null ? NotFound(new MessageResponse("挂载配置不存在")) : StatusCode(202, task);

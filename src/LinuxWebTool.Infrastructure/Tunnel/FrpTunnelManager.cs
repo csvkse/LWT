@@ -127,7 +127,10 @@ public sealed class FrpTunnelManager(
         entity.ServerUrl = req.ServerUrl.Trim();
         entity.BackupServerUrls = req.BackupServerUrls?.Trim();
         entity.TunnelHost = req.TunnelHost.Trim();
-        entity.ApiKey = req.ApiKey?.Trim() ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(req.ApiKey) && !req.ApiKey.Contains('*'))
+        {
+            entity.ApiKey = req.ApiKey.Trim();
+        }
         entity.LocalTargetUrl = string.IsNullOrWhiteSpace(req.LocalTargetUrl) ? "http://127.0.0.1:8080" : req.LocalTargetUrl.Trim();
         entity.AutoStart = req.AutoStart;
         entity.HeartbeatIntervalSeconds = req.HeartbeatIntervalSeconds > 0 ? req.HeartbeatIntervalSeconds : 15;
@@ -231,6 +234,7 @@ public sealed class FrpTunnelManager(
         entity.ProxyBypass,
         instance.State,
         instance.PublicUrl,
+        instance.SubdomainUrl ?? FrpTunnelInstance.ResolveSubdomainUrl(entity.ServerUrl, entity.TunnelHost),
         instance.UptimeSeconds,
         instance.SentBytes,
         instance.ReceivedBytes,

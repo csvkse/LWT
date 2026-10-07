@@ -57,8 +57,8 @@ public sealed record SaveGroupRequest
 
 public sealed record ExecuteHistoryQuery
 {
-    public int Page { get; init; } = 1;
-    public int PageSize { get; init; } = 20;
+    public int? Page { get; init; } = 1;
+    public int? PageSize { get; init; } = 20;
     public ExecutionSource? Source { get; init; }
     public ExecutionStatus? Status { get; init; }
     public Guid? CommandId { get; init; }
@@ -68,7 +68,7 @@ public sealed record ExecuteHistoryQuery
 
 public sealed record OperationLogQuery
 {
-    public int Page { get; init; } = 1;
-    public int PageSize { get; init; } = 20;
+    public int? Page { get; init; } = 1;
+    public int? PageSize { get; init; } = 20;
     public string? Keyword { get; init; }
 }

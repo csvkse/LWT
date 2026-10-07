@@ -92,6 +92,42 @@ public sealed class ApiIntegrationTests
     }
 
     [Fact]
+    public async Task Command_execute_supports_empty_body_and_json_body()
+    {
+        var client = await Client.Value;
+        await LoginAsync(client);
+
+        var groupResponse = await client.PostAsync("/api/Groups", Json("{\"name\":\"exec-test-group\",\"bizType\":0,\"sortOrder\":1}"));
+        Assert.Equal(HttpStatusCode.OK, groupResponse.StatusCode);
+        using var groupDoc = JsonDocument.Parse(await groupResponse.Content.ReadAsStringAsync());
+        var groupId = groupDoc.RootElement.GetProperty("id").GetGuid();
+
+        var commandResponse = await client.PostAsync("/api/Commands", Json($"{{\"name\":\"exec-test-cmd\",\"commandText\":\"echo exec-ok\",\"scriptType\":0,\"groupId\":\"{groupId}\"}}"));
+        Assert.Equal(HttpStatusCode.OK, commandResponse.StatusCode);
+        using var commandDoc = JsonDocument.Parse(await commandResponse.Content.ReadAsStringAsync());
+        var commandId = commandDoc.RootElement.GetProperty("id").GetGuid();
+
+        // 1. 无 Body、无 Content-Type、Content-Length: 0（复现用户使用 curl 或客户端未传 Body 场景，禁止 404）
+        using var emptyContent = new ByteArrayContent(Array.Empty<byte>());
+        emptyContent.Headers.ContentLength = 0;
+        var emptyBodyResponse = await client.PostAsync($"/api/Commands/{commandId}/Execute", emptyContent);
+        Assert.Equal(HttpStatusCode.OK, emptyBodyResponse.StatusCode);
+        var emptyBodyResult = await emptyBodyResponse.Content.ReadAsStringAsync();
+        Assert.Contains("\"success\":true", emptyBodyResult);
+
+        // 2. 带 JSON Body（带 timeoutSeconds 等参数）
+        var jsonBodyResponse = await client.PostAsync($"/api/Commands/{commandId}/Execute", Json("{\"timeoutSeconds\":30}"));
+        Assert.Equal(HttpStatusCode.OK, jsonBodyResponse.StatusCode);
+        var jsonBodyResult = await jsonBodyResponse.Content.ReadAsStringAsync();
+        Assert.Contains("\"success\":true", jsonBodyResult);
+
+        // 清理
+        Assert.Equal(HttpStatusCode.OK, (await client.DeleteAsync($"/api/Commands/{commandId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.DeleteAsync($"/api/Groups/{groupId}")).StatusCode);
+    }
+
+
+    [Fact]
     public async Task Legacy_lowercase_smb_mount_id_can_be_looked_up_by_route_guid()
     {
         var client = await Client.Value;

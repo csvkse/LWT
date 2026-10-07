@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
@@ -24,7 +25,7 @@ public sealed class FrpTunnelInstance(
         "te", "trailer", "trailers", "transfer-encoding", "upgrade", "proxy-connection"
     };
 
-    // 局域网转发与代拉流专用客户端：强制 UseProxy = false，绝不走上游出口代理
+    // 局域网转发与代拉流专用客户端：强制 UseProxy = false，绝不走上游出口代理；支持局域网自签名 SSL 证书
     private readonly HttpClient _localHttpClient = new(new SocketsHttpHandler
     {
         AllowAutoRedirect = false,
@@ -32,8 +33,15 @@ public sealed class FrpTunnelInstance(
         UseProxy = false,
         Proxy = null,
         EnableMultipleHttp2Connections = true,
-        PooledConnectionLifetime = TimeSpan.FromMinutes(15)
+        PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+        SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+        {
+            RemoteCertificateValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
+        }
     });
+
+    private readonly ConcurrentDictionary<string, TunnelRequestSession> _sessions = new();
+    private readonly MediaStreamCoordinator _mediaCoordinator = new();
 
     private readonly ConcurrentQueue<FrpTunnelLogItem> _logs = new();
     private ClientWebSocket? _ws;
@@ -45,13 +53,62 @@ public sealed class FrpTunnelInstance(
     public FrpTunnelLineEntity Config { get; private set; } = config;
     public string State { get; private set; } = "Disconnected";
     public string? PublicUrl { get; private set; }
+    private readonly SemaphoreSlim _wsSendLock = new(1, 1);
+    private long _sentBytes;
+    private long _receivedBytes;
+
+    public string? SubdomainUrl { get; private set; }
     public DateTime? ConnectedAt { get; private set; }
-    public long SentBytes { get; private set; }
-    public long ReceivedBytes { get; private set; }
+    public long SentBytes => Volatile.Read(ref _sentBytes);
+    public long ReceivedBytes => Volatile.Read(ref _receivedBytes);
     public string? LastError { get; private set; }
     public long UptimeSeconds => ConnectedAt.HasValue && State == "Connected"
         ? (long)(DateTime.UtcNow - ConnectedAt.Value).TotalSeconds
         : 0;
+
+    private async Task<bool> SafeSendWebSocketAsync(
+        WebSocket ws,
+        ReadOnlyMemory<byte> buffer,
+        WebSocketMessageType messageType,
+        bool endOfMessage,
+        CancellationToken token)
+    {
+        if (ws.State != WebSocketState.Open) return false;
+
+        try
+        {
+            await _wsSendLock.WaitAsync(token);
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (ws.State != WebSocketState.Open) return false;
+            await ws.SendAsync(buffer, messageType, endOfMessage, token);
+            Interlocked.Add(ref _sentBytes, buffer.Length);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (WebSocketException ex)
+        {
+            AddLog("WRN", $"WebSocket 发送失败 ({ex.WebSocketErrorCode}): {ex.Message}");
+            return false;
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+        finally
+        {
+            _wsSendLock.Release();
+        }
+    }
 
     public IReadOnlyList<FrpTunnelLogItem> GetRecentLogs() => _logs.ToArray();
 
@@ -74,15 +131,22 @@ public sealed class FrpTunnelInstance(
         _isStopped = true;
         State = "Stopped";
         _instanceCts?.Cancel();
-        if (_ws != null)
+        foreach (var s in _sessions.Values)
+        {
+            s.Abort();
+            s.Dispose();
+        }
+        _sessions.Clear();
+
+        var ws = Interlocked.Exchange(ref _ws, null);
+        if (ws != null)
         {
             try
             {
-                await _ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Line stopped", CancellationToken.None);
+                await ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Line stopped", CancellationToken.None);
             }
             catch { }
-            _ws.Dispose();
-            _ws = null;
+            try { ws.Dispose(); } catch { }
         }
     }
 
@@ -119,7 +183,12 @@ public sealed class FrpTunnelInstance(
                     backoffSeconds = 1;
                     LastError = null;
                     PublicUrl = $"{ResolveHttpOrigin(Config.ServerUrl)}/tunnel/{Config.TunnelHost}/";
+                    SubdomainUrl = ResolveSubdomainUrl(Config.ServerUrl, Config.TunnelHost);
                     AddLog("INFO", $"✓ 已成功连接至边缘网关 (Host: {Config.TunnelHost})");
+                    if (!string.IsNullOrEmpty(SubdomainUrl))
+                    {
+                        AddLog("INFO", $"🌐 独立子域名入口: {SubdomainUrl}");
+                    }
 
                     using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(token);
                     var heartbeatTask = RunHeartbeatAsync(_ws, heartbeatCts.Token);
@@ -141,7 +210,22 @@ public sealed class FrpTunnelInstance(
             }
             catch (WebSocketException ex) when (ex.WebSocketErrorCode == WebSocketError.NotAWebSocket)
             {
-                LastError = "网关非有效 WebSocket 服务端: " + ex.Message;
+                if (ex.Message.Contains("403"))
+                {
+                    LastError = "边缘网关鉴权失败 (HTTP 403 Forbidden)：请检查客户端鉴权 Token (ApiKey) 或穿透 Host 权限是否有效";
+                }
+                else if (ex.Message.Contains("401"))
+                {
+                    LastError = "边缘网关未授权 (HTTP 401 Unauthorized)：请检查客户端鉴权 Token (ApiKey) 是否正确";
+                }
+                else if (ex.Message.Contains("404"))
+                {
+                    LastError = "边缘网关端点不存在 (HTTP 404 Not Found)：请检查服务端 URL 路径是否正确";
+                }
+                else
+                {
+                    LastError = "网关握手失败 (非有效 WebSocket 服务端): " + ex.Message;
+                }
                 AddLog("ERR", LastError);
             }
             catch (Exception ex)
@@ -153,10 +237,10 @@ public sealed class FrpTunnelInstance(
             {
                 if (State != "Displaced") State = _isStopped ? "Stopped" : "Reconnecting";
                 ConnectedAt = null;
-                if (_ws != null)
+                var ws = Interlocked.Exchange(ref _ws, null);
+                if (ws != null)
                 {
-                    try { _ws.Dispose(); } catch { }
-                    _ws = null;
+                    try { ws.Dispose(); } catch { }
                 }
             }
 
@@ -331,6 +415,84 @@ public sealed class FrpTunnelInstance(
         return $"{scheme}://{uri.Host}{portPart}";
     }
 
+    /// <summary>
+    /// 解析独立二级子域名格式公网入口（如 https://lwt.asairo.de/）
+    /// 支持推导 Cloudflare / ProxyByCF 泛解析与子域名直通模式，规避 IP 或 localhost
+    /// </summary>
+    public static string? ResolveSubdomainUrl(string? serverUrl, string? tunnelHost)
+    {
+        if (string.IsNullOrWhiteSpace(serverUrl) || string.IsNullOrWhiteSpace(tunnelHost))
+            return null;
+
+        var hostClean = tunnelHost.Trim().ToLowerInvariant();
+        if (hostClean.Length == 0 || hostClean.Contains('/') || hostClean.Contains(':'))
+            return null;
+
+        var raw = serverUrl.Trim();
+        if (!raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+            !raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
+            !raw.StartsWith("ws://", StringComparison.OrdinalIgnoreCase) &&
+            !raw.StartsWith("wss://", StringComparison.OrdinalIgnoreCase))
+        {
+            raw = "https://" + raw;
+        }
+
+        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri))
+            return null;
+
+        var host = uri.Host.Trim().ToLowerInvariant();
+
+        // 排除本地回环、局域网私有地址、IP 地址与不支持二级子域名的 Cloudflare 默认域名
+        if (IPAddress.TryParse(host, out _) ||
+            host == "localhost" ||
+            host.EndsWith(".local", StringComparison.OrdinalIgnoreCase) ||
+            host.EndsWith(".lan", StringComparison.OrdinalIgnoreCase) ||
+            host.EndsWith(".internal", StringComparison.OrdinalIgnoreCase) ||
+            host.EndsWith(".workers.dev", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var scheme = (uri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase) || uri.Scheme.Equals("ws", StringComparison.OrdinalIgnoreCase))
+            ? "http"
+            : "https";
+
+        var portPart = uri.IsDefaultPort ? string.Empty : $":{uri.Port}";
+
+        var parts = host.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2)
+            return null;
+
+        string baseDomain;
+        if (parts.Length == 2)
+        {
+            // 例如 asairo.de -> lwt.asairo.de
+            baseDomain = host;
+        }
+        else if (parts.Length == 3)
+        {
+            // 判断是否为国家二级代码顶级域（如 example.co.uk, test.com.cn）
+            var isTwoLevelTld = (parts[1] is "co" or "com" or "net" or "org" or "gov" or "edu") && parts[2].Length == 2;
+            if (isTwoLevelTld)
+            {
+                baseDomain = host;
+            }
+            else
+            {
+                // 例如 p.asairo.de -> 去掉网关域前缀 p -> asairo.de -> lwt.asairo.de
+                baseDomain = $"{parts[1]}.{parts[2]}";
+            }
+        }
+        else
+        {
+            // 多级域名：如 p.asairo.co.uk 或 edge.service.asairo.de
+            // 剥离最左侧子网关前缀
+            baseDomain = string.Join('.', parts.Skip(1));
+        }
+
+        return $"{scheme}://{hostClean}.{baseDomain}{portPart}/";
+    }
+
     private async Task RunHeartbeatAsync(ClientWebSocket ws, CancellationToken token)
     {
         var pingBytes = Encoding.UTF8.GetBytes("{\"type\":\"ping\"}");
@@ -341,8 +503,10 @@ public sealed class FrpTunnelInstance(
             {
                 await Task.Delay(interval, token);
                 if (ws.State != WebSocketState.Open) break;
-                await ws.SendAsync(pingBytes, WebSocketMessageType.Text, true, token);
-                SentBytes += pingBytes.Length;
+                if (!await SafeSendWebSocketAsync(ws, pingBytes, WebSocketMessageType.Text, true, token))
+                {
+                    break;
+                }
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
@@ -360,7 +524,26 @@ public sealed class FrpTunnelInstance(
 
         while (!token.IsCancellationRequested && ws.State == WebSocketState.Open)
         {
-            var result = await ws.ReceiveAsync(buffer, token);
+            WebSocketReceiveResult result;
+            try
+            {
+                result = await ws.ReceiveAsync(buffer, token);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested || _isStopped)
+            {
+                break;
+            }
+            catch (WebSocketException ex)
+            {
+                AddLog("WRN", $"网关连接读取异常 ({ex.WebSocketErrorCode}): {ex.Message}");
+                break;
+            }
+            catch (Exception ex)
+            {
+                AddLog("WRN", $"网关连接异常: {ex.Message}");
+                break;
+            }
+
             if (result.MessageType == WebSocketMessageType.Close)
             {
                 if (ws.CloseStatus == (WebSocketCloseStatus)4002)
@@ -374,7 +557,7 @@ public sealed class FrpTunnelInstance(
                 break;
             }
 
-            ReceivedBytes += result.Count;
+            Interlocked.Add(ref _receivedBytes, result.Count);
             ms.Write(buffer, 0, result.Count);
 
             if (result.EndOfMessage)
@@ -384,14 +567,58 @@ public sealed class FrpTunnelInstance(
 
                 if (result.MessageType == WebSocketMessageType.Text)
                 {
-                    HandleJsonMessage(ws, payloadBytes, token);
+                    try
+                    {
+                        HandleJsonMessage(ws, payloadBytes, token);
+                    }
+                    catch (Exception ex)
+                    {
+                        AddLog("ERR", $"[消息处理异常]: {ex.Message}");
+                    }
                 }
             }
         }
     }
 
+    public static Uri CombineLocalTargetUri(string localTargetUrl, string reqPath)
+    {
+        var rawBase = (localTargetUrl ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(rawBase)) rawBase = "http://127.0.0.1:8080";
+        var baseUri = new Uri(rawBase);
+        var basePath = baseUri.AbsolutePath.TrimEnd('/');
+        var pathOnly = reqPath ?? "/";
+        var queryOnly = string.Empty;
+        var qIdx = pathOnly.IndexOf('?');
+        if (qIdx >= 0)
+        {
+            queryOnly = pathOnly[(qIdx + 1)..];
+            pathOnly = pathOnly[..qIdx];
+        }
+
+        if (!pathOnly.StartsWith('/'))
+        {
+            pathOnly = "/" + pathOnly;
+        }
+
+        var mergedPath = string.IsNullOrEmpty(basePath)
+            ? pathOnly
+            : $"{basePath}{pathOnly}";
+
+        var builder = new UriBuilder(baseUri)
+        {
+            Path = mergedPath
+        };
+        if (!string.IsNullOrEmpty(queryOnly))
+        {
+            builder.Query = queryOnly;
+        }
+        return builder.Uri;
+    }
+
     private void HandleJsonMessage(ClientWebSocket ws, byte[] payloadBytes, CancellationToken token)
     {
+        var jsonStr = Encoding.UTF8.GetString(payloadBytes);
+        AddLog("INFO", $"[WS RECV] {jsonStr}");
         using var doc = JsonDocument.Parse(payloadBytes);
         var root = doc.RootElement;
         if (!root.TryGetProperty("type", out var typeProp)) return;
@@ -404,63 +631,208 @@ public sealed class FrpTunnelInstance(
                 var host = root.TryGetProperty("host", out var hP) ? hP.GetString() : Config.TunnelHost;
                 var pathModeUrl = root.TryGetProperty("pathModeUrl", out var pP) ? pP.GetString() : $"/tunnel/{host}/";
                 PublicUrl = $"{ResolveHttpOrigin(Config.ServerUrl)}{pathModeUrl}";
+                SubdomainUrl = ResolveSubdomainUrl(Config.ServerUrl, host ?? Config.TunnelHost);
                 AddLog("INFO", $"🚀 公网映射挂载成功: {PublicUrl}");
+                if (!string.IsNullOrEmpty(SubdomainUrl))
+                {
+                    AddLog("INFO", $"🚀 独立子域名直通入口: {SubdomainUrl}");
+                }
                 break;
             }
             case "pong" or "PONG":
                 break;
             case "HTTP_REQUEST":
             {
-                _ = Task.Run(() => ForwardHttpRequestAsync(ws, root.Clone(), token), token);
+                if (!root.TryGetProperty("requestId", out var rIdProp) || rIdProp.GetString() is not { } requestId)
+                {
+                    break;
+                }
+                var method = root.TryGetProperty("method", out var mProp) ? mProp.GetString() ?? "GET" : "GET";
+                var path = root.TryGetProperty("path", out var pathP) ? pathP.GetString() : "/";
+                AddLog("INFO", $"[HTTP_REQUEST 收到] {method} {path} ({requestId})");
+
+                var session = new TunnelRequestSession(requestId, method, path ?? "/", token);
+                _sessions[requestId] = session;
+
+                var reqHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (root.TryGetProperty("headers", out var hObj))
+                {
+                    foreach (var prop in hObj.EnumerateObject())
+                    {
+                        reqHeaders[prop.Name] = prop.Value.GetString() ?? string.Empty;
+                    }
+                }
+
+                // 流媒体协同与拖拽寻轨抢占检测
+                if (MediaStreamCoordinator.IsMediaResource(path ?? "/"))
+                {
+                    var sessionScope = MediaStreamCoordinator.ExtractSessionScope(reqHeaders, path ?? "/");
+                    var canonicalKey = MediaStreamCoordinator.GetCanonicalMediaKey(sessionScope, path ?? "/");
+                    session.CanonicalMediaKey = canonicalKey;
+
+                    reqHeaders.TryGetValue("range", out var rangeHeader);
+                    var isProbe = MediaStreamCoordinator.IsBoundedRangeProbe(rangeHeader);
+
+                    var (superseded, wasPreempted) = _mediaCoordinator.CoordinateStream(canonicalKey, session, isProbe);
+                    if (wasPreempted && superseded != null)
+                    {
+                        AddLog("INFO", $">> [媒体寻轨抢占] 收到全新播放请求，中止旧流: {superseded.RequestId} -> {requestId}");
+                    }
+                }
+
+                var reqClone = root.Clone();
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await ForwardHttpRequestAsync(ws, reqClone, session);
+                    }
+                    catch (Exception ex)
+                    {
+                        AddLog("ERR", $"[ForwardHttpRequestAsync 顶层未捕获异常]: {ex}");
+                    }
+                }, token);
+                break;
+            }
+            case "HTTP_ABORT":
+            {
+                var abortId = root.TryGetProperty("requestId", out var aP) ? aP.GetString() : null;
+                if (abortId != null && _sessions.TryGetValue(abortId, out var abortSession))
+                {
+                    abortSession.Abort();
+                    AddLog("INFO", $">> [HTTP_ABORT] 收到网关中断通知，即时中止本地拉流: {abortId}");
+                }
+                break;
+            }
+            case "HTTP_ACK":
+            {
+                var ackId = root.TryGetProperty("requestId", out var aP) ? aP.GetString() : null;
+                var ackBytes = root.TryGetProperty("bytes", out var bP) ? bP.GetInt32() : 0;
+                if (ackId != null && _sessions.TryGetValue(ackId, out var ackSession))
+                {
+                    ackSession.AddCredit(ackBytes);
+                }
                 break;
             }
         }
     }
 
-    internal async Task ForwardHttpRequestAsync(WebSocket ws, JsonElement reqFrame, CancellationToken token)
+    internal Task ForwardHttpRequestAsync(WebSocket ws, JsonElement reqFrame, CancellationToken token)
     {
-        var requestId = reqFrame.GetProperty("requestId").GetString()!;
-        var method = reqFrame.GetProperty("method").GetString() ?? "GET";
-        var path = reqFrame.TryGetProperty("path", out var pathP) ? pathP.GetString() : "/";
-        var bodyB64 = reqFrame.TryGetProperty("body", out var bP) ? bP.GetString() : null;
+        var requestId = reqFrame.TryGetProperty("requestId", out var rP) ? rP.GetString() ?? "unknown" : "unknown";
+        var method = reqFrame.TryGetProperty("method", out var mP) ? mP.GetString() ?? "GET" : "GET";
+        var path = reqFrame.TryGetProperty("path", out var pP) ? pP.GetString() ?? "/" : "/";
+        var session = new TunnelRequestSession(requestId, method, path, token);
+        _sessions[requestId] = session;
+        return ForwardHttpRequestAsync(ws, reqFrame, session);
+    }
 
-        var targetBase = Config.LocalTargetUrl.TrimEnd('/');
-        var targetUri = new Uri($"{targetBase}{path}");
-
-        using var httpRequest = new HttpRequestMessage(new HttpMethod(method), targetUri);
+    private static (HttpRequestMessage Request, bool IsWsUpgrade) CreateForwardHttpRequest(
+        string method,
+        Uri uri,
+        JsonElement reqFrame,
+        byte[]? bodyBytes)
+    {
+        var req = new HttpRequestMessage(new HttpMethod(method), uri);
+        var isWsUpgrade = false;
 
         if (reqFrame.TryGetProperty("headers", out var headersObj))
         {
             foreach (var prop in headersObj.EnumerateObject())
             {
                 var k = prop.Name;
+                var v = prop.Value.GetString();
+                if (k.Equals("upgrade", StringComparison.OrdinalIgnoreCase) && string.Equals(v, "websocket", StringComparison.OrdinalIgnoreCase))
+                {
+                    isWsUpgrade = true;
+                }
                 if (HopByHopHeaders.Contains(k)) continue;
                 if (k.Equals("host", StringComparison.OrdinalIgnoreCase)) continue;
                 if (k.Equals("content-length", StringComparison.OrdinalIgnoreCase)) continue;
                 if (k.Equals("accept-encoding", StringComparison.OrdinalIgnoreCase)) continue;
 
-                httpRequest.Headers.TryAddWithoutValidation(k, prop.Value.GetString());
+                req.Headers.TryAddWithoutValidation(k, v);
             }
         }
 
-        httpRequest.Headers.TryAddWithoutValidation("X-Forwarded-Proto", "https");
-        httpRequest.Headers.TryAddWithoutValidation("X-Forwarded-Host", targetUri.Authority);
+        req.Headers.TryAddWithoutValidation("Host", uri.Authority);
+        req.Headers.TryAddWithoutValidation("X-Forwarded-Proto", "https");
+        req.Headers.TryAddWithoutValidation("X-Forwarded-Host", uri.Authority);
 
-        if (!string.IsNullOrEmpty(bodyB64) && method != "GET" && method != "HEAD")
+        if (bodyBytes != null && method != "GET" && method != "HEAD")
         {
-            var bodyBytes = Convert.FromBase64String(bodyB64);
-            httpRequest.Content = new ByteArrayContent(bodyBytes);
+            req.Content = new ByteArrayContent(bodyBytes);
         }
 
+        return (req, isWsUpgrade);
+    }
+
+    internal async Task ForwardHttpRequestAsync(WebSocket ws, JsonElement reqFrame, TunnelRequestSession session)
+    {
+        var requestId = session.RequestId;
+        var token = session.Cts.Token;
         try
         {
-            var currentUrl = targetUri.ToString();
+            session.SetState(TunnelRequestState.Connecting);
+            var method = session.Method;
+            var path = session.Path;
+            var bodyB64 = reqFrame.TryGetProperty("body", out var bP) ? bP.GetString() : null;
+
+            var targetUri = CombineLocalTargetUri(Config.LocalTargetUrl, path);
+            var cachedRedirect = !string.IsNullOrEmpty(session.CanonicalMediaKey)
+                ? _mediaCoordinator.GetCachedRedirect(session.CanonicalMediaKey!)
+                : null;
+
+            var activeUri = targetUri;
+            if (!string.IsNullOrEmpty(cachedRedirect))
+            {
+                activeUri = new Uri(cachedRedirect);
+                AddLog("INFO", $">> [STRM/直链加速] 命中已缓存的局域网 STRM 直链，跳过 302 重定向: {cachedRedirect}");
+            }
+
             var currentMethod = method;
             byte[]? currentBodyBytes = !string.IsNullOrEmpty(bodyB64) && method != "GET" && method != "HEAD"
                 ? Convert.FromBase64String(bodyB64)
                 : null;
 
-            var (httpResponse, _, _) = await ExecuteLocalHttpWith302Async(httpRequest, currentUrl, currentMethod, currentBodyBytes, token);
+            var (httpRequest, isWsUpgrade) = CreateForwardHttpRequest(currentMethod, activeUri, reqFrame, currentBodyBytes);
+            if (isWsUpgrade)
+            {
+                using (httpRequest)
+                {
+                    var wsHeaders = new Dictionary<string, string>
+                    {
+                        ["upgrade"] = "websocket",
+                        ["connection"] = "Upgrade",
+                        ["content-type"] = "text/plain; charset=utf-8"
+                    };
+                    var wsBody = Convert.ToBase64String(Encoding.UTF8.GetBytes("WebSocket upgrade not tunnelled over HTTP multiplexer"));
+                    var wsRespBytes = TunnelFrameSerializer.SerializeHttpResponse(requestId, 426, wsHeaders, wsBody);
+                    await SafeSendWebSocketAsync(ws, wsRespBytes, WebSocketMessageType.Text, true, token);
+                    session.SetState(TunnelRequestState.Completed);
+                    return;
+                }
+            }
+
+            HttpResponseMessage httpResponse;
+            using (httpRequest)
+            {
+                (httpResponse, _, _) = await ExecuteLocalHttpWith302Async(httpRequest, activeUri.ToString(), currentMethod, currentBodyBytes, token, session.CanonicalMediaKey);
+            }
+
+            // 若命中缓存直链但远端已失效 (如 401/403/404)，清除缓存并回退至本地原始服务重新拉取
+            if (!string.IsNullOrEmpty(cachedRedirect) && (int)httpResponse.StatusCode is 401 or 403 or 404)
+            {
+                AddLog("WRN", $">> 已缓存的 STRM 直链失效 (HTTP {(int)httpResponse.StatusCode})，清除缓存并回退至本地服务: {cachedRedirect}");
+                _mediaCoordinator.InvalidateRedirect(session.CanonicalMediaKey!);
+                httpResponse.Dispose();
+
+                var (fallbackReq, _) = CreateForwardHttpRequest(currentMethod, targetUri, reqFrame, currentBodyBytes);
+                using (fallbackReq)
+                {
+                    (httpResponse, _, _) = await ExecuteLocalHttpWith302Async(fallbackReq, targetUri.ToString(), currentMethod, currentBodyBytes, token, session.CanonicalMediaKey);
+                }
+            }
 
             using (httpResponse)
             {
@@ -478,80 +850,99 @@ public sealed class FrpTunnelInstance(
                 var contentLength = httpResponse.Content.Headers.ContentLength;
                 var isSmall = contentLength.HasValue && contentLength.Value <= 1024 * 1024;
                 var isNoBody = statusCode == 204 || statusCode == 304 || method == "HEAD";
+                var is3xxRedirect = statusCode is >= 300 and <= 308;
 
-                if (isNoBody || isSmall)
+                if (isNoBody || is3xxRedirect || isSmall)
                 {
-                    var bodyBytes = isNoBody ? Array.Empty<byte>() : await httpResponse.Content.ReadAsByteArrayAsync(token);
-                    var respPayload = new
-                    {
-                        type = "HTTP_RESPONSE",
-                        requestId,
-                        status = statusCode,
-                        headers = respHeaders,
-                        body = Convert.ToBase64String(bodyBytes)
-                    };
-
-                    var frameBytes = JsonSerializer.SerializeToUtf8Bytes(respPayload);
-                    await ws.SendAsync(frameBytes, WebSocketMessageType.Text, true, token);
-                    SentBytes += frameBytes.Length;
+                    var bodyBytes = isNoBody || is3xxRedirect ? Array.Empty<byte>() : await httpResponse.Content.ReadAsByteArrayAsync(token);
+                    var frameBytes = TunnelFrameSerializer.SerializeHttpResponse(requestId, statusCode, respHeaders, Convert.ToBase64String(bodyBytes));
+                    await SafeSendWebSocketAsync(ws, frameBytes, WebSocketMessageType.Text, true, token);
+                    session.SetState(TunnelRequestState.Completed);
                 }
                 else
                 {
-                    var headPayload = new
+                    session.SetState(TunnelRequestState.Streaming);
+                    var headBytes = TunnelFrameSerializer.SerializeHttpResponseStart(requestId, statusCode, respHeaders);
+                    if (!await SafeSendWebSocketAsync(ws, headBytes, WebSocketMessageType.Text, true, token))
                     {
-                        type = "HTTP_RESPONSE_START",
-                        requestId,
-                        status = statusCode,
-                        headers = respHeaders
-                    };
-                    var headBytes = JsonSerializer.SerializeToUtf8Bytes(headPayload);
-                    await ws.SendAsync(headBytes, WebSocketMessageType.Text, true, token);
-                    SentBytes += headBytes.Length;
+                        session.SetState(TunnelRequestState.Completed);
+                        return;
+                    }
 
                     using var stream = await httpResponse.Content.ReadAsStreamAsync(token);
-                    var streamBuf = new byte[32 * 1024];
+                    var streamBuf = ArrayPool<byte>.Shared.Rent(32 * 1024);
                     var reqIdBytes = Encoding.UTF8.GetBytes(requestId);
                     var idLen = (byte)reqIdBytes.Length;
 
-                    int bytesRead;
-                    while ((bytesRead = await stream.ReadAsync(streamBuf, token)) > 0)
+                    try
                     {
-                        // Cloudflare DO 零拷贝流式分片格式: [1字节 0x01][1字节 idLen][idLen 字节 reqId][原始二进制分片]
-                        var chunkMsg = new byte[2 + idLen + bytesRead];
-                        chunkMsg[0] = 0x01;
-                        chunkMsg[1] = idLen;
-                        Buffer.BlockCopy(reqIdBytes, 0, chunkMsg, 2, idLen);
-                        Buffer.BlockCopy(streamBuf, 0, chunkMsg, 2 + idLen, bytesRead);
+                        int bytesRead;
+                        while ((bytesRead = await stream.ReadAsync(streamBuf.AsMemory(0, 32 * 1024), token)) > 0)
+                        {
+                            // 1. 等待滑动窗口信用额度 (支持 16MB 起播突发免限流)
+                            await session.ConsumeCreditAsync(bytesRead, token);
 
-                        await ws.SendAsync(chunkMsg, WebSocketMessageType.Binary, true, token);
-                        SentBytes += chunkMsg.Length;
+                            // 2. Cloudflare DO 零拷贝流式分片格式: [1字节 0x01][1字节 idLen][idLen 字节 reqId][原始二进制分片]
+                            var chunkTotalLen = 2 + idLen + bytesRead;
+                            var chunkRented = ArrayPool<byte>.Shared.Rent(chunkTotalLen);
+                            try
+                            {
+                                chunkRented[0] = 0x01;
+                                chunkRented[1] = idLen;
+                                Buffer.BlockCopy(reqIdBytes, 0, chunkRented, 2, idLen);
+                                Buffer.BlockCopy(streamBuf, 0, chunkRented, 2 + idLen, bytesRead);
+
+                                if (!await SafeSendWebSocketAsync(ws, new ReadOnlyMemory<byte>(chunkRented, 0, chunkTotalLen), WebSocketMessageType.Binary, true, token))
+                                {
+                                    break;
+                                }
+                            }
+                            finally
+                            {
+                                ArrayPool<byte>.Shared.Return(chunkRented);
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(streamBuf);
                     }
 
-                    var endPayload = new { type = "HTTP_RESPONSE_END", requestId };
-                    var endBytes = JsonSerializer.SerializeToUtf8Bytes(endPayload);
-                    await ws.SendAsync(endBytes, WebSocketMessageType.Text, true, token);
-                    SentBytes += endBytes.Length;
+                    var endBytes = TunnelFrameSerializer.SerializeHttpResponseEnd(requestId);
+                    await SafeSendWebSocketAsync(ws, endBytes, WebSocketMessageType.Text, true, token);
+                    session.SetState(TunnelRequestState.Completed);
                 }
             }
         }
+        catch (OperationCanceledException) when (session.State == TunnelRequestState.Aborted || _instanceCts?.IsCancellationRequested == true)
+        {
+            AddLog("INFO", $">> [HTTP_ABORT 结束] 客户端请求已优雅中止取消: {requestId}");
+        }
         catch (Exception ex)
         {
-            AddLog("ERR", $"本地代理转发失败: {ex.Message}");
-            var errPayload = new
+            if (session.State == TunnelRequestState.Aborted)
             {
-                type = "HTTP_RESPONSE",
-                requestId,
-                status = 502,
-                headers = new Dictionary<string, string> { ["content-type"] = "text/plain; charset=utf-8" },
-                body = Convert.ToBase64String(Encoding.UTF8.GetBytes("Bad Gateway: " + ex.Message))
-            };
-            var errBytes = JsonSerializer.SerializeToUtf8Bytes(errPayload);
+                return;
+            }
+            session.SetState(TunnelRequestState.Errored);
+            AddLog("ERR", $"本地代理转发失败: {ex.Message}");
+            var errHeaders = new Dictionary<string, string> { ["content-type"] = "text/plain; charset=utf-8" };
+            var errBody = Convert.ToBase64String(Encoding.UTF8.GetBytes("Bad Gateway: " + ex.Message));
+            var errBytes = TunnelFrameSerializer.SerializeHttpResponse(requestId, 502, errHeaders, errBody);
             try
             {
-                await ws.SendAsync(errBytes, WebSocketMessageType.Text, true, token);
-                SentBytes += errBytes.Length;
+                await SafeSendWebSocketAsync(ws, errBytes, WebSocketMessageType.Text, true, CancellationToken.None);
             }
             catch { }
+        }
+        finally
+        {
+            if (!string.IsNullOrEmpty(session.CanonicalMediaKey))
+            {
+                _mediaCoordinator.Unregister(session.CanonicalMediaKey, session);
+            }
+            _sessions.TryRemove(requestId, out _);
+            session.Dispose();
         }
     }
 
@@ -560,7 +951,8 @@ public sealed class FrpTunnelInstance(
         string initialUrl,
         string method,
         byte[]? bodyBytes,
-        CancellationToken token)
+        CancellationToken token,
+        string? canonicalMediaKey = null)
     {
         var currentUrl = initialUrl;
         var currentMethod = method;
@@ -594,6 +986,11 @@ public sealed class FrpTunnelInstance(
                 {
                     AddLog("INFO", $">> [STRM/私网重定向] 本地服务重定向至私有地址，客户端在局域网内代为拉流: {nextUrl}");
 
+                    if (!string.IsNullOrEmpty(canonicalMediaKey))
+                    {
+                        _mediaCoordinator.CacheRedirect(canonicalMediaKey, nextUrl);
+                    }
+
                     // RFC 9110：301/302/303 非 GET/HEAD 降级为 GET 并清除 Body
                     if ((int)httpResponse.StatusCode is 301 or 302 or 303 && currentMethod != "GET" && currentMethod != "HEAD")
                     {
@@ -604,11 +1001,24 @@ public sealed class FrpTunnelInstance(
                     httpResponse.Dispose();
 
                     using var nextReq = new HttpRequestMessage(new HttpMethod(currentMethod), nextUri);
+                    // 继承原始请求的所有请求标头（如 Range, User-Agent, Accept 等）
+                    foreach (var h in httpRequest.Headers)
+                    {
+                        if (h.Key.Equals("Host", StringComparison.OrdinalIgnoreCase)) continue;
+                        nextReq.Headers.TryAddWithoutValidation(h.Key, h.Value);
+                    }
                     nextReq.Headers.TryAddWithoutValidation("Host", nextUri.Authority);
                     nextReq.Headers.TryAddWithoutValidation("X-Forwarded-Proto", "https");
                     if (currentBodyBytes != null && currentMethod != "GET" && currentMethod != "HEAD")
                     {
                         nextReq.Content = new ByteArrayContent(currentBodyBytes);
+                        if (httpRequest.Content != null)
+                        {
+                            foreach (var ch in httpRequest.Content.Headers)
+                            {
+                                nextReq.Content.Headers.TryAddWithoutValidation(ch.Key, ch.Value);
+                            }
+                        }
                     }
 
                     try

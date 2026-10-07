@@ -193,21 +193,31 @@ export default defineComponent({
       </div>
 
       <div class="panel overflow-x-auto">
-        <table class="data-table min-w-[52rem]">
+        <table class="data-table min-w-[54rem]">
           <thead>
-            <tr><th class="w-8"></th><th>任务</th><th>指令</th><th>Cron</th><th>分组</th><th>状态</th><th>上次执行</th><th>下次执行</th><th class="text-right">操作</th></tr>
+            <tr>
+              <th class="w-8 whitespace-nowrap"></th>
+              <th class="whitespace-nowrap">任务</th>
+              <th class="whitespace-nowrap">指令</th>
+              <th class="whitespace-nowrap">Cron</th>
+              <th class="whitespace-nowrap">分组</th>
+              <th class="whitespace-nowrap">状态</th>
+              <th class="whitespace-nowrap">上次执行</th>
+              <th class="whitespace-nowrap">下次执行</th>
+              <th class="text-right whitespace-nowrap">操作</th>
+            </tr>
           </thead>
           <tbody>
             <tr v-if="!tasks.length && !loading"><td colspan="9" class="text-slate-600 py-8 text-center">暂无定时任务，点右上角「新建任务」</td></tr>
             <tr v-for="task in tasks" :key="task.id">
               <td>
-                <button :class="task.isPinned ? 'text-amber-300' : 'text-slate-600 hover:text-amber-300'" @click="togglePin(task)">★</button>
+                <button class="w-5 h-5 inline-flex items-center justify-center text-sm transition-colors" :class="task.isPinned ? 'text-amber-300' : 'text-slate-600 hover:text-amber-300'" @click="togglePin(task)">★</button>
               </td>
-              <td class="text-slate-200">{{ task.name }}</td>
+              <td class="text-slate-200 font-medium">{{ task.name }}</td>
               <td class="max-w-[12rem]">
                 <div class="truncate text-cyan-300/80 font-mono text-xs flex items-center gap-1.5" :title="task.commandText">
-                  {{ task.commandName }}
-                  <span v-if="task.scriptType === 1" class="badge border-violet-500/50 text-violet-300 !text-[0.625rem]">脚本</span>
+                  <span class="truncate">{{ task.commandName }}</span>
+                  <span v-if="task.scriptType === 1" class="badge border-violet-500/50 text-violet-300 !text-[0.625rem] shrink-0">脚本</span>
                 </div>
               </td>
               <td><span class="badge border-violet-500/50 text-violet-300 font-mono">{{ task.cronExpression }}</span></td>
@@ -219,12 +229,14 @@ export default defineComponent({
               <td class="whitespace-nowrap text-slate-400 text-xs">{{ formatTime(task.lastRunTime) }}</td>
               <td class="whitespace-nowrap text-xs" :class="task.enabled ? 'text-cyan-300/80' : 'text-slate-600'">{{ formatTime(task.nextRunTime) }}</td>
               <td class="text-right whitespace-nowrap">
-                <button class="btn btn-xs btn-primary" :disabled="runningId === task.id || !task.enabled" @click="runNow(task)">
-                  {{ runningId === task.id ? '触发中…' : '▶ 立即运行' }}
-                </button>
-                <button class="btn btn-xs" @click="goRecords(task)">记录</button>
-                <button class="btn btn-xs" @click="openEdit(task)">编辑</button>
-                <button class="btn btn-xs btn-danger" @click="remove(task)">删除</button>
+                <div class="inline-flex items-center gap-1.5">
+                  <button class="btn btn-xs btn-primary" :disabled="runningId === task.id || !task.enabled" @click="runNow(task)">
+                    {{ runningId === task.id ? '触发中…' : '▶ 运行' }}
+                  </button>
+                  <button class="btn btn-xs" @click="goRecords(task)">记录</button>
+                  <button class="btn btn-xs" @click="openEdit(task)">编辑</button>
+                  <button class="btn btn-xs btn-danger" @click="remove(task)">删除</button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -232,7 +244,7 @@ export default defineComponent({
       </div>
 
       <div v-if="showEditor" class="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="panel w-full max-w-lg p-5 max-h-[90vh] overflow-auto" style="background: rgba(13, 21, 38, 0.97)">
+        <div class="panel w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto" style="background: rgba(13, 21, 38, 0.97)">
           <h3 class="font-display text-base text-neon-soft mb-4">{{ editingId ? '编辑任务' : '新建任务' }}</h3>
           <div class="flex flex-col gap-3">
             <label class="block">
@@ -246,10 +258,10 @@ export default defineComponent({
                 <option v-for="command in commands" :key="command.id" :value="command.id">{{ optionLabel(command) }}</option>
               </select>
               <template v-if="selectedCommand">
-                <div class="output-block !max-h-28 !text-[0.7rem] mt-1.5">{{ selectedCommand.commandText }}</div>
+                <div class="output-block !max-h-28 !text-[0.7rem] mt-1.5 overflow-x-auto whitespace-pre-wrap break-all">{{ selectedCommand.commandText }}</div>
                 <template v-if="selectedCommand.scriptType === 1">
                   <label class="block mt-1.5">
-                    <span class="text-xs text-slate-500 mb-1 block">脚本位置参数（调度与「立即运行」时作为 \$1 \$2... 传入，空格分隔，引号包裹可含空格）</span>
+                    <span class="text-xs text-slate-500 mb-1 block">脚本位置参数（调度与「立即运行」时作为 $1 $2... 传入，空格分隔，引号包裹可含空格）</span>
                     <input class="input font-mono" v-model="form.arguments" placeholder="例如：/var/log 20" />
                   </label>
                   <p class="text-xs text-violet-300/80">📜 该条目为 Bash 脚本，定时执行时使用上方固定参数</p>

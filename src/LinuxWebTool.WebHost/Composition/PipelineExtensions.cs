@@ -55,7 +55,7 @@ public static class PipelineExtensions
         });
 
         var webRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
-        IFileProvider fileProvider = app.Environment.IsDevelopment() && Directory.Exists(webRoot)
+        IFileProvider fileProvider = Directory.Exists(webRoot)
             ? new PhysicalFileProvider(webRoot)
             : new EmbeddedFileProvider(typeof(PipelineExtensions).Assembly, "LinuxWebTool.WebHost.wwwroot");
 

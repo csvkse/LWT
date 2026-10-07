@@ -445,7 +445,7 @@ public sealed class TranscodeQueueService(
             process.Start();
 
             var stdoutTask = ConsumeProgressAsync(process, job, totalSeconds, jobStopping);
-            var stderrTask = ConsumeLogAsync(process, logStream, tailBuffer);
+            var stderrTask = ConsumeLogAsync(process, logStream, tailBuffer, jobStopping);
 
             try
             {
@@ -454,6 +454,7 @@ public sealed class TranscodeQueueService(
             catch (OperationCanceledException)
             {
                 TryKillTree(process);
+                try { await Task.WhenAll(stdoutTask, stderrTask); } catch { /* ignore */ }
                 throw; // 由外层统一标记取消 / 中断并清理
             }
             await stdoutTask;
@@ -497,7 +498,7 @@ public sealed class TranscodeQueueService(
                 lastWrite = now;
                 job.SpeedText = lastSpeed;
                 job.Progress = totalSeconds is > 0 ? Math.Clamp(100.0 * lastSeconds / totalSeconds.Value, 0, 99.5) : 0;
-                await jobStore.UpdateAsync(job);
+                await jobStore.UpdateProgressAsync(job.Id, job.Progress, job.SpeedText);
             }
         }
         catch (OperationCanceledException)
@@ -510,16 +511,20 @@ public sealed class TranscodeQueueService(
         }
     }
 
-    private static async Task ConsumeLogAsync(Process process, FileStream logStream, StringBuilder tail)
+    private static async Task ConsumeLogAsync(Process process, FileStream logStream, StringBuilder tail, CancellationToken stopping)
     {
         try
         {
-            while (await process.StandardError.ReadLineAsync() is { } line)
+            while (await process.StandardError.ReadLineAsync(stopping) is { } line)
             {
                 var bytes = Encoding.UTF8.GetBytes(line + "\n");
-                await logStream.WriteAsync(bytes);
+                await logStream.WriteAsync(bytes, stopping);
                 AppendTail(tail, line);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // 正常取消
         }
         catch
         {

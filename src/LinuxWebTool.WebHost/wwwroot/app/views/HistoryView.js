@@ -141,18 +141,27 @@ export default defineComponent({
       <div class="panel overflow-x-auto">
         <table class="data-table min-w-[56rem]">
           <thead>
-            <tr><th>时间</th><th>来源</th><th>名称</th><th>指令</th><th>状态</th><th>退出码</th><th>耗时</th><th>触发者</th></tr>
+            <tr>
+              <th class="whitespace-nowrap">时间</th>
+              <th class="whitespace-nowrap">来源</th>
+              <th class="whitespace-nowrap">名称</th>
+              <th class="whitespace-nowrap">指令</th>
+              <th class="whitespace-nowrap">状态</th>
+              <th class="whitespace-nowrap">退出码</th>
+              <th class="whitespace-nowrap">耗时</th>
+              <th class="whitespace-nowrap">触发者</th>
+            </tr>
           </thead>
           <tbody>
             <tr v-if="!items.length && !loading"><td colspan="8" class="text-slate-600 py-8 text-center">没有执行记录</td></tr>
             <tr v-for="item in items" :key="item.id" class="cursor-pointer" @click="detail = item">
               <td class="whitespace-nowrap text-slate-400 text-xs">{{ formatTime(item.startTime) }}</td>
               <td><span class="badge" :class="sourceMeta(item.source).class">{{ sourceMeta(item.source).label }}</span></td>
-              <td class="text-slate-200">{{ item.commandName }}</td>
+              <td class="text-slate-200 font-medium">{{ item.commandName }}</td>
               <td class="max-w-[16rem] truncate font-mono text-xs text-cyan-300/70" :title="item.commandText">{{ item.commandText }}</td>
               <td><span class="badge" :class="statusMeta(item.status).class">{{ statusMeta(item.status).label }}</span></td>
-              <td class="text-slate-400">{{ item.exitCode ?? '—' }}</td>
-              <td class="whitespace-nowrap text-slate-400">{{ formatDuration(item.durationMs) }}</td>
+              <td class="text-slate-400 font-mono">{{ item.exitCode ?? '—' }}</td>
+              <td class="whitespace-nowrap text-slate-400 font-mono text-xs">{{ formatDuration(item.durationMs) }}</td>
               <td class="text-slate-500 text-xs">{{ item.triggerBy }}</td>
             </tr>
           </tbody>
@@ -163,24 +172,24 @@ export default defineComponent({
         <span>共 {{ total }} 条</span>
         <div class="flex items-center gap-2">
           <button class="btn btn-xs" :disabled="query.page <= 1" @click="goPage(-1)">上一页</button>
-          <span>{{ query.page }} / {{ totalPages.value }}</span>
-          <button class="btn btn-xs" :disabled="query.page >= totalPages.value" @click="goPage(1)">下一页</button>
+          <span>{{ query.page }} / {{ totalPages }}</span>
+          <button class="btn btn-xs" :disabled="query.page >= totalPages" @click="goPage(1)">下一页</button>
         </div>
       </div>
 
       <div v-if="detail" class="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="panel w-full max-w-3xl p-5" style="background: rgba(13, 21, 38, 0.97)">
+        <div class="panel w-full max-w-3xl p-5 max-h-[90vh] flex flex-col overflow-y-auto" style="background: rgba(13, 21, 38, 0.97)">
           <div class="flex items-center gap-2 mb-3 flex-wrap">
-            <h3 class="font-display text-base text-neon-soft">{{ detail.commandName }}</h3>
-            <span class="badge" :class="sourceMeta(detail.source).class">{{ sourceMeta(detail.source).label }}</span>
-            <span class="badge" :class="statusMeta(detail.status).class">{{ statusMeta(detail.status).label }}</span>
-            <span class="text-xs text-slate-500">{{ formatTime(detail.startTime) }} · exit {{ detail.exitCode ?? '—' }} · {{ formatDuration(detail.durationMs) }} · by {{ detail.triggerBy }}</span>
-            <button class="btn btn-xs ml-auto" @click="detail = null">✕</button>
+            <h3 class="font-display text-base text-neon-soft truncate min-w-0 max-w-xs" :title="detail.commandName">{{ detail.commandName }}</h3>
+            <span class="badge shrink-0" :class="sourceMeta(detail.source).class">{{ sourceMeta(detail.source).label }}</span>
+            <span class="badge shrink-0" :class="statusMeta(detail.status).class">{{ statusMeta(detail.status).label }}</span>
+            <span class="text-xs text-slate-500 shrink-0">{{ formatTime(detail.startTime) }} · exit {{ detail.exitCode ?? '—' }} · {{ formatDuration(detail.durationMs) }} · by {{ detail.triggerBy }}</span>
+            <button class="btn btn-xs ml-auto shrink-0" @click="detail = null">✕</button>
           </div>
           <div class="font-mono text-xs text-slate-400 border border-cyber-line rounded-lg px-3 py-2 mb-3 break-all">{{ detail.commandText }}</div>
-          <div class="output-block">{{ detail.output || '(无标准输出)' }}</div>
-          <div v-if="detail.errorOutput" class="output-block mt-2 !border-rose-500/30 text-rose-200/90">{{ detail.errorOutput }}</div>
-          <div class="flex justify-end gap-2 mt-4">
+          <div class="output-block max-h-72 overflow-y-auto whitespace-pre-wrap break-all">{{ detail.output || '(无标准输出)' }}</div>
+          <div v-if="detail.errorOutput" class="output-block mt-2 !border-rose-500/30 text-rose-200/90 max-h-48 overflow-y-auto whitespace-pre-wrap break-all">{{ detail.errorOutput }}</div>
+          <div class="flex justify-end gap-2 mt-4 shrink-0">
             <button class="btn" @click="copyDetail()">复制输出</button>
             <button class="btn btn-primary" @click="detail = null">关闭</button>
           </div>

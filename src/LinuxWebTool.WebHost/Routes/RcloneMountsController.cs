@@ -53,6 +53,7 @@ public class RcloneMountsController(
         Assign(mount, request, validation.Path);
         await store.InsertAsync(mount);
         if (mount.Enabled) SystemStatusProvider.ManagedMountPoints[mount.LocalPath] = 0;
+        if (await catalog.LoadAsync(new("rclone", mount.Id)) is { } descriptor) health.ConfigurationChanged(descriptor);
         await LogAsync("新增挂载配置", mount, "已保存", true);
         return Ok(new IdResponse(mount.Id));
     }

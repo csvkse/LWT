@@ -9,10 +9,10 @@ const NEW_GROUP = '__new__';
 
 // Bash 脚本示例模板（$1 $2 为位置参数，执行时可填）
 const SCRIPT_TEMPLATE = `#!/usr/bin/env bash
-# 位置参数：\$1 \$2 ...（执行时可填，空格分隔，引号包裹可含空格）
+# 位置参数：$1 $2 ...（执行时可填，空格分隔，引号包裹可含空格）
 set -e
 
-echo "hello, \$1"`;
+echo "hello, $1"`;
 
 export default defineComponent({
   name: 'CommandsView',
@@ -170,7 +170,7 @@ export default defineComponent({
       }
       runningId.value = command.id;
       try {
-        const result = await http(API.commands.execute(command.id), { method: 'POST' });
+        const result = await http(API.commands.execute(command.id), { method: 'POST', body: {} });
         if (result.ok) execModal.value = { name: command.name, ...result.data };
       } finally {
         runningId.value = null;
@@ -277,7 +277,7 @@ export default defineComponent({
     });
 
     return {
-      groups, commands, activeGroupId, keyword, loading, filteredCommands,
+      groups, commands, activeGroupId, keyword, loading, filteredCommands, selectGroup,
       quickText, quickTimeout, quickRunning, quickResult, runQuick, confirmQuickClear,
       showEditor, editingId, form, saving, openCreate, openEdit, save, applyTemplate,
       remove, togglePin, execute, executeWithArgs, runningId, execModal, copyOutput,
@@ -349,7 +349,7 @@ export default defineComponent({
           <div v-for="command in filteredCommands" :key="command.id"
                class="panel p-4 flex flex-col gap-2 hover:border-neon/40 transition group">
             <div class="flex items-start gap-2">
-              <button class="text-lg leading-none transition" :class="command.isPinned ? 'text-amber-300' : 'text-slate-600 hover:text-amber-300'"
+              <button class="text-lg leading-none transition mt-0.5 shrink-0" :class="command.isPinned ? 'text-amber-300' : 'text-slate-600 hover:text-amber-300'"
                       :title="command.isPinned ? '取消置顶' : '置顶'" @click="togglePin(command)">★</button>
               <div class="min-w-0 flex-1">
                 <div class="text-sm text-slate-200 font-medium truncate flex items-center gap-1.5">
@@ -394,7 +394,7 @@ export default defineComponent({
             </label>
             <label class="block">
               <span class="text-xs text-slate-500 mb-1 block flex items-center gap-2">
-                {{ Number(form.scriptType) === 1 ? '脚本内容 *（bash 执行，可用 $1 \$2 接收位置参数）' : '指令内容 *' }}
+                {{ Number(form.scriptType) === 1 ? '脚本内容 *（bash 执行，可用 $1 $2 接收位置参数）' : '指令内容 *' }}
                 <button v-if="Number(form.scriptType) === 1" class="btn btn-xs" @click="applyTemplate()">插入示例</button>
               </span>
               <textarea class="input font-mono !text-[0.8rem]" :rows="Number(form.scriptType) === 1 ? 12 : 3" v-model="form.commandText"
@@ -435,7 +435,7 @@ export default defineComponent({
           <h3 class="font-display text-base text-neon-soft mb-3">运行脚本 · {{ argModal.name }}</h3>
           <div class="output-block !max-h-32 mb-3">{{ argModal.commandText }}</div>
           <label class="block">
-            <span class="text-xs text-slate-500 mb-1 block">位置参数（空格分隔，引号包裹可含空格；脚本内用 \$1 \$2 引用）</span>
+            <span class="text-xs text-slate-500 mb-1 block">位置参数（空格分隔，引号包裹可含空格；脚本内用 $1 $2 引用）</span>
             <input class="input font-mono" v-model="argText" placeholder="例如：/var/log 20" @keyup.enter="executeWithArgs()" />
           </label>
           <div class="flex justify-end gap-2 mt-4">
@@ -447,9 +447,9 @@ export default defineComponent({
 
       <div v-if="execModal" class="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="panel w-full max-w-2xl p-5" style="background: rgba(13, 21, 38, 0.97)">
-          <div class="flex items-center gap-2 mb-3">
-            <h3 class="font-display text-base text-neon-soft">执行结果 · {{ execModal.name }}</h3>
-            <span class="badge ml-auto" :class="execModal.status === 0 ? 'border-emerald-500/50 text-emerald-300' : 'border-rose-500/50 text-rose-300'">
+          <div class="flex items-center gap-2 mb-3 min-w-0">
+            <h3 class="font-display text-base text-neon-soft truncate min-w-0 flex-1" :title="'执行结果 · ' + execModal.name">执行结果 · {{ execModal.name }}</h3>
+            <span class="badge shrink-0" :class="execModal.status === 0 ? 'border-emerald-500/50 text-emerald-300' : 'border-rose-500/50 text-rose-300'">
               {{ execModal.status === 0 ? '成功' : (execModal.status === 2 ? '超时' : '失败') }} · exit {{ execModal.exitCode ?? '—' }} · {{ formatDuration(execModal.durationMs) }}
             </span>
           </div>

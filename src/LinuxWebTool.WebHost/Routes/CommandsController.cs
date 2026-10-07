@@ -105,7 +105,7 @@ public class CommandsController(
 
     /// <summary>执行已保存的指令并记录调用历史；脚本类型可携带位置参数。</summary>
     [HttpPost("{id:guid}/Execute")]
-    public async Task<IResult> Execute(Guid id, [FromBody] ExecuteCommandRequest? request)
+    public async Task<IResult> Execute(Guid id, [FromBody] ExecuteCommandRequest? request = null)
     {
         var command = await commandStore.GetByIdAsync(id);
         if (command is null)
@@ -116,10 +116,7 @@ public class CommandsController(
         var response = await ExecuteAndRecordAsync(
             command: command,
             arguments: request?.Arguments);
-        if (command.ScriptType != (int)ScriptType.BashScript)
-        {
-            await commandStore.UpdateLastExecTimeAsync(command.Id);
-        }
+        await commandStore.UpdateLastExecTimeAsync(command.Id);
         return Ok(response);
     }
 

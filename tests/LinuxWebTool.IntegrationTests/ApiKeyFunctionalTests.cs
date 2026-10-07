@@ -327,4 +327,19 @@ public sealed class ApiKeyFunctionalTests
         var disabledResp = await keyClient.GetAsync("/api/Terminal/Support");
         Assert.Equal(HttpStatusCode.Unauthorized, disabledResp.StatusCode);
     }
+
+    [Fact]
+    public async Task ApiKey_Extension_Suffix_On_Protected_Route_Does_Not_Bypass_Auth()
+    {
+        var anonymousClient = await TestServerFixture.CreateAnonymousClientAsync();
+
+        // 尝试用伪装成静态资源的 URL 访问 MCP 路由，必须被 ApiKeyMiddleware 拦截返回 401
+        var mcpResp = await anonymousClient.GetAsync("/mcp/v1/tools.js");
+        Assert.Equal(HttpStatusCode.Unauthorized, mcpResp.StatusCode);
+
+        // 使用无效 Key 访问带 .js 后缀的 API 路由，必须执行 Key 校验并返回 401（不能因 .js 后缀跳过校验）
+        var invalidKeyClient = await TestServerFixture.CreateApiKeyClientAsync("lwt_live_invalid_key_123");
+        var apiResp = await invalidKeyClient.GetAsync("/api/Terminal/Support.js");
+        Assert.Equal(HttpStatusCode.Unauthorized, apiResp.StatusCode);
+    }
 }

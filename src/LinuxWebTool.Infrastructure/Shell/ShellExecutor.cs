@@ -71,10 +71,12 @@ public sealed class ShellExecutor : IShellExecutor
         if (bashPath is null)
         {
             _logger.LogError("脚本执行失败：未找到 bash（Linux 需 /bin/bash，Windows 开发环境需 Git Bash）");
+            const string failure = "当前环境未找到 bash，无法执行脚本（Linux 原生支持；Windows 需安装 Git Bash）";
             return new ShellResult
             {
                 Started = false,
-                StartFailure = "当前环境未找到 bash，无法执行脚本（Linux 原生支持；Windows 需安装 Git Bash）",
+                StartFailure = failure,
+                ErrorOutput = failure,
                 StartTime = DateTime.Now,
                 EndTime = DateTime.Now,
             };
@@ -104,10 +106,12 @@ public sealed class ShellExecutor : IShellExecutor
         catch (Exception ex)
         {
             _logger.LogError(ex, "脚本写入临时文件失败");
+            var failure = "脚本写入临时文件失败：" + ex.Message;
             return new ShellResult
             {
                 Started = false,
-                StartFailure = "脚本写入临时文件失败：" + ex.Message,
+                StartFailure = failure,
+                ErrorOutput = failure,
                 StartTime = DateTime.Now,
                 EndTime = DateTime.Now,
             };
@@ -163,6 +167,7 @@ public sealed class ShellExecutor : IShellExecutor
             {
                 Started = false,
                 StartFailure = ex.Message,
+                ErrorOutput = ex.Message,
                 StartTime = startedAt,
                 EndTime = DateTime.Now,
                 DurationMs = stopwatch.ElapsedMilliseconds,
@@ -177,6 +182,7 @@ public sealed class ShellExecutor : IShellExecutor
         int? exitCode = null;
         using (var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
+            timeoutCts.CancelAfter(timeout);
             try
             {
                 await process.WaitForExitAsync(timeoutCts.Token);

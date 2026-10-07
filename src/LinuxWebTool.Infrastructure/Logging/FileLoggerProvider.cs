@@ -12,6 +12,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
 {
     private readonly FileLoggerOptions _options;
     private readonly object _sync = new();
+    private bool _dirCreated;
 
     public FileLoggerProvider(FileLoggerOptions options)
     {
@@ -31,7 +32,11 @@ public sealed class FileLoggerProvider : ILoggerProvider
 
         lock (_sync)
         {
-            Directory.CreateDirectory(_options.Directory);
+            if (!_dirCreated)
+            {
+                Directory.CreateDirectory(_options.Directory);
+                _dirCreated = true;
+            }
             if (level >= LogLevel.Information)
             {
                 File.AppendAllText(AppFilePath(now), line);

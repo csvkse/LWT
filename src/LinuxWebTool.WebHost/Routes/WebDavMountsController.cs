@@ -55,6 +55,7 @@ public class WebDavMountsController(
         };
         await store.InsertAsync(mount);
         if (mount.Enabled) SystemStatusProvider.ManagedMountPoints[mount.LocalPath] = 0;
+        if (await catalog.LoadAsync(new("webdav", mount.Id)) is { } descriptor) health.ConfigurationChanged(descriptor);
         await operationLogger.LogAsync("新增挂载配置", "WebDAV挂载", mount.Name,
             $"{mount.Url} → {mount.LocalPath}", clientIp: HttpContext.GetClientIp());
         return Ok(new IdResponse(mount.Id));
@@ -112,7 +113,7 @@ public class WebDavMountsController(
     }
 
     [HttpPost("{id:guid}/Unmount")]
-    public async Task<IResult> Unmount(Guid id, [FromBody] WebDavUnmountRequest? request)
+    public async Task<IResult> Unmount(Guid id, [FromBody] WebDavUnmountRequest? request = null)
     {
         var task = await health.SubmitAsync("webdav", id, "Unmount", clientIp: HttpContext.GetClientIp());
         return task is null ? NotFound(new MessageResponse("挂载配置不存在")) : StatusCode(202, task);

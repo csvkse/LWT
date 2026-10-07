@@ -17,7 +17,7 @@ public partial class TranscodeJobStore(DbConnectionFactory factory)
         
         var conditions = new List<string>();
         if (status.HasValue) conditions.Add("Status = @Status");
-        if (watchRuleId.HasValue) conditions.Add("WatchRuleId = @WatchRuleId");
+        if (watchRuleId.HasValue) conditions.Add("WatchRuleId = @WatchRuleId COLLATE NOCASE");
         
         var whereClause = conditions.Count > 0 ? "WHERE " + string.Join(" AND ", conditions) : "";
 
@@ -46,7 +46,7 @@ public partial class TranscodeJobStore(DbConnectionFactory factory)
     {
         using var db = factory.CreateConnection();
         return await db.QueryFirstOrDefaultAsync<TranscodeJob>(
-            "SELECT * FROM transcode_job WHERE Id = @Id", new { Id = id });
+            "SELECT * FROM transcode_job WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     public async Task InsertAsync(TranscodeJob job)
@@ -88,14 +88,31 @@ public partial class TranscodeJobStore(DbConnectionFactory factory)
                 ErrorOutput = @ErrorOutput, LogFile = @LogFile, SourceSizeBytes = @SourceSizeBytes, 
                 OutputSizeBytes = @OutputSizeBytes, QueueTime = @QueueTime, StartTime = @StartTime, 
                 EndTime = @EndTime, UpdateTime = @UpdateTime
-            WHERE Id = @Id";
+            WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, job);
+    }
+
+    /// <summary>轻量更新转码进度与速度（避免高频落库全字段覆写）。</summary>
+    public async Task UpdateProgressAsync(Guid id, double progress, string? speedText)
+    {
+        using var db = factory.CreateConnection();
+        const string sql = @"
+            UPDATE transcode_job 
+            SET Progress = @Progress, SpeedText = @SpeedText, UpdateTime = @UpdateTime 
+            WHERE Id = @Id COLLATE NOCASE";
+        await db.ExecuteAsync(sql, new 
+        { 
+            Id = id, 
+            Progress = progress, 
+            SpeedText = speedText, 
+            UpdateTime = DateTime.Now 
+        });
     }
 
     public async Task DeleteAsync(Guid id)
     {
         using var db = factory.CreateConnection();
-        await db.ExecuteAsync("DELETE FROM transcode_job WHERE Id = @Id", new { Id = id });
+        await db.ExecuteAsync("DELETE FROM transcode_job WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     /// <summary>删除全部已结束（成功/失败/取消/中断）的任务记录，返回删除数量。</summary>
@@ -138,7 +155,7 @@ public partial class TranscodeJobStore(DbConnectionFactory factory)
     {
         using var db = factory.CreateConnection();
         var count = await db.QueryFirstOrDefaultAsync<int?>(
-            "SELECT 1 FROM transcode_job WHERE PresetId = @PresetId AND Status < @SuccessStatus", 
+            "SELECT 1 FROM transcode_job WHERE PresetId = @PresetId COLLATE NOCASE AND Status < @SuccessStatus", 
             new { PresetId = presetId, SuccessStatus = (int)TranscodeJobStatus.Success });
         return count.HasValue;
     }

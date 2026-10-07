@@ -1,4 +1,4 @@
-import { defineComponent, onMounted, reactive, ref } from 'vue';
+import { defineComponent, onMounted, ref } from 'vue';
 import { http } from '../api/client.js';
 import { API } from '../config.js';
 import { toast } from '../store/toast.js';
@@ -112,8 +112,18 @@ export default defineComponent({
           <button class="btn" @click="loadOperations()">刷新</button>
         </div>
         <div class="panel overflow-x-auto">
-          <table class="data-table min-w-[48rem]">
-            <thead><tr><th>时间</th><th>操作</th><th>对象类型</th><th>对象</th><th>详情</th><th>IP</th><th>结果</th></tr></thead>
+          <table class="data-table min-w-[52rem]">
+            <thead>
+              <tr>
+                <th class="whitespace-nowrap">时间</th>
+                <th class="whitespace-nowrap">操作</th>
+                <th class="whitespace-nowrap">对象类型</th>
+                <th class="whitespace-nowrap">对象</th>
+                <th class="whitespace-nowrap">详情</th>
+                <th class="whitespace-nowrap">IP</th>
+                <th class="whitespace-nowrap">结果</th>
+              </tr>
+            </thead>
             <tbody>
               <tr v-if="!items.length && !loading"><td colspan="7" class="text-slate-600 py-8 text-center">暂无操作日志</td></tr>
               <tr v-for="item in items" :key="item.id">
@@ -150,13 +160,15 @@ export default defineComponent({
               <button class="btn btn-xs" @click="loadFiles()">刷新</button>
             </div>
             <p v-if="!files.length" class="text-slate-600 text-xs px-1 py-2">暂无日志文件</p>
-            <button v-for="file in files" :key="file.name"
-                    class="text-left rounded-lg px-3 py-1.5 transition flex flex-col"
-                    :class="activeFile === file.name ? 'bg-neon/10' : 'hover:bg-white/5'"
-                    @click="openFile(file.name)">
-              <span class="text-xs font-mono" :class="file.name.startsWith('debug') ? 'text-violet-300' : 'text-cyan-300'">{{ file.name }}</span>
-              <span class="text-[10px] text-slate-600">{{ formatSize(file.lengthBytes) }} · {{ formatTime(file.lastWriteTime) }}</span>
-            </button>
+            <div class="flex flex-col gap-1 max-h-[70vh] overflow-y-auto">
+              <button v-for="file in files" :key="file.name"
+                      class="text-left rounded-lg px-3 py-1.5 transition flex flex-col"
+                      :class="activeFile === file.name ? 'bg-neon/10' : 'hover:bg-white/5'"
+                      @click="openFile(file.name)">
+                <span class="text-xs font-mono" :class="file.name.startsWith('debug') ? 'text-violet-300' : 'text-cyan-300'">{{ file.name }}</span>
+                <span class="text-[10px] text-slate-600">{{ formatSize(file.lengthBytes) }} · {{ formatTime(file.lastWriteTime) }}</span>
+              </button>
+            </div>
           </aside>
           <section class="panel p-4 flex flex-col gap-2 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
@@ -173,7 +185,7 @@ export default defineComponent({
                 <button class="btn btn-xs" @click="copyFile()">复制</button>
               </div>
             </div>
-            <div class="output-block flex-1 min-h-[24rem]">{{ fileLoading ? '加载中…' : (fileContent || '(空)') }}</div>
+            <div class="output-block flex-1 min-h-[24rem] max-h-[70vh] overflow-y-auto whitespace-pre-wrap break-all">{{ fileLoading ? '加载中…' : (fileContent || '(空)') }}</div>
           </section>
         </div>
       </template>

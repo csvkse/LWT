@@ -24,7 +24,7 @@ public partial class ScheduleStore(DbConnectionFactory factory)
     public async Task<ScheduleTask?> GetByIdAsync(Guid id)
     {
         using var db = factory.CreateConnection();
-        var sql = "SELECT * FROM schedule_task WHERE Id = @Id LIMIT 1";
+        var sql = "SELECT * FROM schedule_task WHERE Id = @Id COLLATE NOCASE LIMIT 1";
         return await db.QueryFirstOrDefaultAsync<ScheduleTask>(sql, new { Id = id });
     }
 
@@ -48,21 +48,21 @@ UPDATE schedule_task SET
     Name = @Name, CommandId = @CommandId, CronExpression = @CronExpression, Enabled = @Enabled, 
     GroupId = @GroupId, IsPinned = @IsPinned, SortOrder = @SortOrder, TimeoutSeconds = @TimeoutSeconds, 
     Arguments = @Arguments, LastRunTime = @LastRunTime, NextRunTime = @NextRunTime, UpdateTime = @UpdateTime
-WHERE Id = @Id";
+WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, task);
     }
 
     public async Task DeleteAsync(Guid id)
     {
         using var db = factory.CreateConnection();
-        var sql = "DELETE FROM schedule_task WHERE Id = @Id";
+        var sql = "DELETE FROM schedule_task WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, new { Id = id });
     }
 
     public async Task<int> CountByGroupAsync(Guid groupId)
     {
         using var db = factory.CreateConnection();
-        var sql = "SELECT COUNT(1) FROM schedule_task WHERE GroupId = @GroupId";
+        var sql = "SELECT COUNT(1) FROM schedule_task WHERE GroupId = @GroupId COLLATE NOCASE";
         return await db.QueryFirstOrDefaultAsync<int>(sql, new { GroupId = groupId });
     }
 
@@ -72,12 +72,12 @@ WHERE Id = @Id";
         using var db = factory.CreateConnection();
         if (nextRun.HasValue)
         {
-            var sql = "UPDATE schedule_task SET LastRunTime = @LastRun, NextRunTime = @NextRun WHERE Id = @Id";
+            var sql = "UPDATE schedule_task SET LastRunTime = @LastRun, NextRunTime = @NextRun WHERE Id = @Id COLLATE NOCASE";
             await db.ExecuteAsync(sql, new { Id = id, LastRun = lastRun, NextRun = nextRun.Value });
         }
         else
         {
-            var sql = "UPDATE schedule_task SET LastRunTime = @LastRun WHERE Id = @Id";
+            var sql = "UPDATE schedule_task SET LastRunTime = @LastRun WHERE Id = @Id COLLATE NOCASE";
             await db.ExecuteAsync(sql, new { Id = id, LastRun = lastRun });
         }
     }

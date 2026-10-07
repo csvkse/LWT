@@ -19,6 +19,7 @@ public class GatewayController(
     GatewayStore store,
     DatabaseProxyConfigProvider proxyConfigProvider,
     TcpProxyEngine tcpEngine,
+    UdpProxyEngine udpEngine,
     IOperationLogger operationLogger) : MinimalApi.ControllerBase
 {
     // === L7 路由 ===
@@ -34,13 +35,24 @@ public class GatewayController(
     [HttpPost("Routes")]
     public async Task<IResult> CreateRoute([FromBody] SaveGatewayRouteRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.RouteId)) return BadRequest(new MessageResponse("路由标识不能为空"));
+        if (string.IsNullOrWhiteSpace(request.ClusterId)) return BadRequest(new MessageResponse("目标集群不能为空"));
+        if (string.IsNullOrWhiteSpace(request.MatchPath)) return BadRequest(new MessageResponse("匹配路径不能为空"));
+
+        var trimmedPath = request.MatchPath.Trim();
+        var trimmedHosts = request.MatchHosts?.Trim();
+        if ((trimmedPath == "/" || trimmedPath == "/*" || trimmedPath.StartsWith("/{*", StringComparison.Ordinal)) && string.IsNullOrWhiteSpace(trimmedHosts))
+        {
+            return BadRequest(new MessageResponse("全局根通配路由 (如 /{**catchall}) 必须指定域名约束 (MatchHosts)，禁止未绑定域名拦截管理后台与系统核心接口"));
+        }
+
         var entity = new GatewayRouteEntity
         {
             Id = Guid.NewGuid().ToString("N"),
             RouteId = request.RouteId.Trim(),
             ClusterId = request.ClusterId.Trim(),
-            MatchPath = request.MatchPath.Trim(),
-            MatchHosts = request.MatchHosts?.Trim(),
+            MatchPath = trimmedPath,
+            MatchHosts = trimmedHosts,
             Transforms = request.Transforms,
             Metadata = request.Metadata,
             OrderNum = request.OrderNum,
@@ -55,13 +67,24 @@ public class GatewayController(
     [HttpPut("Routes/{id}")]
     public async Task<IResult> UpdateRoute(string id, [FromBody] SaveGatewayRouteRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.RouteId)) return BadRequest(new MessageResponse("路由标识不能为空"));
+        if (string.IsNullOrWhiteSpace(request.ClusterId)) return BadRequest(new MessageResponse("目标集群不能为空"));
+        if (string.IsNullOrWhiteSpace(request.MatchPath)) return BadRequest(new MessageResponse("匹配路径不能为空"));
+
+        var trimmedPath = request.MatchPath.Trim();
+        var trimmedHosts = request.MatchHosts?.Trim();
+        if ((trimmedPath == "/" || trimmedPath == "/*" || trimmedPath.StartsWith("/{*", StringComparison.Ordinal)) && string.IsNullOrWhiteSpace(trimmedHosts))
+        {
+            return BadRequest(new MessageResponse("全局根通配路由 (如 /{**catchall}) 必须指定域名约束 (MatchHosts)，禁止未绑定域名拦截管理后台与系统核心接口"));
+        }
+
         var entity = await store.GetRouteByIdAsync(id);
         if (entity == null) return NotFound(new MessageResponse("路由不存在"));
 
         entity.RouteId = request.RouteId.Trim();
         entity.ClusterId = request.ClusterId.Trim();
-        entity.MatchPath = request.MatchPath.Trim();
-        entity.MatchHosts = request.MatchHosts?.Trim();
+        entity.MatchPath = trimmedPath;
+        entity.MatchHosts = trimmedHosts;
         entity.Transforms = request.Transforms;
         entity.Metadata = request.Metadata;
         entity.OrderNum = request.OrderNum;
@@ -98,6 +121,8 @@ public class GatewayController(
     [HttpPost("Clusters")]
     public async Task<IResult> CreateCluster([FromBody] SaveGatewayClusterRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.ClusterId)) return BadRequest(new MessageResponse("集群标识不能为空"));
+
         var entity = new GatewayClusterEntity
         {
             Id = Guid.NewGuid().ToString("N"),
@@ -115,6 +140,8 @@ public class GatewayController(
     [HttpPut("Clusters/{id}")]
     public async Task<IResult> UpdateCluster(string id, [FromBody] SaveGatewayClusterRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.ClusterId)) return BadRequest(new MessageResponse("集群标识不能为空"));
+
         var entity = await store.GetClusterByIdAsync(id);
         if (entity == null) return NotFound(new MessageResponse("集群不存在"));
 
@@ -154,6 +181,9 @@ public class GatewayController(
     [HttpPost("Websites")]
     public async Task<IResult> CreateWebsite([FromBody] SaveGatewayWebsiteRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.Name)) return BadRequest(new MessageResponse("网站名称不能为空"));
+        if (string.IsNullOrWhiteSpace(request.TargetUrl)) return BadRequest(new MessageResponse("目标地址不能为空"));
+
         var entity = new GatewayWebsiteEntity
         {
             Id = Guid.NewGuid().ToString("N"),
@@ -172,6 +202,9 @@ public class GatewayController(
     [HttpPut("Websites/{id}")]
     public async Task<IResult> UpdateWebsite(string id, [FromBody] SaveGatewayWebsiteRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.Name)) return BadRequest(new MessageResponse("网站名称不能为空"));
+        if (string.IsNullOrWhiteSpace(request.TargetUrl)) return BadRequest(new MessageResponse("目标地址不能为空"));
+
         var entity = await store.GetWebsiteByIdAsync(id);
         if (entity == null) return NotFound(new MessageResponse("网站代理不存在"));
 
@@ -212,11 +245,18 @@ public class GatewayController(
     [HttpPost("TcpRoutes")]
     public async Task<IResult> CreateTcpRoute([FromBody] SaveGatewayTcpRouteRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.Name)) return BadRequest(new MessageResponse("规则名称不能为空"));
+        var protocol = string.IsNullOrWhiteSpace(request.Protocol) ? "TCP" : request.Protocol.Trim().ToUpperInvariant();
+        if (protocol != "TCP" && protocol != "UDP") return BadRequest(new MessageResponse("协议仅支持 TCP 或 UDP"));
+        if (request.ListenPort <= 0 || request.ListenPort > 65535) return BadRequest(new MessageResponse("监听端口必须在 1-65535 之间"));
+        if (request.ForwardPort <= 0 || request.ForwardPort > 65535) return BadRequest(new MessageResponse("转发端口必须在 1-65535 之间"));
+        if (string.IsNullOrWhiteSpace(request.ForwardHost)) return BadRequest(new MessageResponse("转发目标主机不能为空"));
+
         var entity = new GatewayTcpRouteEntity
         {
             Id = Guid.NewGuid().ToString("N"),
             Name = request.Name.Trim(),
-            Protocol = request.Protocol.Trim().ToUpperInvariant(),
+            Protocol = protocol,
             ListenPort = request.ListenPort,
             ForwardHost = request.ForwardHost.Trim(),
             ForwardPort = request.ForwardPort,
@@ -224,6 +264,7 @@ public class GatewayController(
         };
         await store.InsertTcpRouteAsync(entity);
         _ = tcpEngine.ReloadAsync();
+        _ = udpEngine.ReloadAsync();
         await operationLogger.LogAsync("新建端口转发", "网关服务", $"{entity.Protocol}:{entity.ListenPort}", $"{entity.ForwardHost}:{entity.ForwardPort}", clientIp: HttpContext.GetClientIp());
         return Ok(new MessageResponse("端口转发规则已添加"));
     }
@@ -231,11 +272,18 @@ public class GatewayController(
     [HttpPut("TcpRoutes/{id}")]
     public async Task<IResult> UpdateTcpRoute(string id, [FromBody] SaveGatewayTcpRouteRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.Name)) return BadRequest(new MessageResponse("规则名称不能为空"));
+        var protocol = string.IsNullOrWhiteSpace(request.Protocol) ? "TCP" : request.Protocol.Trim().ToUpperInvariant();
+        if (protocol != "TCP" && protocol != "UDP") return BadRequest(new MessageResponse("协议仅支持 TCP 或 UDP"));
+        if (request.ListenPort <= 0 || request.ListenPort > 65535) return BadRequest(new MessageResponse("监听端口必须在 1-65535 之间"));
+        if (request.ForwardPort <= 0 || request.ForwardPort > 65535) return BadRequest(new MessageResponse("转发端口必须在 1-65535 之间"));
+        if (string.IsNullOrWhiteSpace(request.ForwardHost)) return BadRequest(new MessageResponse("转发目标主机不能为空"));
+
         var entity = await store.GetTcpRouteByIdAsync(id);
         if (entity == null) return NotFound(new MessageResponse("转发规则不存在"));
 
         entity.Name = request.Name.Trim();
-        entity.Protocol = request.Protocol.Trim().ToUpperInvariant();
+        entity.Protocol = protocol;
         entity.ListenPort = request.ListenPort;
         entity.ForwardHost = request.ForwardHost.Trim();
         entity.ForwardPort = request.ForwardPort;
@@ -243,6 +291,7 @@ public class GatewayController(
 
         await store.UpdateTcpRouteAsync(entity);
         _ = tcpEngine.ReloadAsync();
+        _ = udpEngine.ReloadAsync();
         await operationLogger.LogAsync("更新端口转发", "网关服务", $"{entity.Protocol}:{entity.ListenPort}", $"{entity.ForwardHost}:{entity.ForwardPort}", clientIp: HttpContext.GetClientIp());
         return Ok(new MessageResponse("端口转发规则已更新"));
     }
@@ -255,6 +304,7 @@ public class GatewayController(
 
         await store.DeleteTcpRouteAsync(id);
         _ = tcpEngine.ReloadAsync();
+        _ = udpEngine.ReloadAsync();
         await operationLogger.LogAsync("删除端口转发", "网关服务", $"{entity.Protocol}:{entity.ListenPort}", "", clientIp: HttpContext.GetClientIp());
         return Ok(new MessageResponse("端口转发规则已删除"));
     }

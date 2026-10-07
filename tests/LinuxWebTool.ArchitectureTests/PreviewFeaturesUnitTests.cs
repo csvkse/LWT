@@ -289,4 +289,33 @@ public sealed class PreviewFeaturesUnitTests
             try { if (File.Exists(tempDb)) File.Delete(tempDb); } catch { }
         }
     }
+
+    [Theory]
+    [InlineData("wss://p.asairo.de/frp", "lwt", "https://lwt.asairo.de/")]
+    [InlineData("https://p.asairo.de", "lwt", "https://lwt.asairo.de/")]
+    [InlineData("wss://p.asairo.de:8443/tunnel/connect", "lwt", "https://lwt.asairo.de:8443/")]
+    [InlineData("wss://frp.example.com", "myapp", "https://myapp.example.com/")]
+    [InlineData("wss://p.asairo.co.uk/frp", "lwt", "https://lwt.asairo.co.uk/")]
+    [InlineData("wss://asairo.de/frp", "lwt", "https://lwt.asairo.de/")]
+    [InlineData("http://p.asairo.de:8080", "lwt", "http://lwt.asairo.de:8080/")]
+    [InlineData("p.asairo.de", "lwt", "https://lwt.asairo.de/")]
+    public void FrpTunnelInstance_ResolveSubdomainUrl_Computes_Valid_Subdomain(string serverUrl, string tunnelHost, string expected)
+    {
+        var actual = FrpTunnelInstance.ResolveSubdomainUrl(serverUrl, tunnelHost);
+        Assert.Equal(expected, actual);
+    }
+
+    [Theory]
+    [InlineData("http://192.168.1.100:8080", "lwt")]
+    [InlineData("https://127.0.0.1", "lwt")]
+    [InlineData("wss://localhost:5000", "lwt")]
+    [InlineData("https://worker.workers.dev", "lwt")]
+    [InlineData("http://router.local", "lwt")]
+    [InlineData("", "lwt")]
+    [InlineData("wss://p.asairo.de", "")]
+    public void FrpTunnelInstance_ResolveSubdomainUrl_Rejects_Invalid_Or_Ip_Addresses(string serverUrl, string tunnelHost)
+    {
+        var actual = FrpTunnelInstance.ResolveSubdomainUrl(serverUrl, tunnelHost);
+        Assert.Null(actual);
+    }
 }

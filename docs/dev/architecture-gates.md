@@ -29,6 +29,11 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + wwwroot �
 | `LinuxArch005` | Routes(Controller) 直接 using SqlSugar | xUnit（源码扫描） |
 | `LinuxArch007` | 命名空间与物理路径不一致 | xUnit（源码扫描） |
 | `LinuxArch012` | Controller `Http*` 特性与 `EndpointsMapper.g.cs` 方法/路径不一致 | xUnit（源码契约检查） |
+| `LinuxArch013` | SQLite 仓储层 Guid/Id 字段比较必须声明 `COLLATE NOCASE`（防止 .NET Guid 大写参数匹配失败） | xUnit（源码扫描） |
+| `LinuxArch014` | SQLite DDL 表主键定义必须声明 `COLLATE NOCASE` | xUnit（源码扫描） |
+| `LinuxArch015` | Minimal API GET 查询模型属性禁止使用非空值类型（必须为可空或引用类型，防止无参请求 400/500） | xUnit（反射契约检查） |
+| `LinuxArch016` | SQLite 实体按 Guid 查询支持大小写混合真实数据库验证 | xUnit（SQLite 动态集成测试） |
+| `LinuxArch017` | Minimal API 可选 `[FromBody]` 参数禁止直接声明为委托参数（须用 `ctx.Request.HasJsonContentType()` 动态解析，防止空 Body 或无 Content-Type 报 404） | xUnit（源码契约检查） |
 | `FE-HTML-INLINE` | index.html 内联脚本（importmap 除外）/ 内联事件 | frontend-gate.cjs |
 | `FE-API-OWNERSHIP` | API 路径字符串出现在 config.js 之外 | frontend-gate.cjs |
 | `FE-NO-FETCH` | fetch() 出现在 api/client.js 之外 | frontend-gate.cjs |
@@ -36,6 +41,12 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + wwwroot �
 | `FE-IMPORT-BOUNDARY` | 跨层 import（store→views 等） | frontend-gate.cjs |
 | `FE-TEMPLATE-REF` | 模板事件绑定使用裸标识符（Vue 运行时编译会错误提升导致 handler 丢失，必须 `method()`） | frontend-gate.cjs |
 | `FE-API-METHOD` | 前端 `http/httpUpload/httpDownload` 动词与后端 mapper 契约不一致 | frontend-gate.cjs |
+| `FE-TAILWIND-CLASS` | 禁止使用非标 Tailwind 尺寸/边距类（如 p-4.5，避免 padding 归零导致圆角内容剪切与贴边） | frontend-gate.cjs |
+| `FE-OVERFLOW-CONFLICT` | 同一元素禁止混用 truncate 与 overflow-(auto/scroll)，防止横向滚动失效导致子项省略/截断冲突 | frontend-gate.cjs |
+| `FE-TEMPLATE-WINDOW` | Vue 模板禁止直接访问全局 window.*，必须通过 setup 显式 return 暴露 | frontend-gate.cjs |
+| `FE-TEMPLATE-VALUE-REF` | Vue 模板禁止访问 setup 暴露变量的 .value（模板自动解包，写 .value 为反模式） | frontend-gate.cjs |
+| `FE-TEMPLATE-TAG-BALANCE` | Vue 组件模板关键结构标签（div/table/thead/tbody/section/aside）必须严格开闭平衡 | frontend-gate.cjs |
+| `FE-TERMINAL-SESSION-HEAL` | TerminalView 必须具备失效会话自动重置与新建降级机制（防止服务重启或会话过期后前端卡死） | frontend-gate.cjs |
 
 ## 约定要点
 

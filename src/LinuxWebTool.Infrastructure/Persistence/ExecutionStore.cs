@@ -21,14 +21,14 @@ public partial class ExecutionStore(DbConnectionFactory factory)
     public async Task<ExecutionRecord?> GetByIdAsync(Guid id)
     {
         using var db = factory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<ExecutionRecord>("SELECT * FROM execution_record WHERE Id = @Id", new { Id = id });
+        return await db.QueryFirstOrDefaultAsync<ExecutionRecord>("SELECT * FROM execution_record WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     public async Task<PagedResult<ExecutionRecord>> QueryAsync(ExecuteHistoryQuery query)
     {
         using var db = factory.CreateConnection();
-        var page = Math.Max(1, query.Page);
-        var pageSize = Math.Clamp(query.PageSize <= 0 ? 20 : query.PageSize, 1, 200);
+        var page = Math.Max(1, query.Page ?? 1);
+        var pageSize = Math.Clamp((query.PageSize ?? 20) <= 0 ? 20 : (query.PageSize ?? 20), 1, 200);
         
         var source = query.Source.HasValue ? (int)query.Source.Value : (int?)null;
         var status = query.Status.HasValue ? (int)query.Status.Value : (int?)null;
@@ -41,7 +41,7 @@ public partial class ExecutionStore(DbConnectionFactory factory)
             ScheduleTaskId = query.ScheduleTaskId,
             Keyword = keyword,
         };
-        const string whereClause = "WHERE (@Source IS NULL OR Source = @Source) AND (@Status IS NULL OR Status = @Status) AND (@CommandId IS NULL OR CommandId = @CommandId) AND (@ScheduleTaskId IS NULL OR ScheduleTaskId = @ScheduleTaskId) AND (@Keyword IS NULL OR CommandName LIKE @Keyword OR CommandText LIKE @Keyword)";
+        const string whereClause = "WHERE (@Source IS NULL OR Source = @Source) AND (@Status IS NULL OR Status = @Status) AND (@CommandId IS NULL OR CommandId = @CommandId COLLATE NOCASE) AND (@ScheduleTaskId IS NULL OR ScheduleTaskId = @ScheduleTaskId COLLATE NOCASE) AND (@Keyword IS NULL OR CommandName LIKE @Keyword OR CommandText LIKE @Keyword)";
         var total = await db.QueryFirstOrDefaultAsync<int>($"SELECT COUNT(*) FROM execution_record {whereClause}", parameters);
         var offset = (page - 1) * pageSize;
         var records = await db.QueryAsync<ExecutionRecord>($"SELECT * FROM execution_record {whereClause} ORDER BY StartTime DESC LIMIT @PageSize OFFSET @Offset", new

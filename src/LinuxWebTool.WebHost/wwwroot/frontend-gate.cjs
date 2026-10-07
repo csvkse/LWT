@@ -10,6 +10,12 @@
  *  FE-IMPORT-BOUNDARY 跨层 import 限制（store→views 禁止、api→views/components 禁止、views 互引禁止）
  *  FE-TEMPLATE-REF    模板事件绑定必须使用内联调用（method()），避免运行时编译提升裸标识符导致 handler 丢失
  *  FE-API-METHOD      前端 HTTP 动词必须匹配 EndpointsMapper.g.cs 声明的后端路由
+ *  FE-TAILWIND-CLASS  禁止使用非标 Tailwind 边距/尺寸类名（如 p-4.5、gap-4.5），防止 padding 归零导致元素贴边与圆角内容剪切
+ *  FE-OVERFLOW-CONFLICT 同一元素禁止混用 truncate 与 overflow-(auto|scroll)，防止横向滚动失效导致子项省略/截断冲突
+ *  FE-TEMPLATE-WINDOW Vue 模板禁止直接访问全局 window.*，必须通过 setup 显式 return 暴露
+ *  FE-TEMPLATE-VALUE-REF Vue 模板禁止访问 setup 暴露变量的 .value（模板自动解包，写 .value 为反模式）
+ *  FE-TEMPLATE-TAG-BALANCE Vue 组件模板关键结构标签（div/table/thead/tbody/section/aside）必须严格开闭平衡
+ *  FE-TERMINAL-SESSION-HEAL TerminalView 必须具备失效会话自动重置与新建降级机制，防止服务重启后前端卡死
  *
  * 基线：frontend-gate-baseline.json 冻结存量债务，只允许删除条目，不允许新增。
  */
@@ -190,6 +196,67 @@ for (const file of files) {
     const bare = content.matchAll(/@(?:click|blur|keyup(?:\.[a-z]+)*|submit(?:\.[a-z]+)*|change)\s*=\s*"([A-Za-z_$][\w$]*)"/g);
     for (const [, name] of bare) {
       add('FE-TEMPLATE-REF', file, `事件绑定使用了裸标识符 "${name}"，必须写成 "${name}()"`);
+    }
+
+    // FE-TAILWIND-CLASS：禁止使用未被默认 spacing 缩放支持的非标浮点类（例如 p-4.5、m-4.5 等，会导致样式失效为 0）
+    const invalidTailwind = content.match(/\b(?:p|m|px|py|pt|pb|pl|pr|gap|w|h)-4\.5\b/g);
+    if (invalidTailwind) {
+      add('FE-TAILWIND-CLASS', file, `存在无效非标 Tailwind 类名 "${invalidTailwind[0]}"，请使用标准阶梯（如 p-4, p-5）或自定义方括号尺寸`);
+    }
+
+    // FE-OVERFLOW-CONFLICT：同一 class 属性禁止混用 truncate 与 overflow-(auto|scroll)
+    const classMatches = content.matchAll(/class\s*=\s*["']([^"']*)["']/g);
+    for (const [, cls] of classMatches) {
+      if (/\btruncate\b/.test(cls) && /\boverflow-(?:x-|y-)?(?:auto|scroll)\b/.test(cls)) {
+        add('FE-OVERFLOW-CONFLICT', file, `同一元素混用了 truncate 与 overflow-auto/scroll，两者 CSS 冲突导致横向滚动失效`);
+      }
+    }
+
+    // 针对 Vue 组件 template: `...` 的静态模板检查
+    const tplMatch = content.match(/template:\s*`([\s\S]*?)`/);
+    if (tplMatch) {
+      const tpl = tplMatch[1];
+
+      // FE-TEMPLATE-WINDOW：模板禁止直接访问全局 window.*
+      if (/\{\{[^}]*\bwindow\./.test(tpl) || /:[\w-]+\s*=\s*["'][^"']*\bwindow\./.test(tpl)) {
+        add('FE-TEMPLATE-WINDOW', file, 'Vue 模板中禁止直接访问 window.*（Vue 模板沙箱无全局 window，运行时报错），请在 setup 中暴露');
+      }
+
+      // FE-TEMPLATE-VALUE-REF：模板禁止显式访问 setup 暴露变量的 .value（模板自动解包）
+      const setupReturnMatch = content.match(/return\s*\{([\s\S]*?)\};?\s*\},?\s*(?:template|mounted)/);
+      if (setupReturnMatch) {
+        const returnedVars = setupReturnMatch[1]
+          .split(',')
+          .map((s) => s.trim().split(':')[0].trim())
+          .filter((s) => /^[a-zA-Z_$][\w$]*$/.test(s) && !['formatTime', 'formatBytes', 'formatBps', 'formatDuration'].includes(s));
+
+        if (returnedVars.length) {
+          const varPattern = new RegExp(`\\b(${returnedVars.join('|')})\\.value\\b`);
+          const valMatch = tpl.match(varPattern);
+          if (valMatch) {
+            add('FE-TEMPLATE-VALUE-REF', file, `模板中错误访问了 ref/computed 的 .value（"${valMatch[0]}"），Vue 模板已自动解包`);
+          }
+        }
+      }
+
+      // FE-TEMPLATE-TAG-BALANCE：Vue 组件模板关键标签必须开闭平衡
+      const checkTags = ['div', 'table', 'thead', 'tbody', 'section', 'aside'];
+      for (const tag of checkTags) {
+        const openRegex = new RegExp(`<${tag}\\b[^>]*>`, 'gi');
+        const closeRegex = new RegExp(`</${tag}>`, 'gi');
+        const opens = (tpl.match(openRegex) || []).length;
+        const closes = (tpl.match(closeRegex) || []).length;
+        if (opens !== closes) {
+          add('FE-TEMPLATE-TAG-BALANCE', file, `<${tag}> 标签不平衡: ${opens} 处开启 vs ${closes} 处闭合，可能导致 DOM 树结构异常`);
+        }
+      }
+    }
+
+    // FE-TERMINAL-SESSION-HEAL：TerminalView 必须具备失效会话自动重置与新建降级机制，防止服务重启后前端卡死
+    if (path.basename(file) === 'TerminalView.js') {
+      if (!content.includes('API.terminal.sessions') || !content.includes("runtime.sessionId = ''")) {
+        add('FE-TERMINAL-SESSION-HEAL', file, 'TerminalView 必须具备失效会话自动重置与新建降级机制，防止服务重启后前端卡死');
+      }
     }
   }
 }

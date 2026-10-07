@@ -63,6 +63,17 @@ public sealed partial class WebsiteProxyTransformProvider : ITransformProvider
     {
         var http = ctx.HttpContext;
         var raw = http.Request.Path.Value ?? "";
+
+        // 管理后台、API 与基础设施接口永远不被代理拦截
+        if (raw.StartsWith("/app", StringComparison.OrdinalIgnoreCase) ||
+            raw.StartsWith("/api", StringComparison.OrdinalIgnoreCase) ||
+            raw.Equals("/health", StringComparison.OrdinalIgnoreCase) ||
+            raw.StartsWith("/scalar", StringComparison.OrdinalIgnoreCase) ||
+            raw.StartsWith("/openapi", StringComparison.OrdinalIgnoreCase))
+        {
+            return ValueTask.CompletedTask;
+        }
+
         var rest = raw.Length > 0 && raw[0] == '/' ? raw[1..] : raw;
 
         // 1. 匹配 /proxy/{key} (支持 /proxy/domain 和 /proxy/alias)
@@ -142,8 +153,15 @@ public sealed partial class WebsiteProxyTransformProvider : ITransformProvider
             return ValueTask.CompletedTask;
         }
 
-        // 3. 匹配 /{scheme}://{authority} (协议内嵌模式)
+        // 3. 匹配 /{scheme}://{authority} 或 /{scheme}:/{authority} (协议内嵌模式)
         var sep = rest.IndexOf("://", StringComparison.Ordinal);
+        var sepLen = 3;
+        if (sep < 0)
+        {
+            sep = rest.IndexOf(":/", StringComparison.Ordinal);
+            sepLen = 2;
+        }
+
         if (sep > 0)
         {
             var schemeText = rest[..sep];
@@ -155,7 +173,7 @@ public sealed partial class WebsiteProxyTransformProvider : ITransformProvider
                 return ValueTask.CompletedTask;
             }
 
-            var afterScheme = rest[(sep + 3)..];
+            var afterScheme = rest[(sep + sepLen)..];
             var slash = afterScheme.IndexOf('/');
             var authority = slash < 0 ? afterScheme : afterScheme[..slash];
             var tail = slash < 0 ? "/" : afterScheme[slash..];
@@ -176,7 +194,10 @@ public sealed partial class WebsiteProxyTransformProvider : ITransformProvider
                     http.Response.StatusCode = StatusCodes.Status403Forbidden;
                     return ValueTask.CompletedTask;
                 }
-                ApplyProxyRoute(ctx, entry, tail, $"/{entry.UpstreamScheme}://{entry.Authority}");
+                var prefix = sepLen == 2
+                    ? $"/{entry.UpstreamScheme}:/{entry.Authority}"
+                    : $"/{entry.UpstreamScheme}://{entry.Authority}";
+                ApplyProxyRoute(ctx, entry, tail, prefix);
                 return ValueTask.CompletedTask;
             }
 
@@ -201,24 +222,35 @@ public sealed partial class WebsiteProxyTransformProvider : ITransformProvider
         ctx.ProxyRequest.Headers.Remove("Host");
         ctx.ProxyRequest.Headers.TryAddWithoutValidation("Host", entry.Authority);
 
+        if (entry.RewriteBody)
+        {
+            // 剥离压缩请求头，促使上游返回未压缩明文响应，确保 HTML/CSS 绝对路径改写能可靠执行
+            ctx.ProxyRequest.Headers.Remove("Accept-Encoding");
+        }
+
         ctx.HttpContext.Items[AllowEntryKey] = entry;
         ctx.HttpContext.Items[MatchedPrefixKey] = matchedPrefix;
     }
 
     [GeneratedRegex("""(?<==["'])/(?!/)""")]
-    private static partial Regex HtmlAttrRootRelativeRegex();
+    public static partial Regex HtmlAttrRootRelativeRegex();
 
     [GeneratedRegex("""(?<=url\(["']?)/(?!/)""")]
-    private static partial Regex CssUrlRootRelativeRegex();
+    public static partial Regex CssUrlRootRelativeRegex();
 
     private ValueTask RewriteBodyAsync(ResponseTransformContext ctx)
     {
         var entry = ctx.HttpContext.Items[AllowEntryKey] as WebsiteEntry;
         if (entry is not { RewriteBody: true }) return ValueTask.CompletedTask;
 
-        if (!string.IsNullOrEmpty(ctx.HttpContext.Response.Headers.ContentEncoding.ToString()))
+        var contentEncoding = ctx.ProxyResponse?.Content.Headers.ContentEncoding.ToString();
+        if (string.IsNullOrEmpty(contentEncoding))
         {
-            _logger.LogDebug("[WebsiteProxy] 跳过响应体改写：响应已被压缩 (Content-Encoding 存在)");
+            contentEncoding = ctx.HttpContext.Response.Headers.ContentEncoding.ToString();
+        }
+        if (!string.IsNullOrEmpty(contentEncoding))
+        {
+            _logger.LogDebug("[WebsiteProxy] 跳过响应体改写：响应已被压缩 (Content-Encoding: {Encoding})", contentEncoding);
             return ValueTask.CompletedTask;
         }
 
@@ -228,6 +260,13 @@ public sealed partial class WebsiteProxyTransformProvider : ITransformProvider
         var isHtml = media.Contains("html", StringComparison.OrdinalIgnoreCase);
         var isCss = media.Contains("css", StringComparison.OrdinalIgnoreCase);
         if (!isHtml && !isCss) return ValueTask.CompletedTask;
+
+        var cl = ctx.ProxyResponse?.Content.Headers.ContentLength;
+        if (cl.HasValue && cl.Value > 2 * 1024 * 1024)
+        {
+            _logger.LogDebug("[WebsiteProxy] 响应体尺寸 ({Length} 字节) 超过改写上限 2MB，跳过正则改写直接透传", cl.Value);
+            return ValueTask.CompletedTask;
+        }
 
         var prefix = (ctx.HttpContext.Items[MatchedPrefixKey] as string)
                      ?? $"/{entry.UpstreamScheme}://{entry.Authority}";
@@ -303,7 +342,7 @@ public sealed partial class WebsiteProxyTransformProvider : ITransformProvider
     }
 
     [GeneratedRegex("(?i)(;\\s*path=)/(?!/)")]
-    private static partial Regex CookiePathRegex();
+    public static partial Regex CookiePathRegex();
 
     public static string NormalizeAuthority(string authority)
     {

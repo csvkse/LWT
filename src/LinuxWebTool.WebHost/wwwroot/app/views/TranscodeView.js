@@ -243,7 +243,7 @@ export default defineComponent({
       if (!submitForm.customArgs && !submitForm.presetId) return toast.error('请选择预设或填写自定义参数');
       // 完整命令模式仅支持单文件（含固定 -i 与输出路径，无法逐文件替换）。按文件名是否含扩展名点判断。
       if (submitForm.isFullCommand && submitForm.customArgs) {
-        const base = String(submitForm.sourcePath).replace(/[\/\\]+$/, '').split(/[\/\\]/).pop() || '';
+        const base = String(submitForm.sourcePath).replace(/[/\\]+$/, '').split(/[/\\]/).pop() || '';
         if (!base.includes('.')) return toast.error('完整命令模式仅支持单文件，请改用非完整模式或选择具体文件路径');
       }
       submitting.value = true;
@@ -411,10 +411,7 @@ export default defineComponent({
       const base = (dir.endsWith('/') ? dir : dir + '/') + name;
       if (String(outputMode) === '0') return base + '.' + ext; // 替换模式（并存=1 见下）
       // 并存：重名避让（前端仅预测 base，实际以运行时为准）
-      let candidate = base + '.' + ext;
-      let idx = 0;
-      // 前端无法可靠检测 File.Exists，预测用 -1 起步；运行时以 Plan 为准
-      return candidate;
+      return base + '.' + ext;
     }
 
     /// 展开预设为完整 ffmpeg 命令（含 -i 输入、具体硬件编码器、输出路径）。
@@ -816,7 +813,16 @@ export default defineComponent({
         <div class="panel overflow-x-auto">
           <table class="data-table min-w-[62rem]">
             <thead>
-              <tr><th>状态</th><th>源文件</th><th>输出</th><th>预设</th><th>进度</th><th>触发</th><th>时间</th><th class="text-right">操作</th></tr>
+              <tr>
+                <th class="whitespace-nowrap">状态</th>
+                <th class="whitespace-nowrap">源文件</th>
+                <th class="whitespace-nowrap">输出</th>
+                <th class="whitespace-nowrap">预设</th>
+                <th class="whitespace-nowrap">进度</th>
+                <th class="whitespace-nowrap">触发</th>
+                <th class="whitespace-nowrap">时间</th>
+                <th class="text-right whitespace-nowrap">操作</th>
+              </tr>
             </thead>
             <tbody>
               <tr v-if="!jobs.length && !jobLoading"><td colspan="8" class="text-slate-600 py-8 text-center">暂无转码任务，切换到「一次性转码」提交</td></tr>
@@ -847,13 +853,15 @@ export default defineComponent({
                 <td class="text-xs text-slate-500 whitespace-nowrap">{{ transcodeTriggerLabel(job.trigger) }}</td>
                 <td class="text-[10px] text-slate-500 whitespace-nowrap">{{ formatTime(job.startTime || job.queueTime) }}</td>
                 <td class="text-right whitespace-nowrap">
-                  <button v-if="job.commandLine" class="btn btn-xs" title="查看实际执行的 ffmpeg 命令" @click="showCommand(job)">命令</button>
-                  <template v-if="job.status === 0 || job.status === 1">
-                    <button class="btn btn-xs btn-danger" :disabled="actJobId === job.id" @click="cancelJob(job)">取消</button>
-                  </template>
-                  <template v-else-if="job.status === 3 || job.status === 4 || job.status === 5">
-                    <button class="btn btn-xs" :disabled="actJobId === job.id" @click="retryJob(job)">重试</button>
-                  </template>
+                  <div class="inline-flex items-center gap-1.5">
+                    <button v-if="job.commandLine" class="btn btn-xs" title="查看实际执行的 ffmpeg 命令" @click="showCommand(job)">命令</button>
+                    <template v-if="job.status === 0 || job.status === 1">
+                      <button class="btn btn-xs btn-danger" :disabled="actJobId === job.id" @click="cancelJob(job)">取消</button>
+                    </template>
+                    <template v-else-if="job.status === 3 || job.status === 4 || job.status === 5">
+                      <button class="btn btn-xs" :disabled="actJobId === job.id" @click="retryJob(job)">重试</button>
+                    </template>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -910,7 +918,17 @@ export default defineComponent({
         <div class="panel overflow-x-auto">
           <table class="data-table min-w-[56rem]">
             <thead>
-              <tr><th>状态</th><th>名称</th><th>监听目录</th><th>扩展名</th><th>预设</th><th>输出/递归</th><th>扫描方式</th><th>上次扫描</th><th class="text-right">操作</th></tr>
+              <tr>
+                <th class="whitespace-nowrap">状态</th>
+                <th class="whitespace-nowrap">名称</th>
+                <th class="whitespace-nowrap">监听目录</th>
+                <th class="whitespace-nowrap">扩展名</th>
+                <th class="whitespace-nowrap">预设</th>
+                <th class="whitespace-nowrap">输出/递归</th>
+                <th class="whitespace-nowrap">扫描方式</th>
+                <th class="whitespace-nowrap">上次扫描</th>
+                <th class="text-right whitespace-nowrap">操作</th>
+              </tr>
             </thead>
             <tbody>
               <tr v-if="!watchRules.length"><td colspan="9" class="text-slate-600 py-8 text-center">暂无监听规则</td></tr>
@@ -924,10 +942,12 @@ export default defineComponent({
                 <td class="text-xs text-slate-500 whitespace-nowrap">{{ rule.mode === 1 ? '文件事件' : '轮询 ' + rule.pollSeconds + 's' }}</td>
                 <td class="text-[10px] text-slate-500 whitespace-nowrap">{{ formatTime(rule.lastScanTime) }}</td>
                 <td class="text-right whitespace-nowrap">
-                  <button class="badge" :class="rule.enabled ? 'border-emerald-500/50 text-emerald-300' : 'border-slate-600/60 text-slate-500'"
-                          @click="toggleWatch(rule)">{{ rule.enabled ? '● 启用' : '○ 停用' }}</button>
-                  <button class="btn btn-xs" @click="openWatchEdit(rule)">编辑</button>
-                  <button class="btn btn-xs btn-danger" @click="removeWatch(rule)">删除</button>
+                  <div class="inline-flex items-center gap-1.5">
+                    <button class="badge" :class="rule.enabled ? 'border-emerald-500/50 text-emerald-300' : 'border-slate-600/60 text-slate-500'"
+                            @click="toggleWatch(rule)">{{ rule.enabled ? '● 启用' : '○ 停用' }}</button>
+                    <button class="btn btn-xs" @click="openWatchEdit(rule)">编辑</button>
+                    <button class="btn btn-xs btn-danger" @click="removeWatch(rule)">删除</button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -937,7 +957,7 @@ export default defineComponent({
 
       <!-- ============ 预设编辑弹窗 ============ -->
       <div v-if="showPresetEditor" class="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="panel w-full max-w-lg p-5 max-h-[90vh] overflow-auto" style="background: rgba(13, 21, 38, 0.97)">
+        <div class="panel w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto" style="background: rgba(13, 21, 38, 0.97)">
           <h3 class="font-display text-base text-neon-soft mb-4">{{ editingPresetId ? '编辑预设' : '新建预设' }}</h3>
           <div class="flex flex-col gap-3">
             <label class="block">

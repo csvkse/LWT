@@ -16,7 +16,7 @@ public partial class ApiKeyStore(DbConnectionFactory factory)
     public async Task<ApiKeyEntity?> GetByIdAsync(string id)
     {
         using var db = factory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<ApiKeyEntity>("SELECT * FROM api_key WHERE Id = @Id", new { Id = id });
+        return await db.QueryFirstOrDefaultAsync<ApiKeyEntity>("SELECT * FROM api_key WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     public async Task<ApiKeyEntity?> GetByHashAsync(string keyHash)
@@ -42,19 +42,19 @@ public partial class ApiKeyStore(DbConnectionFactory factory)
             SET Name = @Name, IsEnabled = @IsEnabled, AllowApi = @AllowApi, AllowMcp = @AllowMcp,
                 AllowTerminal = @AllowTerminal, AllowSchedules = @AllowSchedules, AllowFiles = @AllowFiles,
                 AllowTranscode = @AllowTranscode, AllowGateway = @AllowGateway, ExpiresAt = @ExpiresAt
-            WHERE Id = @Id";
+            WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, entity);
     }
 
     public async Task DeleteAsync(string id)
     {
         using var db = factory.CreateConnection();
-        await db.ExecuteAsync("DELETE FROM api_key WHERE Id = @Id", new { Id = id });
+        await db.ExecuteAsync("DELETE FROM api_key WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     public async Task TouchLastUsedAsync(string id)
     {
         using var db = factory.CreateConnection();
-        await db.ExecuteAsync("UPDATE api_key SET LastUsedAt = @LastUsedAt WHERE Id = @Id", new { LastUsedAt = DateTime.UtcNow, Id = id });
+        await db.ExecuteAsync("UPDATE api_key SET LastUsedAt = @LastUsedAt WHERE Id = @Id COLLATE NOCASE", new { LastUsedAt = DateTime.UtcNow, Id = id });
     }
 }

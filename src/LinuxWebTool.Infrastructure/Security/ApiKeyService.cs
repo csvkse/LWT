@@ -15,6 +15,8 @@ public class ApiKeyService(ApiKeyStore store, ILogger<ApiKeyService> logger)
 {
     private const string KeyPrefixTag = "lwt_live_";
     private readonly ConcurrentDictionary<string, ApiKeyEntity> _cache = new();
+    private readonly ConcurrentDictionary<string, DateTime> _lastTouched = new();
+    private static readonly TimeSpan TouchThrottle = TimeSpan.FromMinutes(1);
 
     /// <summary>生成新 API Key 并写入持久化</summary>
     public async Task<(string rawKey, ApiKeyEntity entity)> CreateAsync(CreateApiKeyRequest request)
@@ -84,12 +86,20 @@ public class ApiKeyService(ApiKeyStore store, ILogger<ApiKeyService> logger)
         else
         {
             _cache.Clear();
+            _lastTouched.Clear();
         }
     }
 
-    /// <summary>异步更新最后使用时间戳</summary>
+    /// <summary>异步更新最后使用时间戳（附带 1 分钟防抖阈值，避免高频请求压垮 SQLite 写入锁）</summary>
     public void TouchLastUsed(string id)
     {
+        var now = DateTime.UtcNow;
+        if (_lastTouched.TryGetValue(id, out var last) && now - last < TouchThrottle)
+        {
+            return;
+        }
+
+        _lastTouched[id] = now;
         _ = Task.Run(async () =>
         {
             try

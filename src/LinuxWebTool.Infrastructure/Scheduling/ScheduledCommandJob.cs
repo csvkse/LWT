@@ -32,23 +32,28 @@ public class ScheduledCommandJob(
             return;
         }
 
+        var isManual = context.JobDetail.Key.Group == "LinuxCommandOnce";
+        var triggerBy = isManual ? "manual" : "schedule";
+        var source = isManual ? ExecutionSource.Manual : ExecutionSource.Schedule;
+
         var command = await commandStore.GetByIdAsync(task.CommandId);
         if (command is null)
         {
             logger.LogWarning("定时任务 {Task} 引用的指令不存在：{CommandId}", task.Name, task.CommandId);
             await executionStore.InsertAsync(new ExecutionRecord
             {
-                Source = (int)ExecutionSource.Schedule,
+                Source = (int)source,
                 ScheduleTaskId = task.Id,
                 CommandId = task.CommandId,
                 CommandName = task.Name,
                 CommandText = $"[指令已删除 {task.CommandId}]",
                 Status = (int)ExecutionStatus.Failure,
-                TriggerBy = "schedule",
+                TriggerBy = triggerBy,
                 ErrorOutput = "任务引用的指令已被删除",
                 StartTime = DateTime.Now,
                 EndTime = DateTime.Now,
             });
+            await scheduleStore.UpdateRunInfoAsync(task.Id, DateTime.Now, isManual ? null : context.NextFireTimeUtc?.LocalDateTime);
             return;
         }
 
@@ -64,7 +69,7 @@ public class ScheduledCommandJob(
 
         await executionStore.InsertAsync(new ExecutionRecord
         {
-            Source = (int)ExecutionSource.Schedule,
+            Source = (int)source,
             ScheduleTaskId = task.Id,
             CommandId = command.Id,
             CommandName = command.Name,
@@ -76,12 +81,12 @@ public class ScheduledCommandJob(
             DurationMs = result.DurationMs,
             TimedOut = result.TimedOut,
             Truncated = result.Truncated,
-            TriggerBy = "schedule",
+            TriggerBy = triggerBy,
             StartTime = result.StartTime,
             EndTime = result.EndTime,
         });
 
-        await scheduleStore.UpdateRunInfoAsync(task.Id, DateTime.Now, context.NextFireTimeUtc?.LocalDateTime);
+        await scheduleStore.UpdateRunInfoAsync(task.Id, DateTime.Now, isManual ? null : context.NextFireTimeUtc?.LocalDateTime);
 
         logger.LogInformation(
             "定时任务 {Task}（{Command}）执行完成：{Status}，耗时 {Duration}ms",

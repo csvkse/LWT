@@ -33,9 +33,10 @@ public sealed class TcpProxyEngine(GatewayStore store, ILogger<TcpProxyEngine> l
     {
         var routes = (await store.GetAllTcpRoutesAsync())
             .Where(r => r.IsEnabled && r.Protocol.Equals("TCP", StringComparison.OrdinalIgnoreCase))
-            .ToList();
+            .GroupBy(r => r.ListenPort)
+            .ToDictionary(g => g.Key, g => g.First());
 
-        var desiredPorts = routes.ToDictionary(r => r.ListenPort);
+        var desiredPorts = routes;
 
         // 1. 停用不再需要的监听器
         foreach (var port in _listeners.Keys.ToList())
@@ -51,10 +52,19 @@ public sealed class TcpProxyEngine(GatewayStore store, ILogger<TcpProxyEngine> l
             }
         }
 
-        // 2. 启动新监听器
+        // 2. 启动新监听器 或 更新既有监听器的目标配置
         foreach (var (port, route) in desiredPorts)
         {
-            if (!_listeners.ContainsKey(port))
+            if (_listeners.TryGetValue(port, out var existing))
+            {
+                if (existing.ForwardHost != route.ForwardHost || existing.ForwardPort != route.ForwardPort)
+                {
+                    existing.ForwardHost = route.ForwardHost;
+                    existing.ForwardPort = route.ForwardPort;
+                    logger.LogInformation("[Gateway TCP] 端口 {Port} 转发目标已热更新为 {Host}:{ForwardPort}", port, route.ForwardHost, route.ForwardPort);
+                }
+            }
+            else
             {
                 var cts = new CancellationTokenSource();
                 var listener = new TcpListener(IPAddress.Any, port);
@@ -86,6 +96,7 @@ public sealed class TcpProxyEngine(GatewayStore store, ILogger<TcpProxyEngine> l
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
+                if (token.IsCancellationRequested) break;
                 logger.LogError(ex, "[Gateway TCP] Accept 异常");
             }
         }
@@ -97,33 +108,70 @@ public sealed class TcpProxyEngine(GatewayStore store, ILogger<TcpProxyEngine> l
         using var upstream = new Socket(SocketType.Stream, ProtocolType.Tcp);
         try
         {
-            await upstream.ConnectAsync(forwardHost, forwardPort, token);
+            client.NoDelay = true;
+            upstream.NoDelay = true;
+
+            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            connectCts.CancelAfter(TimeSpan.FromSeconds(5));
+            await upstream.ConnectAsync(forwardHost, forwardPort, connectCts.Token);
+
             using var clientStream = new NetworkStream(client, false);
             using var upstreamStream = new NetworkStream(upstream, false);
 
-            var t1 = CopyStreamAsync(clientStream, upstreamStream, token);
-            var t2 = CopyStreamAsync(upstreamStream, clientStream, token);
-            await Task.WhenAny(t1, t2);
+            using var relayCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            var relayToken = relayCts.Token;
+
+            var clientToUpstream = RelayDirectionAsync(clientStream, upstreamStream, client, upstream, relayCts, relayToken);
+            var upstreamToClient = RelayDirectionAsync(upstreamStream, clientStream, upstream, client, relayCts, relayToken);
+
+            await Task.WhenAll(clientToUpstream, upstreamToClient);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            if (!token.IsCancellationRequested)
+            {
+                logger.LogDebug(ex, "[Gateway TCP] 连接转发异常: {Host}:{Port}", forwardHost, forwardPort);
+            }
+        }
     }
 
-    private static async Task CopyStreamAsync(NetworkStream src, NetworkStream dst, CancellationToken token)
+    private static async Task RelayDirectionAsync(
+        NetworkStream srcStream,
+        NetworkStream dstStream,
+        Socket srcSocket,
+        Socket dstSocket,
+        CancellationTokenSource relayCts,
+        CancellationToken token)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(32 * 1024);
         try
         {
             int read;
-            while ((read = await src.ReadAsync(buffer.AsMemory(), token)) > 0)
+            while ((read = await srcStream.ReadAsync(buffer.AsMemory(), token)) > 0)
             {
-                await dst.WriteAsync(buffer.AsMemory(0, read), token);
+                await dstStream.WriteAsync(buffer.AsMemory(0, read), token);
             }
+
+            try
+            {
+                dstSocket.Shutdown(SocketShutdown.Send);
+            }
+            catch { }
         }
-        catch { }
+        catch
+        {
+            try { relayCts.Cancel(); } catch { }
+        }
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
         }
+    }
+
+    public override Task StopAsync(CancellationToken cancellationToken)
+    {
+        StopAll();
+        return base.StopAsync(cancellationToken);
     }
 
     private void StopAll()
@@ -140,5 +188,11 @@ public sealed class TcpProxyEngine(GatewayStore store, ILogger<TcpProxyEngine> l
         _listeners.Clear();
     }
 
-    private sealed record TcpListenerContext(TcpListener Listener, string ForwardHost, int ForwardPort, CancellationTokenSource Cts);
+    private sealed class TcpListenerContext(TcpListener listener, string forwardHost, int forwardPort, CancellationTokenSource cts)
+    {
+        public TcpListener Listener { get; } = listener;
+        public string ForwardHost { get; set; } = forwardHost;
+        public int ForwardPort { get; set; } = forwardPort;
+        public CancellationTokenSource Cts { get; } = cts;
+    }
 }

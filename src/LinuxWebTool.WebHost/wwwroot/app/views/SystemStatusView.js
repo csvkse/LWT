@@ -356,11 +356,11 @@ export default defineComponent({
               </div>
               <div class="flex flex-col gap-1 max-h-56 overflow-y-auto pr-1">
                 <div v-for="h in status.hardware" :key="h.type + h.name"
-                     class="flex items-center gap-2 text-xs py-0.5 border-b border-cyber-line/20"
+                     class="flex items-center gap-2 text-xs py-1 border-b border-cyber-line/20"
                      :class="h.isGpu ? 'text-rose-300 bg-rose-500/5 rounded px-1' : 'text-slate-400'">
-                  <span class="font-mono truncate" :title="h.name">{{ h.isGpu ? '🖥' : (h.type === 'usb' ? '🔌' : '🧩') }}</span>
-                  <span class="font-mono truncate" :title="h.description">{{ h.name }}</span>
-                  <span class="ml-auto text-[11px] truncate max-w-[45%]" :title="h.description">
+                  <span class="font-mono shrink-0">{{ h.isGpu ? '🖥' : (h.type === 'usb' ? '🔌' : '🧩') }}</span>
+                  <span class="font-mono truncate min-w-0 flex-1" :title="h.name">{{ h.name }}</span>
+                  <span class="text-[11px] truncate max-w-[50%] shrink-0 text-right" :title="h.description">
                     <span v-if="h.isGpu" class="text-rose-300">{{ h.description }}</span>
                     <template v-else>{{ h.description }}</template>
                   </span>
@@ -398,11 +398,13 @@ export default defineComponent({
             <div class="flex flex-col gap-2">
               <p v-if="!status.networks.length" class="text-slate-600 text-sm">当前环境不采集网络数据</p>
               <div v-for="net in status.networks" :key="net.name"
-                   class="flex items-center gap-3 text-xs border border-cyber-line/60 rounded-lg px-3 py-2">
-                <span class="font-mono text-cyan-300/80 w-24 truncate">{{ net.name }}</span>
-                <span class="text-emerald-300">↓ {{ formatBps(net.recvBytesPerSec) }}</span>
-                <span class="text-amber-300">↑ {{ formatBps(net.sentBytesPerSec) }}</span>
-                <span class="ml-auto text-slate-600">累计 ↓{{ formatBytes(net.totalRecvBytes) }} ↑{{ formatBytes(net.totalSentBytes) }}</span>
+                   class="flex items-center justify-between gap-2 flex-wrap text-xs border border-cyber-line/60 rounded-lg px-3 py-2">
+                <div class="flex items-center gap-3 min-w-0">
+                  <span class="font-mono text-cyan-300/80 w-24 truncate" :title="net.name">{{ net.name }}</span>
+                  <span class="text-emerald-300 whitespace-nowrap">↓ {{ formatBps(net.recvBytesPerSec) }}</span>
+                  <span class="text-amber-300 whitespace-nowrap">↑ {{ formatBps(net.sentBytesPerSec) }}</span>
+                </div>
+                <span class="text-slate-600 whitespace-nowrap text-[11px]">累计 ↓{{ formatBytes(net.totalRecvBytes) }} ↑{{ formatBytes(net.totalSentBytes) }}</span>
               </div>
             </div>
           </div>

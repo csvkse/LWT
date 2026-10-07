@@ -18,7 +18,7 @@ public partial class GroupStore(DbConnectionFactory factory)
     public async Task<CommandGroup?> GetByIdAsync(Guid id)
     {
         using var db = factory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<CommandGroup>("SELECT * FROM command_group WHERE Id = @Id", new { Id = id });
+        return await db.QueryFirstOrDefaultAsync<CommandGroup>("SELECT * FROM command_group WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     public async Task<bool> ExistsNameAsync(string name, GroupBizType bizType, Guid? excludeId)
@@ -27,7 +27,7 @@ public partial class GroupStore(DbConnectionFactory factory)
         var sql = "SELECT 1 FROM command_group WHERE Name = @Name AND BizType = @BizType";
         if (excludeId.HasValue)
         {
-            sql += " AND Id != @ExcludeId";
+            sql += " AND Id != @ExcludeId COLLATE NOCASE";
         }
         return await db.QueryFirstOrDefaultAsync<int?>(sql, new { Name = name, BizType = (int)bizType, ExcludeId = excludeId }) != null;
     }
@@ -48,13 +48,13 @@ public partial class GroupStore(DbConnectionFactory factory)
         var sql = @"
             UPDATE command_group 
             SET Name = @Name, BizType = @BizType, SortOrder = @SortOrder, CreateTime = @CreateTime
-            WHERE Id = @Id";
+            WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, group);
     }
 
     public async Task DeleteAsync(Guid id)
     {
         using var db = factory.CreateConnection();
-        await db.ExecuteAsync("DELETE FROM command_group WHERE Id = @Id", new { Id = id });
+        await db.ExecuteAsync("DELETE FROM command_group WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 }

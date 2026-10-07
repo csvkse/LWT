@@ -60,7 +60,16 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_CommandsController.MapPost("", async ([FromServices] CommandsController ctrl, HttpContext ctx, [FromBody] SaveCommandRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Create(request); });
             group_CommandsController.MapPut("{id:guid}", async ([FromServices] CommandsController ctrl, HttpContext ctx, Guid id, [FromBody] SaveCommandRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Update(id, request); });
             group_CommandsController.MapDelete("{id:guid}", async ([FromServices] CommandsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Delete(id); });
-            group_CommandsController.MapPost("{id:guid}/Execute", async ([FromServices] CommandsController ctrl, HttpContext ctx, Guid id, [FromBody] ExecuteCommandRequest? request) => { ctrl.HttpContext = ctx; return await ctrl.Execute(id, request); });
+            group_CommandsController.MapPost("{id:guid}/Execute", async ([FromServices] CommandsController ctrl, HttpContext ctx, Guid id) =>
+            {
+                ctrl.HttpContext = ctx;
+                ExecuteCommandRequest? request = null;
+                if (ctx.Request.HasJsonContentType() && ctx.Request.ContentLength is not (null or 0))
+                {
+                    request = await ctx.Request.ReadFromJsonAsync<ExecuteCommandRequest>(LinuxWebTool.WebHost.Composition.AppJsonSerializerContext.Default.ExecuteCommandRequest);
+                }
+                return await ctrl.Execute(id, request);
+            });
             group_CommandsController.MapPost("QuickExecute", async ([FromServices] CommandsController ctrl, HttpContext ctx, [FromBody] QuickExecuteRequest request) => { ctrl.HttpContext = ctx; return await ctrl.QuickExecute(request); });
             group_CommandsController.MapGet("{id:guid}/History", async ([FromServices] CommandsController ctrl, HttpContext ctx, Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20) => { ctrl.HttpContext = ctx; return await ctrl.History(id, page, pageSize); });
 
@@ -114,7 +123,16 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_SmbMountsController.MapPut("{id:guid}", async ([FromServices] SmbMountsController ctrl, HttpContext ctx, Guid id, [FromBody] SaveSmbMountRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Update(id, request); });
             group_SmbMountsController.MapDelete("{id:guid}", async ([FromServices] SmbMountsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Delete(id); });
             group_SmbMountsController.MapPost("{id:guid}/Mount", async ([FromServices] SmbMountsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Mount(id); });
-            group_SmbMountsController.MapPost("{id:guid}/Unmount", async ([FromServices] SmbMountsController ctrl, HttpContext ctx, Guid id, [FromBody] UnmountRequest? request) => { ctrl.HttpContext = ctx; return await ctrl.Unmount(id, request); });
+            group_SmbMountsController.MapPost("{id:guid}/Unmount", async ([FromServices] SmbMountsController ctrl, HttpContext ctx, Guid id) =>
+            {
+                ctrl.HttpContext = ctx;
+                SmbMountsController.UnmountRequest? request = null;
+                if (ctx.Request.HasJsonContentType() && ctx.Request.ContentLength is not (null or 0))
+                {
+                    request = await ctx.Request.ReadFromJsonAsync<SmbMountsController.UnmountRequest>(LinuxWebTool.WebHost.Composition.AppJsonSerializerContext.Default.UnmountRequest);
+                }
+                return await ctrl.Unmount(id, request);
+            });
 
             var group_WebDavMountsController = app.MapGroup("/api/WebDavMounts");
             group_WebDavMountsController.RequireAuthorization();
@@ -124,7 +142,16 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_WebDavMountsController.MapPut("{id:guid}", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, Guid id, [FromBody] SaveWebDavMountRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Update(id, request); });
             group_WebDavMountsController.MapDelete("{id:guid}", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Delete(id); });
             group_WebDavMountsController.MapPost("{id:guid}/Mount", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Mount(id); });
-            group_WebDavMountsController.MapPost("{id:guid}/Unmount", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, Guid id, [FromBody] WebDavMountsController.WebDavUnmountRequest? request) => { ctrl.HttpContext = ctx; return await ctrl.Unmount(id, request); });
+            group_WebDavMountsController.MapPost("{id:guid}/Unmount", async ([FromServices] WebDavMountsController ctrl, HttpContext ctx, Guid id) =>
+            {
+                ctrl.HttpContext = ctx;
+                WebDavMountsController.WebDavUnmountRequest? request = null;
+                if (ctx.Request.HasJsonContentType() && ctx.Request.ContentLength is not (null or 0))
+                {
+                    request = await ctx.Request.ReadFromJsonAsync<WebDavMountsController.WebDavUnmountRequest>(LinuxWebTool.WebHost.Composition.AppJsonSerializerContext.Default.WebDavUnmountRequest);
+                }
+                return await ctrl.Unmount(id, request);
+            });
 
             var group_MountTasksController = app.MapGroup("/api/MountTasks").RequireAuthorization();
             group_MountTasksController.MapGet("{id:guid}", ([FromServices] MountTasksController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return ctrl.Get(id); });

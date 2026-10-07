@@ -13,3 +13,4 @@ publish/
 *.db-wal
 .env
 .env.*
+scratch/

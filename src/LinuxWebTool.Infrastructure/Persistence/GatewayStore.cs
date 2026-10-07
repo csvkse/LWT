@@ -17,7 +17,7 @@ public partial class GatewayStore(DbConnectionFactory factory)
     public async Task<GatewayRouteEntity?> GetRouteByIdAsync(string id)
     {
         using var db = factory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<GatewayRouteEntity>("SELECT * FROM gateway_route WHERE Id = @Id", new { Id = id });
+        return await db.QueryFirstOrDefaultAsync<GatewayRouteEntity>("SELECT * FROM gateway_route WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     public async Task InsertRouteAsync(GatewayRouteEntity entity)
@@ -38,14 +38,14 @@ public partial class GatewayStore(DbConnectionFactory factory)
             UPDATE gateway_route
             SET RouteId = @RouteId, ClusterId = @ClusterId, MatchPath = @MatchPath, MatchHosts = @MatchHosts,
                 Transforms = @Transforms, Metadata = @Metadata, OrderNum = @OrderNum, IsEnabled = @IsEnabled, UpdateTime = @UpdateTime
-            WHERE Id = @Id";
+            WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, entity);
     }
 
     public async Task DeleteRouteAsync(string id)
     {
         using var db = factory.CreateConnection();
-        await db.ExecuteAsync("DELETE FROM gateway_route WHERE Id = @Id", new { Id = id });
+        await db.ExecuteAsync("DELETE FROM gateway_route WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     // === L7 集群 ===
@@ -58,7 +58,7 @@ public partial class GatewayStore(DbConnectionFactory factory)
     public async Task<GatewayClusterEntity?> GetClusterByIdAsync(string id)
     {
         using var db = factory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<GatewayClusterEntity>("SELECT * FROM gateway_cluster WHERE Id = @Id", new { Id = id });
+        return await db.QueryFirstOrDefaultAsync<GatewayClusterEntity>("SELECT * FROM gateway_cluster WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     public async Task InsertClusterAsync(GatewayClusterEntity entity)
@@ -79,14 +79,14 @@ public partial class GatewayStore(DbConnectionFactory factory)
             UPDATE gateway_cluster
             SET ClusterId = @ClusterId, LoadBalancingPolicy = @LoadBalancingPolicy, Destinations = @Destinations,
                 HealthCheckConfig = @HealthCheckConfig, UpdateTime = @UpdateTime
-            WHERE Id = @Id";
+            WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, entity);
     }
 
     public async Task DeleteClusterAsync(string id)
     {
         using var db = factory.CreateConnection();
-        await db.ExecuteAsync("DELETE FROM gateway_cluster WHERE Id = @Id", new { Id = id });
+        await db.ExecuteAsync("DELETE FROM gateway_cluster WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     // === 网站代理 ===
@@ -99,7 +99,7 @@ public partial class GatewayStore(DbConnectionFactory factory)
     public async Task<GatewayWebsiteEntity?> GetWebsiteByIdAsync(string id)
     {
         using var db = factory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<GatewayWebsiteEntity>("SELECT * FROM gateway_website WHERE Id = @Id", new { Id = id });
+        return await db.QueryFirstOrDefaultAsync<GatewayWebsiteEntity>("SELECT * FROM gateway_website WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     public async Task InsertWebsiteAsync(GatewayWebsiteEntity entity)
@@ -120,14 +120,14 @@ public partial class GatewayStore(DbConnectionFactory factory)
             UPDATE gateway_website
             SET Name = @Name, TargetUrl = @TargetUrl, RewriteBody = @RewriteBody, RewriteCookie = @RewriteCookie,
                 IsEnabled = @IsEnabled, UpdateTime = @UpdateTime
-            WHERE Id = @Id";
+            WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, entity);
     }
 
     public async Task DeleteWebsiteAsync(string id)
     {
         using var db = factory.CreateConnection();
-        await db.ExecuteAsync("DELETE FROM gateway_website WHERE Id = @Id", new { Id = id });
+        await db.ExecuteAsync("DELETE FROM gateway_website WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     // === L4 TCP/UDP 路由 ===
@@ -140,7 +140,7 @@ public partial class GatewayStore(DbConnectionFactory factory)
     public async Task<GatewayTcpRouteEntity?> GetTcpRouteByIdAsync(string id)
     {
         using var db = factory.CreateConnection();
-        return await db.QueryFirstOrDefaultAsync<GatewayTcpRouteEntity>("SELECT * FROM gateway_tcp_route WHERE Id = @Id", new { Id = id });
+        return await db.QueryFirstOrDefaultAsync<GatewayTcpRouteEntity>("SELECT * FROM gateway_tcp_route WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     public async Task InsertTcpRouteAsync(GatewayTcpRouteEntity entity)
@@ -161,13 +161,13 @@ public partial class GatewayStore(DbConnectionFactory factory)
             UPDATE gateway_tcp_route
             SET Name = @Name, Protocol = @Protocol, ListenPort = @ListenPort, ForwardHost = @ForwardHost,
                 ForwardPort = @ForwardPort, IsEnabled = @IsEnabled, UpdateTime = @UpdateTime
-            WHERE Id = @Id";
+            WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, entity);
     }
 
     public async Task DeleteTcpRouteAsync(string id)
     {
         using var db = factory.CreateConnection();
-        await db.ExecuteAsync("DELETE FROM gateway_tcp_route WHERE Id = @Id", new { Id = id });
+        await db.ExecuteAsync("DELETE FROM gateway_tcp_route WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 }

@@ -17,6 +17,7 @@ public sealed record FrpTunnelLineDto(
     string? ProxyBypass,
     string State,
     string? PublicUrl,
+    string? SubdomainUrl,
     long UptimeSeconds,
     long SentBytes,
     long ReceivedBytes,
@@ -80,6 +81,7 @@ public sealed record UpdateFrpConfigRequest(
 public sealed record FrpTunnelStatusDto(
     string State,
     string? PublicUrl,
+    string? SubdomainUrl,
     string? LocalTargetUrl,
     DateTime? ConnectedAt,
     long UptimeSeconds,

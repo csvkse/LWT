@@ -18,7 +18,7 @@ public partial class WatchRuleStore(DbConnectionFactory factory)
     {
         using var db = factory.CreateConnection();
         return await db.QueryFirstOrDefaultAsync<WatchRule>(
-            "SELECT * FROM watch_rule WHERE Id = @Id", new { Id = id });
+            "SELECT * FROM watch_rule WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     public async Task<bool> ExistsNameAsync(string name, Guid? excludeId)
@@ -27,7 +27,7 @@ public partial class WatchRuleStore(DbConnectionFactory factory)
         var sql = "SELECT 1 FROM watch_rule WHERE Name = @Name";
         if (excludeId.HasValue)
         {
-            sql += " AND Id != @ExcludeId";
+            sql += " AND Id != @ExcludeId COLLATE NOCASE";
         }
         var count = await db.QueryFirstOrDefaultAsync<int?>(sql, new { Name = name, ExcludeId = excludeId });
         return count.HasValue;
@@ -60,13 +60,13 @@ public partial class WatchRuleStore(DbConnectionFactory factory)
                 Mode = @Mode, PollSeconds = @PollSeconds, Enabled = @Enabled, 
                 UseHardwareAccel = @UseHardwareAccel, HardwareBackend = @HardwareBackend, 
                 LastScanTime = @LastScanTime, UpdateTime = @UpdateTime
-            WHERE Id = @Id";
+            WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, rule);
     }
 
     public async Task DeleteAsync(Guid id)
     {
         using var db = factory.CreateConnection();
-        await db.ExecuteAsync("DELETE FROM watch_rule WHERE Id = @Id", new { Id = id });
+        await db.ExecuteAsync("DELETE FROM watch_rule WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 }

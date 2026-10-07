@@ -85,6 +85,18 @@ public class AuthController(
 
     private static void RecordFailure(string ip)
     {
+        if (Failures.Count > 100)
+        {
+            var now = DateTime.Now;
+            foreach (var kvp in Failures)
+            {
+                if (kvp.Value.LockUntil <= now)
+                {
+                    Failures.TryRemove(kvp.Key, out _);
+                }
+            }
+        }
+
         Failures.AddOrUpdate(
             ip,
             _ => (1, DateTime.MinValue),

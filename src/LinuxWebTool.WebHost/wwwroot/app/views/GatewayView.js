@@ -444,43 +444,45 @@ export default defineComponent({
           暂未登记任何网站代理，点击右上角登记内网设备 Web 界面（如路由器、NAS、PVE、打印机等）。
         </div>
         <div v-else class="overflow-x-auto">
-          <table class="w-full text-left text-xs border-collapse">
+          <table class="w-full text-left text-xs border-collapse min-w-[50rem]">
             <thead>
               <tr class="border-b border-slate-700/50 text-slate-400 font-medium">
-                <th class="py-2.5 px-3">名称</th>
-                <th class="py-2.5 px-3">内网目标地址</th>
-                <th class="py-2.5 px-3">网关直通入口</th>
-                <th class="py-2.5 px-3">改写策略</th>
-                <th class="py-2.5 px-3">状态</th>
-                <th class="py-2.5 px-3 text-right">操作</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">名称</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">内网目标地址</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">网关直通入口</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">改写策略</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">状态</th>
+                <th class="py-2.5 px-3 text-right whitespace-nowrap">操作</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-800/40">
               <tr v-for="w in websites" :key="w.id" class="hover:bg-slate-800/20 transition-colors">
-                <td class="py-3 px-3 font-medium text-slate-200">{{ w.name }}</td>
+                <td class="py-3 px-3 font-medium text-slate-200 whitespace-nowrap">{{ w.name }}</td>
                 <td class="py-3 px-3">
                   <code class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 font-mono text-slate-300">
                     {{ w.targetUrl }}
                   </code>
                 </td>
-                <td class="py-3 px-3">
+                <td class="py-3 px-3 max-w-[16rem]">
                   <a :href="buildProxyLink(w.targetUrl)" target="_blank"
-                     class="text-cyan-400 hover:underline font-mono inline-flex items-center gap-1">
-                    {{ buildProxyLink(w.targetUrl) }} ↗
+                     :title="buildProxyLink(w.targetUrl)"
+                     class="text-cyan-400 hover:underline font-mono inline-flex items-center gap-1 min-w-0 max-w-full">
+                    <span class="truncate">{{ buildProxyLink(w.targetUrl) }}</span>
+                    <span class="shrink-0 text-[10px]">↗</span>
                   </a>
                 </td>
-                <td class="py-3 px-3">
+                <td class="py-3 px-3 whitespace-nowrap">
                   <div class="flex gap-1">
                     <span v-if="w.rewriteBody" class="badge border-cyan-500/40 text-cyan-400 bg-cyan-950/20">HTML改写</span>
                     <span v-if="w.rewriteCookie" class="badge border-purple-500/40 text-purple-400 bg-purple-950/20">Cookie隔离</span>
                   </div>
                 </td>
-                <td class="py-3 px-3">
+                <td class="py-3 px-3 whitespace-nowrap">
                   <span class="badge" :class="w.isEnabled ? 'border-emerald-500/40 text-emerald-300 bg-emerald-950/30' : 'border-slate-600 text-slate-400 bg-slate-900'">
                     {{ w.isEnabled ? '● 已启用' : '○ 已停用' }}
                   </span>
                 </td>
-                <td class="py-3 px-3 text-right">
+                <td class="py-3 px-3 text-right whitespace-nowrap">
                   <div class="flex items-center justify-end gap-1.5">
                     <a :href="buildProxyLink(w.targetUrl)" target="_blank" class="btn btn-xs btn-primary">访问</a>
                     <button class="btn btn-xs" @click="openEditWebsite(w)">编辑</button>
@@ -500,31 +502,31 @@ export default defineComponent({
           暂无自定义 L7 路由规则。
         </div>
         <div v-else class="overflow-x-auto">
-          <table class="w-full text-left text-xs border-collapse">
+          <table class="w-full text-left text-xs border-collapse min-w-[54rem]">
             <thead>
               <tr class="border-b border-slate-700/50 text-slate-400 font-medium">
-                <th class="py-2.5 px-3">路由 ID</th>
-                <th class="py-2.5 px-3">匹配路径</th>
-                <th class="py-2.5 px-3">匹配域名 (Hosts)</th>
-                <th class="py-2.5 px-3">目标集群 ID</th>
-                <th class="py-2.5 px-3">优先级 (Order)</th>
-                <th class="py-2.5 px-3">状态</th>
-                <th class="py-2.5 px-3 text-right">操作</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">路由 ID</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">匹配路径</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">匹配域名 (Hosts)</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">目标集群 ID</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">优先级 (Order)</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">状态</th>
+                <th class="py-2.5 px-3 text-right whitespace-nowrap">操作</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-800/40">
               <tr v-for="r in routes" :key="r.id" class="hover:bg-slate-800/20 transition-colors">
-                <td class="py-3 px-3 font-mono text-cyan-300">{{ r.routeId }}</td>
+                <td class="py-3 px-3 font-mono text-cyan-300 whitespace-nowrap">{{ r.routeId }}</td>
                 <td class="py-3 px-3 font-mono text-slate-300">{{ r.matchPath }}</td>
                 <td class="py-3 px-3 text-slate-400">{{ r.matchHosts || '*' }}</td>
-                <td class="py-3 px-3 font-mono text-violet-300">{{ r.clusterId }}</td>
-                <td class="py-3 px-3 text-slate-400">{{ r.orderNum }}</td>
-                <td class="py-3 px-3">
+                <td class="py-3 px-3 font-mono text-violet-300 whitespace-nowrap">{{ r.clusterId }}</td>
+                <td class="py-3 px-3 text-slate-400 whitespace-nowrap">{{ r.orderNum }}</td>
+                <td class="py-3 px-3 whitespace-nowrap">
                   <span class="badge" :class="r.isEnabled ? 'border-emerald-500/40 text-emerald-300 bg-emerald-950/30' : 'border-slate-600 text-slate-400 bg-slate-900'">
                     {{ r.isEnabled ? '● 启用' : '○ 停用' }}
                   </span>
                 </td>
-                <td class="py-3 px-3 text-right">
+                <td class="py-3 px-3 text-right whitespace-nowrap">
                   <div class="flex items-center justify-end gap-1.5">
                     <button class="btn btn-xs" @click="openEditRoute(r)">编辑</button>
                     <button class="btn btn-xs btn-danger" @click="deleteRoute(r)">删除</button>
@@ -543,23 +545,23 @@ export default defineComponent({
           暂无集群配置。
         </div>
         <div v-else class="overflow-x-auto">
-          <table class="w-full text-left text-xs border-collapse">
+          <table class="w-full text-left text-xs border-collapse min-w-[48rem]">
             <thead>
               <tr class="border-b border-slate-700/50 text-slate-400 font-medium">
-                <th class="py-2.5 px-3">集群 ID</th>
-                <th class="py-2.5 px-3">负载均衡策略</th>
-                <th class="py-2.5 px-3">目标节点 (Destinations)</th>
-                <th class="py-2.5 px-3">更新时间</th>
-                <th class="py-2.5 px-3 text-right">操作</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">集群 ID</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">负载均衡策略</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">目标节点 (Destinations)</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">更新时间</th>
+                <th class="py-2.5 px-3 text-right whitespace-nowrap">操作</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-800/40">
               <tr v-for="c in clusters" :key="c.id" class="hover:bg-slate-800/20 transition-colors">
-                <td class="py-3 px-3 font-mono text-violet-300">{{ c.clusterId }}</td>
-                <td class="py-3 px-3 text-slate-300">{{ c.loadBalancingPolicy }}</td>
+                <td class="py-3 px-3 font-mono text-violet-300 whitespace-nowrap">{{ c.clusterId }}</td>
+                <td class="py-3 px-3 text-slate-300 whitespace-nowrap">{{ c.loadBalancingPolicy }}</td>
                 <td class="py-3 px-3 font-mono text-slate-400 break-all">{{ c.destinations }}</td>
-                <td class="py-3 px-3 text-slate-500">{{ formatTime(c.updateTime) }}</td>
-                <td class="py-3 px-3 text-right">
+                <td class="py-3 px-3 text-slate-500 whitespace-nowrap">{{ formatTime(c.updateTime) }}</td>
+                <td class="py-3 px-3 text-right whitespace-nowrap">
                   <div class="flex items-center justify-end gap-1.5">
                     <button class="btn btn-xs" @click="openEditCluster(c)">编辑</button>
                     <button class="btn btn-xs btn-danger" @click="deleteCluster(c)">删除</button>
@@ -578,33 +580,33 @@ export default defineComponent({
           暂无端口转发规则。
         </div>
         <div v-else class="overflow-x-auto">
-          <table class="w-full text-left text-xs border-collapse">
+          <table class="w-full text-left text-xs border-collapse min-w-[46rem]">
             <thead>
               <tr class="border-b border-slate-700/50 text-slate-400 font-medium">
-                <th class="py-2.5 px-3">规则名称</th>
-                <th class="py-2.5 px-3">协议</th>
-                <th class="py-2.5 px-3">监听端口</th>
-                <th class="py-2.5 px-3">转发目标</th>
-                <th class="py-2.5 px-3">状态</th>
-                <th class="py-2.5 px-3 text-right">操作</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">规则名称</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">协议</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">监听端口</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">转发目标</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">状态</th>
+                <th class="py-2.5 px-3 text-right whitespace-nowrap">操作</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-800/40">
               <tr v-for="t in tcpRoutes" :key="t.id" class="hover:bg-slate-800/20 transition-colors">
-                <td class="py-3 px-3 font-medium text-slate-200">{{ t.name }}</td>
-                <td class="py-3 px-3">
+                <td class="py-3 px-3 font-medium text-slate-200 whitespace-nowrap">{{ t.name }}</td>
+                <td class="py-3 px-3 whitespace-nowrap">
                   <span class="badge" :class="t.protocol === 'UDP' ? 'border-amber-500/50 text-amber-300' : 'border-cyan-500/50 text-cyan-300'">
                     {{ t.protocol }}
                   </span>
                 </td>
-                <td class="py-3 px-3 font-mono text-cyan-300">:{{ t.listenPort }}</td>
-                <td class="py-3 px-3 font-mono text-slate-300">{{ t.forwardHost }}:{{ t.forwardPort }}</td>
-                <td class="py-3 px-3">
+                <td class="py-3 px-3 font-mono text-cyan-300 whitespace-nowrap">:{{ t.listenPort }}</td>
+                <td class="py-3 px-3 font-mono text-slate-300 whitespace-nowrap">{{ t.forwardHost }}:{{ t.forwardPort }}</td>
+                <td class="py-3 px-3 whitespace-nowrap">
                   <span class="badge" :class="t.isEnabled ? 'border-emerald-500/40 text-emerald-300 bg-emerald-950/30' : 'border-slate-600 text-slate-400 bg-slate-900'">
                     {{ t.isEnabled ? '● 监听中' : '○ 已停止' }}
                   </span>
                 </td>
-                <td class="py-3 px-3 text-right">
+                <td class="py-3 px-3 text-right whitespace-nowrap">
                   <div class="flex items-center justify-end gap-1.5">
                     <button class="btn btn-xs" @click="openEditTcp(t)">编辑</button>
                     <button class="btn btn-xs btn-danger" @click="deleteTcp(t)">删除</button>
@@ -618,7 +620,7 @@ export default defineComponent({
 
       <!-- 模态框：网站代理 -->
       <div v-if="showWebsiteModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="panel w-full max-w-md p-5 flex flex-col gap-4">
+        <div class="panel w-full max-w-md p-5 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
             <h3 class="font-semibold text-slate-100 text-base">
               {{ isEditWebsite ? '编辑网站代理' : '登记网站代理' }}
@@ -665,7 +667,7 @@ export default defineComponent({
 
       <!-- 模态框：L7 路由 -->
       <div v-if="showRouteModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="panel w-full max-w-lg p-5 flex flex-col gap-4">
+        <div class="panel w-full max-w-lg p-5 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
             <h3 class="font-semibold text-slate-100 text-base">
               {{ isEditRoute ? '编辑 L7 路由' : '新建 L7 路由' }}
@@ -718,7 +720,7 @@ export default defineComponent({
 
       <!-- 模态框：集群 -->
       <div v-if="showClusterModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="panel w-full max-w-lg p-5 flex flex-col gap-4">
+        <div class="panel w-full max-w-lg p-5 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
             <h3 class="font-semibold text-slate-100 text-base">
               {{ isEditCluster ? '编辑集群' : '新建集群' }}
@@ -757,7 +759,7 @@ export default defineComponent({
 
       <!-- 模态框：L4 端口转发 -->
       <div v-if="showTcpModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="panel w-full max-w-md p-5 flex flex-col gap-4">
+        <div class="panel w-full max-w-md p-5 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
             <h3 class="font-semibold text-slate-100 text-base">
               {{ isEditTcp ? '编辑端口转发' : '新建端口转发' }}

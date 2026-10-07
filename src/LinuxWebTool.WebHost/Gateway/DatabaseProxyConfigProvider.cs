@@ -52,10 +52,27 @@ public sealed class DatabaseProxyConfigProvider : IProxyConfigProvider
 
             foreach (var r in dbRoutes.Where(r => r.IsEnabled))
             {
+                var hosts = string.IsNullOrWhiteSpace(r.MatchHosts)
+                    ? null
+                    : r.MatchHosts.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+                var matchPath = r.MatchPath?.Trim() ?? "";
+                var order = r.OrderNum;
+
+                // 若历史数据库中存在未绑定 Hosts 的根通配路由，调降优先级，避免抢占管理后台与系统 API
+                if (hosts == null && (matchPath == "/" || matchPath == "/*" || matchPath.StartsWith("/{*", StringComparison.Ordinal)))
+                {
+                    _logger.LogWarning("[Gateway L7] 路由 '{RouteId}' 未绑定域名约束却使用全局根通配，已调降优先级避免影响管理后台", r.RouteId);
+                    if (order < 1000)
+                    {
+                        order = 1000;
+                    }
+                }
+
                 var match = new RouteMatch
                 {
                     Path = r.MatchPath,
-                    Hosts = string.IsNullOrWhiteSpace(r.MatchHosts) ? null : r.MatchHosts.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                    Hosts = hosts
                 };
 
                 var meta = new Dictionary<string, string>();
@@ -77,7 +94,7 @@ public sealed class DatabaseProxyConfigProvider : IProxyConfigProvider
                     RouteId = r.RouteId,
                     ClusterId = r.ClusterId,
                     Match = match,
-                    Order = r.OrderNum,
+                    Order = order,
                     Metadata = meta
                 });
             }
@@ -115,18 +132,43 @@ public sealed class DatabaseProxyConfigProvider : IProxyConfigProvider
                 var anyBodyRewrite = websites.Any(w => w.IsEnabled && w.RewriteBody);
                 var anyCookieRewrite = websites.Any(w => w.IsEnabled && w.RewriteCookie);
 
+                var proxyMeta = new Dictionary<string, string>
+                {
+                    [WebsiteProxyTransformProvider.MetadataKey] = "true",
+                    [WebsiteProxyTransformProvider.MetadataKey + ".AnyBodyRewrite"] = anyBodyRewrite ? "true" : "false",
+                    [WebsiteProxyTransformProvider.MetadataKey + ".AnyCookieRewrite"] = anyCookieRewrite ? "true" : "false"
+                };
+
                 routes.Add(new RouteConfig
                 {
-                    RouteId = "__website_proxy_catchall",
+                    RouteId = "__website_proxy_prefix",
                     ClusterId = "__website_proxy_cluster",
-                    Match = new RouteMatch { Path = "/{**catchall}" },
-                    Order = int.MaxValue,
-                    Metadata = new Dictionary<string, string>
-                    {
-                        [WebsiteProxyTransformProvider.MetadataKey] = "true",
-                        [WebsiteProxyTransformProvider.MetadataKey + ".AnyBodyRewrite"] = anyBodyRewrite ? "true" : "false",
-                        [WebsiteProxyTransformProvider.MetadataKey + ".AnyCookieRewrite"] = anyCookieRewrite ? "true" : "false"
-                    }
+                    Match = new RouteMatch { Path = "/proxy/{**catchall}" },
+                    Metadata = proxyMeta
+                });
+
+                routes.Add(new RouteConfig
+                {
+                    RouteId = "__website_proxy_alias",
+                    ClusterId = "__website_proxy_cluster",
+                    Match = new RouteMatch { Path = "/s/{**catchall}" },
+                    Metadata = proxyMeta
+                });
+
+                routes.Add(new RouteConfig
+                {
+                    RouteId = "__website_proxy_scheme_http",
+                    ClusterId = "__website_proxy_cluster",
+                    Match = new RouteMatch { Path = "/http:/{**catchall}" },
+                    Metadata = proxyMeta
+                });
+
+                routes.Add(new RouteConfig
+                {
+                    RouteId = "__website_proxy_scheme_https",
+                    ClusterId = "__website_proxy_cluster",
+                    Match = new RouteMatch { Path = "/https:/{**catchall}" },
+                    Metadata = proxyMeta
                 });
 
                 clusters.Add(new ClusterConfig

@@ -21,8 +21,8 @@ VALUES (@Id, @Time, @Action, @TargetType, @TargetName, @Detail, @ClientIp, @Succ
 
     public async Task<PagedResult<OperationLog>> QueryAsync(OperationLogQuery query)
     {
-        var page = Math.Max(1, query.Page);
-        var pageSize = Math.Clamp(query.PageSize <= 0 ? 20 : query.PageSize, 1, 200);
+        var page = Math.Max(1, query.Page ?? 1);
+        var pageSize = Math.Clamp((query.PageSize ?? 20) <= 0 ? 20 : (query.PageSize ?? 20), 1, 200);
         
         using var db = factory.CreateConnection();
         var whereClause = "";

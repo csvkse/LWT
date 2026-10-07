@@ -19,7 +19,7 @@ public partial class FrpTunnelLineStore(DbConnectionFactory factory)
     {
         using var db = factory.CreateConnection();
         return await db.QueryFirstOrDefaultAsync<FrpTunnelLineEntity>(
-            "SELECT * FROM frp_tunnel_lines WHERE Id = @Id", new { Id = id });
+            "SELECT * FROM frp_tunnel_lines WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     public async Task<FrpTunnelLineEntity?> GetLineByHostAsync(string host)
@@ -67,21 +67,21 @@ public partial class FrpTunnelLineStore(DbConnectionFactory factory)
                 ProxyBypass = @ProxyBypass,
                 SortOrder = @SortOrder,
                 UpdateTime = @UpdateTime
-            WHERE Id = @Id";
+            WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, entity);
     }
 
     public async Task DeleteLineAsync(string id)
     {
         using var db = factory.CreateConnection();
-        await db.ExecuteAsync("DELETE FROM frp_tunnel_lines WHERE Id = @Id", new { Id = id });
+        await db.ExecuteAsync("DELETE FROM frp_tunnel_lines WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     public async Task UpdateStatusAsync(string id, string status)
     {
         using var db = factory.CreateConnection();
         await db.ExecuteAsync(
-            "UPDATE frp_tunnel_lines SET Status = @Status, UpdateTime = @UpdateTime WHERE Id = @Id",
+            "UPDATE frp_tunnel_lines SET Status = @Status, UpdateTime = @UpdateTime WHERE Id = @Id COLLATE NOCASE",
             new { Id = id, Status = status, UpdateTime = DateTime.UtcNow });
     }
 }

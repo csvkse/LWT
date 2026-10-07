@@ -256,8 +256,10 @@ export default defineComponent({
         sessionId: '',
         containerEl,
         resizeObserver: null,
+        resizeTimer: null,
         awaitingTimer: null,
         isConnecting: false,
+        isExited: false,
         lastSequence: 0,
         retries: 0,
         reconnectTimer: null,
@@ -301,21 +303,40 @@ export default defineComponent({
         const cols = runtime.term.cols > 0 ? runtime.term.cols : (isFullscreen.value ? 120 : 90);
         const rows = runtime.term.rows > 0 ? runtime.term.rows : (isFullscreen.value ? 36 : 28);
 
-        const res = runtime.sessionId ? await http(API.terminal.session(runtime.sessionId), { method: 'GET' }) : await http(API.terminal.sessions, {
-          method: 'POST',
-          body: { columns: cols, rows, workingDirectory: tab.workingDirectory },
-        });
+        let res;
+        if (runtime.sessionId) {
+          res = await http(API.terminal.session(runtime.sessionId), { method: 'GET' });
+          if (!res.ok && (res.status === 404 || !res.data)) {
+            // 历史会话失效（服务已重启或后台闲置超时清理），自动清空失效 ID 并降级创建全新终端会话
+            runtime.sessionId = '';
+            tab.sessionId = '';
+            runtime.term.writeln('\x1b[90m[历史会话已结束或服务已重启，正在为您自动创建新终端...]\x1b[0m');
+            res = await http(API.terminal.sessions, {
+              method: 'POST',
+              body: { columns: cols, rows, workingDirectory: tab.workingDirectory },
+            });
+          }
+        } else {
+          res = await http(API.terminal.sessions, {
+            method: 'POST',
+            body: { columns: cols, rows, workingDirectory: tab.workingDirectory },
+          });
+        }
 
         if (!res.ok || !res.data) {
           runtime.retries = 3;
-          throw new Error(res.message || '会话不存在或服务已重启，请新建终端');
+          throw new Error(res.message || '终端会话创建失败，请稍后重试');
         }
         if (disposed || !tabRuntimes.has(tabId)) return;
 
         const data = res.data;
         if (data.state === 'Exited') {
           runtime.retries = 3;
-          throw new Error('会话已退出，退出码：' + (data.exitCode ?? '未知'));
+          runtime.isExited = true;
+          runtime.term.writeln(`\r\n\x1b[90m[终端进程已结束，退出码：${data.exitCode ?? 0}]\x1b[0m`);
+          tab.isConnected = false;
+          refreshSessions();
+          return;
         }
         const sessionId = data?.sessionId || data?.SessionId;
         if (!sessionId) {
@@ -375,7 +396,7 @@ export default defineComponent({
           tab.awaitingInput = null;
           runtime.term.writeln('\r\n\x1b[38;2;244;63;94m[终端会话已断开]\x1b[0m');
           refreshSessions();
-          if (!disposed && runtime.retries < 3 && tabRuntimes.has(tabId)) {
+          if (!disposed && !runtime.isExited && runtime.retries < 3 && tabRuntimes.has(tabId)) {
             const delay = 1000 * (2 ** runtime.retries++);
             runtime.reconnectTimer = setTimeout(() => initTabSession(tabId), delay);
           }
@@ -407,16 +428,19 @@ export default defineComponent({
 
         runtime.resizeObserver = new ResizeObserver(() => {
           if (runtime.containerEl.clientWidth === 0 || runtime.containerEl.clientHeight === 0) return;
-          try {
-            runtime.fitAddon.fit();
-            if (runtime.ws && runtime.ws.readyState === WebSocket.OPEN) {
-              runtime.ws.send(JSON.stringify({
-                type: 'resize',
-                cols: runtime.term.cols,
-                rows: runtime.term.rows,
-              }));
-            }
-          } catch { /* Ignore resize during terminal disposal. */ }
+          if (runtime.resizeTimer) clearTimeout(runtime.resizeTimer);
+          runtime.resizeTimer = setTimeout(() => {
+            try {
+              runtime.fitAddon.fit();
+              if (runtime.ws && runtime.ws.readyState === WebSocket.OPEN) {
+                runtime.ws.send(JSON.stringify({
+                  type: 'resize',
+                  cols: runtime.term.cols,
+                  rows: runtime.term.rows,
+                }));
+              }
+            } catch { /* Ignore resize during terminal disposal. */ }
+          }, 80);
         });
         runtime.resizeObserver.observe(runtime.containerEl);
       }
@@ -465,6 +489,7 @@ export default defineComponent({
         tabRuntimes.delete(tabId);
         if (runtime.reconnectTimer) clearTimeout(runtime.reconnectTimer);
         if (runtime.awaitingTimer) clearTimeout(runtime.awaitingTimer);
+        if (runtime.resizeTimer) clearTimeout(runtime.resizeTimer);
         if (runtime.ws) {
           try { runtime.ws.close(); } catch { /* Detach is idempotent. */ }
         }
@@ -503,9 +528,15 @@ export default defineComponent({
 
     function reconnectCurrent() {
       const runtime = tabRuntimes.get(activeTabId.value);
+      const tab = tabs.value.find(t => t.id === activeTabId.value);
       if (runtime) {
         if (runtime.isConnecting) return;
         runtime.retries = 0;
+        if (runtime.isExited) {
+          runtime.isExited = false;
+          runtime.sessionId = '';
+          if (tab) tab.sessionId = '';
+        }
       }
       initTabSession(activeTabId.value);
     }
@@ -653,12 +684,12 @@ export default defineComponent({
       <!-- 顶部控制栏与标签页 -->
       <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-900/90 border border-cyber-line p-2.5 rounded-lg">
         <!-- 标签页列表 -->
-        <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+        <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar min-w-0 flex-1 py-0.5">
           <button
             v-for="tab in tabs"
             :key="tab.id"
             type="button"
-            class="flex items-center gap-2 px-3 py-1.5 text-xs font-mono rounded border transition-colors cursor-pointer"
+            class="flex items-center gap-2 px-3 py-1.5 text-xs font-mono rounded border transition-colors cursor-pointer shrink-0"
             :class="tab.id === activeTabId ? 'bg-slate-800 text-neon-soft border-neon/50 shadow-sm' : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:border-slate-700'"
             @click="switchTab(tab.id)"
           >
@@ -676,7 +707,7 @@ export default defineComponent({
           </button>
           <button
             type="button"
-            class="btn btn-xs font-bold text-slate-400 hover:text-neon-soft px-2.5 py-1"
+            class="btn btn-xs font-bold text-slate-400 hover:text-neon-soft px-2.5 py-1 shrink-0"
             @click="addTab()"
             title="新建终端"
           >+ 新建</button>
@@ -684,7 +715,7 @@ export default defineComponent({
           <!-- 交互式等待输入提示徽章（参考 AITool） -->
           <span
             v-if="activeTab && activeTab.awaitingInput"
-            class="ml-2 px-2 py-0.5 rounded text-[11px] bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse font-mono truncate max-w-[260px]"
+            class="ml-2 px-2 py-0.5 rounded text-[11px] bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse font-mono truncate max-w-[260px] shrink-0"
             :title="activeTab.awaitingInput"
           >
             ⏳ 等待输入: {{ activeTab.awaitingInput }}
@@ -692,7 +723,7 @@ export default defineComponent({
         </div>
 
         <!-- 操作按钮组 -->
-        <div class="flex items-center gap-1.5 shrink-0">
+        <div class="flex items-center gap-1.5 flex-wrap shrink-0">
           <button type="button" class="btn btn-xs" @click="showBackground = !showBackground; refreshSessions()">后台终端 ({{ backgroundSessions.length }})</button>
           <button v-if="activeTab && activeTab.currentWorkingDirectory" type="button" class="btn btn-xs" @click="openCurrentDirectory()" :title="activeTab.currentWorkingDirectory">打开当前目录</button>
           <button v-if="activeTab && activeTab.sessionId" type="button" class="btn btn-xs btn-danger" @click="endSession(activeTab.sessionId, activeTab.id)">结束会话</button>

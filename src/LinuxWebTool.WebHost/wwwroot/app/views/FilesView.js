@@ -303,16 +303,16 @@ export default defineComponent({
         </div>
       </div>
 
-      <div class="panel p-3 flex items-center gap-2 flex-wrap">
-        <button class="btn btn-xs" @click="goHome()">🏠</button>
-        <button class="btn btn-xs" @click="goUp()" :disabled="isRoot">⬆ 上一级</button>
-        <div class="text-xs text-cyan-300/80 font-mono truncate flex-1 min-w-0 overflow-x-auto no-scrollbar">
+      <div class="panel p-3 flex items-center gap-2">
+        <button class="btn btn-xs shrink-0" @click="goHome()">🏠</button>
+        <button class="btn btn-xs shrink-0" @click="goUp()" :disabled="isRoot">⬆ 上一级</button>
+        <div class="text-xs text-cyan-300/80 font-mono flex items-center gap-1.5 flex-1 min-w-0 overflow-x-auto no-scrollbar py-0.5">
           <template v-for="(crumb, i) in breadcrumbs" :key="crumb.path">
-            <span class="text-slate-600">/</span>
-            <button class="hover:text-cyan-300" @click="goPath(crumb.path)">{{ crumb.name }}</button>
+            <span class="text-slate-600 shrink-0">/</span>
+            <button class="hover:text-cyan-300 whitespace-nowrap shrink-0" @click="goPath(crumb.path)">{{ crumb.name }}</button>
           </template>
         </div>
-        <button class="btn btn-xs" @click="load()">刷新</button>
+        <button class="btn btn-xs ml-auto shrink-0" @click="load()">刷新</button>
       </div>
 
       <div v-if="loadError" class="panel !border-rose-500/40 bg-rose-500/5 text-rose-200/90 text-xs px-4 py-3 flex items-center gap-3">
@@ -323,21 +323,30 @@ export default defineComponent({
       <div class="panel overflow-x-auto">
         <table class="data-table min-w-[48rem]">
           <thead>
-            <tr><th>名称</th><th>大小</th><th>修改时间</th><th class="text-right">操作</th></tr>
+            <tr>
+              <th class="whitespace-nowrap">名称</th>
+              <th class="whitespace-nowrap">大小</th>
+              <th class="whitespace-nowrap">修改时间</th>
+              <th class="text-right whitespace-nowrap">操作</th>
+            </tr>
           </thead>
           <tbody>
             <tr v-if="!entries.length && !loading && !loadError"><td colspan="4" class="text-slate-600 py-8 text-center">{{ dirName === '/' ? '根目录为空' : '此目录为空' }}</td></tr>
             <tr v-for="entry in entries" :key="entry.path" class="hover:bg-cyan-500/5 transition cursor-pointer" @click="openEntry(entry)">
               <td>
-                <span class="mr-1.5">{{ iconFor(entry) }}</span>
-                <span class="font-mono text-xs" :class="entry.isDirectory ? 'text-cyan-300/80' : 'text-slate-300'">{{ entry.name }}</span>
+                <div class="flex items-center gap-1.5 min-w-0">
+                  <span class="shrink-0">{{ iconFor(entry) }}</span>
+                  <span class="font-mono text-xs truncate" :class="entry.isDirectory ? 'text-cyan-300/80' : 'text-slate-300'">{{ entry.name }}</span>
+                </div>
               </td>
-              <td class="text-xs text-slate-500">{{ entry.isDirectory ? '—' : formatBytes(entry.size) }}</td>
-              <td class="text-xs text-slate-500">{{ formatTime(entry.modified) }}</td>
+              <td class="text-xs text-slate-500 whitespace-nowrap">{{ entry.isDirectory ? '—' : formatBytes(entry.size) }}</td>
+              <td class="text-xs text-slate-500 whitespace-nowrap">{{ formatTime(entry.modified) }}</td>
               <td class="text-right whitespace-nowrap text-xs" @click.stop>
-                <button v-if="entry.isDirectory" class="btn btn-xs" @click="openTerminal(entry.path)">在终端打开</button>
-                <button v-if="!virtualRoot" class="btn btn-xs" @click="renameEntry(entry)">重命名</button>
-                <button v-if="!virtualRoot" class="btn btn-xs btn-danger" @click="removeEntry(entry)">删除</button>
+                <div class="inline-flex items-center gap-1.5">
+                  <button v-if="entry.isDirectory" class="btn btn-xs" @click="openTerminal(entry.path)">在终端打开</button>
+                  <button v-if="!virtualRoot" class="btn btn-xs" @click="renameEntry(entry)">重命名</button>
+                  <button v-if="!virtualRoot" class="btn btn-xs btn-danger" @click="removeEntry(entry)">删除</button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -348,13 +357,13 @@ export default defineComponent({
       <div v-if="showEditor" class="fixed inset-0 z-[85] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="panel w-full max-w-2xl p-5 max-h-[88vh] flex flex-col" style="background: rgba(13, 21, 38, 0.97)">
           <div class="flex items-center gap-2 mb-3">
-            <h3 class="font-display text-base text-neon-soft">编辑文本 · {{ editorName }}</h3>
-            <span class="text-xs text-slate-500 truncate ml-auto">{{ editorPath }}</span>
-            <button class="btn btn-xs" @click="showEditor = false">✕</button>
+            <h3 class="font-display text-base text-neon-soft shrink-0">编辑文本 · {{ editorName }}</h3>
+            <span class="text-xs text-slate-500 truncate min-w-0 flex-1 ml-auto text-right" :title="editorPath">{{ editorPath }}</span>
+            <button class="btn btn-xs shrink-0" @click="showEditor = false">✕</button>
           </div>
           <textarea class="input font-mono !text-[0.8rem] flex-1 min-h-[24rem] resize-y" v-model="editorContent"
                     :disabled="editorLoading || editorSaving" placeholder="（加载中…）"></textarea>
-          <div class="flex justify-end gap-2 mt-4">
+          <div class="flex items-center justify-end gap-2 mt-4">
             <span v-if="editorLoading" class="text-xs text-slate-500 mr-auto">加载中…</span>
             <button class="btn" @click="showEditor = false">取消</button>
             <button class="btn btn-primary" :disabled="editorLoading || editorSaving" @click="saveEditor()">
@@ -366,7 +375,7 @@ export default defineComponent({
 
       <!-- 新建文件夹弹窗 -->
       <div v-if="showMkdir" class="fixed inset-0 z-[85] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="panel w-full max-w-sm p-5" style="background: rgba(13, 21, 38, 0.97)">
+        <div class="panel w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto" style="background: rgba(13, 21, 38, 0.97)">
           <h3 class="font-display text-base text-neon-soft mb-4">新建文件夹</h3>
           <input class="input font-mono" v-model="mkdirName" placeholder="文件夹名称" @keyup.enter="createMkdir()" />
           <div class="flex justify-end gap-2 mt-5">
@@ -378,7 +387,7 @@ export default defineComponent({
 
       <!-- 重命名弹窗 -->
       <div v-if="showRename" class="fixed inset-0 z-[85] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="panel w-full max-w-sm p-5" style="background: rgba(13, 21, 38, 0.97)">
+        <div class="panel w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto" style="background: rgba(13, 21, 38, 0.97)">
           <h3 class="font-display text-base text-neon-soft mb-4">重命名</h3>
           <input class="input font-mono" v-model="renameName" placeholder="新名称" @keyup.enter="saveRename()" />
           <div class="flex justify-end gap-2 mt-5">

@@ -29,7 +29,7 @@ export default defineComponent({
     return { form, error, loading, submit };
   },
   template: `
-    <div class="min-h-screen flex items-center justify-center p-4">
+    <div class="min-h-[calc(100vh-8rem)] flex items-center justify-center p-4">
       <div class="panel w-full max-w-sm p-7">
         <div class="flex flex-col items-center gap-2 mb-7">
           <div class="w-12 h-12 rounded-xl border border-neon/40 flex items-center justify-center font-display text-neon-soft">LWT</div>

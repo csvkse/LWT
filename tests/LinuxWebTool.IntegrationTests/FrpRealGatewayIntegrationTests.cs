@@ -249,4 +249,81 @@ public sealed class FrpRealGatewayIntegrationTests(Xunit.Abstractions.ITestOutpu
             Assert.Equal("Stopped", instance.State);
         }
     }
+
+    [Fact]
+    public async Task Live_FrpTunnelInstance_E2E_Forward_Request()
+    {
+        var env = EnvConfig.Value;
+        if (!env.TryGetValue("FRP_SERVER_URL", out var serverUrl) || string.IsNullOrWhiteSpace(serverUrl))
+        {
+            return;
+        }
+
+        env.TryGetValue("FRP_API_KEY", out var apiKey);
+        env.TryGetValue("FRP_TUNNEL_HOST", out var tunnelHost);
+        env.TryGetValue("FRP_LOCAL_TARGET_URL", out var localTarget);
+
+        var entity = new FrpTunnelLineEntity
+        {
+            Id = "real_live_e2e_test",
+            Name = "Real Gateway E2E Line",
+            ServerUrl = serverUrl,
+            TunnelHost = string.IsNullOrWhiteSpace(tunnelHost) ? "lwt" : tunnelHost,
+            ApiKey = apiKey ?? string.Empty,
+            LocalTargetUrl = string.IsNullOrWhiteSpace(localTarget) ? "http://192.168.1.60:32400" : localTarget,
+            AutoStart = false,
+            HeartbeatIntervalSeconds = 15,
+            EnableLan302Proxy = true,
+            ProxyType = "Direct",
+            Status = "Disconnected"
+        };
+
+        var instance = new FrpTunnelInstance(entity, NullLogger.Instance);
+
+        try
+        {
+            await instance.StartAsync();
+
+            var startWait = DateTime.UtcNow;
+            while (instance.State != "Connected" && (DateTime.UtcNow - startWait).TotalSeconds < 15)
+            {
+                await Task.Delay(200);
+            }
+
+            Assert.Equal("Connected", instance.State);
+            output.WriteLine($"Connected to: {instance.PublicUrl}");
+
+            var testHandler = new SocketsHttpHandler
+            {
+                ConnectCallback = async (context, cancellationToken) =>
+                {
+                    var entry = await System.Net.Dns.GetHostEntryAsync(context.DnsEndPoint.Host, cancellationToken);
+                    var ipv4 = entry.AddressList.First(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
+                    var socket = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+                    socket.NoDelay = true;
+                    await socket.ConnectAsync(new System.Net.IPEndPoint(ipv4, context.DnsEndPoint.Port), cancellationToken);
+                    return new System.Net.Sockets.NetworkStream(socket, ownsSocket: true);
+                }
+            };
+            using var httpClient = new HttpClient(testHandler) { Timeout = TimeSpan.FromSeconds(15) };
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var response = await httpClient.GetAsync(instance.PublicUrl);
+            sw.Stop();
+
+            output.WriteLine($"Response StatusCode: {response.StatusCode} in {sw.ElapsedMilliseconds}ms");
+            var content = await response.Content.ReadAsStringAsync();
+            output.WriteLine($"Content (first 200 chars): {content[..Math.Min(200, content.Length)]}");
+
+            Assert.True((int)response.StatusCode < 500, $"Expected non-5xx, got {response.StatusCode}");
+        }
+        finally
+        {
+            foreach (var l in instance.GetRecentLogs())
+            {
+                output.WriteLine($"INSTANCE_LOG: [{l.Level}] {l.Message}");
+            }
+            await instance.StopAsync();
+        }
+    }
 }
+

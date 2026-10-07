@@ -35,17 +35,17 @@ public static class DbSetup
         using var cmd = db.CreateCommand();
         cmd.CommandText = @"
 CREATE TABLE IF NOT EXISTS command_group (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Name TEXT,
   BizType INTEGER,
   SortOrder INTEGER,
   CreateTime TEXT
 );
 CREATE TABLE IF NOT EXISTS execution_record (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Source INTEGER,
-  CommandId TEXT,
-  ScheduleTaskId TEXT,
+  CommandId TEXT COLLATE NOCASE,
+  ScheduleTaskId TEXT COLLATE NOCASE,
   CommandName TEXT,
   CommandText TEXT,
   Status INTEGER,
@@ -60,12 +60,12 @@ CREATE TABLE IF NOT EXISTS execution_record (
   EndTime TEXT
 );
 CREATE TABLE IF NOT EXISTS linux_command (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Name TEXT,
   CommandText TEXT,
   ScriptType INTEGER,
   Description TEXT,
-  GroupId TEXT,
+  GroupId TEXT COLLATE NOCASE,
   IsPinned INTEGER,
   SortOrder INTEGER,
   TimeoutSeconds INTEGER,
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS linux_command (
   UpdateTime TEXT
 );
 CREATE TABLE IF NOT EXISTS operation_log (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Time TEXT,
   Action TEXT,
   TargetType TEXT,
@@ -84,12 +84,12 @@ CREATE TABLE IF NOT EXISTS operation_log (
   Success INTEGER
 );
 CREATE TABLE IF NOT EXISTS schedule_task (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Name TEXT,
-  CommandId TEXT,
+  CommandId TEXT COLLATE NOCASE,
   CronExpression TEXT,
   Enabled INTEGER,
-  GroupId TEXT,
+  GroupId TEXT COLLATE NOCASE,
   IsPinned INTEGER,
   SortOrder INTEGER,
   TimeoutSeconds INTEGER,
@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS schedule_task (
   UpdateTime TEXT
 );
 CREATE TABLE IF NOT EXISTS smb_mount (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Name TEXT,
   Server TEXT,
   LocalPath TEXT,
@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS smb_mount (
   UpdateTime TEXT
 );
 CREATE TABLE IF NOT EXISTS webdav_mount (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Name TEXT,
   Url TEXT,
   LocalPath TEXT,
@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS webdav_mount (
   UpdateTime TEXT
 );
 CREATE TABLE IF NOT EXISTS rclone_mount (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Name TEXT,
   Kind TEXT,
   LocalPath TEXT,
@@ -151,7 +151,7 @@ CREATE TABLE IF NOT EXISTS rclone_mount (
   UpdateTime TEXT
 );
 CREATE TABLE IF NOT EXISTS system_status_disk_snapshot (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Time TEXT,
   Mount TEXT,
   FileSystem TEXT,
@@ -161,14 +161,14 @@ CREATE TABLE IF NOT EXISTS system_status_disk_snapshot (
   FreeBytes INTEGER
 );
 CREATE TABLE IF NOT EXISTS system_status_net_snapshot (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Time TEXT,
   Name TEXT,
   SentBytesPerSec INTEGER,
   RecvBytesPerSec INTEGER
 );
 CREATE TABLE IF NOT EXISTS system_status_process_snapshot (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Time TEXT,
   Pid INTEGER,
   Name TEXT,
@@ -181,7 +181,7 @@ CREATE TABLE IF NOT EXISTS system_status_process_snapshot (
   NetRecvBps INTEGER
 );
 CREATE TABLE IF NOT EXISTS system_status_snapshot (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Time TEXT,
   CpuUsage REAL,
   Load1 REAL,
@@ -191,10 +191,10 @@ CREATE TABLE IF NOT EXISTS system_status_snapshot (
   NetRecvBps INTEGER
 );
 CREATE TABLE IF NOT EXISTS transcode_job (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   SourcePath TEXT,
   OutputPath TEXT,
-  PresetId TEXT,
+  PresetId TEXT COLLATE NOCASE,
   PresetName TEXT,
   CustomArgs TEXT,
   IsFullCommand INTEGER,
@@ -208,7 +208,7 @@ CREATE TABLE IF NOT EXISTS transcode_job (
   OutputContainer TEXT,
   OutputMode INTEGER,
   Trigger INTEGER,
-  WatchRuleId TEXT,
+  WatchRuleId TEXT COLLATE NOCASE,
   Status INTEGER,
   Progress REAL,
   SpeedText TEXT,
@@ -224,7 +224,7 @@ CREATE TABLE IF NOT EXISTS transcode_job (
   UpdateTime TEXT
 );
 CREATE TABLE IF NOT EXISTS transcode_preset (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Name TEXT,
   Container TEXT,
   VideoCodec TEXT,
@@ -238,11 +238,11 @@ CREATE TABLE IF NOT EXISTS transcode_preset (
   UpdateTime TEXT
 );
 CREATE TABLE IF NOT EXISTS watch_rule (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Name TEXT,
   WatchPath TEXT,
   FilePatterns TEXT,
-  PresetId TEXT,
+  PresetId TEXT COLLATE NOCASE,
   OutputMode INTEGER,
   Recursive INTEGER,
   Mode INTEGER,
@@ -255,7 +255,7 @@ CREATE TABLE IF NOT EXISTS watch_rule (
   UpdateTime TEXT
 );
 CREATE TABLE IF NOT EXISTS api_key (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Name TEXT NOT NULL,
   KeyPrefix TEXT NOT NULL,
   KeyHash TEXT NOT NULL UNIQUE,
@@ -273,7 +273,7 @@ CREATE TABLE IF NOT EXISTS api_key (
 );
 CREATE INDEX IF NOT EXISTS idx_api_key_hash ON api_key(KeyHash);
 CREATE TABLE IF NOT EXISTS frp_tunnel_config (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   ServerUrl TEXT NOT NULL,
   TunnelHost TEXT NOT NULL,
   ApiKey TEXT NOT NULL,
@@ -286,7 +286,7 @@ CREATE TABLE IF NOT EXISTS frp_tunnel_config (
   UpdateTime TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS frp_tunnel_lines (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Name TEXT NOT NULL,
   ServerUrl TEXT NOT NULL,
   BackupServerUrls TEXT,
@@ -310,7 +310,7 @@ FROM frp_tunnel_config
 WHERE (SELECT COUNT(*) FROM frp_tunnel_lines) = 0;
 CREATE INDEX IF NOT EXISTS idx_frp_tunnel_host ON frp_tunnel_lines(TunnelHost);
 CREATE TABLE IF NOT EXISTS gateway_route (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   RouteId TEXT NOT NULL UNIQUE,
   ClusterId TEXT NOT NULL,
   MatchPath TEXT NOT NULL,
@@ -322,7 +322,7 @@ CREATE TABLE IF NOT EXISTS gateway_route (
   UpdateTime TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS gateway_cluster (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   ClusterId TEXT NOT NULL UNIQUE,
   LoadBalancingPolicy TEXT NOT NULL DEFAULT 'RoundRobin',
   Destinations TEXT NOT NULL,
@@ -330,7 +330,7 @@ CREATE TABLE IF NOT EXISTS gateway_cluster (
   UpdateTime TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS gateway_website (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Name TEXT NOT NULL,
   TargetUrl TEXT NOT NULL UNIQUE,
   RewriteBody INTEGER NOT NULL DEFAULT 1,
@@ -339,7 +339,7 @@ CREATE TABLE IF NOT EXISTS gateway_website (
   UpdateTime TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS gateway_tcp_route (
-  Id TEXT PRIMARY KEY,
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
   Name TEXT NOT NULL,
   Protocol TEXT NOT NULL DEFAULT 'TCP',
   ListenPort INTEGER NOT NULL UNIQUE,

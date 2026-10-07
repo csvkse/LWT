@@ -56,6 +56,100 @@ export default defineComponent({
       };
     });
 
+    // 解析独立二级子域名格式公网入口（如 https://lwt.asairo.de/）
+    function computeSubdomainUrl(serverUrl, tunnelHost) {
+      if (!serverUrl || !tunnelHost) return null;
+      const hostClean = tunnelHost.trim().toLowerCase();
+      if (!hostClean || hostClean.includes('/') || hostClean.includes(':')) return null;
+
+      let raw = serverUrl.trim();
+      if (!raw.startsWith('http://') && !raw.startsWith('https://') && !raw.startsWith('ws://') && !raw.startsWith('wss://')) {
+        raw = 'https://' + raw;
+      }
+
+      try {
+        const url = new URL(raw);
+        const host = url.hostname.toLowerCase();
+        if (!host || host === 'localhost' || host.endsWith('.local') || host.endsWith('.lan') || host.endsWith('.internal') || host.endsWith('.workers.dev')) {
+          return null;
+        }
+        if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host.includes(':')) {
+          return null;
+        }
+
+        const scheme = (url.protocol === 'http:' || url.protocol === 'ws:') ? 'http' : 'https';
+        const portPart = url.port ? `:${url.port}` : '';
+        const parts = host.split('.').filter(Boolean);
+        if (parts.length < 2) return null;
+
+        let baseDomain;
+        if (parts.length === 2) {
+          baseDomain = host;
+        } else if (parts.length === 3) {
+          const isTwoLevelTld = ['co', 'com', 'net', 'org', 'gov', 'edu'].includes(parts[1]) && parts[2].length === 2;
+          if (isTwoLevelTld) {
+            baseDomain = host;
+          } else {
+            baseDomain = `${parts[1]}.${parts[2]}`;
+          }
+        } else {
+          baseDomain = parts.slice(1).join('.');
+        }
+
+        return `${scheme}://${hostClean}.${baseDomain}${portPart}/`;
+      } catch {
+        return null;
+      }
+    }
+
+    // 解析兼容路径模式入口（如 https://p.asairo.de/tunnel/lwt/）
+    function computePathModeUrl(serverUrl, tunnelHost) {
+      if (!serverUrl || !tunnelHost) return null;
+      const hostClean = tunnelHost.trim().toLowerCase();
+      let raw = serverUrl.trim();
+      if (!raw.startsWith('http://') && !raw.startsWith('https://') && !raw.startsWith('ws://') && !raw.startsWith('wss://')) {
+        raw = 'https://' + raw;
+      }
+      try {
+        const url = new URL(raw);
+        const scheme = (url.protocol === 'http:' || url.protocol === 'ws:') ? 'http' : 'https';
+        const portPart = url.port ? `:${url.port}` : '';
+        return `${scheme}://${url.hostname}${portPart}/tunnel/${hostClean}/`;
+      } catch {
+        return null;
+      }
+    }
+
+    // 模态框实时预览响应式计算属性
+    const previewUrls = computed(() => {
+      const subdomain = computeSubdomainUrl(form.serverUrl, form.tunnelHost);
+      const pathMode = computePathModeUrl(form.serverUrl, form.tunnelHost);
+      let subdomainNote = '';
+      if (!form.serverUrl.trim() || !form.tunnelHost.trim()) {
+        subdomainNote = '输入服务端地址与 Host 后自动推导';
+      } else if (!subdomain) {
+        subdomainNote = 'IP 地址或 localhost 不支持子域名，仅可使用路径模式';
+      }
+      return {
+        subdomain,
+        pathMode,
+        subdomainNote,
+      };
+    });
+
+    function copyText(text) {
+      if (!text) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          toast.success('已复制: ' + text);
+        }).catch(() => {
+          prompt('请手动复制链接:', text);
+        });
+      } else {
+        prompt('请手动复制链接:', text);
+      }
+    }
+
     async function loadLines() {
       const res = await http(API.frp.lines, { method: 'GET' });
       if (res.ok && res.data) {
@@ -110,7 +204,7 @@ export default defineComponent({
         serverUrl: line.serverUrl,
         backupServerUrls: line.backupServerUrls || '',
         tunnelHost: line.tunnelHost,
-        apiKey: line.apiKey || '',
+        apiKey: '', // 留空保持原 Token 不变
         localTargetUrl: line.localTargetUrl,
         autoStart: line.autoStart,
         heartbeatIntervalSeconds: line.heartbeatIntervalSeconds || 15,
@@ -236,6 +330,10 @@ export default defineComponent({
       stopLine,
       viewLineLogs,
       stateBadge,
+      previewUrls,
+      copyText,
+      computeSubdomainUrl,
+      computePathModeUrl,
       formatBytes,
       formatDuration,
       formatTime,
@@ -312,15 +410,15 @@ export default defineComponent({
 
       <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <div v-for="line in lines" :key="line.id"
-             class="panel p-4.5 flex flex-col justify-between border-slate-700/60 hover:border-slate-600 transition-colors">
+             class="panel p-5 flex flex-col justify-between border-slate-700/60 hover:border-slate-600 transition-colors">
           <!-- 线路卡片头部 -->
           <div>
             <div class="flex items-start justify-between gap-2 border-b border-slate-700/50 pb-3">
-              <div>
-                <h3 class="font-semibold text-slate-100 text-sm flex items-center gap-2">
+              <div class="min-w-0 flex-1">
+                <h3 class="font-semibold text-slate-100 text-sm flex items-center gap-2 truncate" :title="line.name">
                   {{ line.name }}
                 </h3>
-                <span class="font-mono text-xs text-cyan-400 mt-0.5 block truncate">
+                <span class="font-mono text-xs text-cyan-400 mt-0.5 block truncate" :title="'Host: ' + line.tunnelHost">
                   Host: {{ line.tunnelHost }}
                 </span>
               </div>
@@ -349,53 +447,87 @@ export default defineComponent({
             </div>
 
             <!-- 地址信息展示 -->
-            <div class="flex flex-col gap-1.5 text-xs bg-slate-900/60 p-2.5 rounded border border-slate-800">
+            <div class="flex flex-col gap-2.5 text-xs bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+              <!-- 独立二级子域名公网入口 -->
               <div>
-                <span class="text-slate-500 block text-[11px]">公网入口:</span>
-                <a v-if="line.publicUrl" :href="line.publicUrl" target="_blank"
-                   class="font-mono text-cyan-300 hover:underline flex items-center gap-1 truncate mt-0.5">
-                  {{ line.publicUrl }} ↗
-                </a>
-                <span v-else class="font-mono text-slate-500 text-[11px]">等待长连接建立</span>
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-slate-400 text-[11px] flex items-center gap-1 shrink-0">
+                    <span class="text-emerald-400 font-semibold">★</span> 公网入口 (子域名直通):
+                  </span>
+                  <button v-if="line.subdomainUrl" type="button" class="text-[10px] text-cyan-400 hover:text-cyan-300 shrink-0" @click="copyText(line.subdomainUrl)">
+                    复制
+                  </button>
+                </div>
+                <div class="mt-1">
+                  <a v-if="line.subdomainUrl && line.state === 'Connected'" :href="line.subdomainUrl" target="_blank"
+                     :title="line.subdomainUrl"
+                     class="font-mono text-emerald-300 hover:underline inline-flex items-center gap-1 min-w-0 max-w-full font-medium">
+                    <span class="truncate">{{ line.subdomainUrl }}</span>
+                    <span class="shrink-0 text-[10px]">↗</span>
+                  </a>
+                  <span v-else-if="line.subdomainUrl" class="font-mono text-slate-400 text-[11px] truncate block" :title="'未上线: ' + line.subdomainUrl">
+                    {{ line.subdomainUrl }} <span class="text-slate-500">(待连接)</span>
+                  </span>
+                  <span v-else class="font-mono text-slate-500 text-[11px]">当前域名不支持子域名</span>
+                </div>
+              </div>
+
+              <!-- 兼容路径模式入口 -->
+              <div>
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-slate-400 text-[11px] shrink-0">公网备用 (路径模式):</span>
+                  <button v-if="line.publicUrl" type="button" class="text-[10px] text-cyan-400 hover:text-cyan-300 shrink-0" @click="copyText(line.publicUrl)">
+                    复制
+                  </button>
+                </div>
+                <div class="mt-1">
+                  <a v-if="line.publicUrl && line.state === 'Connected'" :href="line.publicUrl" target="_blank"
+                     :title="line.publicUrl"
+                     class="font-mono text-cyan-300 hover:underline inline-flex items-center gap-1 min-w-0 max-w-full">
+                    <span class="truncate">{{ line.publicUrl }}</span>
+                    <span class="shrink-0 text-[10px]">↗</span>
+                  </a>
+                  <span v-else class="font-mono text-slate-500 text-[11px]">等待长连接建立</span>
+                </div>
               </div>
 
               <div>
                 <span class="text-slate-500 block text-[11px]">本地目标:</span>
-                <span class="font-mono text-slate-300 truncate block mt-0.5">
+                <span class="font-mono text-slate-300 truncate block mt-0.5" :title="line.localTargetUrl">
                   {{ line.localTargetUrl }}
                 </span>
               </div>
 
               <div v-if="line.proxyUrl" class="truncate">
                 <span class="text-slate-500 block text-[11px]">前置代理:</span>
-                <span class="font-mono text-purple-300 text-[11px] truncate block">
+                <span class="font-mono text-purple-300 text-[11px] truncate block" :title="line.proxyUrl">
                   {{ line.proxyUrl }}
                 </span>
               </div>
             </div>
 
             <!-- 实时统计数据 -->
-            <div class="grid grid-cols-2 gap-2 mt-3 text-[11px] font-mono text-slate-400">
-              <div>运行: {{ line.uptimeSeconds > 0 ? formatDuration(line.uptimeSeconds) : '--' }}</div>
-              <div class="text-right text-cyan-300">↑ {{ formatBytes(line.sentBytes) }}</div>
-              <div>心跳: {{ line.heartbeatIntervalSeconds }}s</div>
-              <div class="text-right text-violet-300">↓ {{ formatBytes(line.receivedBytes) }}</div>
+            <div class="grid grid-cols-2 gap-2 mt-3 text-[11px] font-mono text-slate-400 bg-slate-900/50 p-2.5 rounded border border-slate-800/80">
+              <div class="truncate">运行: <span class="text-slate-300">{{ line.uptimeSeconds > 0 ? formatDuration(line.uptimeSeconds) : '--' }}</span></div>
+              <div class="text-right text-cyan-300 truncate" :title="'上行发送: ' + formatBytes(line.sentBytes)">↑ {{ formatBytes(line.sentBytes) }}</div>
+              <div class="truncate">心跳: <span class="text-slate-300">{{ line.heartbeatIntervalSeconds }}s</span></div>
+              <div class="text-right text-violet-300 truncate" :title="'下行接收: ' + formatBytes(line.receivedBytes)">↓ {{ formatBytes(line.receivedBytes) }}</div>
             </div>
 
             <!-- 异常提示条 -->
-            <div v-if="line.lastError" class="mt-2.5 p-2 rounded bg-rose-950/40 border border-rose-500/40 text-[11px] text-rose-300 font-mono truncate">
+            <div v-if="line.lastError" class="mt-2.5 p-2 rounded bg-rose-950/40 border border-rose-500/40 text-[11px] text-rose-300 font-mono truncate" :title="line.lastError">
               ⚠️ {{ line.lastError }}
             </div>
           </div>
 
           <!-- 卡片底部操作按钮 -->
-          <div class="flex items-center justify-between border-t border-slate-700/50 pt-3 mt-3">
-            <div class="flex items-center gap-1.5">
+          <div class="flex items-center justify-between border-t border-slate-700/50 pt-3 mt-3 gap-2">
+            <div class="flex items-center gap-1.5 flex-wrap">
               <button class="btn btn-xs" @click="viewLineLogs(line.id)">日志</button>
               <button class="btn btn-xs" @click="openEdit(line)">编辑</button>
               <button class="btn btn-xs btn-danger" @click="removeLine(line)">删除</button>
             </div>
-            <div>
+            <div class="shrink-0">
               <button v-if="line.state !== 'Connected'" class="btn btn-xs btn-primary" @click="startLine(line)">
                 ▶ 启动
               </button>
@@ -467,13 +599,60 @@ export default defineComponent({
 
             <div>
               <label class="block text-slate-400 mb-1">服务端 WebSocket 地址 <span class="text-rose-400">*</span></label>
-              <input v-model="form.serverUrl" class="input font-mono" placeholder="wss://edge.example.com/frp" />
+              <input v-model="form.serverUrl" class="input font-mono" placeholder="wss://p.asairo.de/frp" />
+            </div>
+
+            <!-- 公网入口实时预览卡片 -->
+            <div class="rounded border border-cyan-500/30 bg-cyan-950/25 p-3 flex flex-col gap-2">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-medium text-cyan-300 flex items-center gap-1.5">
+                  <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                  公网入口预览
+                </span>
+                <span class="text-[11px] text-slate-400">长连接挂载后公网直接访问</span>
+              </div>
+
+              <div class="flex flex-col gap-1.5 text-xs">
+                <!-- 独立二级子域名直通模式 -->
+                <div class="flex items-center justify-between gap-2 bg-slate-900/90 p-2 rounded border border-slate-800">
+                  <div class="flex flex-col min-w-0">
+                    <span class="text-[11px] text-emerald-400 font-medium flex items-center gap-1">
+                      <span>★ 独立子域名直通 (推荐):</span>
+                    </span>
+                    <span v-if="previewUrls.subdomain" class="font-mono text-emerald-300 text-xs truncate mt-0.5 select-all font-semibold">
+                      {{ previewUrls.subdomain }}
+                    </span>
+                    <span v-else class="text-[11px] text-slate-500 mt-0.5">
+                      {{ previewUrls.subdomainNote }}
+                    </span>
+                  </div>
+                  <button v-if="previewUrls.subdomain" type="button" class="btn btn-xs shrink-0" @click="copyText(previewUrls.subdomain)">
+                    复制
+                  </button>
+                </div>
+
+                <!-- 兼容路径前缀模式 -->
+                <div class="flex items-center justify-between gap-2 bg-slate-900/90 p-2 rounded border border-slate-800">
+                  <div class="flex flex-col min-w-0">
+                    <span class="text-[11px] text-cyan-400 font-medium">兼容路径模式:</span>
+                    <span v-if="previewUrls.pathMode" class="font-mono text-cyan-300 text-xs truncate mt-0.5 select-all">
+                      {{ previewUrls.pathMode }}
+                    </span>
+                    <span v-else class="text-[11px] text-slate-500 mt-0.5">
+                      等待输入服务端地址与 Host
+                    </span>
+                  </div>
+                  <button v-if="previewUrls.pathMode" type="button" class="btn btn-xs shrink-0" @click="copyText(previewUrls.pathMode)">
+                    复制
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div>
               <label class="block text-slate-400 mb-1">客户端鉴权 Token (ApiKey)</label>
               <div class="relative">
-                <input v-model="form.apiKey" :type="showApiKey ? 'text' : 'password'" class="input font-mono pr-12" placeholder="与边缘网关端保持一致" />
+                <input v-model="form.apiKey" :type="showApiKey ? 'text' : 'password'" class="input font-mono pr-12" :placeholder="isEdit ? '留空保持原 Token 不变（如需修改请输入新密钥）' : '与边缘网关端保持一致'" />
                 <button type="button" class="absolute right-2 top-2 text-[11px] text-cyan-400 hover:text-cyan-300" @click="showApiKey = !showApiKey">
                   {{ showApiKey ? '隐藏' : '显示' }}
                 </button>

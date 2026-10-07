@@ -148,9 +148,12 @@ export default defineComponent({
       showGuideModal.value = true;
     }
 
+    const originUrl = window.location.origin;
+
     onMounted(load);
 
     return {
+      originUrl,
       keys,
       loading,
       showModal,
@@ -202,22 +205,22 @@ export default defineComponent({
           暂无 API Key，请点击右上角新建。
         </div>
         <div v-else class="overflow-x-auto">
-          <table class="w-full text-left text-xs border-collapse">
+          <table class="w-full text-left text-xs border-collapse min-w-[54rem]">
             <thead>
               <tr class="border-b border-slate-700/50 text-slate-400 font-medium">
-                <th class="py-2.5 px-3">名称</th>
-                <th class="py-2.5 px-3">前缀 / 标识</th>
-                <th class="py-2.5 px-3">通道权限</th>
-                <th class="py-2.5 px-3">业务模块权限</th>
-                <th class="py-2.5 px-3">状态</th>
-                <th class="py-2.5 px-3">最后使用</th>
-                <th class="py-2.5 px-3">过期时间</th>
-                <th class="py-2.5 px-3 text-right">操作</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">名称</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">前缀 / 标识</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">通道权限</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">业务模块权限</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">状态</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">最后使用</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">过期时间</th>
+                <th class="py-2.5 px-3 text-right whitespace-nowrap">操作</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-800/40">
               <tr v-for="k in keys" :key="k.id" class="hover:bg-slate-800/20 transition-colors">
-                <td class="py-3 px-3 font-medium text-slate-200">{{ k.name }}</td>
+                <td class="py-3 px-3 font-medium text-slate-200 whitespace-nowrap">{{ k.name }}</td>
                 <td class="py-3 px-3">
                   <code class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 font-mono text-cyan-300">
                     {{ k.keyPrefix }}...
@@ -247,8 +250,8 @@ export default defineComponent({
                   </span>
                 </td>
                 <td class="py-3 px-3 text-slate-400">{{ k.lastUsedAt ? formatTime(k.lastUsedAt) : '从未' }}</td>
-                <td class="py-3 px-3 text-slate-400">{{ k.expiresAt ? formatTime(k.expiresAt) : '永久有效' }}</td>
-                <td class="py-3 px-3 text-right">
+                <td class="py-3 px-3 text-slate-400 whitespace-nowrap">{{ k.expiresAt ? formatTime(k.expiresAt) : '永久有效' }}</td>
+                <td class="py-3 px-3 text-right whitespace-nowrap">
                   <div class="flex items-center justify-end gap-1.5">
                     <button class="btn btn-xs" @click="openGuide(k)">用法</button>
                     <button class="btn btn-xs" @click="openEdit(k)">编辑</button>
@@ -263,7 +266,7 @@ export default defineComponent({
 
       <!-- 新建/编辑 API Key 模态框 -->
       <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="panel w-full max-w-lg p-5 flex flex-col gap-4">
+        <div class="panel w-full max-w-lg p-5 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
             <h3 class="font-semibold text-slate-100 text-base">
               {{ isEdit ? '编辑 API Key 权限' : '新建 API Key' }}
@@ -332,7 +335,7 @@ export default defineComponent({
 
       <!-- 密钥生成成功单次明文展示弹窗 -->
       <div v-if="showSecretModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-        <div class="panel w-full max-w-lg p-5 flex flex-col gap-4 border-cyan-500/50">
+        <div class="panel w-full max-w-lg p-5 flex flex-col gap-4 border-cyan-500/50 max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
             <h3 class="font-semibold text-cyan-300 text-base flex items-center gap-2">
               ✓ API Key 创建成功
@@ -360,7 +363,7 @@ export default defineComponent({
 
       <!-- 集成指引弹窗 -->
       <div v-if="showGuideModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="panel w-full max-w-xl p-5 flex flex-col gap-4">
+        <div class="panel w-full max-w-xl p-5 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
             <h3 class="font-semibold text-slate-100 text-base">客户端与 MCP 集成指引</h3>
             <button class="text-slate-400 hover:text-slate-200" @click="showGuideModal = false">✕</button>
@@ -369,8 +372,8 @@ export default defineComponent({
           <div class="flex flex-col gap-3 text-xs">
             <div>
               <span class="font-medium text-slate-300 block mb-1">1. REST API 调用鉴权方式：</span>
-              <pre class="p-2.5 rounded bg-slate-950 border border-slate-800 text-slate-300 font-mono text-[11px] overflow-x-auto">curl -H "X-Api-Key: {{ guideKey }}" \\
-     {{ window.location.origin }}/api/Overview</pre>
+              <pre class="p-2.5 rounded bg-slate-950 border border-slate-800 text-slate-300 font-mono text-[11px] overflow-x-auto">curl -H "X-Api-Key: {{ guideKey }}" \
+     {{ originUrl }}/api/Overview</pre>
             </div>
 
             <div>
@@ -378,7 +381,7 @@ export default defineComponent({
               <pre class="p-2.5 rounded bg-slate-950 border border-slate-800 text-slate-300 font-mono text-[11px] overflow-x-auto">{
   "mcpServers": {
     "linux-web-tool": {
-      "url": "{{ window.location.origin }}/mcp/sse",
+      "url": "{{ originUrl }}/mcp/sse",
       "headers": {
         "X-Api-Key": "{{ guideKey }}"
       }

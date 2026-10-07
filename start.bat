@@ -1,32 +1,44 @@
 @echo off
-title LinuxWebTool - Linux 指令控制台
-cd /d "%~dp0"
+setlocal
+title LinuxWebTool Host
 
-rem ============ 环境检查 ============
+set "lwt_opened=0"
+
+:run
+set "lwt_exit_code=0"
+pushd "%~dp0" || (
+    set "lwt_exit_code=1"
+    goto prompt
+)
+
 where dotnet >nul 2>nul
 if errorlevel 1 (
-    echo [错误] 未找到 dotnet，请先安装 .NET 10 SDK: https://dotnet.microsoft.com/download
-    pause
-    exit /b 1
+    echo [LinuxWebTool] dotnet SDK was not found in PATH. Please install .NET 10 SDK: https://dotnet.microsoft.com/download
+    set "lwt_exit_code=1"
+    popd
+    goto prompt
 )
 
-echo ============================================
-echo   LinuxWebTool 快速启动
-echo   地址: http://localhost:5270/app/
-echo   数据目录: src\LinuxWebTool.WebHost\data （数据库/凭据/日志）
-echo   管理员密码: 首次启动自动生成并打印于下方；已生成过的见 data\admin.json
-echo   停止服务: 在本窗口按 Ctrl+C
-echo ============================================
+echo =====================================================================
+echo   LinuxWebTool Host is starting...
+echo   URL: http://localhost:5270/app/
+echo   Data directory: src\LinuxWebTool.WebHost\data
+echo   To stop: Press Ctrl+C in this window
+echo =====================================================================
 echo.
 
-rem 延迟 6 秒后自动打开浏览器（设置 LWT_NO_BROWSER=1 可跳过）
-if not "%LWT_NO_BROWSER%"=="1" (
-    start "" cmd /c "timeout /t 6 >nul & start http://localhost:5270/app/"
+if not "%LWT_NO_BROWSER%"=="1" if "%lwt_opened%"=="0" (
+    set "lwt_opened=1"
+    start "" cmd /c "timeout /t 3 >nul & start http://localhost:5270/app/"
 )
 
-rem dotnet run 自带增量编译；首次启动会自动建库并生成管理员密码
-dotnet run --project src\LinuxWebTool.WebHost --urls http://localhost:5270
+dotnet run --project "src\LinuxWebTool.WebHost\LinuxWebTool.WebHost.csproj" --urls "http://localhost:5270"
+set "lwt_exit_code=%ERRORLEVEL%"
 
+popd
+
+:prompt
 echo.
-echo [服务已停止]
-pause
+choice /C RQ /N /M "[LinuxWebTool] Press R to start again, Q to close: "
+if errorlevel 2 exit /b %lwt_exit_code%
+goto run

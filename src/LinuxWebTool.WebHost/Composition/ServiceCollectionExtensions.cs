@@ -127,13 +127,11 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<ApiKeyStore>();
         builder.Services.AddSingleton<ApiKeyService>();
 
-        // FRP 内网穿透反向隧道（HTTP-over-WebSocket，纯 C# 零外部依赖）
+        // FRP 内网穿透反向隧道（HTTP-over-WebSocket，统一由 FrpTunnelManager 调度管理）
         builder.Services.AddSingleton<FrpTunnelConfigStore>();
         builder.Services.AddSingleton<FrpTunnelLineStore>();
         builder.Services.AddSingleton<FrpTunnelManager>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<FrpTunnelManager>());
-        builder.Services.AddSingleton<FrpTunnelEngine>();
-        builder.Services.AddHostedService<FrpTunnelService>();
 
         // MCP (Model Context Protocol) 核心引擎
         builder.Services.AddSingleton<McpServerEngine>();

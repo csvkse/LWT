@@ -177,6 +177,7 @@ public class FrpTunnelController(
             return Ok(new FrpTunnelStatusDto(
                 first.State,
                 first.PublicUrl,
+                first.SubdomainUrl,
                 first.LocalTargetUrl,
                 first.State == "Connected" ? DateTime.UtcNow.AddSeconds(-first.UptimeSeconds) : null,
                 first.UptimeSeconds,
@@ -185,7 +186,7 @@ public class FrpTunnelController(
                 first.LastError));
         }
 
-        return Ok(new FrpTunnelStatusDto("Disconnected", null, null, null, 0, 0, 0, null));
+        return Ok(new FrpTunnelStatusDto("Disconnected", null, null, null, null, 0, 0, 0, null));
     }
 
     [HttpPost("Start")]

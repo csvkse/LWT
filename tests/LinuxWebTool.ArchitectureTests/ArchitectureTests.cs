@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
+using LinuxWebTool.Infrastructure.Persistence;
 using Xunit;
 
 namespace LinuxWebTool.ArchitectureTests;
@@ -209,4 +210,162 @@ public class ArchitectureTests
         var segments = $"{basePath.Trim('/')}/{route.Trim('/')}".Split('/', StringSplitOptions.RemoveEmptyEntries);
         return string.Join('/', segments.Select(s => s.StartsWith('{') ? "*" : s));
     }
+
+    [Fact]
+    public void LinuxArch013_SQLite_仓储层Guid主外键比较必须指定_COLLATE_NOCASE()
+    {
+        var persistenceDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure", "Persistence");
+        Assert.True(Directory.Exists(persistenceDir), "Persistence 目录不存在");
+
+        var pattern = new Regex(@"(?i)\b(WHERE|AND|OR)\b[^;""\r\n]*?\b(\w*Id)\s*(=|!=|<>)\s*@(\w*Id)\b(?!\s*COLLATE\s+NOCASE)", RegexOptions.Compiled);
+        var violations = new List<string>();
+
+        foreach (var file in Directory.EnumerateFiles(persistenceDir, "*Store.cs", SearchOption.TopDirectoryOnly))
+        {
+            var lines = File.ReadAllLines(file);
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i];
+                if (pattern.IsMatch(line))
+                {
+                    violations.Add($"{Path.GetFileName(file)}:{i + 1}: {line.Trim()}");
+                }
+            }
+        }
+
+        Assert.True(violations.Count == 0,
+            "SQLite Guid/Id 字段比对必须声明 COLLATE NOCASE（避免 .NET 大写 Guid 传参时比较失败导致 404）：\n" + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void LinuxArch014_SQLite_DDL主键定义必须声明_COLLATE_NOCASE()
+    {
+        var dbSetupFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure", "Persistence", "DbSetup.cs");
+        Assert.True(File.Exists(dbSetupFile), "DbSetup.cs 不存在");
+
+        var lines = File.ReadAllLines(dbSetupFile);
+        var pattern = new Regex(@"(?i)\bId\s+TEXT\s+PRIMARY\s+KEY(?!\s+COLLATE\s+NOCASE)", RegexOptions.Compiled);
+        var violations = new List<string>();
+
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            if (pattern.IsMatch(line))
+            {
+                violations.Add($"DbSetup.cs:{i + 1}: {line.Trim()}");
+            }
+        }
+
+        Assert.True(violations.Count == 0,
+            "DbSetup.cs 中所有主键 DDL 必须包含 COLLATE NOCASE：\n" + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void LinuxArch015_MinimalApi_GET查询模型属性必须为可空或引用类型()
+    {
+        var queryTypes = ContractsAssembly.GetTypes()
+            .Where(t => t.IsClass && t.Name.EndsWith("Query", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        Assert.NotEmpty(queryTypes);
+        var violations = new List<string>();
+
+        foreach (var type in queryTypes)
+        {
+            foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                // 值类型且非 Nullable<T>，在 Minimal API [AsParameters] 绑定时若 query string 未传会抛 BadHttpRequestException
+                if (prop.PropertyType.IsValueType && Nullable.GetUnderlyingType(prop.PropertyType) == null)
+                {
+                    violations.Add($"{type.Name}.{prop.Name} ({prop.PropertyType.Name})");
+                }
+            }
+        }
+
+        Assert.True(violations.Count == 0,
+            "GET 查询模型属性禁止使用非空值类型（必须为 string 等引用类型或 int?、bool? 等可空类型，防止无参请求报 400/500）：\n" + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public async Task LinuxArch016_SQLite_实体按Guid查询支持大小写混合真实数据库验证()
+    {
+        var tempDbPath = Path.Combine(Path.GetTempPath(), $"lwt_test_arch_{Guid.NewGuid():N}.db");
+        var connectionString = $"Data Source={tempDbPath};Mode=ReadWriteCreate;Cache=Shared";
+        var factory = DbSetup.CreateFactory(connectionString);
+        DbSetup.Initialize(factory);
+
+        try
+        {
+            const string lowercaseCmdId = "00000000-0000-0000-0000-000000000001";
+            const string lowercaseTaskId = "00000000-0000-0000-0000-000000000002";
+
+            using (var conn = factory.CreateConnection())
+            {
+                conn.Open();
+                using var insertCmd = conn.CreateCommand();
+                insertCmd.CommandText = $@"
+                    INSERT INTO linux_command (Id, Name, CommandText, ScriptType, Description, GroupId, IsPinned, SortOrder, TimeoutSeconds, LastExecTime, CreateTime, UpdateTime)
+                    VALUES ('{lowercaseCmdId}', 'arch-test-cmd', 'echo 1', 0, '', NULL, 0, 0, 30, NULL, '2026-01-01 00:00:00', '2026-01-01 00:00:00');
+
+                    INSERT INTO schedule_task (Id, Name, CommandId, CronExpression, Enabled, GroupId, IsPinned, SortOrder, TimeoutSeconds, Arguments, LastRunTime, NextRunTime, CreateTime, UpdateTime)
+                    VALUES ('{lowercaseTaskId}', 'arch-test-task', '{lowercaseCmdId}', '0 */5 * * * ?', 1, NULL, 0, 0, 60, NULL, NULL, NULL, '2026-01-01 00:00:00', '2026-01-01 00:00:00');
+                ";
+                await insertCmd.ExecuteNonQueryAsync();
+            }
+
+            // 使用 Store 按 Guid 参数查询（.NET 驱动会向 SQLite 传入全大写字符串）
+            var commandStore = new CommandStore(factory);
+            var cmd = await commandStore.GetByIdAsync(Guid.Parse(lowercaseCmdId));
+            Assert.NotNull(cmd);
+            Assert.Equal("arch-test-cmd", cmd.Name);
+
+            var scheduleStore = new ScheduleStore(factory);
+            var task = await scheduleStore.GetByIdAsync(Guid.Parse(lowercaseTaskId));
+            Assert.NotNull(task);
+            Assert.Equal("arch-test-task", task.Name);
+        }
+        finally
+        {
+            if (File.Exists(tempDbPath))
+            {
+                try { File.Delete(tempDbPath); } catch { /* ignore */ }
+            }
+        }
+    }
+
+    [Fact]
+    public void LinuxArch017_可空FromBody参数在MinimalApi映射中禁止直接声明以防无Body请求报404()
+    {
+        var routesDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Routes");
+        var mapper = File.ReadAllText(Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "MinimalApi", "EndpointsMapper.g.cs"));
+
+        var violations = new List<string>();
+
+        foreach (var file in Directory.EnumerateFiles(routesDir, "*Controller.cs", SearchOption.TopDirectoryOnly))
+        {
+            var content = File.ReadAllText(file);
+            var className = Regex.Match(content, @"\bclass\s+(\w+Controller)\b").Groups[1].Value;
+            var matches = Regex.Matches(content, @"\[Http(Post|Put)[^\]]*\][\s\r\n]*public\s+[^\(]+\b(\w+)\s*\(([^)]*\[FromBody\]\s*[^,\)]+\?[^)]*)\)", RegexOptions.Singleline);
+            foreach (Match match in matches)
+            {
+                var actionName = match.Groups[2].Value;
+                var mapperGroupPattern = $@"group_{className}\.Map(Post|Put)\([^;]+ctrl\.{actionName}\(";
+                var mapperMatch = Regex.Match(mapper, mapperGroupPattern, RegexOptions.Singleline);
+                if (mapperMatch.Success)
+                {
+                    var lambdaHeader = mapperMatch.Value[..mapperMatch.Value.IndexOf("=>", StringComparison.Ordinal)];
+                    if (lambdaHeader.Contains("[FromBody]"))
+                    {
+                        violations.Add($"{className}.{actionName}: Minimal API 委托参数包含 [FromBody]，会导致 Content-Length: 0 或无 Content-Type 的请求 404/415");
+                    }
+                }
+            }
+        }
+
+        Assert.True(violations.Count == 0,
+            "检测到控制器存在可选 [FromBody] 参数，但在 EndpointsMapper.g.cs 注册中直接使用了 [FromBody] 委托参数。\n" +
+            "Minimal API 要求此类可选 Body 必须通过 HttpContext 动态判断 (ctx.Request.HasJsonContentType())：\n" +
+            string.Join("\n", violations));
+    }
 }
+

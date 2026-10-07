@@ -18,7 +18,7 @@ public partial class TranscodePresetStore(DbConnectionFactory factory)
     {
         using var db = factory.CreateConnection();
         return await db.QueryFirstOrDefaultAsync<TranscodePreset>(
-            "SELECT * FROM transcode_preset WHERE Id = @Id", new { Id = id });
+            "SELECT * FROM transcode_preset WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     public async Task<bool> ExistsNameAsync(string name, Guid? excludeId)
@@ -27,7 +27,7 @@ public partial class TranscodePresetStore(DbConnectionFactory factory)
         var sql = "SELECT 1 FROM transcode_preset WHERE Name = @Name";
         if (excludeId.HasValue)
         {
-            sql += " AND Id != @ExcludeId";
+            sql += " AND Id != @ExcludeId COLLATE NOCASE";
         }
         var count = await db.QueryFirstOrDefaultAsync<int?>(sql, new { Name = name, ExcludeId = excludeId });
         return count.HasValue;
@@ -59,14 +59,14 @@ public partial class TranscodePresetStore(DbConnectionFactory factory)
                 VideoQuality = @VideoQuality, AudioCodec = @AudioCodec, AudioBitrate = @AudioBitrate, 
                 ExtraArgs = @ExtraArgs, Description = @Description, IsBuiltin = @IsBuiltin, 
                 UpdateTime = @UpdateTime
-            WHERE Id = @Id";
+            WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, preset);
     }
 
     public async Task DeleteAsync(Guid id)
     {
         using var db = factory.CreateConnection();
-        await db.ExecuteAsync("DELETE FROM transcode_preset WHERE Id = @Id", new { Id = id });
+        await db.ExecuteAsync("DELETE FROM transcode_preset WHERE Id = @Id COLLATE NOCASE", new { Id = id });
     }
 
     /// <summary>被监听规则引用的数量（删除前校验）。</summary>
@@ -74,6 +74,6 @@ public partial class TranscodePresetStore(DbConnectionFactory factory)
     {
         using var db = factory.CreateConnection();
         return await db.QueryFirstOrDefaultAsync<int>(
-            "SELECT COUNT(1) FROM watch_rule WHERE PresetId = @PresetId", new { PresetId = presetId });
+            "SELECT COUNT(1) FROM watch_rule WHERE PresetId = @PresetId COLLATE NOCASE", new { PresetId = presetId });
     }
 }

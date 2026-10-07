@@ -1,6 +1,8 @@
+using LinuxWebTool.Contracts.Models;
 using LinuxWebTool.Infrastructure.Security;
 using LinuxWebTool.Infrastructure.Support;
 using LinuxWebTool.Infrastructure.Logging;
+using LinuxWebTool.Infrastructure.Shell;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
@@ -112,6 +114,47 @@ public sealed class CoreUnitTests
         finally
         {
             Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public async Task Shell_executor_times_out_and_kills_hanging_process()
+    {
+        var options = new ShellOptions { DefaultTimeoutSeconds = 1, MaxTimeoutSeconds = 5 };
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<ShellExecutor>.Instance;
+        var executor = new ShellExecutor(options, logger);
+
+        var request = new ShellRequest
+        {
+            CommandText = OperatingSystem.IsWindows() ? "ping -n 10 127.0.0.1" : "sleep 10",
+            TimeoutSeconds = 1,
+        };
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var result = await executor.ExecuteAsync(request);
+        stopwatch.Stop();
+
+        Assert.True(result.TimedOut);
+        Assert.True(stopwatch.Elapsed.TotalSeconds < 5, $"Process took too long to terminate: {stopwatch.Elapsed.TotalSeconds}s");
+    }
+
+    [Fact]
+    public async Task Shell_executor_reports_error_output_on_process_start_failure()
+    {
+        var options = new ShellOptions { DefaultTimeoutSeconds = 5, MaxTimeoutSeconds = 10 };
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<ShellExecutor>.Instance;
+        var executor = new ShellExecutor(options, logger);
+
+        var request = new ShellRequest
+        {
+            ScriptText = "echo failure-test",
+            WorkingDirectory = "Z:\\NonExistentDirectory_ForTest_123456",
+        };
+
+        var result = await executor.ExecuteAsync(request);
+        if (!result.Started || result.StartFailure is not null)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(result.ErrorOutput), "启动失败时 ErrorOutput 不得为空，必须包含具体失败原因");
         }
     }
 

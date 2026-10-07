@@ -29,8 +29,8 @@ public sealed class WatchFolderService(
 
     private sealed class RuleState
     {
-        /// <summary>轮询快照：路径 → (大小, 最后写入时间, 稳定起始时间)。</summary>
-        public ConcurrentDictionary<string, (long Size, DateTime LastWrite, DateTime? StableSince)> Snapshot { get; } = new();
+        /// <summary>轮询快照：路径 → (大小, 最后写入时间, 稳定起始时间, 是否已入队)。</summary>
+        public ConcurrentDictionary<string, (long Size, DateTime LastWrite, DateTime? StableSince, bool Enqueued)> Snapshot { get; } = new();
         /// <summary>文件系统事件候选：路径 → 首次事件时间。</summary>
         public ConcurrentDictionary<string, DateTime> Pending { get; } = new();
         public DateTime LastScan { get; set; } = DateTime.MinValue;
@@ -195,8 +195,9 @@ public sealed class WatchFolderService(
             return;
         }
 
+        var isBaseline = state.LastScan == DateTime.MinValue;
         var extensions = MediaExtensions.Parse(rule.FilePatterns);
-        var activePaths = await jobStore.GetActivePathsAsync();
+        var activePaths = isBaseline ? [] : await jobStore.GetActivePathsAsync();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var (path, size) in MediaExtensions.WalkFiles(rule.WatchPath, rule.Recursive))
@@ -208,40 +209,53 @@ public sealed class WatchFolderService(
             }
             seen.Add(path);
 
-            if (!state.Snapshot.TryGetValue(path, out var prev))
+            var lwt = GetLastWrite(path);
+
+            // 首轮扫描仅建立基线快照，不触发存量历史文件
+            if (isBaseline)
             {
-                // 首现：写入时间已稳定 → 立即入队；仍在写入 → 记录后交给稳定检测
-                var lwt = GetLastWrite(path);
-                if (lwt is not null && IsReady(path, lwt.Value) && await EnqueueIfNotActiveAsync(rule, path, activePaths))
-                {
-                    continue;
-                }
-                state.Snapshot[path] = (size, lwt ?? DateTime.MinValue, null);
+                state.Snapshot[path] = (size, lwt ?? DateTime.MinValue, null, Enqueued: true);
                 continue;
             }
 
-            var currentWrite = GetLastWrite(path);
+            if (!state.Snapshot.TryGetValue(path, out var prev))
+            {
+                // 新增文件首现：写入时间已稳定 → 立即入队；仍在写入 → 记录后交给稳定检测
+                var isReady = lwt is not null && IsReady(path, lwt.Value);
+                var enqueued = isReady && (activePaths.Contains(path) || await EnqueueIfNotActiveAsync(rule, path, activePaths));
+                state.Snapshot[path] = (size, lwt ?? DateTime.MinValue, null, Enqueued: enqueued);
+                continue;
+            }
+
+            var currentWrite = lwt;
             var changed = size != prev.Size || currentWrite != prev.LastWrite;
             if (changed)
             {
-                // 变化后稳定 → 立即入队；仍在写入 → 记录
-                if (currentWrite is { } lw && IsReady(path, lw) && await EnqueueIfNotActiveAsync(rule, path, activePaths))
-                {
-                    continue;
-                }
-                state.Snapshot[path] = (size, currentWrite ?? prev.LastWrite, null);
+                // 文件发生变更：重新判定稳定与入队
+                var isReady = currentWrite is { } lw && IsReady(path, lw);
+                var enqueued = isReady && (activePaths.Contains(path) || await EnqueueIfNotActiveAsync(rule, path, activePaths));
+                state.Snapshot[path] = (size, currentWrite ?? prev.LastWrite, null, Enqueued: enqueued);
                 continue;
             }
 
-            // 无变化：累计稳定时长，达到阈值后入队
-            var stableSince = prev.StableSince ?? DateTime.Now;
-            if ((DateTime.Now - stableSince).TotalSeconds >= StableAgeSeconds
-                && currentWrite is { } stableWrite
-                && await EnqueueIfNotActiveAsync(rule, path, activePaths))
+            // 文件无变化且已入队（或属于历史基线）：无需重复触发
+            if (prev.Enqueued)
             {
                 continue;
             }
-            state.Snapshot[path] = (prev.Size, prev.LastWrite, stableSince);
+
+            // 无变化但未入队：累计稳定时长，达到阈值后入队
+            var stableSince = prev.StableSince ?? DateTime.Now;
+            if ((DateTime.Now - stableSince).TotalSeconds >= StableAgeSeconds
+                && currentWrite is { } stableWrite)
+            {
+                var enqueued = activePaths.Contains(path) || await EnqueueIfNotActiveAsync(rule, path, activePaths);
+                state.Snapshot[path] = (prev.Size, prev.LastWrite, stableSince, Enqueued: enqueued);
+            }
+            else
+            {
+                state.Snapshot[path] = (prev.Size, prev.LastWrite, stableSince, Enqueued: false);
+            }
         }
 
         // 清理已消失的文件快照
@@ -249,6 +263,12 @@ public sealed class WatchFolderService(
         {
             state.Snapshot.TryRemove(gone, out _);
         }
+
+        if (isBaseline)
+        {
+            logger.LogInformation("监听规则 {Name} 初始基线扫描完成，已收录 {Count} 个现有文件（跳过历史触发）", rule.Name, state.Snapshot.Count);
+        }
+
         state.LastScan = DateTime.Now;
     }
 

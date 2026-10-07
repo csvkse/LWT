@@ -32,6 +32,8 @@ public sealed class SystemStatusSampleService(
     /// <summary>本轮资源采样的确定性触发节奏（基线 / 异常 / 空闲），供整机采样判断是否联动。</summary>
     private bool _resourcesDueThisTick;
 
+    private DateTime _lastRetentionCleanup = DateTime.Now;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var retention = TimeSpan.FromDays(options.RetentionDays);
@@ -52,6 +54,19 @@ public sealed class SystemStatusSampleService(
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
                 await TryTickAsync();
+
+                if (DateTime.Now - _lastRetentionCleanup >= TimeSpan.FromHours(24))
+                {
+                    _lastRetentionCleanup = DateTime.Now;
+                    try
+                    {
+                        await ClearOlderThanAsync(DateTime.Now - retention);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex, "周期清理过期系统快照失败");
+                    }
+                }
             }
         }
         catch (OperationCanceledException)

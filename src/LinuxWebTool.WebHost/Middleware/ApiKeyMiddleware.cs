@@ -217,6 +217,13 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
             return true;
         }
 
+        // API 与 MCP 路由不受静态扩展名放行规则影响，必须经过严格认证判定
+        if (path.StartsWith("/api", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/mcp", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         // 静态文件扩展名放行
         var staticExtensions = new[] { ".html", ".js", ".css", ".ico", ".svg", ".png", ".woff", ".woff2", ".map" };
         foreach (var ext in staticExtensions)

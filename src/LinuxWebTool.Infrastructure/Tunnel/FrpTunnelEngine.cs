@@ -38,6 +38,7 @@ public sealed class FrpTunnelEngine(
 
     public string State { get; private set; } = "Disconnected";
     public string? PublicUrl { get; private set; }
+    public string? SubdomainUrl { get; private set; }
     public string? LocalTargetUrl { get; private set; }
     public DateTime? ConnectedAt { get; private set; }
     public long SentBytes { get; private set; }
@@ -220,7 +221,12 @@ public sealed class FrpTunnelEngine(
                 var host = root.TryGetProperty("host", out var hP) ? hP.GetString() : config.TunnelHost;
                 var pathModeUrl = root.TryGetProperty("pathModeUrl", out var pP) ? pP.GetString() : $"/tunnel/{host}/";
                 PublicUrl = $"{config.ServerUrl.TrimEnd('/')}{pathModeUrl}";
+                SubdomainUrl = FrpTunnelInstance.ResolveSubdomainUrl(config.ServerUrl, host ?? config.TunnelHost);
                 AddLog("INFO", $"🚀 公网映射挂载成功: {PublicUrl}");
+                if (!string.IsNullOrEmpty(SubdomainUrl))
+                {
+                    AddLog("INFO", $"🚀 独立子域名直通入口: {SubdomainUrl}");
+                }
                 break;
             }
             case "pong" or "PONG":
@@ -291,27 +297,14 @@ public sealed class FrpTunnelEngine(
             if (isNoBody || isSmall)
             {
                 var bodyBytes = isNoBody ? Array.Empty<byte>() : await httpResponse.Content.ReadAsByteArrayAsync(token);
-                var respPayload = new
-                {
-                    type = "HTTP_RESPONSE",
-                    requestId,
-                    status = statusCode,
-                    headers = respHeaders,
-                    body = Convert.ToBase64String(bodyBytes)
-                };
-                await SendTextAsync(ws, JsonSerializer.Serialize(respPayload), token);
+                var frameBytes = TunnelFrameSerializer.SerializeHttpResponse(requestId, statusCode, respHeaders, Convert.ToBase64String(bodyBytes));
+                await SendBytesAsync(ws, frameBytes, token);
             }
             else
             {
                 // Chunked Streaming 流式分片回传
-                var startPayload = new
-                {
-                    type = "HTTP_RESPONSE_START",
-                    requestId,
-                    status = statusCode,
-                    headers = respHeaders
-                };
-                await SendTextAsync(ws, JsonSerializer.Serialize(startPayload), token);
+                var startBytes = TunnelFrameSerializer.SerializeHttpResponseStart(requestId, statusCode, respHeaders);
+                await SendBytesAsync(ws, startBytes, token);
 
                 await using var stream = await httpResponse.Content.ReadAsStreamAsync(token);
                 var chunk = new byte[64 * 1024];
@@ -331,22 +324,23 @@ public sealed class FrpTunnelEngine(
                     SentBytes += frame.Length;
                 }
 
-                var endPayload = new { type = "HTTP_RESPONSE_END", requestId };
-                await SendTextAsync(ws, JsonSerializer.Serialize(endPayload), token);
+                var endBytes = TunnelFrameSerializer.SerializeHttpResponseEnd(requestId);
+                await SendBytesAsync(ws, endBytes, token);
             }
         }
         catch (Exception ex)
         {
-            var errPayload = new
-            {
-                type = "HTTP_RESPONSE",
-                requestId,
-                status = 502,
-                headers = new Dictionary<string, string> { ["content-type"] = "application/json; charset=utf-8" },
-                body = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{{\"error\":\"Bad Gateway\",\"message\":\"{ex.Message}\"}}"))
-            };
-            await SendTextAsync(ws, JsonSerializer.Serialize(errPayload), token);
+            var errHeaders = new Dictionary<string, string> { ["content-type"] = "application/json; charset=utf-8" };
+            var errBody = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{{\"error\":\"Bad Gateway\",\"message\":\"{ex.Message}\"}}"));
+            var errBytes = TunnelFrameSerializer.SerializeHttpResponse(requestId, 502, errHeaders, errBody);
+            await SendBytesAsync(ws, errBytes, token);
         }
+    }
+
+    private async Task SendBytesAsync(ClientWebSocket ws, byte[] bytes, CancellationToken token)
+    {
+        await ws.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, true, token);
+        SentBytes += bytes.Length;
     }
 
     private async Task SendTextAsync(ClientWebSocket ws, string json, CancellationToken token)
