@@ -1,5 +1,20 @@
 @echo off
 setlocal
+cd /d "%~dp0"
+
+:: Guard against infinite recursive elevation
+if "%~1"=="--elevated" goto :run_init
+
+:: Check administrator privileges using WindowsPrincipal
+powershell -NoProfile -ExecutionPolicy Bypass -Command "if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 1 } else { exit 0 }"
+if %errorlevel% neq 0 (
+    echo [LinuxWebTool] Requesting administrator privileges...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath 'cmd.exe' -ArgumentList ('/c \"\"%~f0\" --elevated %*\"') -WorkingDirectory '%~dp0' -Verb RunAs"
+    exit /b
+)
+
+:run_init
+
 title LinuxWebTool Host
 
 set "lwt_opened=0"

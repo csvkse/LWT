@@ -1,6 +1,5 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
-using LinuxWebTool.Infrastructure.Persistence;
 using Xunit;
 
 namespace LinuxWebTool.ArchitectureTests;
@@ -14,8 +13,9 @@ namespace LinuxWebTool.ArchitectureTests;
 /// </summary>
 public class ArchitectureTests
 {
-    private static readonly Assembly ContractsAssembly = typeof(LinuxWebTool.Contracts.Models.SaveCommandRequest).Assembly;
-    private static readonly Assembly InfrastructureAssembly = typeof(LinuxWebTool.Infrastructure.Persistence.DbSetup).Assembly;
+    private static readonly Assembly ContractsAssembly = typeof(LinuxWebTool.Contracts.Shared.Contracts.SaveCommandRequest).Assembly;
+    private static readonly Assembly ApplicationAssembly = typeof(LinuxWebTool.Application.Features.Security.ApiKeyPermissionMatrix).Assembly;
+    private static readonly Assembly InfrastructureAssembly = typeof(LinuxWebTool.Infrastructure.Shared.Persistence.DbSetup).Assembly;
     private static readonly Assembly WebHostAssembly = typeof(LinuxWebTool.WebHost.Program).Assembly;
 
     private static string RepoRoot
@@ -51,16 +51,20 @@ public class ArchitectureTests
     public void LinuxArch002_Infrastructure_禁止引用上层项目()
     {
         var references = InfrastructureAssembly.GetReferencedAssemblies().Select(a => a.Name!).ToList();
-        Assert.DoesNotContain(references, name => name.Contains("WebHost"));
+        Assert.DoesNotContain(references, name => name.Contains("WebHost") || name.Contains("Application"));
     }
 
     [Fact]
     public void LinuxArch004_下层禁止反向引用上层()
     {
         var infraRefs = InfrastructureAssembly.GetReferencedAssemblies().Select(a => a.Name!).ToList();
-        Assert.DoesNotContain(infraRefs, name => name.Contains("WebHost"));
+        Assert.DoesNotContain(infraRefs, name => name.Contains("WebHost") || name.Contains("Application"));
+
+        var appRefs = ApplicationAssembly.GetReferencedAssemblies().Select(a => a.Name!).ToList();
+        Assert.DoesNotContain(appRefs, name => name.Contains("WebHost") || name.Contains("Infrastructure"));
+
         var contractsRefs = ContractsAssembly.GetReferencedAssemblies().Select(a => a.Name!).ToList();
-        Assert.DoesNotContain(contractsRefs, name => name.Contains("Infrastructure") || name.Contains("WebHost"));
+        Assert.DoesNotContain(contractsRefs, name => name.Contains("Application") || name.Contains("Infrastructure") || name.Contains("WebHost"));
     }
 
     [Fact]
@@ -76,9 +80,10 @@ public class ArchitectureTests
     [Fact]
     public void LinuxArch005_Routes_控制器_禁止直接使用_SqlSugar()
     {
-        var routesDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Routes");
-        Assert.True(Directory.Exists(routesDir), "Routes 目录不存在");
-        var violations = Directory.EnumerateFiles(routesDir, "*.cs", SearchOption.AllDirectories)
+        var webHostDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost");
+        var controllerFiles = Directory.EnumerateFiles(webHostDir, "*Controller.cs", SearchOption.AllDirectories).ToList();
+        Assert.NotEmpty(controllerFiles);
+        var violations = controllerFiles
             .Where(file => Regex.IsMatch(File.ReadAllText(file), @"\bSqlSugar\b"))
             .Select(Path.GetFileName)
             .ToList();
@@ -118,15 +123,19 @@ public class ArchitectureTests
     [Fact]
     public void LinuxArch008_AOT关键响应类型必须为显式DTO()
     {
-        var routesDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Routes");
-        var violations = Directory.EnumerateFiles(routesDir, "*.cs", SearchOption.TopDirectoryOnly)
+        var webHostDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost");
+        var controllerFiles = Directory.EnumerateFiles(webHostDir, "*Controller.cs", SearchOption.AllDirectories).ToList();
+        Assert.NotEmpty(controllerFiles);
+        var violations = controllerFiles
             .Where(file => Regex.IsMatch(File.ReadAllText(file), @"new\s*\{"))
             .Select(Path.GetFileName)
             .ToList();
         Assert.True(violations.Count == 0, "Routes 禁止匿名对象响应/投影：" + string.Join(", ", violations));
         foreach (var file in new[] { "CommandsController.cs", "SmbMountsController.cs", "SystemStatusController.cs", "FilesController.cs", "TranscodeController.cs" })
         {
-            var source = File.ReadAllText(Path.Combine(routesDir, file));
+            var matchedFile = controllerFiles.FirstOrDefault(f => Path.GetFileName(f) == file);
+            Assert.NotNull(matchedFile);
+            var source = File.ReadAllText(matchedFile);
             Assert.DoesNotContain("List<object>", source);
         }
     }
@@ -168,11 +177,11 @@ public class ArchitectureTests
     [Fact]
     public void LinuxArch012_ControllerHttp特性和生成映射必须一致()
     {
-        var routesDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Routes");
+        var webHostDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost");
         var mapper = File.ReadAllText(Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "MinimalApi", "EndpointsMapper.g.cs"));
         var mapperRoutes = ParseMapperRoutes(mapper);
         var controllerRoutes = new HashSet<string>();
-        foreach (var file in Directory.EnumerateFiles(routesDir, "*Controller.cs", SearchOption.TopDirectoryOnly))
+        foreach (var file in Directory.EnumerateFiles(webHostDir, "*Controller.cs", SearchOption.AllDirectories))
         {
             var source = File.ReadAllText(file);
             var className = Regex.Match(source, @"\bclass\s+(\w+Controller)\b").Groups[1].Value;
@@ -214,13 +223,14 @@ public class ArchitectureTests
     [Fact]
     public void LinuxArch013_SQLite_仓储层Guid主外键比较必须指定_COLLATE_NOCASE()
     {
-        var persistenceDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure", "Persistence");
-        Assert.True(Directory.Exists(persistenceDir), "Persistence 目录不存在");
+        var infraDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure");
+        var storeFiles = Directory.EnumerateFiles(infraDir, "*Store.cs", SearchOption.AllDirectories).ToList();
+        Assert.NotEmpty(storeFiles);
 
         var pattern = new Regex(@"(?i)\b(WHERE|AND|OR)\b[^;""\r\n]*?\b(\w*Id)\s*(=|!=|<>)\s*@(\w*Id)\b(?!\s*COLLATE\s+NOCASE)", RegexOptions.Compiled);
         var violations = new List<string>();
 
-        foreach (var file in Directory.EnumerateFiles(persistenceDir, "*Store.cs", SearchOption.TopDirectoryOnly))
+        foreach (var file in storeFiles)
         {
             var lines = File.ReadAllLines(file);
             for (var i = 0; i < lines.Length; i++)
@@ -240,8 +250,10 @@ public class ArchitectureTests
     [Fact]
     public void LinuxArch014_SQLite_DDL主键定义必须声明_COLLATE_NOCASE()
     {
-        var dbSetupFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure", "Persistence", "DbSetup.cs");
-        Assert.True(File.Exists(dbSetupFile), "DbSetup.cs 不存在");
+        var infraDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure");
+        var dbSetupFiles = Directory.EnumerateFiles(infraDir, "DbSetup.cs", SearchOption.AllDirectories).ToList();
+        Assert.Single(dbSetupFiles);
+        var dbSetupFile = dbSetupFiles[0];
 
         var lines = File.ReadAllLines(dbSetupFile);
         var pattern = new Regex(@"(?i)\bId\s+TEXT\s+PRIMARY\s+KEY(?!\s+COLLATE\s+NOCASE)", RegexOptions.Compiled);
@@ -336,12 +348,12 @@ public class ArchitectureTests
     [Fact]
     public void LinuxArch017_可空FromBody参数在MinimalApi映射中禁止直接声明以防无Body请求报404()
     {
-        var routesDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Routes");
+        var webHostDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost");
         var mapper = File.ReadAllText(Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "MinimalApi", "EndpointsMapper.g.cs"));
 
         var violations = new List<string>();
 
-        foreach (var file in Directory.EnumerateFiles(routesDir, "*Controller.cs", SearchOption.TopDirectoryOnly))
+        foreach (var file in Directory.EnumerateFiles(webHostDir, "*Controller.cs", SearchOption.AllDirectories))
         {
             var content = File.ReadAllText(file);
             var className = Regex.Match(content, @"\bclass\s+(\w+Controller)\b").Groups[1].Value;
@@ -438,12 +450,142 @@ public class ArchitectureTests
             }
         }
 
+
         Assert.True(violations.Count == 0,
             "检测到调用了无显式源生成参数的 JsonSerializer / JSON I/O 反射重载！\n" +
             "由于项目配置了 <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>，\n" +
             "未传递 JsonTypeInfo 或 JsonSerializerContext 的调用将在运行时抛出 InvalidOperationException。\n" +
             "请传入 AppJsonSerializerContext.Default.* 或自定义 *JsonContext.Default.*。\n" +
             "违规代码：\n" + string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void LinuxArch019_WebHost必须显式直接引用Contracts项目()
+    {
+        var webHostProj = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "LinuxWebTool.WebHost.csproj");
+        Assert.True(File.Exists(webHostProj), "WebHost csproj 不存在");
+        var content = File.ReadAllText(webHostProj).Replace('\\', '/');
+        Assert.True(content.Contains("LinuxWebTool.Contracts/LinuxWebTool.Contracts.csproj"),
+            "WebHost 消费了 Contracts 中的大量契约，必须显式直接引用 Contracts 项目，禁止依赖隐式传递。");
+    }
+
+    [Fact]
+    public void LinuxArch020_基线引擎正常工作且无失效残留条目()
+    {
+        var baselinePath = Path.Combine(RepoRoot, "tests", "LinuxWebTool.ArchitectureTests", "backend-baseline.json");
+        Assert.True(File.Exists(baselinePath), "backend-baseline.json 必须存在于 ArchitectureTests 根目录下");
+        var engine = new LinuxWebTool.ArchitectureTests.Support.BaselineEngine(baselinePath);
+        engine.AssertNoStaleEntries();
+    }
+
+    [Fact]
+    public void LinuxArch021_所有生产项目直接引用图无环()
+    {
+        var srcDir = Path.Combine(RepoRoot, "src");
+        var projectFiles = Directory.EnumerateFiles(srcDir, "*.csproj", SearchOption.AllDirectories).ToList();
+        LinuxWebTool.ArchitectureTests.Support.BaselineEngine.AssertNonEmptyScope(projectFiles.Count, "生产 csproj 项目集合");
+
+        var graph = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var proj in projectFiles)
+        {
+            var projName = Path.GetFileNameWithoutExtension(proj);
+            if (!graph.ContainsKey(projName)) graph[projName] = new();
+            var content = File.ReadAllText(proj);
+            var matches = Regex.Matches(content, @"<ProjectReference\s+Include=""([^""]+)""");
+            foreach (Match m in matches)
+            {
+                var refPath = m.Groups[1].Value;
+                var refName = Path.GetFileNameWithoutExtension(refPath);
+                graph[projName].Add(refName);
+            }
+        }
+
+        var visited = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var cyclePath = new List<string>();
+
+        bool HasCycle(string node)
+        {
+            visited[node] = 1;
+            cyclePath.Add(node);
+            if (graph.TryGetValue(node, out var neighbors))
+            {
+                foreach (var next in neighbors)
+                {
+                    if (!visited.TryGetValue(next, out var state) || state == 0)
+                    {
+                        if (HasCycle(next)) return true;
+                    }
+                    else if (state == 1)
+                    {
+                        cyclePath.Add(next);
+                        return true;
+                    }
+                }
+            }
+            visited[node] = 2;
+            cyclePath.RemoveAt(cyclePath.Count - 1);
+            return false;
+        }
+
+        foreach (var node in graph.Keys)
+        {
+            if (!visited.TryGetValue(node, out var state) || state == 0)
+            {
+                if (HasCycle(node))
+                {
+                    Assert.Fail($"检测到生产项目间直接引用存在循环依赖闭环：{string.Join(" -> ", cyclePath)}");
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void LinuxArch022_HostedService双重注册守卫()
+    {
+        var compositionFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Composition", "ServiceCollectionExtensions.cs");
+        Assert.True(File.Exists(compositionFile), "ServiceCollectionExtensions.cs 不存在");
+        var content = File.ReadAllText(compositionFile);
+
+        var criticalTypes = new[] { "TranscodeQueueService", "MountStateMachineService", "FrpTunnelManager", "EasyTierNodeManager", "EasyTierHostSupervisor" };
+        foreach (var typeName in criticalTypes)
+        {
+            Assert.True(content.Contains($"builder.Services.AddSingleton<{typeName}>()"),
+                $"服务 {typeName} 既是后台任务又被其他单例/控制器直接注入，必须显式调用 AddSingleton<{typeName}>()，杜绝运行时解析失败。");
+        }
+    }
+
+    [Fact]
+    public void LinuxArch023_生产项目根目录必须遵循物理架构规范白名单()
+    {
+        var srcDir = Path.Combine(RepoRoot, "src");
+        var globalAllowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Features", "Composition", "Shared", "Platform", "Serialization", "bin", "obj"
+        };
+        var webHostSpecificAllowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "MinimalApi", "wwwroot", "Deploy", "data", "logs", "Properties"
+        };
+
+        var violations = new List<string>();
+
+        foreach (var projectDir in Directory.EnumerateDirectories(srcDir))
+        {
+            var projectName = Path.GetFileName(projectDir);
+            var isWebHost = projectName.EndsWith("WebHost", StringComparison.OrdinalIgnoreCase);
+
+            foreach (var subDir in Directory.EnumerateDirectories(projectDir))
+            {
+                var dirName = Path.GetFileName(subDir);
+                if (globalAllowed.Contains(dirName)) continue;
+                if (isWebHost && webHostSpecificAllowed.Contains(dirName)) continue;
+
+                violations.Add($"{projectName}/{dirName}");
+            }
+        }
+
+        Assert.True(violations.Count == 0,
+            $"生产项目根目录检测到违规目录（禁止在根目录平铺业务名或职责名，必须统一收敛至 Features/、Shared/、Composition/）：\n{string.Join("\n", violations)}");
     }
 }
 

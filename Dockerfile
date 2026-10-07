@@ -84,7 +84,7 @@ RUN dotnet restore "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj"
 COPY src ./src
 
 RUN apk add --no-cache clang build-base zlib-dev
-RUN cc -shared -fPIC -O2 -Wall -Wextra -Werror src/LinuxWebTool.Infrastructure/Terminal/native/linuxwebtool_pty.c -o /tmp/liblinuxwebtool_pty.so -lutil
+RUN cc -shared -fPIC -O2 -Wall -Wextra -Werror src/LinuxWebTool.Infrastructure/Features/Terminal/Platform/native/linuxwebtool_pty.c -o /tmp/liblinuxwebtool_pty.so -lutil
 RUN dotnet publish "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj" \
     -c $BUILD_CONFIGURATION \
     -o /app/publish \

@@ -1,33 +1,40 @@
 # 架构门禁（Architecture Gates）
 
 本门禁把分层约定从人工约定变为可执行规则。快速门禁入口：仓库根目录运行 `./scripts/verify-fast.ps1`（编译 + 架构测试 + 前端门禁）。
+完整架构演进方案、五大核心视图与 L0~L5 门禁治理体系详见 [docs/architecture/](../architecture/README.md)。
 
 ## 允许的依赖方向
 
 ```text
-LinuxWebTool.Contracts          ← 零依赖（DTO / 枚举 / 技术接口）
-        ↑
-LinuxWebTool.Infrastructure     ← SqlSugar / Quartz / Shell / 文件日志 / JWT
-        ↑
-LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + wwwroot 前端
+LinuxWebTool.Contracts          ← 零依赖（DTO / 枚举 / 业务与技术接口，纯 BCL）
+        ↑             ↑
+LinuxWebTool.Application     LinuxWebTool.Infrastructure  ← Dapper.AOT / SQLite / Quartz / Shell / PTY 原生库
+(业务用例/状态机编排)           (纯技术适配/持久化)
+        ↑             ↑
+LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + MCP 端点 + wwwroot 前端 (显式直接引用)
 ```
 
 | 调用方 | 允许直接引用 |
 |---|---|
-| Contracts | 无（仅 BCL） |
-| Infrastructure | Contracts、BCL、技术 NuGet（SqlSugar/Quartz/IdentityModel/Microsoft.Extensions.*） |
-| WebHost | Contracts、Infrastructure、ASP.NET Core 框架 |
+| Contracts | 无（仅 BCL 原生类型） |
+| Application | Contracts、BCL、Microsoft.Extensions.Logging.Abstractions |
+| Infrastructure | Contracts、BCL、技术 NuGet（Dapper/Dapper.AOT/Microsoft.Data.Sqlite/Quartz/Microsoft.IdentityModel/Polly） |
+| WebHost | Contracts（显式直接引用）、Application、Infrastructure、ASP.NET Core 框架 |
 
 ## 诊断编号
 
 | 编号 | 含义 | 强制方式 |
 |---|---|---|
 | `LinuxArch001` | Contracts 引用项目或第三方包 | xUnit（程序集引用检查） |
-| `LinuxArch002` | Infrastructure 引用 WebHost | xUnit |
+| `LinuxArch002` | Infrastructure 禁止引用 WebHost 或 Application | xUnit |
 | `LinuxArch003` | Contracts 出现 ORM / 调度 / 认证框架类型 | xUnit |
-| `LinuxArch004` | 下层反向引用上层 | xUnit |
-| `LinuxArch005` | Routes(Controller) 直接 using SqlSugar | xUnit（源码扫描） |
+| `LinuxArch004` | 下层禁止反向引用上层（严格验证 Contracts / Application / Infrastructure / WebHost 单向拓扑） | xUnit |
+| `LinuxArch005` | Routes(Controller) 接触底层持久化细节或仓储 | xUnit（源码扫描） |
 | `LinuxArch007` | 命名空间与物理路径不一致 | xUnit（源码扫描） |
+| `LinuxArch008` | AOT 响应类型必须为显式 DTO（禁止匿名对象 new { ... }） | xUnit（源码扫描） |
+| `LinuxArch009` | 关键控制器接口必须存在 Minimal API 生成映射 | xUnit（源码契约检查） |
+| `LinuxArch010` | 发布脚本必须启用 Native AOT 且关闭反射 JSON | xUnit（文件配置断言） |
+| `LinuxArch011` | 文件删除请求必须使用 DELETE 方法 | xUnit（前端视图检查） |
 | `LinuxArch012` | Controller `Http*` 特性与 `EndpointsMapper.g.cs` 方法/路径不一致 | xUnit（源码契约检查） |
 | `LinuxArch013` | SQLite 仓储层 Guid/Id 字段比较必须声明 `COLLATE NOCASE`（防止 .NET Guid 大写参数匹配失败） | xUnit（源码扫描） |
 | `LinuxArch014` | SQLite DDL 表主键定义必须声明 `COLLATE NOCASE` | xUnit（源码扫描） |
@@ -35,6 +42,11 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + wwwroot �
 | `LinuxArch016` | SQLite 实体按 Guid 查询支持大小写混合真实数据库验证 | xUnit（SQLite 动态集成测试） |
 | `LinuxArch017` | Minimal API 可选 `[FromBody]` 参数禁止直接声明为委托参数（须用 `ctx.Request.HasJsonContentType()` 动态解析，防止空 Body 或无 Content-Type 报 404） | xUnit（源码契约检查） |
 | `LinuxArch018` | Native AOT 环境下禁止调用无显式源生成上下文的 `JsonSerializer` / `WriteAsJsonAsync` / `ReadFromJsonAsync` 反射重载 | xUnit（源码 AST/语法检查） |
+| `LinuxArch019` | WebHost 项目必须显式直接引用 Contracts 项目，禁止依赖隐式传递 | xUnit（csproj 依赖检查） |
+| `LinuxArch020` | 后端精确基线引擎健康检测与失效（Stale）条目防假绿拦截 | xUnit（基线引擎自检） |
+| `LinuxArch021` | 所有生产项目直接引用拓扑图无环检测（Acyclic DAG） | xUnit（拓扑排序检查） |
+| `LinuxArch022` | IHostedService 双重注册守卫（防止后台单例服务解析失败） | xUnit（源码注册断言） |
+| `LinuxArch023` | 生产项目根目录必须遵循物理架构规范白名单（仅允许 Features/、Composition/、Shared/ 等） | xUnit（物理目录扫描） |
 | `FE-HTML-INLINE` | index.html 内联脚本（importmap 除外）/ 内联事件 | frontend-gate.cjs |
 | `FE-API-OWNERSHIP` | API 路径字符串出现在 config.js 之外 | frontend-gate.cjs |
 | `FE-NO-FETCH` | fetch() 出现在 api/client.js 之外 | frontend-gate.cjs |
@@ -51,14 +63,17 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + wwwroot �
 
 ## 约定要点
 
-- **实体放 Infrastructure**：SqlSugar 特性属于持久化细节，Contracts 只保留 DTO 与接口（本工具对参考项目六层结构的简化，语义一致）。
-- **Controller 不触碰 SqlSugar**：数据访问一律经 `*Store` 仓储。
+- **实体与数据库适配放 Infrastructure**：Dapper.AOT 与 SQLite 表特性属于持久化实现细节，Contracts 保持纯净。
+- **业务用例下沉 Application**：编排、状态机与参数决策集中在 `LinuxWebTool.Application`。
+- **Controller 不触碰底层仓储**：数据访问与流程编排经由 Application 用例。
 - **前端零构建**：Vue3 ESM + importmap + 本地 vendor 自托管（内网零外网依赖），`vendor/` 目录不参与门禁扫描。
 - **事件绑定必须 `method()`**：Vue 完整版运行时编译会把裸标识符处理器误提升到 `with(_ctx)` 作用域之外，导致 handler 为 undefined（详见 FE-TEMPLATE-REF 规则说明）。
 
 ## 基线纪律
 
-`wwwroot/frontend-gate-baseline.json` 只用于冻结存量债务：基线总量只能下降；新代码触发门禁时修复依赖，不得扩充基线；门禁发现失效条目时会提示删除。
+- 前端基线：`wwwroot/frontend-gate-baseline.json`；
+- 后端基线：`tests/LinuxWebTool.ArchitectureTests/backend-baseline.json`。
+- **基线铁律**：只用于冻结存量技术债务，总量只能下降；新代码触发门禁时就地修复，不得扩充基线；任何条目修复后若未从基线删除，门禁将作为失效（Stale）条目报错失败（防假绿）。
 
 ## 扩展门禁
 

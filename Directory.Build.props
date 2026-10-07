@@ -7,4 +7,19 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <InterceptorsNamespaces>$(InterceptorsNamespaces);Dapper.AOT</InterceptorsNamespaces>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="LinuxWebTool.Contracts.Shared.Contracts" />
+    <Using Include="LinuxWebTool.Contracts.Features.Commands.Contracts" />
+    <Using Include="LinuxWebTool.Contracts.Features.Security.Contracts" />
+    <Using Include="LinuxWebTool.Contracts.Features.EasyTier.Contracts" />
+    <Using Include="LinuxWebTool.Contracts.Features.Tunnel.Contracts" />
+    <Using Include="LinuxWebTool.Contracts.Features.Gateway.Contracts" />
+    <Using Include="LinuxWebTool.Contracts.Features.Mcp.Contracts" />
+    <Using Include="LinuxWebTool.Contracts.Features.Mount.Contracts" />
+    <Using Include="LinuxWebTool.Contracts.Features.SystemStatus.Contracts" />
+    <Using Include="LinuxWebTool.Contracts.Features.Terminal.Contracts" />
+    <Using Include="LinuxWebTool.Contracts.Features.Transcode.Contracts" />
+    <Using Include="LinuxWebTool.Contracts.Features.Shell.Contracts" />
+  </ItemGroup>
 </Project>

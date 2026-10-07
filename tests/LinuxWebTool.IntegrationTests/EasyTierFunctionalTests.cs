@@ -1,6 +1,5 @@
 using System.Net;
 using System.Text.Json;
-using LinuxWebTool.Contracts.Models;
 using LinuxWebTool.IntegrationTests.Support;
 using LinuxWebTool.WebHost.Composition;
 using Xunit;
@@ -57,6 +56,8 @@ public sealed class EasyTierFunctionalTests
         Assert.NotNull(created);
         Assert.Equal(instName, created.InstanceName);
         Assert.Equal("integration_vnet", created.NetworkName);
+        Assert.NotNull(created.Listeners);
+        Assert.Equal(2, created.Listeners.Count);
 
         var nodeId = created.Id;
 
@@ -126,5 +127,26 @@ public sealed class EasyTierFunctionalTests
         // 第二次同名创建应被拒绝
         var resp2 = await client.PostAsync("/api/EasyTier/Nodes", TestServerFixture.Json(createJson));
         Assert.Equal(HttpStatusCode.BadRequest, resp2.StatusCode);
+    }
+
+    [Fact]
+    public async Task EasyTier_AvailablePort_Probing_Returns_Available_Ports()
+    {
+        var client = await TestServerFixture.CreateAdminClientAsync();
+        var resp = await client.GetAsync("/api/EasyTier/AvailablePort?startPort=11010");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        var json = await resp.Content.ReadAsStringAsync();
+        var result = JsonSerializer.Deserialize<EasyTierAvailablePortDto>(json, AppJsonSerializerContext.Default.Options);
+        Assert.NotNull(result);
+        Assert.True(result.BasePort >= 1024);
+        Assert.Equal(result.BasePort + 1, result.WgPort);
+        Assert.NotEmpty(result.SuggestedListeners);
+        Assert.Contains($"tcp://0.0.0.0:{result.BasePort}", result.SuggestedListeners);
+        Assert.Contains($"udp://0.0.0.0:{result.BasePort}", result.SuggestedListeners);
+        Assert.Contains($"wg://0.0.0.0:{result.WgPort}", result.SuggestedListeners);
+        Assert.Contains($"tcp://[::]:{result.BasePort}", result.SuggestedListeners);
+        Assert.Contains($"udp://[::]:{result.BasePort}", result.SuggestedListeners);
+        Assert.Contains($"wg://[::]:{result.WgPort}", result.SuggestedListeners);
     }
 }

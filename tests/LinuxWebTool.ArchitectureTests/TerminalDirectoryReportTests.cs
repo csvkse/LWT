@@ -1,4 +1,3 @@
-using LinuxWebTool.Infrastructure.Terminal;
 using Xunit;
 
 namespace LinuxWebTool.ArchitectureTests;

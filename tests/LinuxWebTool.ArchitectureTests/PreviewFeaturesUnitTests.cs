@@ -1,9 +1,4 @@
-using LinuxWebTool.Contracts.Models;
-using LinuxWebTool.Infrastructure.Persistence;
-using LinuxWebTool.Infrastructure.Persistence.Entities;
-using LinuxWebTool.Infrastructure.Security;
-using LinuxWebTool.Infrastructure.Tunnel;
-using LinuxWebTool.WebHost.Gateway;
+using LinuxWebTool.WebHost.Features.Gateway.Adapters;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 

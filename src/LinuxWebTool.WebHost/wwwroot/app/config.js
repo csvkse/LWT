@@ -136,6 +136,7 @@ export const API = {
     patchConfig: (id) => `/EasyTier/Nodes/${id}/Config`,
     nodeStart: (id) => `/EasyTier/Nodes/${id}/Start`,
     nodeStop: (id) => `/EasyTier/Nodes/${id}/Stop`,
+    availablePort: '/EasyTier/AvailablePort',
     engineStatus: '/EasyTier/Engine/Status',
     engineUpgrade: '/EasyTier/Engine/Upgrade',
     githubRelease: '/EasyTier/Engine/Releases',

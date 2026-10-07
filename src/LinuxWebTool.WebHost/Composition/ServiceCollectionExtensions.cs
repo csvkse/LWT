@@ -1,14 +1,4 @@
 using LinuxWebTool.WebHost.MinimalApi;
-using LinuxWebTool.WebHost.Middleware;
-using LinuxWebTool.Infrastructure.Support;
-using LinuxWebTool.Infrastructure.Persistence;
-using LinuxWebTool.Infrastructure.Security;
-using LinuxWebTool.Infrastructure.Tunnel;
-using LinuxWebTool.Infrastructure.Gateway;
-using LinuxWebTool.Infrastructure.EasyTier;
-using LinuxWebTool.Contracts.Interfaces;
-using LinuxWebTool.WebHost.Gateway;
-using LinuxWebTool.WebHost.Mcp;
 using Yarp.ReverseProxy.Configuration;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -93,9 +83,9 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<IShellExecutor, ShellExecutor>();
 
         // 终端 PTY 引擎与会话管理
-        builder.Services.AddSingleton<LinuxWebTool.Contracts.Terminal.IPtyEngine, LinuxWebTool.Infrastructure.Terminal.CrossPlatformPtyEngine>();
-        builder.Services.AddSingleton<LinuxWebTool.Contracts.Terminal.IPtySessionManager, LinuxWebTool.Infrastructure.Terminal.PtySessionManager>();
-        builder.Services.AddSingleton<LinuxWebTool.Infrastructure.Terminal.TerminalDependencyService>();
+        builder.Services.AddSingleton<IPtyEngine, LinuxWebTool.Infrastructure.Features.Terminal.Platform.CrossPlatformPtyEngine>();
+        builder.Services.AddSingleton<IPtySessionManager, LinuxWebTool.Infrastructure.Features.Terminal.Platform.PtySessionManager>();
+        builder.Services.AddSingleton<LinuxWebTool.Infrastructure.Features.Terminal.Platform.TerminalDependencyService>();
 
         // 系统状态采集与历史采样
         var systemStatusOptions = configuration.GetSection(SystemStatusOptions.SectionName).Get<SystemStatusOptions>() ?? new SystemStatusOptions();

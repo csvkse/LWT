@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\LinuxWebTool.Contracts\LinuxWebTool.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\LinuxWebTool.Application\LinuxWebTool.Application.csproj" />
     <ProjectReference Include="..\..\src\LinuxWebTool.Infrastructure\LinuxWebTool.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\LinuxWebTool.WebHost\LinuxWebTool.WebHost.csproj" />
   </ItemGroup>
