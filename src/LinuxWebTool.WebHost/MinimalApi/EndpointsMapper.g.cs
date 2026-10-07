@@ -45,6 +45,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             services.AddScoped<ApiKeysController>();
             services.AddScoped<FrpTunnelController>();
             services.AddScoped<GatewayController>();
+            services.AddScoped<EasyTierController>();
         }
 
         public static void MapAutoControllers(this WebApplication app)
@@ -248,6 +249,21 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_GatewayController.MapPost("TcpRoutes", async ([FromServices] GatewayController ctrl, HttpContext ctx, [FromBody] SaveGatewayTcpRouteRequest request) => { ctrl.HttpContext = ctx; return await ctrl.CreateTcpRoute(request); });
             group_GatewayController.MapPut("TcpRoutes/{id}", async ([FromServices] GatewayController ctrl, HttpContext ctx, string id, [FromBody] SaveGatewayTcpRouteRequest request) => { ctrl.HttpContext = ctx; return await ctrl.UpdateTcpRoute(id, request); });
             group_GatewayController.MapDelete("TcpRoutes/{id}", async ([FromServices] GatewayController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; return await ctrl.DeleteTcpRoute(id); });
+
+            var group_EasyTierController = app.MapGroup("/api/EasyTier");
+            group_EasyTierController.RequireAuthorization();
+            group_EasyTierController.MapGet("Nodes", async ([FromServices] EasyTierController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.GetNodes(); });
+            group_EasyTierController.MapGet("Nodes/{id}", async ([FromServices] EasyTierController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; return await ctrl.GetNodeDetail(id); });
+            group_EasyTierController.MapPost("Nodes", async ([FromServices] EasyTierController ctrl, HttpContext ctx, [FromBody] CreateEasyTierNodeRequest request) => { ctrl.HttpContext = ctx; return await ctrl.CreateNode(request); });
+            group_EasyTierController.MapPut("Nodes/{id}", async ([FromServices] EasyTierController ctrl, HttpContext ctx, string id, [FromBody] UpdateEasyTierNodeRequest request) => { ctrl.HttpContext = ctx; return await ctrl.UpdateNode(id, request); });
+            group_EasyTierController.MapPost("Nodes/{id}/Config", async ([FromServices] EasyTierController ctrl, HttpContext ctx, string id, [FromBody] EasyTierPatchRequestDto patch) => { ctrl.HttpContext = ctx; return await ctrl.PatchNodeConfig(id, patch); });
+            group_EasyTierController.MapDelete("Nodes/{id}", async ([FromServices] EasyTierController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; return await ctrl.DeleteNode(id); });
+            group_EasyTierController.MapPost("Nodes/{id}/Start", async ([FromServices] EasyTierController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; return await ctrl.StartNode(id); });
+            group_EasyTierController.MapPost("Nodes/{id}/Stop", async ([FromServices] EasyTierController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; return await ctrl.StopNode(id); });
+            group_EasyTierController.MapGet("Engine/Status", async ([FromServices] EasyTierController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.GetEngineStatus(); });
+            group_EasyTierController.MapPost("Engine/Upgrade", async ([FromServices] EasyTierController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.UpgradeEngine(); });
+            group_EasyTierController.MapGet("Engine/Releases", async ([FromServices] EasyTierController ctrl, HttpContext ctx, [FromQuery] string? proxyPrefix) => { ctrl.HttpContext = ctx; return await ctrl.GetGitHubReleases(proxyPrefix); });
+            group_EasyTierController.MapPost("Engine/InstallGitHub", async ([FromServices] EasyTierController ctrl, HttpContext ctx, [FromBody] InstallGitHubReleaseRequest request) => { ctrl.HttpContext = ctx; return await ctrl.InstallGitHubRelease(request); });
         }
     }
 }

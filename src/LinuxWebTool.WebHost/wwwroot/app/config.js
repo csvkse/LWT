@@ -130,4 +130,16 @@ export const API = {
     tcpRoutes: '/Gateway/TcpRoutes',
     tcpRouteItem: (id) => `/Gateway/TcpRoutes/${id}`,
   },
+  easytier: {
+    nodes: '/EasyTier/Nodes',
+    nodeItem: (id) => `/EasyTier/Nodes/${id}`,
+    patchConfig: (id) => `/EasyTier/Nodes/${id}/Config`,
+    nodeStart: (id) => `/EasyTier/Nodes/${id}/Start`,
+    nodeStop: (id) => `/EasyTier/Nodes/${id}/Stop`,
+    engineStatus: '/EasyTier/Engine/Status',
+    engineUpgrade: '/EasyTier/Engine/Upgrade',
+    githubRelease: '/EasyTier/Engine/Releases',
+    installGitHub: '/EasyTier/Engine/InstallGitHub',
+  },
 };
+

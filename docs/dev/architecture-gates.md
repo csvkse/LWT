@@ -34,6 +34,7 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + wwwroot �
 | `LinuxArch015` | Minimal API GET 查询模型属性禁止使用非空值类型（必须为可空或引用类型，防止无参请求 400/500） | xUnit（反射契约检查） |
 | `LinuxArch016` | SQLite 实体按 Guid 查询支持大小写混合真实数据库验证 | xUnit（SQLite 动态集成测试） |
 | `LinuxArch017` | Minimal API 可选 `[FromBody]` 参数禁止直接声明为委托参数（须用 `ctx.Request.HasJsonContentType()` 动态解析，防止空 Body 或无 Content-Type 报 404） | xUnit（源码契约检查） |
+| `LinuxArch018` | Native AOT 环境下禁止调用无显式源生成上下文的 `JsonSerializer` / `WriteAsJsonAsync` / `ReadFromJsonAsync` 反射重载 | xUnit（源码 AST/语法检查） |
 | `FE-HTML-INLINE` | index.html 内联脚本（importmap 除外）/ 内联事件 | frontend-gate.cjs |
 | `FE-API-OWNERSHIP` | API 路径字符串出现在 config.js 之外 | frontend-gate.cjs |
 | `FE-NO-FETCH` | fetch() 出现在 api/client.js 之外 | frontend-gate.cjs |

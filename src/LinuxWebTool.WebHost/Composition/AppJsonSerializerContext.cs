@@ -192,6 +192,27 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(List<McpToolDefinition>))]
 [JsonSerializable(typeof(List<McpToolContent>))]
 
+// EasyTier Models
+[JsonSerializable(typeof(EasyTierNodeConfigDto))]
+[JsonSerializable(typeof(List<EasyTierNodeConfigDto>))]
+[JsonSerializable(typeof(CreateEasyTierNodeRequest))]
+[JsonSerializable(typeof(UpdateEasyTierNodeRequest))]
+[JsonSerializable(typeof(EasyTierNodeStatusDto))]
+[JsonSerializable(typeof(List<EasyTierNodeStatusDto>))]
+[JsonSerializable(typeof(EasyTierNodeDetailDto))]
+[JsonSerializable(typeof(EasyTierPeerDetailDto))]
+[JsonSerializable(typeof(List<EasyTierPeerDetailDto>))]
+[JsonSerializable(typeof(EasyTierRouteDetailDto))]
+[JsonSerializable(typeof(List<EasyTierRouteDetailDto>))]
+[JsonSerializable(typeof(EasyTierPatchRequestDto))]
+[JsonSerializable(typeof(EasyTierPatchResultDto))]
+[JsonSerializable(typeof(EasyTierEngineStatusDto))]
+[JsonSerializable(typeof(EasyTierUpgradeResultDto))]
+[JsonSerializable(typeof(EasyTierGitHubReleaseInfoDto))]
+[JsonSerializable(typeof(InstallGitHubReleaseRequest))]
+[JsonSerializable(typeof(EasyTierNodeEntity))]
+[JsonSerializable(typeof(List<EasyTierNodeEntity>))]
+
 public partial class AppJsonSerializerContext
  : JsonSerializerContext
 {

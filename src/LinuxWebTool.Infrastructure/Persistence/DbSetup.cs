@@ -348,6 +348,24 @@ CREATE TABLE IF NOT EXISTS gateway_tcp_route (
   IsEnabled INTEGER NOT NULL DEFAULT 1,
   UpdateTime TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS easytier_nodes (
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
+  InstanceName TEXT NOT NULL UNIQUE,
+  NetworkName TEXT NOT NULL,
+  NetworkSecret TEXT NOT NULL,
+  VirtualIpv4 TEXT,
+  EnableDhcp INTEGER NOT NULL DEFAULT 1,
+  ListenersJson TEXT NOT NULL DEFAULT '[]',
+  PeersJson TEXT NOT NULL DEFAULT '[]',
+  ProxyNetworksJson TEXT NOT NULL DEFAULT '[]',
+  RoutesJson TEXT NOT NULL DEFAULT '[]',
+  RawTomlOverride TEXT,
+  AutoStart INTEGER NOT NULL DEFAULT 1,
+  Status INTEGER NOT NULL DEFAULT 0,
+  LastError TEXT,
+  UpdateTime TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_easytier_instance_name ON easytier_nodes(InstanceName);
 ";
         cmd.ExecuteNonQuery();
     }
