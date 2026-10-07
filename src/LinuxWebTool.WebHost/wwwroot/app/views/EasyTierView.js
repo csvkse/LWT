@@ -20,13 +20,121 @@ export default defineComponent({
     const editNodeId = ref(null);
     const activeTab = ref('wizard'); // 'wizard' | 'toml'
 
+    const activeBasePort = ref(11010);
+    const activeWgPort = ref(11011);
+    const portIncrementInfo = ref('');
+
+    function extractPortsFromString(str) {
+      if (!str || typeof str !== 'string') return [];
+      const found = [];
+      const regex = /:(\d{2,5})\b/g;
+      let match;
+      while ((match = regex.exec(str)) !== null) {
+        const p = parseInt(match[1], 10);
+        if (p >= 1 && p <= 65535) {
+          found.push(p);
+        }
+      }
+      for (const line of str.split('\n')) {
+        const trimmed = line.trim();
+        if (/^\d{2,5}$/.test(trimmed)) {
+          const p = parseInt(trimmed, 10);
+          if (p >= 1 && p <= 65535) {
+            found.push(p);
+          }
+        }
+      }
+      return found;
+    }
+
+    function buildListenersText(basePort, wgPort, type = 'all_dual_stack') {
+      if (type === 'all_dual_stack') {
+        return [
+          `tcp://0.0.0.0:${basePort}`,
+          `udp://0.0.0.0:${basePort}`,
+          `wg://0.0.0.0:${wgPort}`,
+          `tcp://[::]:${basePort}`,
+          `udp://[::]:${basePort}`,
+          `wg://[::]:${wgPort}`,
+        ].join('\n');
+      }
+      if (type === 'all_ipv4') {
+        return [
+          `tcp://0.0.0.0:${basePort}`,
+          `udp://0.0.0.0:${basePort}`,
+          `wg://0.0.0.0:${wgPort}`,
+        ].join('\n');
+      }
+      if (type === 'udp_dual_stack') {
+        return [
+          `udp://0.0.0.0:${basePort}`,
+          `udp://[::]:${basePort}`,
+        ].join('\n');
+      }
+      if (type === 'tcp_udp_dual') {
+        return [
+          `tcp://0.0.0.0:${basePort}`,
+          `udp://0.0.0.0:${basePort}`,
+          `tcp://[::]:${basePort}`,
+          `udp://[::]:${basePort}`,
+        ].join('\n');
+      }
+      return '';
+    }
+
+    function computeNextNodePorts() {
+      let maxPort = 0;
+      for (const node of nodes.value || []) {
+        if (Array.isArray(node.listeners)) {
+          for (const lis of node.listeners) {
+            const ports = extractPortsFromString(lis);
+            for (const p of ports) {
+              if (p > maxPort) maxPort = p;
+            }
+          }
+        }
+        if (node.rawTomlOverride) {
+          const ports = extractPortsFromString(node.rawTomlOverride);
+          for (const p of ports) {
+            if (p > maxPort) maxPort = p;
+          }
+        }
+      }
+
+      if (maxPort <= 0) {
+        return { basePort: 11010, wgPort: 11011, isIncremented: false, maxFoundPort: null };
+      }
+
+      let nextBase = maxPort + 1;
+      if (nextBase > 65534) {
+        nextBase = 11010;
+      }
+      const nextWg = nextBase + 1;
+      return { basePort: nextBase, wgPort: nextWg, isIncremented: true, maxFoundPort: maxPort };
+    }
+
+    function getNodePortSummary(node) {
+      if (!node) return '';
+      const ports = [];
+      if (Array.isArray(node.listeners)) {
+        for (const l of node.listeners) {
+          ports.push(...extractPortsFromString(l));
+        }
+      }
+      const unique = [...new Set(ports)].sort((a, b) => a - b);
+      if (unique.length === 0) return '';
+      return unique.join(', ');
+    }
+
+    const DEFAULT_LISTENERS = buildListenersText(11010, 11011, 'all_dual_stack');
+
     const nodeForm = reactive({
       instanceName: '',
       networkName: 'default',
       networkSecret: '',
       virtualIpv4: '',
       enableDhcp: true,
-      listenersText: 'tcp://0.0.0.0:11010\nudp://0.0.0.0:11010',
+      listenersText: DEFAULT_LISTENERS,
       peersText: '',
       proxyNetworksText: '',
       routesText: '',
@@ -103,17 +211,59 @@ export default defineComponent({
       await Promise.all([loadNodes(), loadEngineStatus()]);
     }
 
-    function openCreateNode() {
+    const probingPort = ref(false);
+
+    async function probeAvailablePorts(preferredStartPort = null) {
+      probingPort.value = true;
+      try {
+        const start = preferredStartPort || activeBasePort.value || 11010;
+        const res = await http(API.easytier.availablePort, {
+          method: 'GET',
+          params: { startPort: start },
+        });
+        if (res.ok && res.data) {
+          const { basePort, wgPort, skippedOccupiedPorts, suggestedListeners } = res.data;
+          activeBasePort.value = basePort;
+          activeWgPort.value = wgPort;
+          if (Array.isArray(suggestedListeners) && suggestedListeners.length > 0) {
+            nodeForm.listenersText = suggestedListeners.join('\n');
+          } else {
+            nodeForm.listenersText = buildListenersText(basePort, wgPort, 'all_dual_stack');
+          }
+
+          if (Array.isArray(skippedOccupiedPorts) && skippedOccupiedPorts.length > 0) {
+            portIncrementInfo.value = `已自动规避被占用端口 (${skippedOccupiedPorts.join(', ')})，分配可用端口: ${basePort}/${wgPort}`;
+            toast.info(`⚡ 系统已自动规避被占用端口 (${skippedOccupiedPorts.join(', ')})，分配新端口: ${basePort}/${wgPort}`);
+          } else {
+            portIncrementInfo.value = `端口探测通过 (可用端口: ${basePort}/${wgPort})`;
+          }
+        }
+      } catch (err) {
+        console.warn('探测可用端口失败，沿用本地递增计算端口:', err);
+      } finally {
+        probingPort.value = false;
+      }
+    }
+
+    async function openCreateNode() {
       isEditNode.value = false;
       editNodeId.value = null;
       activeTab.value = 'wizard';
+
+      const { basePort, wgPort, isIncremented, maxFoundPort } = computeNextNodePorts();
+      activeBasePort.value = basePort;
+      activeWgPort.value = wgPort;
+      portIncrementInfo.value = isIncremented
+        ? `基于现有最大端口 (${maxFoundPort}) 自动递增: ${basePort}/${wgPort} (正在探测系统占用...)`
+        : '默认初始分配端口: 11010/11011 (正在探测系统占用...)';
+
       Object.assign(nodeForm, {
         instanceName: 'node_' + Math.floor(Math.random() * 1000),
         networkName: 'default',
         networkSecret: '',
         virtualIpv4: '',
         enableDhcp: true,
-        listenersText: 'tcp://0.0.0.0:11010\nudp://0.0.0.0:11010',
+        listenersText: buildListenersText(basePort, wgPort, 'all_dual_stack'),
         peersText: 'tcp://public.easytier.top:11010',
         proxyNetworksText: '',
         routesText: '',
@@ -121,17 +271,69 @@ export default defineComponent({
         autoStart: true,
       });
       showNodeModal.value = true;
+
+      await probeAvailablePorts(basePort);
+    }
+
+    function applyListenerPreset(type) {
+      if (type === 'none') {
+        nodeForm.listenersText = '';
+        toast.info('已切换为【纯客户端模式】（不监听本地端口）');
+        return;
+      }
+
+      const existingPorts = extractPortsFromString(nodeForm.listenersText);
+      let basePort = activeBasePort.value || 11010;
+      let wgPort = activeWgPort.value || (basePort + 1);
+      if (existingPorts.length > 0) {
+        basePort = existingPorts[0];
+        wgPort = existingPorts.length > 1 ? existingPorts[1] : (basePort + 1);
+      }
+
+      nodeForm.listenersText = buildListenersText(basePort, wgPort, type);
+      if (type === 'all_dual_stack') {
+        toast.info(`已应用【全协议双栈】预设 (TCP/UDP: ${basePort}, WG: ${wgPort})`);
+      } else if (type === 'all_ipv4') {
+        toast.info(`已应用【仅 IPv4 (TCP+UDP+WG)】预设 (端口: ${basePort}/${wgPort})`);
+      } else if (type === 'udp_dual_stack') {
+        toast.info(`已应用【双栈 UDP 纯打洞直连】预设 (端口: ${basePort})`);
+      } else if (type === 'tcp_udp_dual') {
+        toast.info(`已应用【双栈 TCP + UDP (无WG)】预设 (端口: ${basePort})`);
+      }
+    }
+
+    function applyPeerPreset(type) {
+      if (type === 'public_tcp') {
+        nodeForm.peersText = 'tcp://public.easytier.top:11010';
+        toast.info('已填入【官方公共 TCP 中继】');
+      } else if (type === 'public_udp') {
+        nodeForm.peersText = 'udp://public.easytier.top:11010';
+        toast.info('已填入【官方公共 UDP 中继】');
+      } else if (type === 'worker_wss') {
+        nodeForm.peersText = 'wss://your-domain.workers.dev/';
+        toast.info('已填入【Cloudflare Worker WSS 中继】示例');
+      }
     }
 
     async function openEditNode(node) {
       isEditNode.value = true;
       editNodeId.value = node.id;
       activeTab.value = 'wizard';
+      portIncrementInfo.value = '';
 
       const res = await http(API.easytier.nodeItem(node.id), { method: 'GET' });
       if (res.ok && res.data) {
         const detail = res.data;
         const cfg = detail.config;
+        const existingPorts = extractPortsFromString((cfg.listeners || []).join('\n'));
+        if (existingPorts.length > 0) {
+          activeBasePort.value = existingPorts[0];
+          activeWgPort.value = existingPorts.length > 1 ? existingPorts[1] : (existingPorts[0] + 1);
+        } else {
+          activeBasePort.value = 11010;
+          activeWgPort.value = 11011;
+        }
+
         Object.assign(nodeForm, {
           instanceName: cfg.instanceName,
           networkName: cfg.networkName,
@@ -377,9 +579,17 @@ export default defineComponent({
       viewNodeTopology,
       openHotPatch,
       submitHotPatch,
+      applyListenerPreset,
+      applyPeerPreset,
       handleFileChange,
       submitEngineUpgrade,
       formatBytes,
+      portIncrementInfo,
+      getNodePortSummary,
+      activeBasePort,
+      activeWgPort,
+      probingPort,
+      probeAvailablePorts,
     };
   },
   template: `
@@ -510,6 +720,9 @@ export default defineComponent({
                   </span>
                   <span>对端: <strong class="text-cyan-400">{{ node.peerCount }}</strong> 节点 (直连: {{ node.directPeerCount }})</span>
                   <span>流量: ↓{{ formatBytes(node.totalRxBytes) }} / ↑{{ formatBytes(node.totalTxBytes) }}</span>
+                  <span v-if="getNodePortSummary(node)">
+                    监听端口: <span class="font-mono text-cyan-300 font-semibold">{{ getNodePortSummary(node) }}</span>
+                  </span>
                 </div>
                 <div v-if="node.lastError" class="mt-2 text-xs text-rose-300 bg-rose-950/40 border border-rose-800/60 rounded px-2 py-1 flex items-center gap-1.5">
                   <span class="text-rose-400 font-bold">⚠️ 提示:</span>
@@ -747,25 +960,80 @@ export default defineComponent({
               </div>
 
               <div>
-                <label class="block text-slate-400 mb-1">对端节点地址列表 (Peers / 每行一个)</label>
+                <div class="flex items-center justify-between mb-1">
+                  <label class="text-slate-400">对端节点地址列表 (Peers / 每行一个)</label>
+                  <div class="flex items-center gap-1 flex-wrap">
+                    <span class="text-[10px] text-slate-500">快速填入:</span>
+                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      @click="applyPeerPreset('public_tcp')">
+                      官方 TCP
+                    </button>
+                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      @click="applyPeerPreset('public_udp')">
+                      官方 UDP
+                    </button>
+                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-indigo-950/40 text-indigo-300 border border-indigo-800/60 hover:bg-indigo-900/60"
+                      @click="applyPeerPreset('worker_wss')">
+                      Worker WSS
+                    </button>
+                  </div>
+                </div>
                 <textarea
                   v-model="nodeForm.peersText"
                   rows="2"
-                  class="input font-mono"
-                  placeholder="tcp://public.easytier.top:11010&#10;udp://123.45.67.89:11010"></textarea>
-                <span class="text-[11px] text-slate-500 mt-0.5 block">连接到公共根节点或自建异地节点即可全网自动发现并建立 P2P 穿透</span>
+                  class="input font-mono text-xs"
+                  placeholder="tcp://public.easytier.top:11010&#10;udp://public.easytier.top:11010&#10;wss://your-domain.workers.dev/"></textarea>
+                <span class="text-[11px] text-slate-500 mt-0.5 block">连接到公共根节点、自建节点或 Cloudflare Worker 即可全网自动发现并建立 P2P 穿透</span>
               </div>
 
               <div>
-                <label class="block text-slate-400 mb-1">
-                  本地监听端口 (Listeners / 支持端口号如 11020 或完整协议，留空则不开启监听)
-                </label>
+                <div class="flex items-center justify-between mb-1">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <label class="text-slate-400">本地监听端口 (Listeners / 全协议双栈)</label>
+                    <span v-if="portIncrementInfo" class="badge text-[10px] bg-emerald-950/60 text-emerald-300 border-emerald-700/50">
+                      ⚡ {{ portIncrementInfo }}
+                    </span>
+                  </div>
+                  <div class="flex items-center gap-1 flex-wrap">
+                    <button type="button" class="btn btn-xs py-0.5 px-2 text-[10px] bg-amber-950/40 text-amber-300 border border-amber-700/60 hover:bg-amber-900/60 flex items-center gap-1"
+                      :disabled="probingPort"
+                      title="向宿主机探测系统空闲端口，自动避开已被占用的端口"
+                      @click="probeAvailablePorts(activeBasePort)">
+                      <span v-if="probingPort" class="animate-spin text-[10px]">⌛</span>
+                      <span v-else>🔍</span>
+                      <span>{{ probingPort ? '探测中...' : '探测可用端口' }}</span>
+                    </button>
+                    <span class="text-[10px] text-slate-500">预设:</span>
+                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-emerald-950/50 text-emerald-300 border border-emerald-700/60 hover:bg-emerald-900/60"
+                      @click="applyListenerPreset('all_dual_stack')">
+                      🌟 全协议双栈
+                    </button>
+                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-sky-950/40 text-sky-300 border border-sky-800/60 hover:bg-sky-900/60"
+                      @click="applyListenerPreset('all_ipv4')">
+                      仅 IPv4
+                    </button>
+                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      @click="applyListenerPreset('udp_dual_stack')">
+                      UDP 双栈
+                    </button>
+                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      @click="applyListenerPreset('tcp_udp_dual')">
+                      TCP+UDP
+                    </button>
+                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-slate-800 text-slate-400 hover:bg-slate-700"
+                      @click="applyListenerPreset('none')">
+                      纯客户端(清空)
+                    </button>
+                  </div>
+                </div>
                 <textarea
                   v-model="nodeForm.listenersText"
-                  rows="2"
-                  class="input font-mono"
-                  placeholder="11020 或 tcp://0.0.0.0:11020&#10;留空则为纯客户端模式(不占用本地监听端口)"></textarea>
-                <span class="text-[11px] text-slate-500 mt-0.5 block">输入纯端口号自动开启 TCP/UDP 双监听；留空则不开启任何本地端口监听。</span>
+                  rows="4"
+                  class="input font-mono text-xs"
+                  placeholder="tcp://0.0.0.0:11010&#10;udp://0.0.0.0:11010&#10;wg://0.0.0.0:11011&#10;tcp://[::]:11010&#10;udp://[::]:11010&#10;wg://[::]:11011"></textarea>
+                <span class="text-[11px] text-slate-500 mt-0.5 block">
+                  💡 <strong>全栈互通优势</strong>：默认开启 <code>tcp</code>、<code>udp</code> 和 <code>wg</code> 的 IPv4 与 IPv6 ([::]) 全量监听。即使在复杂对称 NAT 下，只要双端支持 IPv6 即可直接点对点极速通信，<strong>完全脱离 Cloudflare Worker 中继流量</strong>。
+                </span>
               </div>
 
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -890,6 +1158,10 @@ export default defineComponent({
             <div class="flex justify-between items-center">
               <span class="text-slate-400">核心程序路径:</span>
               <span class="text-slate-400 font-mono truncate max-w-[300px]" :title="engineStatus?.nativeLibraryPath">{{ engineStatus?.nativeLibraryPath }}</span>
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-slate-400">持久化存储根目录:</span>
+              <span class="text-emerald-400/90 font-mono truncate max-w-[300px]" :title="engineStatus?.storageDirectory">{{ engineStatus?.storageDirectory }}</span>
             </div>
           </div>
 

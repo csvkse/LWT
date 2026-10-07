@@ -1,5 +1,3 @@
-using LinuxWebTool.Infrastructure.Persistence.Entities;
-using LinuxWebTool.Infrastructure.Transcode;
 using Xunit;
 
 namespace LinuxWebTool.ArchitectureTests;

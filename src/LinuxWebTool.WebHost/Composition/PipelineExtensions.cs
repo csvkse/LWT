@@ -1,11 +1,7 @@
-using LinuxWebTool.WebHost.Endpoints;
 using LinuxWebTool.WebHost.MinimalApi;
-using LinuxWebTool.Infrastructure.Support;
-using LinuxWebTool.WebHost.Middleware;
 using Microsoft.Extensions.FileProviders;
 using System.Diagnostics;
 using System.Reflection;
-using LinuxWebTool.Infrastructure.Persistence;
 
 namespace LinuxWebTool.WebHost.Composition;
 
@@ -30,7 +26,7 @@ public static class PipelineExtensions
                 // 健康检查必须返回可消费的 503，而不是抛出未处理异常。
             }
 
-            var response = new Routes.HealthResponse(
+            var response = new HealthResponse(
                 database ? "healthy" : "unhealthy",
                 Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "unknown",
                 Environment.Version.ToString(),
@@ -92,7 +88,7 @@ public static class PipelineExtensions
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.Response.ContentType = "application/json; charset=utf-8";
-            await context.Response.WriteAsJsonAsync(new LinuxWebTool.WebHost.Routes.MessageResponse("API endpoint not found"), AppJsonSerializerContext.Default.MessageResponse);
+            await context.Response.WriteAsJsonAsync(new MessageResponse("API endpoint not found"), AppJsonSerializerContext.Default.MessageResponse);
         });
 
         app.MapFallbackToFile("app/index.html");

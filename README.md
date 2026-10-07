@@ -18,15 +18,18 @@
 | **WebDAV 挂载** | 通过 rclone/FUSE 挂载 HTTPS WebDAV：配置管理、手动与启动自动挂载、远端与本地双重健康探测、故障恢复；写缓存保留在数据卷。需要 Linux、`/dev/fuse` 和挂载权限 |
 | **SFTP / S3 挂载** | 通过 rclone/FUSE 挂载 SFTP 目录、AWS S3 或 HTTPS S3 兼容存储；支持手动/自动挂载、直连远端与本地目录健康探测、故障恢复。SFTP 要求提供可信 SSH 主机公钥 |
 | **FFmpeg 转码** | 视频 / 音频格式处理：一次性文件或文件夹批量入队；转码预设（内置 MP4/H.265/MKV 重封装/MP3）+ 自定义 ffmpeg 参数；替换（先写临时文件成功后才删源）与并存两种输出模式；实时进度 / 速度 / 取消 / 重试；监听文件夹自动转码（网络盘轮询 / 本地盘文件事件两种方式）；桌面部署需安装 ffmpeg，Docker 镜像已内置 |
+| **EasyTier 虚拟组网** | 去中心化点对点虚拟局域网：基于 Rust 原生内核驱动，支持全互联拓扑、NAT 打洞直连、虚拟 IP、运行时零中断热打补丁；内置内核引擎热升级调度器（支持 GitHub 云端拉取与本地上传双模热重载），内核与节点配置全部收敛于持久化目录 |
+| **FRP 内网穿透** | 反向隧道（HTTP-over-WebSocket）：支持多线路反向穿透、302 自动重定向代理与内网代拉，安全穿透内网服务 |
+| **家庭智能网关** | 基于 YARP 的高性能反向代理：支持 L7 网站即席代理、白名单控制，以及 L4 TCP/UDP 端口转发 |
 | 执行历史 | 手动 / 定时 / 快速三类记录；状态筛选、关键字搜索、分页；失败详情（stdout/stderr/退出码/耗时） |
 | 日志 | 操作日志（DB，全行为审计）+ 程序日志（`logs/app-*.txt`）+ 调试日志（`logs/debug-*.txt`，网页 tail 查看） |
 | 门禁 | 单管理员登录签发 JWT（HS256，默认 12h）；登录失败 10 次锁 IP 5 分钟；全部 API 需认证 |
 
 ## 技术栈
 
-- **后端**：.NET 10 / ASP.NET Core Controller + SqlSugar(CodeFirst, SQLite) + Quartz.NET(内存调度) + JwtBearer
+- **后端**：.NET 10 / ASP.NET Core Minimal API（AutoControllers 源码生成，Native AOT 零反射）+ Dapper AOT (DDL SQLite) + Quartz.NET(调度) + JwtBearer + YARP 反向代理 + EasyTier 原生 C ABI / Core 守护进程双模引擎
 - **前端**：零构建 Vue3 ESM（本地 vendor 自托管）+ vue-router(hash) + Tailwind（本地 Play 脚本）——**内网零外网依赖**
-- **架构**：`Contracts(零依赖) → Infrastructure → WebHost(组合根+前端)`，xUnit 架构测试 + Node 前端门禁强制约束
+- **架构**：物理分层 `Contracts(零依赖) → Infrastructure → WebHost(组合根+前端)`，严格遵循功能垂直切片（Features）与基础设施适配（Adapters），128 项 xUnit 架构测试与门禁基线 + Node 前端门禁强制约束
 
 ## 目录结构
 
@@ -147,12 +150,18 @@ docker run -d --restart unless-stopped -p 5270:5270 -v linuxwebtool-data:/app/da
 # 已在运行的容器补加自启策略: docker update --restart unless-stopped linuxwebtool
 ```
 
-上面的基础命令只用于普通功能。要在容器内管理 **SMB、WebDAV、SFTP 或 S3 挂载**，请在 Linux Docker 宿主机上使用以下启动参数（rclone 挂载需宿主机支持 FUSE 并提供 `/dev/fuse`；SMB 不需要该设备）：
+上面的基础命令只用于普通功能。要在容器内使用 **EasyTier 虚拟组网** 或管理 **SMB、WebDAV、SFTP、S3 挂载**，请在 Linux Docker 宿主机上增加对应设备与权限（若同时需要多项，建议直接使用 `--privileged --user root`）：
 
 ```bash
-# 先确认宿主机存在 FUSE 设备
-ls -l /dev/fuse
+# 1. 运行 EasyTier 虚拟组网（必需 /dev/net/tun 设备与 NET_ADMIN 能力；持久化挂载确保内核与节点不丢）
+docker run -d --restart unless-stopped \
+  --name linuxwebtool \
+  -p 5270:5270 \
+  -v linuxwebtool-data:/app/data \
+  --cap-add=NET_ADMIN --device=/dev/net/tun \
+  ghcr.io/csvkse/lwt:latest
 
+# 2. 运行 SMB / WebDAV / SFTP / S3 挂载（WebDAV/SFTP/S3 需 /dev/fuse；仅 SMB 时可省略 --device）
 docker run -d --restart unless-stopped \
   --name linuxwebtool \
   -p 5270:5270 \
@@ -160,11 +169,17 @@ docker run -d --restart unless-stopped \
   --privileged --user root --device /dev/fuse \
   ghcr.io/csvkse/lwt:latest
 
-# 确认设备已透传，再在网页上配置并挂载 WebDAV / SFTP / S3
-docker exec linuxwebtool ls -l /dev/fuse
+# 3. 全能特权模式（同时启用 EasyTier 虚拟组网 + 磁盘挂载 + 宿主硬件控制）
+docker run -d --restart unless-stopped \
+  --name linuxwebtool \
+  -p 5270:5270 \
+  -v linuxwebtool-data:/app/data \
+  --privileged --user root \
+  --device=/dev/net/tun --device=/dev/fuse \
+  ghcr.io/csvkse/lwt:latest
 ```
 
-`--privileged` 权限较大，只在可信宿主机使用。若仅使用 SMB，保留 `--privileged --user root`，去掉 `--device /dev/fuse`。若使用本地尚未发布的挂载代码，先执行下方 `docker build -t linuxwebtool .`，再把镜像名改成 `linuxwebtool`。本机 `wslc` 不支持设备透传，不能用它验证 rclone 实际挂载。
+`--privileged` 权限较大，只在可信宿主机使用。若使用本地尚未发布的挂载或组网代码，先执行下方 `docker build -t linuxwebtool .`，再把镜像名改成 `linuxwebtool`。本机 `wslc` 不支持设备透传，不能用它验证 rclone 或 TUN 虚拟网卡实际工作。
 
 > 注：GHCR 包首次发布默认 private。拉取时先 `docker login ghcr.io`（用户名 GitHub 账号、密码为 PAT，需 `read:packages` 权限）；或将仓库 Packages 页中 lwt 的 visibility 改为 public 后免登录拉取。
 
@@ -178,12 +193,15 @@ services:
     ports:
       - "5270:5270"
     volumes:
-      - ./data:/app/data          # 单卷持久化：数据库+凭据+密钥+日志
-    # 使用 SMB/WebDAV/SFTP/S3 挂载时，取消以下配置的注释；仅 SMB 可省略 devices
-    # privileged: true
+      - ./data:/app/data          # 单卷持久化：数据库+凭据+密钥+日志+EasyTier内核与节点配置
+    # 启用 EasyTier 虚拟组网所需权限与设备（无需特权模式即可运行）
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+      # - /dev/fuse:/dev/fuse     # 若需 WebDAV/SFTP/S3 FUSE 挂载则取消注释
+    # privileged: true           # 若同时使用 SMB 挂载，建议取消注释并配置 user: root
     # user: root
-    # devices:
-    #   - /dev/fuse:/dev/fuse
     environment:
       - Admin__UserName=admin
       - Admin__Password=修改我     # 不设则自动生成，见容器日志
@@ -369,12 +387,29 @@ USB / GPU 直通的 compose 节选（叠加到上方任一示例的对应位置�
 
 ### 持久化与数据目录（三种方式通用）
 
-全部可持久化数据聚合在**数据目录 `data/`**（单文件夹备份即可）：`linuxweb.db`（SQLite）、`admin.json`（管理员凭据）、`jwt-secret.key`（签名密钥）、`logs/`（按天滚动日志）。位置可用 `Data__Directory` 环境变量修改（绝对路径或相对应用根的路径）。
+全部可持久化数据聚合在**数据根目录 `data/`**（Docker 容器内为 `/app/data`，单文件夹备份即可）：
+- `linuxweb.db`：SQLite 数据库（指令、执行历史、定时任务、EasyTier 节点元数据、FRP 穿透与网关配置）
+- `admin.json`：管理员凭据持久化（首次运行自动生成随机强密码）
+- `jwt.key`：JWT 身份签名密钥
+- `easytier/bin/`：**EasyTier 原生内核与工具**（`easytier-core`、`easytier-cli`、`libeasytier_ffi.so`/`easytier_ffi.dll`，在线下载升级或本地上传后永久保存在此）
+- `easytier/nodes/`：**EasyTier 节点运行时配置**（`<实例名称>.toml`，启动时从数据库加载并持久化生成）
+- `easytier/staging/`：在线升级包临时缓冲下载目录
+- `logs/`：系统按天滚动日志（`app-*.txt`）与调试日志（`debug-*.txt`）
+- `mount-creds/`、`rclone-config/`、`rclone-cache/`：网络挂载凭据与写入缓存
+
+> **单卷挂载优势**：无论通过 Docker 命名卷 `-v linuxwebtool-data:/app/data` 还是本地路径映射 `-v /opt/linuxwebtool/data:/app/data`，所有 EasyTier 核心文件、版本更新、节点网络规则和系统数据全部落在此卷内。容器销毁、重建或镜像升级（`docker pull`）时，**已安装的 EasyTier 内核与网络节点配置 100% 完整保留并自启**，无需重复下载或重新配置。
+>
+> 自定义路径：可通过配置 `Data:Directory` 或环境变量 `Data__Directory`（如 `Data__Directory=/var/lib/linuxwebtool`）自定义持久化绝对路径。
 
 管理员凭据优先级：`Admin__UserName`/`Admin__Password` 环境变量或 appsettings 显式配置 **>** `data/admin.json`（记录最后一次生效的凭据）**>** 首次启动随机生成（打印在启动日志）。网页右上角 ⚙ 可随时修改用户名 / 密码。
 
-### 挂载 / 转码的运行要求
+### 挂载 / 转码 / EasyTier 虚拟组网的运行要求
 
+- **EasyTier 虚拟组网**：基于 Rust 原生内核的去中心化全互联 P2P 虚拟局域网。
+  - **Linux 宿主 / Docker 容器**：创建 TUN 虚拟网卡需要 Root 用户或 `CAP_NET_ADMIN` 能力。在 Docker 下运行必须透传设备与权限：`--cap-add=NET_ADMIN --device=/dev/net/tun`（或 `--privileged --user root`）；宿主非 root 运行可执行 `sudo setcap cap_net_admin=+ep data/easytier/bin/easytier-core` 赋予网卡管理能力。
+  - **Windows 宿主机**：创建 TUN 虚拟网卡需要以管理员身份运行 WebHost（右键“以管理员身份运行”），否则虚拟网卡创建失败，DHCP 将无法分配虚拟 IP。
+  - **内核引擎管理与热升级**：Web 端提供【⚙️ 内核管理】界面，支持从 GitHub Releases 官方仓库一键云端自动拉取适配系统的内核包（内置 ghproxy 加速），或手动上传 `libeasytier_ffi.so` / `easytier_ffi.dll`。内核支持双模调度（C ABI Native FFI 高性能直调模式与 Core Binary 独立守护进程模式），更新时自动排空旧实例、解压到持久化 `bin/` 目录并平滑恢复所有网络节点。
+  - **P2P 真直连与流量卸载（UDP 监听预设）**：为获得最佳 P2P 穿透效果并卸载中继/Cloudflare Worker 流量，推荐开启本地 UDP 监听端口（UI 提供一键预设：如 `udp://0.0.0.0:11010` 或 IPv4+IPv6 双栈 `udp://0.0.0.0:11010` + `udp://[::]:11010`）。只要路由器开启 UPnP、Full Cone NAT 或具备原生 IPv6，两端节点通过中继完成握手后，所有虚拟内网数据传输将自动切换为点对点 UDP 直连（P2P），流量完全不消耗中继服务器。Docker 部署若需外部节点直连本节点，可映射对应 UDP 端口（如 `-p 11010:11010/udp`）或采用 host 网络模式。
 - **SMB 挂载**：仅 Linux 生效。Docker 部署需在以 `--privileged --user root` 运行时挂载（特权不足会返回 EPERM，UI 有明确提示）；镜像已内置 `cifs-utils`。挂载点需在容器内可访问（`/mnt/*`），凭据写入 `data/mount-creds/<id>`（600 权限），密码不经命令行。
 - **WebDAV 挂载**：仅 Linux 生效。镜像包含 `rclone` 和 `fuse3`；容器需提供 `/dev/fuse` 及挂载权限，例如可信环境下使用 `--privileged --device=/dev/fuse --user root`。仅接受 HTTPS WebDAV URL。配置写入数据卷中的 `webdav-config`（600 权限），写入缓存保存在 `webdav-cache`；卸载前请确认文件已上传。WebDAV 服务端不提供容量时，系统状态页不显示估算容量。容器内创建的挂载默认只在本容器可见；要供宿主机或其他容器访问，还需配置并验证 Linux 绑定挂载传播。
 - **SFTP / S3 挂载**：同样需要 `rclone`、`/dev/fuse` 和挂载权限。SFTP 需要用户名及密码或容器内私钥文件，并须填入从可信渠道获得的完整 SSH 主机公钥；S3 支持 AWS 区域或自定义 HTTPS 端点、存储桶及访问密钥。两者共用 `data/rclone-config`（凭据文件 600 权限）和 `data/rclone-cache`（写缓存），卸载前请确认待上传文件已同步。健康检查每 30 秒直接读取远端目录，并检查本地挂载目录；连续三次本地失败且远端正常时尝试正常卸载重挂。详见 [SFTP/S3 配置说明](docs/rclone-sftp-s3.md)。

@@ -1,8 +1,6 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
-using LinuxWebTool.Infrastructure.Persistence.Entities;
-using LinuxWebTool.Infrastructure.Tunnel;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 

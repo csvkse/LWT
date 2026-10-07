@@ -1,7 +1,5 @@
 using System.Text;
 using System.Threading.Channels;
-using LinuxWebTool.Contracts.Terminal;
-using LinuxWebTool.Infrastructure.Terminal;
 using Microsoft.Extensions.Configuration;
 using Xunit;
 

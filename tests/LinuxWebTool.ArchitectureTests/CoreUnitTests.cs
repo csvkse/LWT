@@ -1,8 +1,3 @@
-using LinuxWebTool.Contracts.Models;
-using LinuxWebTool.Infrastructure.Security;
-using LinuxWebTool.Infrastructure.Support;
-using LinuxWebTool.Infrastructure.Logging;
-using LinuxWebTool.Infrastructure.Shell;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
@@ -78,8 +73,8 @@ public sealed class CoreUnitTests
     [Fact]
     public async Task Pty_engine_starts_and_reads_session()
     {
-        var engine = new LinuxWebTool.Infrastructure.Terminal.CrossPlatformPtyEngine();
-        var session = await engine.StartSessionAsync(new LinuxWebTool.Contracts.Terminal.PtyStartOptions());
+        var engine = new LinuxWebTool.Infrastructure.Features.Terminal.Platform.CrossPlatformPtyEngine();
+        var session = await engine.StartSessionAsync(new PtyStartOptions());
         Assert.NotNull(session);
         Assert.False(session.HasExited);
 

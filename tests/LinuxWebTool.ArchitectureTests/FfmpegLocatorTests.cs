@@ -1,5 +1,3 @@
-using LinuxWebTool.Contracts.Models;
-using LinuxWebTool.Infrastructure.Transcode;
 using Xunit;
 
 namespace LinuxWebTool.ArchitectureTests;

@@ -1,7 +1,6 @@
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
-using LinuxWebTool.WebHost.Routes;
 using LinuxWebTool.WebHost.Composition;
 
 namespace LinuxWebTool.WebHost.MinimalApi;
@@ -20,7 +19,7 @@ public abstract class ControllerBase
     protected IResult NotFound(object? value) => Results.NotFound(value);
     protected IResult StatusCode(int statusCode) => Results.StatusCode(statusCode);
     protected IResult StatusCode(int statusCode, MessageResponse value) => new MessageJsonResult(value, statusCode);
-    protected IResult StatusCode(int statusCode, LinuxWebTool.Contracts.Models.MountTaskInfo value) =>
+    protected IResult StatusCode(int statusCode, MountTaskInfo value) =>
         Results.Json(value, statusCode: statusCode);
     protected IResult File(byte[] fileContents, string contentType, string? fileDownloadName = null) => Results.File(fileContents, contentType, fileDownloadName);
     protected IResult File(Stream fileStream, string contentType, string? fileDownloadName = null) => Results.File(fileStream, contentType, fileDownloadName);

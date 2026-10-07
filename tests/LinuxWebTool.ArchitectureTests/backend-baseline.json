@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "project": "LinuxWebTool",
+  "lastAudited": "2026-10-07",
+  "description": "后端架构门禁精确技术债务基线登记表。基线只降不增；债务修复后必须同步删除条目，否则门禁将作为失效基线报错失败。",
+  "entries": []
+}

@@ -1,0 +1,119 @@
+schemaVersion: 1
+
+project:
+  id: LinuxWebTool
+  repositoryName: WebToolForLinux
+  bindingVersion: 1.0.0
+  status: implemented
+  targetDesignVersion: v2.5-modular
+
+architecture:
+  core: lightweight-modular-backend@1.2.0
+  physicalMappingStatus: implemented
+  projectOverridesDocument: README.md
+
+selectedProfiles:
+  hosts:
+    - aspnet-web-api@1.0.0
+  runtime:
+    - native-aot@1.0.0
+
+governance:
+  gates: 1.1.0
+  targetGateStatus: enforced
+  executionEvidenceStatus: audited-baseline
+
+documents:
+  overview: README.md
+  architecture: architecture-optimization-plan.md
+  gates: gates-and-baseline-governance.md
+  feasibilityAndPreview: feasibility-and-preview-plan.md
+
+approvedProductionProjects:
+  - id: LinuxWebTool.Contracts
+    role: Contracts
+    description: 跨层公开业务契约、技术抽象接口与纯数据模型（纯 BCL，零外部依赖）
+    sourceScope: src/LinuxWebTool.Contracts
+  - id: LinuxWebTool.Application
+    role: Features/Application
+    description: 垂直业务用例编排、领域行为与跨模块契约协作（无技术副作用，AOT 兼容）
+    sourceScope: src/LinuxWebTool.Application
+  - id: LinuxWebTool.Infrastructure
+    role: Infrastructure
+    description: 纯技术基础设施适配器（Dapper.AOT、SQLite DDL、OS P/Invoke、YARP、Shell、PTY 驱动）
+    sourceScope: src/LinuxWebTool.Infrastructure
+  - id: LinuxWebTool.WebHost
+    role: Host/Composition
+    description: 进程入口、Minimal API 路由、MCP 协议分发端点、DI 组合根与嵌入式前端托管
+    sourceScope: src/LinuxWebTool.WebHost
+
+approvedDirectReferenceEdges:
+  - from: LinuxWebTool.Infrastructure
+    to: LinuxWebTool.Contracts
+    reason: 基础设施实现公开契约与技术端口
+  - from: LinuxWebTool.Application
+    to: LinuxWebTool.Contracts
+    reason: 业务用例消费跨功能契约与定义内部端口
+  - from: LinuxWebTool.WebHost
+    to: LinuxWebTool.Contracts
+    reason: 路由与控制层绑定输入输出 DTO（显式直接引用，杜绝隐式传递）
+  - from: LinuxWebTool.WebHost
+    to: LinuxWebTool.Application
+    reason: Minimal API 路由与 MCP 端点调用业务用例服务
+  - from: LinuxWebTool.WebHost
+    to: LinuxWebTool.Infrastructure
+    reason: 组合根（Composition Root）在 Program 启动阶段完成具体技术实现注入
+
+featureModules:
+  - name: Commands
+    owner: Shell / Batch Execution
+  - name: Schedule
+    owner: Quartz Scheduled Tasks
+  - name: SystemStatus
+    owner: Hardware / OS Metric Probes
+  - name: Files
+    owner: Local File Management & Browsing
+  - name: Terminal
+    owner: Cross-Platform PTY & Interactive Shell
+  - name: Transcode
+    owner: FFmpeg Queue, Watcher & Pipeline
+  - name: Mount
+    owner: Storage Mounts (SMB, WebDAV, Rclone/SFTP/S3)
+  - name: Tunnel
+    owner: FRP WebSocket Reverse Tunnel
+  - name: Gateway
+    owner: YARP L7 Proxy & L4 Forwarder
+  - name: EasyTier
+    owner: P2P Mesh VPN Network Manager
+  - name: Security
+    owner: JWT Credentials & APIKey Permission Matrix
+  - name: Mcp
+    owner: Model Context Protocol Tool Server
+  - name: Logging
+    owner: Operation Logs & File Log Retention
+
+gateEvidenceMatrix:
+  - layer: L0
+    focus: 物理所有权与文件归属
+    engine: .NET 架构测试 / 路径比对
+    status: planned
+  - layer: L1
+    focus: 项目依赖拓扑与无环检测
+    engine: .NET 架构测试 / Assembly 图
+    status: planned
+  - layer: L2
+    focus: Roslyn 语义边界与跨 Feature 隔离
+    engine: Roslyn Semantic Analysis / C# 源码门禁
+    status: planned
+  - layer: L3
+    focus: Native AOT 序列化与 SQLite NOCASE 约束
+    engine: Roslyn AST + SourceGen 验证
+    status: enforced-existing-subset
+  - layer: L4
+    focus: Minimal API 契约与 HTTP 行为一致性
+    engine: xUnit 集成测试 (TestHost)
+    status: enforced-existing-subset
+  - layer: L5
+    focus: Native AOT 真实构建发布与启动 Smoke
+    engine: Docker Linux 容器构建与冒烟脚本
+    status: enforced-existing-subset

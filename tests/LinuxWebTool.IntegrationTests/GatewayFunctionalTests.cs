@@ -1,6 +1,5 @@
 using System.Net;
 using System.Text.Json;
-using LinuxWebTool.Contracts.Models;
 using LinuxWebTool.IntegrationTests.Support;
 using LinuxWebTool.WebHost.Composition;
 using Xunit;

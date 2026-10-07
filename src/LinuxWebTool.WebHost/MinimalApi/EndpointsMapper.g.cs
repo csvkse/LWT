@@ -4,22 +4,20 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
-using LinuxWebTool.WebHost.Routes;
-using LinuxWebTool.Contracts.Models;
 using System;
 using System.Threading.Tasks;
 
-using static LinuxWebTool.WebHost.Routes.AuthController;
-using static LinuxWebTool.WebHost.Routes.CommandsController;
-using static LinuxWebTool.WebHost.Routes.FilesController;
-using static LinuxWebTool.WebHost.Routes.GroupsController;
-using static LinuxWebTool.WebHost.Routes.HistoryController;
-using static LinuxWebTool.WebHost.Routes.LogsController;
-using static LinuxWebTool.WebHost.Routes.OverviewController;
-using static LinuxWebTool.WebHost.Routes.SchedulesController;
-using static LinuxWebTool.WebHost.Routes.SmbMountsController;
-using static LinuxWebTool.WebHost.Routes.SystemStatusController;
-using static LinuxWebTool.WebHost.Routes.TranscodeController;
+using static LinuxWebTool.WebHost.Features.Auth.Routes.AuthController;
+using static LinuxWebTool.WebHost.Features.Commands.Routes.CommandsController;
+using static LinuxWebTool.WebHost.Features.Files.Routes.FilesController;
+using static LinuxWebTool.WebHost.Features.Commands.Routes.GroupsController;
+using static LinuxWebTool.WebHost.Features.Commands.Routes.HistoryController;
+using static LinuxWebTool.WebHost.Features.Logging.Routes.LogsController;
+using static LinuxWebTool.WebHost.Features.SystemStatus.Routes.OverviewController;
+using static LinuxWebTool.WebHost.Features.Schedule.Routes.SchedulesController;
+using static LinuxWebTool.WebHost.Features.Mount.Routes.SmbMountsController;
+using static LinuxWebTool.WebHost.Features.SystemStatus.Routes.SystemStatusController;
+using static LinuxWebTool.WebHost.Features.Transcode.Routes.TranscodeController;
 
 namespace LinuxWebTool.WebHost.MinimalApi
 {
@@ -201,9 +199,9 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_TerminalController.MapGet("Support", ([FromServices] TerminalController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.Support(); });
             group_TerminalController.MapGet("Sessions", ([FromServices] TerminalController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.ListSessions(); });
             group_TerminalController.MapGet("Sessions/{sessionId}", ([FromServices] TerminalController ctrl, HttpContext ctx, string sessionId) => { ctrl.HttpContext = ctx; return ctrl.SessionDetails(sessionId); });
-            group_TerminalController.MapPatch("Sessions/{sessionId}", ([FromServices] TerminalController ctrl, HttpContext ctx, string sessionId, [FromBody] LinuxWebTool.Contracts.Terminal.TerminalSessionUpdateRequest request) => { ctrl.HttpContext = ctx; return ctrl.UpdateSession(sessionId, request); });
+            group_TerminalController.MapPatch("Sessions/{sessionId}", ([FromServices] TerminalController ctrl, HttpContext ctx, string sessionId, [FromBody] LinuxWebTool.Contracts.Features.Terminal.Contracts.TerminalSessionUpdateRequest request) => { ctrl.HttpContext = ctx; return ctrl.UpdateSession(sessionId, request); });
             group_TerminalController.MapPost("Sessions/{sessionId}/Attachment", ([FromServices] TerminalController ctrl, HttpContext ctx, string sessionId) => { ctrl.HttpContext = ctx; return ctrl.AttachmentTicket(sessionId); });
-            group_TerminalController.MapPost("Sessions", async ([FromServices] TerminalController ctrl, HttpContext ctx, [FromBody] LinuxWebTool.Contracts.Terminal.TerminalSessionCreateRequest request) => { ctrl.HttpContext = ctx; return await ctrl.CreateSession(request); });
+            group_TerminalController.MapPost("Sessions", async ([FromServices] TerminalController ctrl, HttpContext ctx, [FromBody] LinuxWebTool.Contracts.Features.Terminal.Contracts.TerminalSessionCreateRequest request) => { ctrl.HttpContext = ctx; return await ctrl.CreateSession(request); });
             group_TerminalController.MapDelete("Sessions/{sessionId}", async ([FromServices] TerminalController ctrl, HttpContext ctx, string sessionId) => { ctrl.HttpContext = ctx; return await ctrl.CloseSession(sessionId); });
 
             var group_ApiKeysController = app.MapGroup("/api/ApiKeys");
@@ -253,6 +251,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             var group_EasyTierController = app.MapGroup("/api/EasyTier");
             group_EasyTierController.RequireAuthorization();
             group_EasyTierController.MapGet("Nodes", async ([FromServices] EasyTierController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.GetNodes(); });
+            group_EasyTierController.MapGet("AvailablePort", async ([FromServices] EasyTierController ctrl, HttpContext ctx, [FromQuery] int? startPort) => { ctrl.HttpContext = ctx; return await ctrl.GetAvailablePort(startPort); });
             group_EasyTierController.MapGet("Nodes/{id}", async ([FromServices] EasyTierController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; return await ctrl.GetNodeDetail(id); });
             group_EasyTierController.MapPost("Nodes", async ([FromServices] EasyTierController ctrl, HttpContext ctx, [FromBody] CreateEasyTierNodeRequest request) => { ctrl.HttpContext = ctx; return await ctrl.CreateNode(request); });
             group_EasyTierController.MapPut("Nodes/{id}", async ([FromServices] EasyTierController ctrl, HttpContext ctx, string id, [FromBody] UpdateEasyTierNodeRequest request) => { ctrl.HttpContext = ctx; return await ctrl.UpdateNode(id, request); });

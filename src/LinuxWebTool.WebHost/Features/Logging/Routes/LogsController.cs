@@ -1,0 +1,35 @@
+namespace LinuxWebTool.WebHost.Features.Logging.Routes;
+
+/// <summary>日志查看：操作日志（DB）与程序/调试日志文件（tail）。</summary>
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class LogsController(OperationLogStore operationLogStore, LogFileService logFileService) : MinimalApi.ControllerBase
+{
+    /// <summary>操作日志分页查询。</summary>
+    [HttpGet("Operations")]
+    public async Task<IResult> Operations([FromQuery] OperationLogQuery query)
+    {
+        var result = await operationLogStore.QueryAsync(query);
+        return Ok(result);
+    }
+
+    /// <summary>日志文件列表（app-* 程序日志、debug-* 调试日志）。</summary>
+    [HttpGet("Files")]
+    public IResult Files()
+    {
+        return Ok(logFileService.List().Select(x => new LogFileItemResponse(x.Name, x.LengthBytes, x.LastWriteTime)).ToList());
+    }
+
+    /// <summary>查看日志文件末尾 N 行（默认 300）。</summary>
+    [HttpGet("Files/{name}")]
+    public IResult FileContent(string name, [FromQuery] int tail = 300)
+    {
+        var content = logFileService.ReadTail(name, tail);
+        if (content is null)
+        {
+            return NotFound(new MessageResponse("日志文件不存在或文件名非法"));
+        }
+        return Ok(new LogContentResponse(name, tail, content));
+    }
+}
