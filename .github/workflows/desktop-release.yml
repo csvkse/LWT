@@ -122,40 +122,86 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout repository with full history
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Generate Release Body with Collapsible Changelog
+        shell: bash
+        run: |
+          CURRENT_TAG="${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}"
+          echo "Target tag: $CURRENT_TAG"
+
+          # 1. 提取 Tag 说明文字（若为附注标签）
+          TAG_SUBJECT=$(git tag -l --format='%(contents:subject)' "$CURRENT_TAG" 2>/dev/null || echo "")
+
+          # 2. 定位上一个 Tag
+          PREV_TAG=$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || echo "")
+          echo "Previous tag: $PREV_TAG"
+
+          # 3. 提取两版本间的 Commit 记录（排除 merge commits）
+          if [ -n "$PREV_TAG" ]; then
+            COMMITS=$(git log "${PREV_TAG}..${CURRENT_TAG}" --pretty=format:"- %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" --no-merges 2>/dev/null || echo "")
+            CHANGELOG_TITLE="📋 点击展开查看版本更新日志 (Changelog: \`${PREV_TAG}\` → \`${CURRENT_TAG}\`)"
+          else
+            COMMITS=$(git log "${CURRENT_TAG}" -n 25 --pretty=format:"- %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" --no-merges 2>/dev/null || echo "")
+            CHANGELOG_TITLE="📋 点击展开查看版本更新日志 (Changelog: \`${CURRENT_TAG}\`)"
+          fi
+
+          if [ -z "$COMMITS" ]; then
+            COMMITS="- 本次发布暂无独立提交差异或为首发版本。"
+          fi
+
+          # 4. 生成 release_body.md
+          {
+            echo "🎉 **LinuxWebTool 桌面端（自包含）发布 - ${CURRENT_TAG}**"
+            echo ""
+            if [ -n "$TAG_SUBJECT" ]; then
+              echo "> **版本要点**：${TAG_SUBJECT}"
+              echo ""
+            fi
+            echo "<details>"
+            echo "<summary><b>${CHANGELOG_TITLE}</b></summary>"
+            echo "<br/>"
+            echo ""
+            printf '%s\n' "$COMMITS"
+            echo ""
+            echo "</details>"
+            echo ""
+            cat << 'STATIC_EOF'
+各平台压缩包为**自包含发布**，目标机**无需安装 .NET 运行时**，解压即可运行。
+
+### 📦 下载与运行
+
+* **🐧 Linux x64 / ARM64**：
+    * 下载 `linuxwebtool-linux-*.tar.gz`，解压后执行 `./start.sh`（或 `./LinuxWebTool.WebHost`）。
+    * 系统服务：使用包内 `linuxwebtool.service` 注册 systemd。
+* **🪟 Windows x64**：
+    * 下载 `linuxwebtool-win-x64.zip`，解压后双击 `start.bat`（或 `LinuxWebTool.WebHost.exe`）。
+
+### 🔑 首次启动
+
+* 管理员口令自动生成：见程序日志，或 `data/admin.json`；
+* 也可用环境变量注入：`Admin__UserName` / `Admin__Password`。
+
+### ⚠️ 安全提示
+
+本工具可在网页上远程执行 shell，请仅部署于内网/本机，勿暴露公网。
+STATIC_EOF
+          } > release_body.md
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
           files: artifacts/**/*
-          generate_release_notes: true
-          body: |
-            🎉 **LinuxWebTool 桌面端（自包含）发布**
-
-            各平台压缩包为**自包含发布**，目标机**无需安装 .NET 运行时**，解压即可运行。
-
-            ### 📦 下载与运行
-
-            * **🐧 Linux x64 / ARM64**：
-                * 下载 `linuxwebtool-linux-*.tar.gz`，解压后执行 `./start.sh`（或 `./LinuxWebTool.WebHost`）。
-                * 系统服务：使用包内 `linuxwebtool.service` 注册 systemd。
-            * **🪟 Windows x64**：
-                * 下载 `linuxwebtool-win-x64.zip`，解压后双击 `start.bat`（或 `LinuxWebTool.WebHost.exe`）。
-
-            ### 🔑 首次启动
-
-            * 管理员口令自动生成：见程序日志，或 `data/admin.json`；
-            * 也可用环境变量注入：`Admin__UserName` / `Admin__Password`。
-
-            ### ⚠️ 安全提示
-
-            本工具可在网页上远程执行 shell，请仅部署于内网/本机，勿暴露公网。
-
-            ---
-            *💡 详细代码更新日志见下方自动生成的 Release Notes 👇*
+          body_path: release_body.md
+          generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
