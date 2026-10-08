@@ -9,7 +9,7 @@ public static class TerminalEndpoints
 {
     public static IEndpointRouteBuilder MapTerminalEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/terminal/ws/{sessionId}", async (string sessionId, HttpContext context, IPtySessionManager pty, JwtIssuer jwtIssuer) =>
+        app.MapGet("/api/terminal/ws/{sessionId}", async (string sessionId, HttpContext context, IPtySessionManager pty, JwtIssuer jwtIssuer, AdminCredentialService adminCred) =>
         {
             if (!context.WebSockets.IsWebSocketRequest)
             {
@@ -17,7 +17,7 @@ public static class TerminalEndpoints
                 return;
             }
 
-            // WebSocket 握手鉴权：优先检查已认证的用户，其次检查 Query Token
+            // WebSocket 握手鉴权：优先检查已认证的用户，其次检查一次性 Ticket，最后检查 Query Token
             var isAuthenticated = context.User?.Identity?.IsAuthenticated == true;
             var ticket = context.Request.Query["ticket"].ToString();
             if (!string.IsNullOrEmpty(ticket)) isAuthenticated = pty.ConsumeAttachmentTicket(sessionId, ticket);
@@ -28,9 +28,15 @@ public static class TerminalEndpoints
                 {
                     try
                     {
-                        var handler = new JsonWebTokenHandler();
-                        var result = await handler.ValidateTokenAsync(tokenQuery, jwtIssuer.BuildValidationParameters()).ConfigureAwait(false);
-                        isAuthenticated = result.IsValid;
+                        var result = await JwtIssuer.TokenHandler.ValidateTokenAsync(tokenQuery, jwtIssuer.BuildValidationParameters()).ConfigureAwait(false);
+                        if (result.IsValid && result.ClaimsIdentity is not null)
+                        {
+                            var userName = result.ClaimsIdentity.FindFirst("sub")?.Value;
+                            var stamp = result.ClaimsIdentity.FindFirst("stamp")?.Value;
+                            isAuthenticated = !string.IsNullOrEmpty(userName)
+                                && string.Equals(userName, adminCred.Account.UserName, StringComparison.Ordinal)
+                                && adminCred.ValidateSecurityStamp(stamp);
+                        }
                     }
                     catch
                     {

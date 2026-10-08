@@ -51,7 +51,14 @@ public class ApiKeyService(ApiKeyStore store, ILogger<ApiKeyService> logger)
     {
         if (string.IsNullOrWhiteSpace(rawKey)) return null;
 
-        var keyHash = ComputeHash(rawKey.Trim());
+        var trimmed = rawKey.Trim();
+        // 快速格式预检：必须以 lwt_live_ 开头且总长度为 41 字符（9 前缀 + 32 十六进制），非法格式直接拒绝，防范哈希计算消耗与数据库穿透
+        if (trimmed.Length != 41 || !trimmed.StartsWith(KeyPrefixTag, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var keyHash = ComputeHash(trimmed);
 
         if (!_cache.TryGetValue(keyHash, out var entity))
         {

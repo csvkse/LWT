@@ -76,6 +76,7 @@ public static class PipelineExtensions
         app.UseAuthentication();
         app.UseMiddleware<ApiKeyMiddleware>();
         app.UseAuthorization();
+        app.UseMiddleware<JwtRenewalMiddleware>();
         app.UseAntiforgery();
         app.MapAutoControllers();
         app.MapTerminalEndpoints();

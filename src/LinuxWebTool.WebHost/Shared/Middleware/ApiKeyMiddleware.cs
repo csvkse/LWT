@@ -96,7 +96,7 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
         }
 
         // 7. 模块权限检查 (Module Scope Checking)
-        if (isApi && !CheckModulePermission(path, entity))
+        if (isApi && !CheckModulePermission(context, path, entity))
         {
             logger.LogWarning("API Key '{Name}' 无权访问模块: {Path}", entity.Name, path);
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -123,27 +123,32 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
         keyService.TouchLastUsed(entity.Id);
     }
 
-    private static bool CheckModulePermission(string path, ApiKeyEntity entity)
+    private static bool CheckModulePermission(HttpContext context, string path, ApiKeyEntity entity)
     {
-        // 管理类专属接口严禁普通 API Key 访问（需管理员会话）
-        if (path.StartsWith("/api/Auth/ChangeCredential", StringComparison.OrdinalIgnoreCase) ||
+        // 1. 系统管理类专属接口：严禁普通 API Key 访问（需管理员会话）
+        if (path.StartsWith("/api/Auth", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/api/ApiKeys", StringComparison.OrdinalIgnoreCase) ||
-            path.StartsWith("/api/FrpTunnel", StringComparison.OrdinalIgnoreCase))
+            path.StartsWith("/api/FrpTunnel", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/api/EasyTier", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
+        // 2. 指令与终端模块
         if (path.StartsWith("/api/Commands", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/api/Groups", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/api/Terminal", StringComparison.OrdinalIgnoreCase))
         {
             return entity.AllowTerminal;
         }
 
+        // 3. 定时调度模块
         if (path.StartsWith("/api/Schedules", StringComparison.OrdinalIgnoreCase))
         {
             return entity.AllowSchedules;
         }
 
+        // 4. 文件与挂载模块
         if (path.StartsWith("/api/Files", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/api/SmbMounts", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/api/WebDavMounts", StringComparison.OrdinalIgnoreCase) ||
@@ -153,18 +158,36 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
             return entity.AllowFiles;
         }
 
+        // 5. 媒体转码模块
         if (path.StartsWith("/api/Transcode", StringComparison.OrdinalIgnoreCase))
         {
             return entity.AllowTranscode;
         }
 
+        // 6. 智能网关模块
         if (path.StartsWith("/api/Gateway", StringComparison.OrdinalIgnoreCase))
         {
             return entity.AllowGateway;
         }
 
-        // 默认如 Overview、SystemStatus、History、Logs 等查询接口只要拥有 Api 权限即可
-        return true;
+        // 7. 审计历史清空操作（DELETE /api/History）严禁 API Key 调用
+        if (path.StartsWith("/api/History", StringComparison.OrdinalIgnoreCase) &&
+            HttpMethods.IsDelete(context.Request.Method))
+        {
+            return false;
+        }
+
+        // 8. 监控与只读端点（Overview / SystemStatus / History GET / Logs GET）允许拥有基础 Api 权限的 Key 访问
+        if (path.StartsWith("/api/Overview", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/api/SystemStatus", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/api/History", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/api/Logs", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // 默认拒绝未知未分类路由，杜绝未来新增控制器产生权限漏洞
+        return false;
     }
 
     private static string? ExtractKey(HttpContext context)

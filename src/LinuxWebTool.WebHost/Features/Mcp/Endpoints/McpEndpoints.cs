@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Threading.Channels;
 using LinuxWebTool.WebHost.Composition;
 namespace LinuxWebTool.WebHost.Features.Mcp.Endpoints;
 
@@ -31,23 +32,17 @@ public static class McpEndpoints
 
             try
             {
-                // 维持 SSE 下行推送管道
-                while (!context.RequestAborted.IsCancellationRequested)
+                // 维持 SSE 下行推送管道（基于 Channels 异步监听，消除忙轮询 Task.Delay 与 CPU 空转）
+                await foreach (var msgJson in session.Channel.Reader.ReadAllAsync(context.RequestAborted))
                 {
-                    if (session.OutgoingMessages.TryDequeue(out var msgJson))
-                    {
-                        await context.Response.WriteAsync($"event: message\r\ndata: {msgJson}\r\n\r\n", context.RequestAborted);
-                        await context.Response.Body.FlushAsync(context.RequestAborted);
-                    }
-                    else
-                    {
-                        await Task.Delay(100, context.RequestAborted);
-                    }
+                    await context.Response.WriteAsync($"event: message\r\ndata: {msgJson}\r\n\r\n", context.RequestAborted);
+                    await context.Response.Body.FlushAsync(context.RequestAborted);
                 }
             }
             catch (OperationCanceledException) { }
             finally
             {
+                session.Channel.Writer.TryComplete();
                 Sessions.TryRemove(sessionId, out _);
             }
         });
@@ -76,8 +71,8 @@ public static class McpEndpoints
             var rpcResp = await engine.HandleRequestAsync(rpcReq, session.ApiKey, context);
             var respJson = JsonSerializer.Serialize(rpcResp, AppJsonSerializerContext.Default.Options);
 
-            // 将响应推送到该 session 的下行 SSE 队列
-            session.OutgoingMessages.Enqueue(respJson);
+            // 将响应推送到该 session 的下行 SSE 异步通道
+            session.Channel.Writer.TryWrite(respJson);
             context.Response.StatusCode = StatusCodes.Status202Accepted;
         });
 
@@ -113,6 +108,10 @@ public static class McpEndpoints
     {
         public string SessionId { get; } = sessionId;
         public ApiKeyEntity? ApiKey { get; } = apiKey;
-        public ConcurrentQueue<string> OutgoingMessages { get; } = new();
+        public Channel<string> Channel { get; } = System.Threading.Channels.Channel.CreateUnbounded<string>(new UnboundedChannelOptions
+        {
+            SingleWriter = false,
+            SingleReader = true
+        });
     }
 }

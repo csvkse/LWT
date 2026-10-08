@@ -276,6 +276,18 @@ public sealed class ApiKeyFunctionalTests
         // 3. 修改管理员账号凭据禁止被普通 API Key 访问
         var pwdResp = await fullKeyClient.PostAsync("/api/Auth/ChangeCredential", TestServerFixture.Json("{}"));
         Assert.Equal(HttpStatusCode.Forbidden, pwdResp.StatusCode);
+
+        // 4. EasyTier 虚拟网卡与网络配置禁止被普通 API Key 访问
+        var easyTierResp = await fullKeyClient.GetAsync("/api/EasyTier/Networks");
+        Assert.Equal(HttpStatusCode.Forbidden, easyTierResp.StatusCode);
+
+        // 5. 审计历史清空危险操作禁止被普通 API Key 访问
+        var deleteHistResp = await fullKeyClient.DeleteAsync("/api/History");
+        Assert.Equal(HttpStatusCode.Forbidden, deleteHistResp.StatusCode);
+
+        // 6. 审计历史基础只读查询允许 API Key 访问
+        var getHistResp = await fullKeyClient.GetAsync("/api/History");
+        Assert.Equal(HttpStatusCode.OK, getHistResp.StatusCode);
     }
 
     [Fact]

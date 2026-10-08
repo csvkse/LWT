@@ -49,8 +49,10 @@ namespace LinuxWebTool.WebHost.MinimalApi
         public static void MapAutoControllers(this WebApplication app)
         {
             var group_AuthController = app.MapGroup("/api/Auth");
+            group_AuthController.RequireAuthorization();
             group_AuthController.MapPost("Login", async ([FromServices] AuthController ctrl, HttpContext ctx, [FromBody] LoginRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Login(request); }).AllowAnonymous();
             group_AuthController.MapGet("Check", ([FromServices] AuthController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.Check(); });
+            group_AuthController.MapPost("Renew", async ([FromServices] AuthController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.Renew(); });
             group_AuthController.MapPost("ChangeCredential", async ([FromServices] AuthController ctrl, HttpContext ctx, [FromBody] ChangeCredentialRequest request) => { ctrl.HttpContext = ctx; return await ctrl.ChangeCredential(request); });
 
             var group_CommandsController = app.MapGroup("/api/Commands");

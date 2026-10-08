@@ -32,29 +32,44 @@ public static class NetworkAddressClassifier
         // 3. IP 地址段检查
         if (IPAddress.TryParse(host, out var ip))
         {
-            if (IPAddress.IsLoopback(ip)) return true;
+            return IsPrivateOrLoopbackAddress(ip);
+        }
 
-            if (ip.AddressFamily == AddressFamily.InterNetwork)
-            {
-                var bytes = ip.GetAddressBytes();
-                // RFC 1918 10.0.0.0/8
-                if (bytes[0] == 10) return true;
-                // RFC 1918 172.16.0.0/12 (172.16.0.0 ~ 172.31.255.255)
-                if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true;
-                // RFC 1918 192.168.0.0/16
-                if (bytes[0] == 192 && bytes[1] == 168) return true;
-                // RFC 6598 CGNAT / Tailscale 虚拟网段 (100.64.0.0/10)
-                if (bytes[0] == 100 && bytes[1] >= 64 && bytes[1] <= 127) return true;
-                // RFC 3927 链路本地 (169.254.0.0/16)
-                if (bytes[0] == 169 && bytes[1] == 254) return true;
-            }
-            else if (ip.AddressFamily == AddressFamily.InterNetworkV6)
-            {
-                // RFC 4193 唯一本地地址 ULA (fc00::/7 包括 fd00::/8)
-                if (ip.IsIPv6UniqueLocal) return true;
-                // RFC 4291 链路本地 (fe80::/10)
-                if (ip.IsIPv6LinkLocal) return true;
-            }
+        return false;
+    }
+
+    /// <summary>
+    /// 判定 IP 地址是否为本机环回、私有局域网 (RFC 1918 / ULA) 或链路本地地址
+    /// </summary>
+    public static bool IsPrivateOrLoopbackAddress(IPAddress ip)
+    {
+        if (IPAddress.IsLoopback(ip)) return true;
+
+        if (ip.IsIPv4MappedToIPv6)
+        {
+            ip = ip.MapToIPv4();
+        }
+
+        if (ip.AddressFamily == AddressFamily.InterNetwork)
+        {
+            var bytes = ip.GetAddressBytes();
+            // RFC 1918 10.0.0.0/8
+            if (bytes[0] == 10) return true;
+            // RFC 1918 172.16.0.0/12 (172.16.0.0 ~ 172.31.255.255)
+            if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true;
+            // RFC 1918 192.168.0.0/16
+            if (bytes[0] == 192 && bytes[1] == 168) return true;
+            // RFC 6598 CGNAT / Tailscale 虚拟网段 (100.64.0.0/10)
+            if (bytes[0] == 100 && bytes[1] >= 64 && bytes[1] <= 127) return true;
+            // RFC 3927 链路本地 (169.254.0.0/16)
+            if (bytes[0] == 169 && bytes[1] == 254) return true;
+        }
+        else if (ip.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            // RFC 4193 唯一本地地址 ULA (fc00::/7 包括 fd00::/8)
+            if (ip.IsIPv6UniqueLocal) return true;
+            // RFC 4291 链路本地 (fe80::/10)
+            if (ip.IsIPv6LinkLocal) return true;
         }
 
         return false;

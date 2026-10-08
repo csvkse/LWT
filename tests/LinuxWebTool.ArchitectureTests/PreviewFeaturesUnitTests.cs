@@ -45,9 +45,13 @@ public sealed class PreviewFeaturesUnitTests
             Assert.NotNull(cached);
             Assert.Equal(entity.Id, cached.Id);
 
-            // 错误密钥校验失败
+            // 错误密钥或畸形格式快速校验失败
             var invalid = await service.ValidateAsync("lwt_live_wrong_key_12345678");
             Assert.Null(invalid);
+            var invalidMalformed = await service.ValidateAsync("invalid_format_key");
+            Assert.Null(invalidMalformed);
+            var invalidWrongHash = await service.ValidateAsync("lwt_live_0123456789abcdef0123456789abcdef");
+            Assert.Null(invalidWrongHash);
 
             // 缓存失效
             service.InvalidateCache(entity.KeyHash);
@@ -210,6 +214,25 @@ public sealed class PreviewFeaturesUnitTests
     {
         var actual = NetworkAddressClassifier.IsPrivateNetworkUrl(url);
         Assert.Equal(expectedPrivate, actual);
+    }
+
+    [Theory]
+    [InlineData("127.0.0.1", true)]
+    [InlineData("::1", true)]
+    [InlineData("192.168.1.1", true)]
+    [InlineData("10.0.0.1", true)]
+    [InlineData("172.16.0.1", true)]
+    [InlineData("172.31.255.255", true)]
+    [InlineData("172.32.0.1", false)]
+    [InlineData("100.64.0.1", true)]
+    [InlineData("169.254.1.1", true)]
+    [InlineData("8.8.8.8", false)]
+    [InlineData("1.1.1.1", false)]
+    [InlineData("203.0.113.1", false)]
+    public void NetworkAddressClassifier_IsPrivateOrLoopbackAddress_Identifies_Correctly(string ipStr, bool expected)
+    {
+        var ip = System.Net.IPAddress.Parse(ipStr);
+        Assert.Equal(expected, NetworkAddressClassifier.IsPrivateOrLoopbackAddress(ip));
     }
 
     [Fact]

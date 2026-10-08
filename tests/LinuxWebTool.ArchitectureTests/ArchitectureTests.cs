@@ -587,5 +587,40 @@ public class ArchitectureTests
         Assert.True(violations.Count == 0,
             $"生产项目根目录检测到违规目录（禁止在根目录平铺业务名或职责名，必须统一收敛至 Features/、Shared/、Composition/）：\n{string.Join("\n", violations)}");
     }
+
+    [Fact]
+    public void LinuxArch024_所有控制器必须在ApiKeyMiddleware中显式声明权限归属()
+    {
+        var webHostDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost");
+        var middlewareFile = Path.Combine(webHostDir, "Shared", "Middleware", "ApiKeyMiddleware.cs");
+        Assert.True(File.Exists(middlewareFile), "ApiKeyMiddleware.cs 文件不存在");
+
+        var middlewareContent = File.ReadAllText(middlewareFile);
+
+        var controllerFiles = Directory.GetFiles(webHostDir, "*Controller.cs", SearchOption.AllDirectories);
+        Assert.NotEmpty(controllerFiles);
+
+        var missingControllers = new List<string>();
+
+        foreach (var file in controllerFiles)
+        {
+            var fileName = Path.GetFileNameWithoutExtension(file);
+            if (!fileName.EndsWith("Controller", StringComparison.OrdinalIgnoreCase)) continue;
+
+            var routeName = fileName[..^"Controller".Length];
+            var expectedRoute = $"/api/{routeName}";
+
+            // 检查 ApiKeyMiddleware.cs 是否显式提到了该路由前缀（严格避免隐式放行或漏控）
+            if (!middlewareContent.Contains($"\"{expectedRoute}\"", StringComparison.OrdinalIgnoreCase) &&
+                !middlewareContent.Contains($"\"{expectedRoute}/", StringComparison.OrdinalIgnoreCase))
+            {
+                missingControllers.Add($"{fileName} ({expectedRoute})");
+            }
+        }
+
+        Assert.True(missingControllers.Count == 0,
+            $"发现未在 ApiKeyMiddleware.cs 中显式声明权限控制的控制器：\n{string.Join("\n", missingControllers)}\n" +
+            "所有控制器路由必须在 ApiKeyMiddleware.CheckModulePermission 中显式划定权限归属（拒绝或绑定模块权限），严禁依赖默认规则！");
+    }
 }
 
