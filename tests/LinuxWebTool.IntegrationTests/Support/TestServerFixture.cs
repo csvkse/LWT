@@ -44,6 +44,8 @@ public static class TestServerFixture
 
     public static async Task<WebApplication> GetAppAsync() => await _appInstance.Value;
 
+    public static void InvalidateAdminToken() => _adminToken = null;
+
     public static async Task<string> GetAdminTokenAsync()
     {
         if (_adminToken != null) return _adminToken;

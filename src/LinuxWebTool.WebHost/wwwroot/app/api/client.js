@@ -30,6 +30,25 @@ function buildUrl(url, params) {
   return API_BASE + url + (qs ? `?${qs}` : '');
 }
 
+let tokenRenewedListener = null;
+
+export function onTokenRenewed(listener) {
+  tokenRenewedListener = listener;
+}
+
+function inspectRenewedToken(response) {
+  if (!response || !response.headers || response.status === 401) return;
+  const renewed = response.headers.get('x-renewed-token');
+  if (renewed) {
+    localStorage.setItem(LS_KEYS.token, renewed);
+    if (typeof tokenRenewedListener === 'function') {
+      try {
+        tokenRenewedListener(renewed);
+      } catch { /* ignore */ }
+    }
+  }
+}
+
 function clearSession() {
   localStorage.removeItem(LS_KEYS.token);
   localStorage.removeItem(LS_KEYS.user);
@@ -58,6 +77,8 @@ export async function http(url, { method = 'GET', params, body } = {}) {
     toast.error('网络请求失败，请检查服务是否可达');
     return { ok: false, status: 0, data: null, message: '网络请求失败' };
   }
+
+  inspectRenewedToken(response);
 
   const text = await response.text();
   const contentType = response.headers.get('content-type') || '';
@@ -114,6 +135,8 @@ export async function httpUpload(url, { params, file } = {}) {
     return { ok: false, status: 0, data: null, message: '网络请求失败' };
   }
 
+  inspectRenewedToken(response);
+
   let data = null;
   try {
     data = await response.json();
@@ -151,6 +174,8 @@ export async function httpDownload(url, { params } = {}) {
     toast.error('网络请求失败，请检查服务是否可达');
     return { ok: false, status: 0, blob: null, filename: '', data: null, message: '网络请求失败' };
   }
+
+  inspectRenewedToken(response);
 
   if (response.status === 401) {
     clearSession();

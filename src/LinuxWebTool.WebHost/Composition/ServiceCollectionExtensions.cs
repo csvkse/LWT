@@ -111,6 +111,23 @@ public static class ServiceCollectionExtensions
             {
                 options.MapInboundClaims = false;
                 options.TokenValidationParameters = jwtIssuer.BuildValidationParameters();
+                options.Events = new JwtBearerEvents
+                {
+                    OnTokenValidated = context =>
+                    {
+                        var adminCred = context.HttpContext.RequestServices.GetRequiredService<AdminCredentialService>();
+                        var userName = context.Principal?.FindFirst("sub")?.Value;
+                        var stamp = context.Principal?.FindFirst("stamp")?.Value;
+
+                        if (string.IsNullOrEmpty(userName) ||
+                            !string.Equals(userName, adminCred.Account.UserName, StringComparison.Ordinal) ||
+                            !adminCred.ValidateSecurityStamp(stamp))
+                        {
+                            context.Fail("Token 凭据已失效或已变更");
+                        }
+                        return Task.CompletedTask;
+                    }
+                };
             });
         builder.Services.AddAuthorization();
         builder.Services.AddAntiforgery();

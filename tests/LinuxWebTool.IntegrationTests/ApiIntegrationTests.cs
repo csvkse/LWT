@@ -2,12 +2,14 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using LinuxWebTool.Infrastructure.Features.Security.Adapters;
 using LinuxWebTool.WebHost.Composition;
 using LinuxWebTool.WebHost;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 using LinuxWebTool.IntegrationTests.Support;
@@ -42,6 +44,148 @@ public sealed class ApiIntegrationTests
     {
         var response = await (await Client.Value).PostAsync("/api/Auth/Login", Json("{\"username\":\"admin\",\"password\":\"wrong-password\"}"));
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Auth_login_locks_ip_after_repeated_failures()
+    {
+        var client = await Client.Value;
+        var testIp = "192.0.2." + Random.Shared.Next(1, 250);
+
+        for (var i = 0; i < 10; i++)
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, "/api/Auth/Login");
+            req.Headers.Add("X-Real-IP", testIp);
+            req.Content = Json("{\"username\":\"admin\",\"password\":\"wrong\"}");
+            var resp = await client.SendAsync(req);
+            Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        }
+
+        // 第 11 次应触发 429 TooManyRequests
+        using var lockedReq = new HttpRequestMessage(HttpMethod.Post, "/api/Auth/Login");
+        lockedReq.Headers.Add("X-Real-IP", testIp);
+        lockedReq.Content = Json("{\"username\":\"admin\",\"password\":\"wrong\"}");
+        var lockedResp = await client.SendAsync(lockedReq);
+        Assert.Equal(HttpStatusCode.TooManyRequests, lockedResp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Auth_renew_requires_authentication()
+    {
+        var client = await Client.Value;
+        client.DefaultRequestHeaders.Authorization = null;
+        var response = await client.PostAsync("/api/Auth/Renew", null);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Auth_renew_succeeds_with_valid_token()
+    {
+        var client = await Client.Value;
+        await LoginAsync(client);
+        var response = await client.PostAsync("/api/Auth/Renew", null);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var token = doc.RootElement.GetProperty("token").GetString();
+        var userName = doc.RootElement.GetProperty("userName").GetString();
+        var expiresAt = doc.RootElement.GetProperty("expiresAt").GetDateTime();
+
+        Assert.False(string.IsNullOrWhiteSpace(token));
+        Assert.Equal("admin", userName);
+        Assert.True(expiresAt > DateTime.UtcNow.AddDays(5));
+    }
+
+    [Fact]
+    public async Task Jwt_auto_renewal_middleware_attaches_header_when_remaining_time_within_threshold()
+    {
+        var client = await Client.Value;
+        var app = await TestServerFixture.GetAppAsync();
+        var issuer = app.Services.GetRequiredService<JwtIssuer>();
+        var adminCred = app.Services.GetRequiredService<AdminCredentialService>();
+
+        // 1. 新鲜生成的 7 天 Token（剩余寿命 > 72h），不应触发自动续签头
+        var (freshToken, _) = issuer.Issue("admin", adminCred.Account.SecurityStamp, TimeSpan.FromDays(7));
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", freshToken);
+        var freshResponse = await client.GetAsync("/api/Auth/Check");
+        Assert.Equal(HttpStatusCode.OK, freshResponse.StatusCode);
+        Assert.False(freshResponse.Headers.Contains("X-Renewed-Token"));
+
+        // 2. 剩余 24 小时（<= 72h 阈值），应在响应头自动附加 X-Renewed-Token
+        var (expiringToken, _) = issuer.Issue("admin", adminCred.Account.SecurityStamp, TimeSpan.FromHours(24));
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", expiringToken);
+        var renewingResponse = await client.GetAsync("/api/Auth/Check");
+        Assert.Equal(HttpStatusCode.OK, renewingResponse.StatusCode);
+        Assert.True(renewingResponse.Headers.Contains("X-Renewed-Token"));
+        var renewedToken = renewingResponse.Headers.GetValues("X-Renewed-Token").FirstOrDefault();
+        Assert.False(string.IsNullOrWhiteSpace(renewedToken));
+
+        // 3. 验证续期后的 Token 拥有新的有效期且可正常访问
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", renewedToken);
+        var checkRenewed = await client.GetAsync("/api/Auth/Check");
+        Assert.Equal(HttpStatusCode.OK, checkRenewed.StatusCode);
+    }
+
+    [Fact]
+    public async Task Password_change_rotates_security_stamp_and_immediately_invalidates_old_tokens()
+    {
+        var client = await Client.Value;
+        var app = await TestServerFixture.GetAppAsync();
+        var adminCred = app.Services.GetRequiredService<AdminCredentialService>();
+        var originalStamp = adminCred.Account.SecurityStamp;
+
+        // 1. 登录获取有效 Token
+        await LoginAsync(client);
+        var oldToken = _lastToken;
+        Assert.False(string.IsNullOrWhiteSpace(oldToken));
+
+        // 2. 确认当前 Token 可正常访问受保护接口
+        var checkBefore = await client.GetAsync("/api/Auth/Check");
+        Assert.Equal(HttpStatusCode.OK, checkBefore.StatusCode);
+
+        // 3. 修改密码
+        const string currentPassword = "integration-test-password";
+        const string newPassword = "new-integration-password-456";
+        var changeResp = await client.PostAsync("/api/Auth/ChangeCredential", Json(JsonSerializer.Serialize(new
+        {
+            currentPassword,
+            newPassword
+        })));
+        Assert.Equal(HttpStatusCode.OK, changeResp.StatusCode);
+
+        try
+        {
+            // 4. 使用持有旧 SecurityStamp 的旧 Token 发送请求，必须立即被拒 (401 Unauthorized)
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", oldToken);
+            var checkAfter = await client.GetAsync("/api/Auth/Check");
+            Assert.Equal(HttpStatusCode.Unauthorized, checkAfter.StatusCode);
+
+            // 5. 尝试续约旧 Token，也必须被拒 (401 Unauthorized)
+            var renewAfter = await client.PostAsync("/api/Auth/Renew", null);
+            Assert.Equal(HttpStatusCode.Unauthorized, renewAfter.StatusCode);
+
+            // 6. 使用新密码重新登录，应获取新 Token 并可正常访问
+            var reLoginResp = await client.PostAsync("/api/Auth/Login", Json(JsonSerializer.Serialize(new
+            {
+                username = "admin",
+                password = newPassword
+            })));
+            Assert.Equal(HttpStatusCode.OK, reLoginResp.StatusCode);
+            using var doc = JsonDocument.Parse(await reLoginResp.Content.ReadAsStringAsync());
+            var newToken = doc.RootElement.GetProperty("token").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(newToken));
+
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", newToken);
+            var checkNew = await client.GetAsync("/api/Auth/Check");
+            Assert.Equal(HttpStatusCode.OK, checkNew.StatusCode);
+        }
+        finally
+        {
+            // 还原密码与安全戳记，避免影响后续测试（如复用 Admin Token 的其他测试用例）
+            adminCred.UpdateCredential(null, currentPassword);
+            adminCred.RestoreSecurityStamp(originalStamp);
+            TestServerFixture.InvalidateAdminToken();
+        }
     }
 
     [Fact]
@@ -410,6 +554,35 @@ public sealed class ApiIntegrationTests
         {
             await ws.CloseOutputAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "test-done", CancellationToken.None);
         }
+    }
+
+    [Fact]
+    public async Task Terminal_websocket_rejects_outdated_security_stamp()
+    {
+        var client = await Client.Value;
+        await LoginAsync(client);
+
+        var createResponse = await client.PostAsync("/api/Terminal/Sessions", Json("{\"columns\":80,\"rows\":24}"));
+        Assert.Equal(HttpStatusCode.OK, createResponse.StatusCode);
+        using var doc = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
+        var sessionId = (doc.RootElement.TryGetProperty("sessionId", out var s) ? s.GetString() : null)
+            ?? doc.RootElement.GetProperty("SessionId").GetString();
+        Assert.False(string.IsNullOrEmpty(sessionId));
+
+        var testServer = _app!.GetTestServer();
+        var jwtIssuer = _app!.Services.GetRequiredService<JwtIssuer>();
+        var (badToken, _) = jwtIssuer.Issue("admin", securityStamp: Guid.NewGuid().ToString("N"));
+
+        var wsClient = testServer.CreateWebSocketClient();
+        var wsUri = new Uri(testServer.BaseAddress, $"/api/terminal/ws/{sessionId}?token={badToken}");
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            await wsClient.ConnectAsync(wsUri, cts.Token);
+        });
+        Assert.True(ex is System.Net.WebSockets.WebSocketException || ex.Message.Contains("401"),
+            $"Expected 401 handshake failure or WebSocketException, but got: {ex}");
     }
 
     [Fact]

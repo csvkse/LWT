@@ -11,7 +11,8 @@ public class AuthController(
 {
     private const int MaxFailures = 10;
     private static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(5);
-    private static readonly ConcurrentDictionary<string, (int Count, DateTime LockUntil)> Failures = new();
+    private static readonly TimeSpan FailureRetention = TimeSpan.FromMinutes(10);
+    private static readonly ConcurrentDictionary<string, (int Count, DateTime LockUntil, DateTime LastAttemptAt)> Failures = new();
 
     [AllowAnonymous]
     [HttpPost("Login")]
@@ -35,7 +36,7 @@ public class AuthController(
         }
 
         Failures.TryRemove(ip, out _);
-        var (token, expiresAt) = jwtIssuer.Issue(userName);
+        var (token, expiresAt) = jwtIssuer.Issue(userName, adminCredential.Account.SecurityStamp);
         await operationLogger.LogAsync("登录", "认证", userName, "登录成功", clientIp: ip);
         return Ok(new LoginResult(token, expiresAt, userName));
     }
@@ -44,7 +45,33 @@ public class AuthController(
     [Authorize]
     public IResult Check()
     {
+        if (User.Identity?.IsAuthenticated != true)
+        {
+            return Unauthorized();
+        }
         return Ok(new UserInfoResponse(User.Identity?.Name ?? string.Empty));
+    }
+
+    /// <summary>
+    /// 主动续期当前 JWT（需当前 Token 有效且用户名与配置中的管理员及安全戳记一致）。
+    /// </summary>
+    [HttpPost("Renew")]
+    [Authorize]
+    public async Task<IResult> Renew()
+    {
+        var userName = User.Identity?.Name;
+        var stamp = User.FindFirst("stamp")?.Value;
+        if (string.IsNullOrWhiteSpace(userName) ||
+            User.Identity?.IsAuthenticated != true ||
+            !string.Equals(userName, adminCredential.Account.UserName, StringComparison.Ordinal) ||
+            !adminCredential.ValidateSecurityStamp(stamp))
+        {
+            return Unauthorized(new MessageResponse("身份已失效或发生变更，请重新登录"));
+        }
+
+        var (token, expiresAt) = jwtIssuer.Issue(userName, adminCredential.Account.SecurityStamp);
+        await operationLogger.LogAsync("续期", "认证", userName, "Token 续期成功", clientIp: HttpContext.GetClientIp());
+        return Ok(new LoginResult(token, expiresAt, userName));
     }
 
     /// <summary>
@@ -83,12 +110,14 @@ public class AuthController(
 
     private static void RecordFailure(string ip)
     {
+        var now = DateTime.Now;
         if (Failures.Count > 100)
         {
-            var now = DateTime.Now;
             foreach (var kvp in Failures)
             {
-                if (kvp.Value.LockUntil <= now)
+                var isExpiredLock = kvp.Value.LockUntil > DateTime.MinValue && kvp.Value.LockUntil <= now;
+                var isStaleAttempt = kvp.Value.LockUntil == DateTime.MinValue && (now - kvp.Value.LastAttemptAt) > FailureRetention;
+                if (isExpiredLock || isStaleAttempt)
                 {
                     Failures.TryRemove(kvp.Key, out _);
                 }
@@ -97,7 +126,7 @@ public class AuthController(
 
         Failures.AddOrUpdate(
             ip,
-            _ => (1, DateTime.MinValue),
-            (_, s) => s.Count + 1 >= MaxFailures ? (0, DateTime.Now.Add(LockDuration)) : (s.Count + 1, s.LockUntil));
+            _ => (1, DateTime.MinValue, now),
+            (_, s) => s.Count + 1 >= MaxFailures ? (0, now.Add(LockDuration), now) : (s.Count + 1, s.LockUntil, now));
     }
 }

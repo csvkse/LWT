@@ -10,6 +10,7 @@ export const API = {
   auth: {
     login: '/Auth/Login',
     check: '/Auth/Check',
+    renew: '/Auth/Renew',
     changeCredential: '/Auth/ChangeCredential',
   },
   commands: {

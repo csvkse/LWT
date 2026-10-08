@@ -8,6 +8,9 @@ public sealed class AdminAccount
 
     /// <summary>SHA256(Salt+password) 十六进制。</summary>
     public string PasswordHash { get; set; } = string.Empty;
+
+    /// <summary>独立随机安全戳记（GUID 标识）。改密或改用户名时轮换，使旧 Token 立即失效且不泄露密码特征。</summary>
+    public string SecurityStamp { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -35,19 +38,42 @@ public sealed class AdminCredentialService
             && PasswordHasher.Verify(password, Account.PasswordHash);
     }
 
-    /// <summary>修改管理员凭据（Web 端改密入口）：只传新用户名则仅改名，只传新密码则仅改密，互不干扰。</summary>
+    public bool ValidateSecurityStamp(string? stamp)
+    {
+        return !string.IsNullOrEmpty(Account.SecurityStamp)
+            && !string.IsNullOrEmpty(stamp)
+            && string.Equals(Account.SecurityStamp, stamp, StringComparison.Ordinal);
+    }
+
+    public void RestoreSecurityStamp(string stamp)
+    {
+        if (!string.IsNullOrWhiteSpace(stamp))
+        {
+            Account.SecurityStamp = stamp;
+            Persist(generatedPassword: null);
+        }
+    }
+
+    /// <summary>修改管理员凭据（Web 端改密入口）：只传新用户名则仅改名，只传新密码则仅改密，互不干扰。无论改名还是改密均自动轮换 SecurityStamp。</summary>
     public void UpdateCredential(string? newUserName, string? newPassword)
     {
-        if (!string.IsNullOrWhiteSpace(newUserName))
+        var changed = false;
+        if (!string.IsNullOrWhiteSpace(newUserName) && !string.Equals(Account.UserName, newUserName.Trim(), StringComparison.Ordinal))
         {
             Account.UserName = newUserName.Trim();
+            changed = true;
         }
         if (!string.IsNullOrWhiteSpace(newPassword))
         {
             Account.PasswordHash = PasswordHasher.Hash(newPassword);
+            changed = true;
+        }
+        if (changed || string.IsNullOrEmpty(Account.SecurityStamp))
+        {
+            Account.SecurityStamp = Guid.NewGuid().ToString("N");
         }
         Persist(generatedPassword: null);
-        _logger.LogInformation("管理员凭据已修改：用户名 {UserName}", Account.UserName);
+        _logger.LogInformation("管理员凭据已修改：用户名 {UserName}，安全戳记已轮换", Account.UserName);
     }
 
     private void Initialize(IConfiguration configuration)
@@ -60,10 +86,22 @@ public sealed class AdminCredentialService
         if (!string.IsNullOrEmpty(configuredPassword))
         {
             var userName = string.IsNullOrWhiteSpace(configuredUserName) ? "admin" : configuredUserName.Trim();
+            var newHash = PasswordHasher.Hash(configuredPassword);
+            string stamp;
+            if (TryLoadFromFile() && string.Equals(Account.PasswordHash, newHash, StringComparison.Ordinal) && !string.IsNullOrEmpty(Account.SecurityStamp))
+            {
+                stamp = Account.SecurityStamp;
+            }
+            else
+            {
+                stamp = Guid.NewGuid().ToString("N");
+            }
+
             Account = new AdminAccount
             {
                 UserName = userName,
-                PasswordHash = PasswordHasher.Hash(configuredPassword),
+                PasswordHash = newHash,
+                SecurityStamp = stamp,
             };
             Persist(generatedPassword: null);
             _logger.LogInformation("管理员账户来自显式配置（appsettings 或环境变量 Admin__UserName / Admin__Password）：用户名 {UserName}", userName);
@@ -80,6 +118,7 @@ public sealed class AdminCredentialService
         {
             UserName = string.IsNullOrWhiteSpace(configuredUserName) ? "admin" : configuredUserName.Trim(),
             PasswordHash = PasswordHasher.Hash(generatedPassword),
+            SecurityStamp = Guid.NewGuid().ToString("N"),
         };
         Persist(generatedPassword);
         _logger.LogWarning("首次启动已生成管理员账户：用户名 {UserName}，密码 {Password}（已保存到 {File}，请尽快登录并修改配置）",
@@ -92,6 +131,7 @@ public sealed class AdminCredentialService
         {
             ["userName"] = Account.UserName,
             ["passwordHash"] = Account.PasswordHash,
+            ["securityStamp"] = Account.SecurityStamp,
         };
         if (generatedPassword is not null)
         {
@@ -122,7 +162,19 @@ public sealed class AdminCredentialService
                 return false;
             }
 
-            Account = new AdminAccount { UserName = userName, PasswordHash = hash };
+            var stamp = obj["securityStamp"]?.GetValue<string>();
+            var needsPersist = false;
+            if (string.IsNullOrWhiteSpace(stamp))
+            {
+                stamp = Guid.NewGuid().ToString("N");
+                needsPersist = true;
+            }
+
+            Account = new AdminAccount { UserName = userName, PasswordHash = hash, SecurityStamp = stamp };
+            if (needsPersist)
+            {
+                Persist(obj["generatedPassword"]?.GetValue<string>());
+            }
 
             // 自动生成密码的场景：文件里保留了明文，每次启动都回显，避免用户忘记密码后无处可查。
             var generated = obj["generatedPassword"]?.GetValue<string>();
