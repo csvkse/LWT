@@ -1,92 +1,185 @@
-# LinuxWebTool · Linux 指令控制台
+<div align="center">
 
-个人 Linux 运维工具：把常用 Linux 指令沉淀为「可命名、分组、置顶」的功能一键执行，支持 Cron 定时调度、完整执行历史与三类日志。参考 `DNSPodForNETCore(InfiniWeb)` 的分层架构与前后端门禁体系，按个人工具规模做了裁剪。
+# LinuxWebTool (LWT)
 
-> ⚠️ **安全提示**：本工具可在网页上远程执行任意 shell，**务必只部署在内网/本机，不要暴露公网**。认证为单管理员 + JWT。
+专为个人极客与私有家庭服务器打造的轻量级 Native AOT 全栈 Linux 运维控制台、P2P 虚拟局域网与智能网关。
 
-## 功能
+<p>
+  <a href="#对比优势">对比优势</a>
+  •
+  <a href="#核心特性">核心特性</a>
+  •
+  <a href="#系统架构">系统架构</a>
+  •
+  <a href="#效果预览">效果预览</a>
+  •
+  <a href="#快速部署">快速部署</a>
+  •
+  <a href="#高阶能力指南">高阶能力指南</a>
+  •
+  <a href="#安全体系与权限控制">安全体系</a>
+  •
+  <a href="#本地开发与架构门禁">架构门禁</a>
+  •
+  <a href="#关键配置">配置说明</a>
+</p>
 
-| 模块 | 能力 |
-|---|---|
-| 指令 | 保存 Linux 指令为功能；增删改查；分组 / 命名 / 置顶；一键执行（超时可配、输出截断 64KB、并发上限 4） |
-| **交互式终端** | 网页内置终端（xterm.js 与 WebSocket），支持多标签页、全屏和后台会话；Linux 提供原生 PTY，Windows 10 1809+ 使用 ConPTY，原生创建失败时回退管道并提示限制 |
-| **Bash 脚本** | 支持多行脚本类型：写临时文件 `bash script.sh $1 $2...` 执行（位置参数、引号感知拆分、不经二次 shell 解释）；Windows 开发机自动探测 Git Bash |
-| 快速执行 | 临时指令不保存直接跑，自动记入调用历史 |
-| 定时任务 | 引用已保存指令/脚本 + Cron（支持 Unix 5 段 / Quartz 6 段，自动归一化）；启停 / 立即运行 / 下次执行时间；常用 Cron 预设 |
-| **系统状态** | 即时查看：CPU / 内存 / 磁盘挂载点 / 网卡速率 / 进程 TOP / 主机内核信息；10s 自动刷新；历史曲线（后台 60s 采样入 SQLite，保留 7 天，uPlot 渲染，1h~7d 区间切换）；Docker 部署加 `--privileged --pid=host --user root` 可自动采集宿主机全部磁盘 |
-| **SMB 挂载** | 配置并管理 `mount -t cifs` 网络共享：完整 CRUD、挂载 / 卸载 / 懒卸载、实时状态探测、启动自动重挂（不写 /etc/fstab）、凭据落盘 `data/mount-creds`（600 权限，密码不进命令行）、系统状态页自动展示 SMB 挂载点；需 Linux 特权环境 |
-| **WebDAV 挂载** | 通过 rclone/FUSE 挂载 HTTPS WebDAV：配置管理、手动与启动自动挂载、远端与本地双重健康探测、故障恢复；写缓存保留在数据卷。需要 Linux、`/dev/fuse` 和挂载权限 |
-| **SFTP / S3 挂载** | 通过 rclone/FUSE 挂载 SFTP 目录、AWS S3 或 HTTPS S3 兼容存储；支持手动/自动挂载、直连远端与本地目录健康探测、故障恢复。SFTP 要求提供可信 SSH 主机公钥 |
-| **FFmpeg 转码** | 视频 / 音频格式处理：一次性文件或文件夹批量入队；转码预设（内置 MP4/H.265/MKV 重封装/MP3）+ 自定义 ffmpeg 参数；替换（先写临时文件成功后才删源）与并存两种输出模式；实时进度 / 速度 / 取消 / 重试；监听文件夹自动转码（网络盘轮询 / 本地盘文件事件两种方式）；桌面部署需安装 ffmpeg，Docker 镜像已内置 |
-| **EasyTier 虚拟组网** | 去中心化点对点虚拟局域网：基于 Rust 原生内核驱动，支持全互联拓扑、NAT 打洞直连、虚拟 IP、运行时零中断热打补丁；内置内核引擎热升级调度器（支持 GitHub 云端拉取与本地上传双模热重载），内核与节点配置全部收敛于持久化目录 |
-| **FRP 内网穿透** | 反向隧道（HTTP-over-WebSocket）：支持多线路反向穿透、302 自动重定向代理与内网代拉，安全穿透内网服务 |
-| **家庭智能网关** | 基于 YARP 的高性能反向代理：支持 L7 网站即席代理、白名单控制，以及 L4 TCP/UDP 端口转发 |
-| 执行历史 | 手动 / 定时 / 快速三类记录；状态筛选、关键字搜索、分页；失败详情（stdout/stderr/退出码/耗时） |
-| 日志 | 操作日志（DB，全行为审计）+ 程序日志（`logs/app-*.txt`）+ 调试日志（`logs/debug-*.txt`，网页 tail 查看） |
-| 门禁 | 单管理员登录签发 JWT（HS256，默认 12h）；登录失败 10 次锁 IP 5 分钟；全部 API 需认证 |
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-512bd4?style=flat-square&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
+[![Native AOT](https://img.shields.io/badge/Runtime-Native_AOT-22c55e?style=flat-square&logo=speedtest&logoColor=white)](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
+[![Vue 3](https://img.shields.io/badge/Vue-3.x_ESM-42b883?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
+[![License](https://img.shields.io/badge/License-MIT-16a34a?style=flat-square)](LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/csvkse/LWT?style=flat-square&logo=github&color=blue)](https://github.com/csvkse/LWT/releases)
+[![Platform](https://img.shields.io/badge/Platform-Linux_x64%20|%20ARM64%20|%20Win_x64-blueviolet?style=flat-square)](https://github.com/csvkse/LWT/releases)
+[![GitHub Stars](https://img.shields.io/github/stars/csvkse/LWT?style=flat-square&logo=github)](https://github.com/csvkse/LWT/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/csvkse/LWT?style=flat-square&logo=github)](https://github.com/csvkse/LWT/forks)
 
-## 技术栈
+[在线架构设计规范](./docs/dev/architecture-gates.md) · [安全与权限审计报告](./docs/auth-and-permission-audit-report.md) · [权限治理实施方案](./docs/auth-and-permission-remediation-plan.md) · [JWT 无感续签规范](./docs/jwt-expiration-and-auto-renewal-plan.md)
 
-- **后端**：.NET 10 / ASP.NET Core Minimal API（AutoControllers 源码生成，Native AOT 零反射）+ Dapper AOT (DDL SQLite) + Quartz.NET(调度) + JwtBearer + YARP 反向代理 + EasyTier 原生 C ABI / Core 守护进程双模引擎
-- **前端**：零构建 Vue3 ESM（本地 vendor 自托管）+ vue-router(hash) + Tailwind（本地 Play 脚本）——**内网零外网依赖**
-- **架构**：物理分层 `Contracts(零依赖) → Infrastructure → WebHost(组合根+前端)`，严格遵循功能垂直切片（Features）与基础设施适配（Adapters），128 项 xUnit 架构测试与门禁基线 + Node 前端门禁强制约束
+</div>
 
-## 目录结构
+---
 
+## 项目简介
+
+**LinuxWebTool (LWT)** 是一个专为 **超低资源占用、零外部运行时依赖、高安全可控与全场景运维** 设计的新一代轻量级私有云服务器管理平台。项目后端完全基于 **.NET 10 Native AOT（Ahead-Of-Time 提前编译）** 极致构建，前端采用 **零构建本地原生 Vue 3 ESM 单页系统**，兼具极致的毫秒级冷启动与超低内存消耗（冷启动基准内存仅约 **30~50 MB**）。
+
+传统服务器面板（如宝塔、1Panel、Cockpit）常因依赖庞大的 Python/Go/Node.js 运行时或多进程容器，动辄占用数百兆内存，并伴随公网端口暴露、云端账号绑定、频繁联网上报等安全顾虑。LinuxWebTool 针对家庭 NAS（群晖/绿联/飞牛/极空间）、迷你主机（Intel N100 / AMD 迷你 PC）、云服务器及局域网 Linux 设备做了极致裁剪与原生能力整合：
+
+- **自动化指令与交互终端**：沉淀常用指令/多行 Bash 脚本，支持 Cron 定时调度；内置集成 xterm.js，Linux 走原生 PTY、Windows 走 ConPTY，支持断线无感重连与后台会话托管。
+- **系统全景资源观测**：CPU / 内存 / 磁盘分区 / 实时网速 / 进程 TOP 毫秒级刷新；后台 60 秒恒定采集入本地 SQLite，保留 7 天历史曲线，支持 Docker 穿透采集宿主机全部分区。
+- **多协议全能存储挂载**：原生支持 `mount -t cifs` SMB 网络共享，以及通过 rclone / FUSE 挂载 WebDAV、SFTP 和 AWS S3 兼容对象存储，具备双重健康探测与断线自愈。
+- **智能媒体转码中心**：集成 FFmpeg 视频/音频格式处理，内置 Intel VA-API、AMD Gallium、NVIDIA NVENC/CUDA 真实硬件加速探针与目录监听自动转码。
+- **EasyTier 去中心化虚拟组网**：深度融合 Rust 原生驱动内核，支持 P2P UDP NAT 打洞直连、全互联拓扑与多实例管理；提供 Web 端内核一键云端拉取与本地双模热重载升级。
+- **FRP 穿透与 YARP 智能网关**：内置 HTTP-over-WebSocket 多线路反向穿透隧道与 302 内网代拉；基于 YARP 构建 L7 网站即席代理与 L4 TCP/UDP 高性能端口转发。
+- **AI 智能体原生生态 (MCP Server)**：原生集成 Model Context Protocol (MCP) 服务端，支持 SSE 下行管道与直接 JSON-RPC，让 Claude、Cursor、Roo Code 等 AI 智能体直接安全调用终端指令与服务器管理接口。
+- **高等级安全与权限矩阵**：单管理员机制、随机盐哈希、SecurityStamp 改密即失效、JWT 无感滑动续签、API Key 细粒度权限矩阵（Default-Deny 默认拒绝）与防爆破 IP 锁定。
+
+> ⚠️ **安全红线**：本工具具有执行系统 Shell 及宿主硬件交互的最高能力。**请务必优先部署在私有局域网、内网穿透加密隧道或仅绑定本机环回，切勿在未加设安全防护的情况下直接裸露在公网**。
+
+---
+
+## 目录
+
+- [对比优势](#对比优势)
+- [核心特性](#核心特性)
+- [系统架构](#系统架构)
+- [效果预览](#效果预览)
+  - [首页与指令管理](#首页与指令管理)
+  - [文件、日志与执行历史](#文件日志与执行历史)
+  - [系统状态、转码与存储挂载](#系统状态转码与存储挂载)
+- [快速部署](#快速部署)
+  - [方式一：桌面端（自包含单文件，推荐开箱即用）](#方式一桌面端自包含单文件推荐开箱即用)
+  - [方式二：Docker 容器（极客推荐，多硬件架构）](#方式二docker-容器极客推荐多硬件架构)
+  - [方式三：Linux systemd 系统服务常驻](#方式三linux-systemd-系统服务常驻)
+  - [方式四：源码克隆与本地开发调试](#方式四源码克隆与本地开发调试)
+  - [单卷持久化设计（data/ 目录规范）](#单卷持久化设计data-目录规范)
+- [高阶能力实战指南](#高阶能力实战指南)
+  - [1. EasyTier 虚拟局域网与 P2P UDP 流量卸载](#1-easytier-虚拟局域网与-p2p-udp-流量卸载)
+  - [2. YARP 智能网关与端口转发](#2-yarp-智能网关与端口转发)
+  - [3. AI 智能体集成：MCP Server 连接配置](#3-ai-智能体集成mcp-server-连接配置)
+  - [4. FFmpeg 硬件转码加速与 GPU 直通排查](#4-ffmpeg-硬件转码加速与-gpu-直通排查)
+- [安全体系与权限控制](#安全体系与权限控制)
+  - [凭据优先级体系](#凭据优先级体系)
+  - [安全戳记与改密即刻失效机制](#安全戳记与改密即刻失效机制)
+  - [API Key 细粒度权限矩阵 (Default-Deny)](#api-key-细粒度权限矩阵-default-deny)
+  - [反代 IP 辨析与防暴力破解锁定](#反代-ip-辨析与防暴力破解锁定)
+- [本地开发与架构门禁](#本地开发与架构门禁)
+- [关键配置 (appsettings.json)](#关键配置-appsettingsjson)
+- [常见问题 (FAQ)](#常见问题-faq)
+
+---
+
+## 对比优势
+
+| 维度 | 传统自建面板 (宝塔 / 1Panel) | 官方控制台 (Cockpit) | SSH 终端 / 裸脚本工具 | LinuxWebTool (本项目) |
+| :--- | :--- | :--- | :--- | :--- |
+| **运行时依赖** | 强依赖外部 Python/Go 运行环境及 Docker | 依赖 PAM、Systemd 与发行版套件 | 依赖客户端本机 SSH 环境 | **Native AOT 零依赖**：单二进制文件自包含，无需装 .NET |
+| **内存与资源占用** | 较大（通常常驻 150MB ~ 500MB+） | 中等（多守护进程模型 80MB ~ 200MB） | 0（按需启动连接） | **极致轻量**：基准冷启动仅需 **30MB ~ 50MB** 内存 |
+| **离线内网适应度** | 差（初次登录常强绑手机/强制外网通信） | 较好（无强制联网） | 极佳 | **极佳**：前端内置 Vendor 零外部 CDN，**离线纯内网 100% 正常运行** |
+| **交互式终端** | WebSSH 模拟，后台易断开 | 基础终端支持 | 纯客户端 CLI 窗口 | **原生 PTY/ConPTY 双模**：带后台缓冲托管、支持无感重新连接 |
+| **存储挂载管理** | 通常仅支持基础本地磁盘分区 | 仅基础 LVM/NFS 分区挂载 | 需手写 `/etc/fstab` 与凭据挂载 | **全协议一体化**：SMB、WebDAV、SFTP、S3 FUSE 自动断线重连 |
+| **内网组网与穿透** | 需额外装第三方穿透插件容器 | 不支持 | 需手动常驻部署 FRP/ZeroTier | **内置集成**：原生 EasyTier P2P 组网 + FRP 隧道 + YARP 智能网关 |
+| **AI 智能体生态** | 无原生协议支持 | 无原生协议支持 | 依赖外部本地 CLI 工具代理 | **原生内置 MCP Server**：为 Claude / Cursor 赋能专属运维智能体 |
+| **数据备份与迁移** | 分布在 `/www` 或各大系统目录，割裂 | 依赖系统配置文件迁移 | 散落的 dotfiles 脚本 | **单一数据卷 `data/`**：数据库、凭据、配置单目录打包即可平移 |
+| **代码架构与可靠性**| 业务耦合重，无公开严格门禁体系 | 发行版维护周期较长 | 个人自用脚本缺乏自动化测试 | **24 项后端架构门禁 (LinuxArch001~024)** + 前端架构守卫 |
+
+---
+
+## 核心特性
+
+| 功能模块 | 对应路由 / 入口 | 核心能力说明 |
+| :--- | :--- | :--- |
+| **常用指令控制台** | `/api/Commands`<br/>`/#/commands` | 保存 Linux 指令为一键功能；支持分组命名、拖拽置顶、参数模板、超时防护（默认 60s）、输出截断（64KB）与最大 4 并发队列。 |
+| **交互式原生终端** | `/api/Terminal`<br/>`/#/terminal` | 基于 xterm.js 与 WebSocket。Linux 环境调用原生 PTY，Windows 调用 ConPTY；支持断网后台持续挂起运行、实时输出恢复与无感重连。 |
+| **定时任务自动化** | `/api/Schedules`<br/>`/#/schedules` | 引用指令库 + Quartz.NET 引擎；支持 Unix 5 段与 Quartz 6 段 Cron 表达式无缝归一化，提供即席测试与下次执行时间预估。 |
+| **系统状态全景图** | `/api/SystemStatus`<br/>`/#/status` | CPU / 内存 / 网卡实时吞吐 / 磁盘挂载 / 进程 TOP 10s 自动刷新；后台 60s 周期采样持久化，uPlot 渲染 7 天精细性能曲线。 |
+| **多协议存储挂载** | `/api/SmbMounts`<br/>`/api/WebDavMounts`<br/>`/#/mounts` | Linux 原生 `mount -t cifs` SMB 共享，以及基于 rclone/FUSE 驱动的 WebDAV、SFTP 和 S3 存储挂载，带 600 权限凭据隔离与故障自愈。 |
+| **FFmpeg 媒体转码**| `/api/Transcode`<br/>`/#/transcode` | 单文件或文件夹批量任务队列；内置 Intel iHD (VA-API/QSV)、AMD Gallium、NVIDIA NVENC 硬件探针；支持网络盘轮询与本地事件自动转码。 |
+| **EasyTier 虚拟组网**| `/api/EasyTier`<br/>`/#/easytier` | 深度集成 Rust 驱动去中心化全互联 P2P 局域网；支持 Web 端内核云端一键升级与本地双模热重载，提供完整网络拓扑可视化与 UDP 打洞。 |
+| **FRP 反向穿透隧道**| `/api/FrpTunnel`<br/>`/#/frp` | 基于 HTTP-over-WebSocket 的反向代理隧道；支持多线路智能轮询容灾、302 自动重定向代理与私网代拉，安全穿透内网服务。 |
+| **家庭智能网关** | `/api/Gateway`<br/>`/#/gateway` | 基于高性能 YARP 引擎构建；支持 L7 网站即席代理、正则路由重写、访问白名单与安全阻断，以及 L4 高吞吐 TCP/UDP 端口转发。 |
+| **AI MCP 服务端** | `GET /mcp/sse`<br/>`POST /mcp` | 原生兼容 Model Context Protocol 协议规范；采用 Channels 异步下行管道（零 CPU 空转），赋能 AI 智能体直接调用 LinuxWebTool。 |
+| **细粒度 API Key** | `/api/ApiKeys`<br/>`/#/keys` | 针对第三方调用与 MCP 客户端提供权限矩阵控制；支持 Scopes 细分，纳秒级前缀格式拦截，实行 Default-Deny 默认拒绝原则。 |
+| **安全认证与续签** | `/api/Auth`<br/>`/#/login` | 单管理员机制、随机盐哈希加密；安全戳记（SecurityStamp）改密即刻失效旧会话；JWT 无感滑动窗口自动续期；连续 10 次密码错误 IP 锁定。 |
+| **执行审计与日志** | `/api/History`<br/>`/api/Logs`<br/>`/#/history` | 审计数据库记录完整指令调用流水；按天滚动程序运行日志（`app-*.txt`）与调试日志（`debug-*.txt`），支持 Web 前端动态 tail 实时查看。 |
+
+---
+
+## 系统架构
+
+LinuxWebTool 采用严格的 **功能垂直切片（Feature Vertical Slices）与整洁架构分层**。运行时划分为核心安全中间件管道、领域执行引擎与统一的单数据卷存储层：
+
+```mermaid
+flowchart TD
+  Browser["🖥️ 桌面浏览器 / 移动端 Web"] -->|"HTTP / WebSocket (:5270)"| Entry["LinuxWebTool WebHost"]
+  AIAgent["🤖 AI 智能体 (Claude / Cursor / Roo)"] -->|"SSE / JSON-RPC (/mcp)"| Entry
+  RemoteNodes["🌐 EasyTier 对端节点 / FRP Client"] -->|"P2P UDP / TCP 穿透"| Entry
+
+  subgraph Pipeline["🛡️ 安全中间件管道 (Middlewares)"]
+    IPCheck["客户端 IP 真实性校验<br/>(信任回环/私网反代，防伪造 DoS)"]
+    BruteForce["防暴力破解计数器<br/>(10 次失败锁定 5 分钟)"]
+    ApiKeyGate["API Key 权限矩阵验证<br/>(Default-Deny 默认拒绝)"]
+    JwtRenewal["JWT 认证与滑动无感续签<br/>(SecurityStamp 戳记核验)"]
+  end
+
+  Entry --> IPCheck --> BruteForce --> ApiKeyGate --> JwtRenewal
+
+  subgraph Engines["⚙️ 核心业务引擎 (Business Engines)"]
+    TerminalEngine["PTY 交互终端引擎<br/>Linux Native PTY / Windows ConPTY"]
+    ShellEngine["Shell 指令与脚本调度器<br/>超时熔断 / 64KB 截断 / 并发队列"]
+    MonitorEngine["系统状态性能采集器<br/>60s 恒定采样 + 10m 异常视窗"]
+    MountEngine["存储挂载状态机与健康守护<br/>SMB CIFS / WebDAV / SFTP / S3 FUSE"]
+    TranscodeEngine["FFmpeg 媒体转码引擎<br/>Intel iHD / AMD / NVIDIA 硬件探针"]
+    EasyTierEngine["EasyTier 组网调度引擎<br/>Rust C ABI / Core 守护双模热重载"]
+    FrpEngine["FRP 多线路穿透中继<br/>HTTP-over-WS + 302 私网代拉"]
+    GatewayEngine["YARP 智能反向网关<br/>L7 动态网站代理 + L4 端口转发"]
+    McpEngine["MCP Server 协议处理器<br/>Channels 异步通道零空转推送"]
+  end
+
+  JwtRenewal --> Engines
+
+  subgraph Storage["💾 单持久化数据卷 (data/ 单目录规范)"]
+    SqliteDB[("SQLite 核心数据库<br/>linuxweb.db")]
+    CredsFile["管理员凭据 admin.json<br/>& JWT 签名密钥 jwt-secret.key"]
+    EasyTierStore["EasyTier 内核与节点文件<br/>easytier/bin & nodes"]
+    LogsStore["滚动业务与调试日志<br/>logs/app-*.txt & debug-*.txt"]
+    MountCreds["存储挂载凭据与写入缓存<br/>mount-creds/ & rclone-cache/"]
+  end
+
+  Engines <--> Storage
 ```
-LinuxWebTool.slnx
-├── Directory.Build.props / Directory.Packages.props   # 统一 TFM 与包版本（CPM）
-├── src/
-│   ├── LinuxWebTool.Contracts/        # DTO / 枚举 / IShellExecutor（零依赖，门禁强制）
-│   ├── LinuxWebTool.Infrastructure/    # Persistence(SQLite)/Shell/Logging/Scheduling/Security
-│   └── LinuxWebTool.WebHost/           # Program + Composition + Routes(7 组 API) + wwwroot/app(前端)
-├── tests/LinuxWebTool.ArchitectureTests/  # 后端架构门禁（6 条规则）
-├── scripts/verify-fast.ps1             # 一键门禁：build + test + 前端 gate
-├── scripts/publish.ps1                 # 发布 linux-x64 自包含产物（systemd）
-├── .github/workflows/ci.yml            # CI：构建+门禁+GHCR 镜像（push/PR 触发）
-├── .github/workflows/desktop-release.yml  # 桌面端多平台 Native AOT 发布（tag v* 触发 GitHub Release）
-├── Dockerfile                          # Docker 部署（三阶段，alpine）
-├── start.bat                           # Windows 开发机一键启动（dotnet run + 自动开浏览器）
-└── docs/dev/architecture-gates.md      # 门禁规则文档
-```
 
-## 快速开始（Windows 开发机）
-
-```powershell
-dotnet build LinuxWebTool.slnx
-dotnet run --project src/LinuxWebTool.WebHost
-# 浏览器打开 http://localhost:5270/app/
-```
-
-首次启动自动生成管理员：用户名 `admin`，随机密码打印在程序日志并写入 `src/LinuxWebTool.WebHost/data/admin.json`。也可在 `appsettings.json` 预置：
-
-```json
-{ "Admin": { "UserName": "admin", "Password": "你的密码" } }
-```
-
-**支持环境变量注入凭据**（优先级最高，每次启动生效，修改后重启即换号/换密码）：
-
-```powershell
-# Windows（PowerShell: $env:Admin__Password="xxx"）/ Linux systemd: Environment=Admin__Password=xxx
-Admin__UserName=ops Admin__Password=你的密码 dotnet run
-docker run -e Admin__UserName=ops -e Admin__Password=你的密码 ghcr.io/csvkse/lwt:latest
-```
-
-凭据优先级：`Admin__UserName`/`Admin__Password` 环境变量或 appsettings 显式配置 **>** `data/admin.json`（自动生成密码的持久化，记录最后一次生效的凭据）**>** 首次启动随机生成。
-
-**网页修改凭据**：登录后点右上角用户名旁的 ⚙，可修改用户名 / 密码（需验证当前密码，改完自动登出用新凭据重登）。同时支持 `Data__Directory` 指定数据根目录（默认应用根下 `data/`）。
-
-## 部署与使用
+---
 
 ## 效果预览
 
-### 首页与指令管理
+### 1. 首页控制台与指令管理
 
 ![首页](docs/imgs/首页.png)
 
 ![指令页](docs/imgs/指令页.png)
 
-### 文件、日志与执行历史
+### 2. 文件管理与调用审计历史
 
 ![文件管理](docs/imgs/文件管理.png)
 
@@ -94,370 +187,338 @@ docker run -e Admin__UserName=ops -e Admin__Password=你的密码 ghcr.io/csvkse
 
 ![指令执行历史](docs/imgs/指令执行历史.png)
 
-### 系统状态、转码与 SMB 挂载
+### 3. 系统状态全景、采样曲线、媒体转码与存储挂载
 
 ![系统状态](docs/imgs/系统状态.png)
 
-![系统状态采样点](docs/imgs/系统状态-采样点.png)
+![系统状态-采样点](docs/imgs/系统状态-采样点.png)
 
 ![转码页](docs/imgs/转码页.png)
 
 ![SMB 挂载](docs/imgs/Smb挂载.png)
 
-三种方式任选：**桌面端（Releases 下载，免装 .NET）** / **Docker** / **systemd 自包含发布**。
+---
 
-### 方式一：桌面端（推荐，开箱即用）
+## 快速部署
 
-从 [Releases](https://github.com/csvkse/LWT/releases) 下载对应平台压缩包（当前最新版本 `v0.1.20`）。桌面端包为**Native AOT 自包含单文件发布**，目标机无需安装 .NET 运行时，解压即可运行：
+### 方式一：桌面端（自包含单文件，推荐开箱即用）
 
-| 平台 | 包 | 运行方式 |
-|---|---|---|
-| Linux x64 / ARM64 | `linuxwebtool-linux-*.tar.gz` | `tar -xzf linuxwebtool-*.tar.gz && ./start.sh`（或直接运行 `LinuxWebTool.WebHost`） |
-| Windows x64 | `linuxwebtool-win-x64.zip` | 解压后双击 `start.bat`（或 `LinuxWebTool.WebHost.exe`）；首次运行如遇 SmartScreen 提示，点「更多信息 → 仍要运行」 |
+从 [GitHub Releases](https://github.com/csvkse/LWT/releases) 下载对应平台的最新稳定版发布包（当前最新：**`v0.2.3`**）。全平台均采用 **.NET 10 Native AOT 自包含发布**，目标机**无需安装 .NET 运行时**，解压即可运行：
 
-- 默认地址 `http://localhost:5270/app/`（可用 `--urls http://0.0.0.0:5270` 参数或环境变量 `ASPNETCORE_URLS` 修改）
-- 首次启动自动生成管理员密码：见**控制台启动日志**或 `data/admin.json` 的 `generatedPassword` 字段
-- Linux 注册系统服务：使用包内自带的 `linuxwebtool.service`（`sudo cp linuxwebtool.service /etc/systemd/system/ && sudo systemctl enable --now linuxwebtool`，注意按需修改 `User` 与路径）
-- **升级**：下载新版本包覆盖程序文件，**保留 `data/` 文件夹**即可保留全部数据
+| 操作系统与架构 | 安装包文件名 | 运行方式 |
+| :--- | :--- | :--- |
+| **🐧 Linux x64** | `linuxwebtool-linux-x64.tar.gz` | `tar -xzf linuxwebtool-linux-x64.tar.gz && ./start.sh` |
+| **🐧 Linux ARM64** | `linuxwebtool-linux-arm64.tar.gz` | `tar -xzf linuxwebtool-linux-arm64.tar.gz && ./start.sh` |
+| **🪟 Windows x64** | `linuxwebtool-win-x64.zip` | 解压后直接双击运行 `start.bat`（或 `LinuxWebTool.WebHost.exe`） |
 
-> 桌面端发布由 `.github/workflows/desktop-release.yml` 在推送 `v*` tag 后自动构建 Linux x64、Linux ARM64 和 Windows x64；Native AOT 包与 Docker AOT 镜像使用同一套编译期序列化/路由约束。
+- **默认访问入口**：`http://localhost:5270/app/`（可通过启动参数 `--urls http://0.0.0.0:5270` 或环境变量 `ASPNETCORE_URLS` 调整监听网卡）。
+- **管理员初始密码**：首次启动程序时，系统会自动生成随机强密码，回显在**终端启动日志**中，并安全落盘至 `data/admin.json`。
+- **系统服务注册**：包内自带开箱即用的 `linuxwebtool.service` systemd 配置文件。
+- **平滑升级方式**：下载新版压缩包直接解压覆盖程序文件，**仅需保留 `data/` 目录**，全量历史数据与配置丝毫无损。
 
-### 方式二：Docker
+---
 
-**直接使用 CI 发布的镜像**（每次推送 main 自动构建发布）：
+### 方式二：Docker 容器（极客推荐，多硬件架构）
 
-> 镜像是按 GPU 厂商分 tag 的：默认 `latest` 装全部 VA 驱动（兜底）；`latest-intel`/`latest-amd`/`latest-nv` 只含对应厂商驱动，体积更小。N100 这类 Intel 核显用 `latest-intel`。
+使用 GitHub Packages (GHCR) 预构建镜像，包含全平台与主流 GPU 加速支持。
 
 ```bash
-# 更新镜像（已运行过的容器更新方式见下方）
+# 1. 拉取最新镜像
 docker pull ghcr.io/csvkse/lwt:latest
 
-# --restart unless-stopped: 容器随 Docker 服务自动启动（即开机自启）；手动 docker stop 后不会被拉起
-docker run -d --restart unless-stopped -p 5270:5270 -v linuxwebtool-data:/app/data --name linuxwebtool ghcr.io/csvkse/lwt:latest
-# 首次密码: docker exec linuxwebtool cat /app/data/admin.json
+# 2. 极简基础运行（适合纯指令调度、系统观测与常规运维）
+docker run -d --restart unless-stopped \
+  -p 5270:5270 \
+  -v linuxwebtool-data:/app/data \
+  --name linuxwebtool \
+  ghcr.io/csvkse/lwt:latest
 
-# 端口映射 -p 宿主端口:容器端口：容器内固定监听 5270（全链路与桌面端一致），宿主端口可自选（如 -p 80:5270）。
-# 已运行容器更新镜像：docker pull 后执行 docker rm -f linuxwebtool，再重新运行上面的 docker run（data 卷保留数据）。
-
-# 按 GPU 厂商选 tag（体积更小；见下方「镜像 tag 说明」）：
-#   Intel 核显（N100 等）：docker pull ghcr.io/csvkse/lwt:latest-intel
-#   AMD 核显：           docker pull ghcr.io/csvkse/lwt:latest-amd
-#   NVIDIA（需 --gpus）: docker pull ghcr.io/csvkse/lwt:latest-nv
-
-# 容器开机自启的前提是宿主机 Docker 服务本身自启：
-#   Linux:   sudo systemctl enable docker
-#   Windows: Docker Desktop 设置中勾选 "Start Docker Desktop when you sign in"
-# 已在运行的容器补加自启策略: docker update --restart unless-stopped linuxwebtool
+# 查看首次生成的初始管理员密码：
+docker exec linuxwebtool cat /app/data/admin.json
 ```
 
-上面的基础命令只用于普通功能。要在容器内使用 **EasyTier 虚拟组网** 或管理 **SMB、WebDAV、SFTP、S3 挂载**，请在 Linux Docker 宿主机上增加对应设备与权限（若同时需要多项，建议直接使用 `--privileged --user root`）：
+#### 镜像 Tag 选用说明（按需精简硬件驱动）：
+- `latest`：**全能通用镜像**（默认），内置 Intel iHD、AMD 与 NVIDIA 基础运行库，体积相对完整。
+- `latest-intel`：**推荐 Intel 核显（N100 / 11~14代 CPU）**，仅内置 Intel iHD 驱动，镜像体积精简 ~42MB。
+- `latest-amd`：针对 AMD 锐龙 APU / 独立显卡优化，仅集成 Mesa VA-API 驱动层。
+- `latest-nv`：针对 NVIDIA 独显加速，需配合 `--gpus all` 透传宿主驱动。
+
+#### 全能特权模式（推荐家庭 NAS 宿主机）：
+要在容器中同时运行 **EasyTier 虚拟网卡**、**SMB / WebDAV / S3 FUSE 存储挂载** 以及 **自动采集宿主机全部磁盘**，需赋予对应设备与命名空间能力：
 
 ```bash
-# 1. 运行 EasyTier 虚拟组网（必需 /dev/net/tun 设备与 NET_ADMIN 能力；持久化挂载确保内核与节点不丢）
 docker run -d --restart unless-stopped \
   --name linuxwebtool \
   -p 5270:5270 \
   -v linuxwebtool-data:/app/data \
-  --cap-add=NET_ADMIN --device=/dev/net/tun \
-  ghcr.io/csvkse/lwt:latest
-
-# 2. 运行 SMB / WebDAV / SFTP / S3 挂载（WebDAV/SFTP/S3 需 /dev/fuse；仅 SMB 时可省略 --device）
-docker run -d --restart unless-stopped \
-  --name linuxwebtool \
-  -p 5270:5270 \
-  -v linuxwebtool-data:/app/data \
-  --privileged --user root --device /dev/fuse \
-  ghcr.io/csvkse/lwt:latest
-
-# 3. 全能特权模式（同时启用 EasyTier 虚拟组网 + 磁盘挂载 + 宿主硬件控制）
-docker run -d --restart unless-stopped \
-  --name linuxwebtool \
-  -p 5270:5270 \
-  -v linuxwebtool-data:/app/data \
-  --privileged --user root \
-  --device=/dev/net/tun --device=/dev/fuse \
+  --privileged --pid=host --user root \
+  --device=/dev/net/tun --device=/dev/fuse --device=/dev/dri \
   ghcr.io/csvkse/lwt:latest
 ```
 
-`--privileged` 权限较大，只在可信宿主机使用。若使用本地尚未发布的挂载或组网代码，先执行下方 `docker build -t linuxwebtool .`，再把镜像名改成 `linuxwebtool`。本机 `wslc` 不支持设备透传，不能用它验证 rclone 或 TUN 虚拟网卡实际工作。
-
-> 注：GHCR 包首次发布默认 private。拉取时先 `docker login ghcr.io`（用户名 GitHub 账号、密码为 PAT，需 `read:packages` 权限）；或将仓库 Packages 页中 lwt 的 visibility 改为 public 后免登录拉取。
-
-**docker compose 示例**（更新镜像：`docker compose pull && docker compose up -d`）：
+#### Docker Compose 生产推荐配置：
 
 ```yaml
 services:
   linuxwebtool:
-    image: ghcr.io/csvkse/lwt:latest
+    image: ghcr.io/csvkse/lwt:latest # Intel N100 可替换为 ghcr.io/csvkse/lwt:latest-intel
     container_name: linuxwebtool
+    restart: unless-stopped
+    privileged: true               # 必需：授予 nsenter 跨命名空间磁盘采集与存储挂载权限
+    pid: host                      # 必需：共享宿主机 PID 命名空间
+    user: root                     # 必需：root 权限以操作底层驱动
     ports:
       - "5270:5270"
-    volumes:
-      - ./data:/app/data          # 单卷持久化：数据库+凭据+密钥+日志+EasyTier内核与节点配置
-    # 启用 EasyTier 虚拟组网所需权限与设备（无需特权模式即可运行）
-    cap_add:
-      - NET_ADMIN
+      - "11010:11010/udp"          # 推荐：映射 EasyTier P2P 打洞监听端口
     devices:
-      - /dev/net/tun:/dev/net/tun
-      # - /dev/fuse:/dev/fuse     # 若需 WebDAV/SFTP/S3 FUSE 挂载则取消注释
-    # privileged: true           # 若同时使用 SMB 挂载，建议取消注释并配置 user: root
-    # user: root
+      - /dev/net/tun:/dev/net/tun  # 启用 EasyTier TUN 虚拟网卡
+      - /dev/fuse:/dev/fuse        # 启用 WebDAV / SFTP / S3 FUSE 存储挂载
+      - /dev/dri:/dev/dri          # 启用 Intel / AMD GPU 硬件转码加速
+    volumes:
+      - ./data:/app/data           # 单数据卷持久化（涵盖数据库、凭据、配置及组网内核）
+      - /usr/local/bin:/usr/local/bin:ro # 可选：让容器可直接调用宿主机常用运维脚本
     environment:
       - Admin__UserName=admin
-      - Admin__Password=修改我     # 不设则自动生成，见容器日志
+      - Admin__Password=你的强密码  # 若不配置则启动时自动生成
       - TZ=Asia/Shanghai
-    restart: unless-stopped
 ```
 
-**本地构建镜像**：
+---
+
+### 方式三：Linux systemd 系统服务常驻
+
+适合以独立二进制运行在专属 Linux 服务器上的场景：
 
 ```bash
-docker build -t linuxwebtool .
-docker run -d -p 5270:5270 -v linuxwebtool-data:/app/data linuxwebtool
+# 1. 创建程序目录并解压产物
+sudo mkdir -p /opt/linuxwebtool
+sudo tar -xzf linuxwebtool-linux-x64.tar.gz -C /opt/linuxwebtool
+
+# 2. 复制并启用服务文件
+sudo cp /opt/linuxwebtool/linuxwebtool.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now linuxwebtool
+
+# 3. 检查运行状态与启动密码
+sudo systemctl status linuxwebtool
+sudo journalctl -u linuxwebtool -n 30 --no-pager
 ```
 
-镜像特性（已实测）：`TZ=Asia/Shanghai`、非 root（appuser）运行、内置 HEALTHCHECK、alpine 内已装 `bash`/`procps`/`usbutils`/`pciutils`/`kmod`（脚本执行、状态采集、lsusb/lspci/lsmod 硬件查看容器内可用）。
+---
 
-**容器内执行特权指令**（systemctl、docker 等）：`run` 加 `--user root`（或改 Dockerfile 的 `USER`）；普通内网运维指令无需特权。
+### 方式四：源码克隆与本地开发调试
 
-### 进阶：USB / 宿主工具目录 / GPU 直通（按需添加）
-
-容器默认**无法访问宿主外设**。以下配置让网页中的指令能操作宿主硬件（仅标准 Linux 宿主；WSL2 环境见各项备注）。需要多项时直接在 `docker run` 上堆叠参数：
-
-```bash
-docker run -d --restart unless-stopped \
-  -p 5270:5270 \
-  -v linuxwebtool-data:/app/data \
-  --name linuxwebtool \
-  --user root \
-  -v /usr/local/bin:/usr/local/bin:ro \
-  -v /dev/bus/usb:/dev/bus/usb \
-  --device=/dev/dri \
-  ghcr.io/csvkse/lwt:latest
-```
-
-| 需求 | 配置 | 说明 |
-|---|---|---|
-| **USB 控制** | `-v /dev/bus/usb:/dev/bus/usb` + `--user root` | 挂载整个 USB 总线（热插拔设备动态可见）；特定串口/TTY 设备另加 `--device=/dev/ttyUSB0`；`lsusb` 已内置。**WSL2**：先用 [usbipd-win](https://github.com/dorssel/usbipd-win) 把 Windows USB 设备 attach 到 WSL（`usbipd bind` / `usbipd attach --wsl`），容器再按上面配置 |
-| **宿主机 /usr/local/bin** | `-v /usr/local/bin:/usr/local/bin:ro` | 宿主安装的工具脚本直接在容器内使用（`:ro` 只读更安全）。⚠ 镜像是 alpine(musl)：宿主 Debian/Ubuntu 编译的**动态链接程序无法运行**，脚本与静态编译的二进制不受影响 |
-| **GPU（NVIDIA）** | `--gpus all` | 宿主需已装 NVIDIA 驱动 + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)；**toolkit 装宿主机，非容器**（见下方「宿主机安装 NVIDIA 栈」）；容器内 `nvidia-smi` 可用。WSL2 需 Windows 侧装 NVIDIA 驱动（驱动自带 WSL 支持） |
-| **GPU（Intel/AMD 核显）** | `--device=/dev/dri` | 挂载 DRI 设备（VA-API/Vulkan 硬件加速）；`libva` 用户态库已内置，ffmpeg 已启用 vaapi 编码，透传后即可用。**注意**：VA 驱动按 tag 区分——`latest-intel` 只含 Intel iHD、`latest-amd` 只含 AMD gallium；`latest` 全装（更大全能）。请选对应厂商的 tag，否则核显无对应驱动会回退软件编码 |
-| **全部要（省事）** | `--privileged --user root` | 接近宿主完整权限，含 USB/所有设备。方便但权限最大，请仅在信任内网使用 |
-| **查看宿主机磁盘（自动，推荐）** | `--privileged --pid=host --user root` | 采集器经 `nsenter` 进入宿主挂载命名空间执行 `df`，系统状态页**自动显示宿主全部磁盘与挂载点**，新增磁盘自动出现，无需任何手写。需标准 Linux 宿主 Docker（WSL2 的 wslc 不支持 privileged，见下行） |
-| **查看宿主机磁盘（手动）** | 逐盘挂载：`-v /mnt/c:/host-c:ro`（WSL2 的 Windows 盘）等 | 受限运行时（wslc）或不想给特权时的替代：容器文件系统与宿主隔离，`df` 天然只看到容器自身（如 `/dev/loop2` 虚拟盘）；挂进来的盘会出现在磁盘列表（真实容量）。已实测：WSL2 下挂 `/mnt/c` 后容器内 `df` 正确显示 Windows C 盘容量（790GB·70%） |
-
-### 镜像 tag 说明（按 GPU 厂商瘦身）
-
-CI 每次推送 main 会构建并推送 4 个镜像 tag，用 `VENDOR` 构建参数选装对应 VA 用户态驱动（编码器在 ffmpeg 内，这里只装让 `/dev/dri` 真正可用的驱动库）：
-
-| tag | 适用 GPU | 驱动层 | 说明 |
-|---|---|---|---|
-| `latest` | 通用（兜底） | Intel iHD + AMD/NVIDIA gallium | 与原行为一致，体积最大 |
-| `latest-intel` | Intel 核显（N100/Alder Lake-N 等） | 仅 Intel iHD | **推荐**，比 `latest` 省约 42MB |
-| `latest-amd` | AMD 核显 | 仅 mesa-va-gallium | 走 VAAPI；编码受限时应用自动回退软件 |
-| `latest-nv` | NVIDIA | 无（由 nvidia-container-toolkit 透传） | 需 `--gpus all`，复用宿主机 NVIDIA 驱动 |
-
-> 选 tag 原则：**按宿主机显卡厂商选对应 tag**，避免「全能镜像」白白增容；不确定就先用 `latest`（全装，一定能跑）。
-
-**宿主机安装 NVIDIA 栈（`nvidia-container-toolkit` 装在宿主机，不在容器内）**
-
-> 关键：`nvidia-container-toolkit` 是**宿主机级容器运行时插件**，安装在跑 Docker 的那台宿主机器上（用宿主包管理器 + `sudo`），不是在容器里。它在 Docker 启动 `--gpus all` 时负责把 NVIDIA 驱动与 GPU 设备注入容器。缺它时 `--gpus all` 参数会直接报错。
-
-```bash
-# 1. 安装 NVIDIA 驱动（宿主，Ubuntu/Debian 示例；已装可跳过）
-sudo apt install -y nvidia-driver-550          # 版本按宿主机显卡与发行版选择
-# 重启宿主机使驱动生效，随后 nvidia-smi 应能列出 GPU
-
-# 2. 安装 nvidia-container-toolkit（宿主机）
-sudo apt install -y nvidia-container-toolkit
-# 或 NVIDIA 官方脚本：  curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg && ...（见官方 install-guide）
-
-# 3. 配置 Docker 运行时（宿主机，改 /etc/docker/daemon.json）
-sudo nvidia-ctk runtime configure --runtime=docker
-sudo systemctl restart docker
-
-# 4. 验证（宿主机）——容器内 nvidia-smi 应可列出 GPU
-docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
-```
-
-带 GPU 透传运行本应用（宿主机上执行）：
-
-```bash
-docker run -d --restart unless-stopped \
-  -p 5270:5270 \
-  -v linuxwebtool-data:/app/data \
-  --name linuxwebtool \
-  --user root \
-  --gpus all \
-  ghcr.io/csvkse/lwt:latest
-```
-
-compose 等价写法（NVIDIA GPU 透传）：
-
-```yaml
-services:
-  linuxwebtool:
-    image: ghcr.io/csvkse/lwt:latest
-    container_name: linuxwebtool
-    user: root
-    ports:
-      - "5270:5270"
-    volumes:
-      - linuxwebtool-data:/app/data
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    restart: unless-stopped
-
-volumes:
-  linuxwebtool-data:
-```
-
-**Intel/AMD 核显**（`--device=/dev/dri` 透传）：镜像已内置 VA-API 用户态库（`libva`）与 核显驱动（`mesa-va-gallium`），ffmpeg 已启用 vaapi 编码支持，透传 `/dev/dri` 后即可走 VA-API 硬件编码。核显路径**不需要** nvidia-container-toolkit。若自行裁剪镜像后遇到 "Cannot load libva" / "device not found"，需保留 `apk add libva mesa-va-gallium`。
-
-**应用侧行为（已实现）**：应用会枚举 `/dev/dri/renderD*` 渲染设备，按 PCI vendor 区分 Intel / AMD，并对 NVIDIA/Intel/AMD 硬件编码器执行真实编码探针，同时读取 `nvidia-smi` 或 `vainfo` 的 GPU/驱动信息。VAAPI/QSV 探针成功时记录实际设备路径，真实转码会复用同一设备，避免多显卡环境探 A 卡、实际转码用 B 卡。只有探针通过才显示「⚡ 硬件加速可用」；驱动初始化、设备权限或 VA 用户态库异常时显示「△ 硬件驱动异常」和失败原因，转码自动回退软件编码（libx264/libx265）。AMD 不探测 QSV；系统状态页「硬件」区块会标记 GPU（VGA/3D/Display 类）。
-
-**宿主机磁盘自动采集 —— 完整示例**（三个参数缺一不可，作用：`--privileged` 授予 nsenter 权限；`--pid=host` 让容器看到宿主 PID 1 以定位其命名空间；`--user root` 非 root 无权切换命名空间）：
-
-```bash
-# 更新镜像（已有容器：pull 后 docker rm -f linuxwebtool，再重新运行下方 docker run；data 卷数据保留）
-docker pull ghcr.io/csvkse/lwt:latest
-
-docker run -d --restart unless-stopped \
-  -p 5270:5270 \
-  -v linuxwebtool-data:/app/data \
-  -v /usr/local/bin:/usr/local/bin:ro \
-  --name linuxwebtool \
-  --privileged --pid=host --user root \
-  ghcr.io/csvkse/lwt:latest
-# 打开 http://localhost:5270/app/ 系统状态页，磁盘列表即宿主机全部磁盘与挂载点
-# /usr/local/bin 只读映射：宿主安装的工具脚本在容器内直接可用（alpine 容器注意动态链接兼容性）
-```
-
-compose 等价完整写法（更新镜像：`docker compose pull && docker compose up -d`）：
-
-```yaml
-services:
-  linuxwebtool:
-    image: ghcr.io/csvkse/lwt:latest
-    container_name: linuxwebtool
-    privileged: true      # 必需：授予 nsenter 权限
-    pid: host             # 必需：共享宿主 PID 命名空间（nsenter -t 1 定位宿主）
-    user: root            # 必需：非 root 无权切换命名空间
-    # 启用 WebDAV/SFTP/S3 挂载时还需宿主机支持 FUSE，并添加：
-    # devices:
-    #   - /dev/fuse:/dev/fuse
-    ports:
-      - "5270:5270"
-    volumes:
-      - linuxwebtool-data:/app/data
-      - /usr/local/bin:/usr/local/bin:ro
-    environment:
-      - TZ=Asia/Shanghai
-    restart: unless-stopped
-
-volumes:
-  linuxwebtool-data:
-```
-
-USB / GPU 直通的 compose 节选（叠加到上方任一示例的对应位置）：
-
-```yaml
-    devices:
-      - /dev/bus/usb
-      - /dev/dri
-    volumes:
-      - /usr/local/bin:/usr/local/bin:ro
-```
-
-> ⚠️ 这些配置授予容器宿主硬件控制权，与「不暴露公网」原则叠加使用；非 NVIDIA 环境去掉 `--gpus all`（无 toolkit 时该参数会直接报错）。
-
-### 方式三：systemd（常规自包含发布）
+要求本地安装 [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) 与 Node.js 20+：
 
 ```powershell
-./scripts/publish.ps1
-# 按输出提示上传 /opt/linuxwebtool 并启用 linuxwebtool.service
+# 1. 克隆代码仓库
+git clone https://github.com/csvkse/LWT.git
+cd LWT
+
+# 2. 编译并启动服务
+dotnet build LinuxWebTool.slnx
+dotnet run --project src/LinuxWebTool.WebHost
+
+# 3. 浏览器打开开发界面
+# http://localhost:5270/app/
 ```
 
-> `scripts/publish.ps1` 面向 Linux x64 的常规自包含部署；桌面端 Native AOT 包请优先从 Releases 下载。systemd 服务文件中的启动路径应与实际发布产物保持一致。
+---
 
-### 持久化与数据目录（三种方式通用）
+### 单卷持久化设计（data/ 目录规范）
 
-全部可持久化数据聚合在**数据根目录 `data/`**（Docker 容器内为 `/app/data`，单文件夹备份即可）：
-- `linuxweb.db`：SQLite 数据库（指令、执行历史、定时任务、EasyTier 节点元数据、FRP 穿透与网关配置）
-- `admin.json`：管理员凭据持久化（首次运行自动生成随机强密码）
-- `jwt.key`：JWT 身份签名密钥
-- `easytier/bin/`：**EasyTier 原生内核与工具**（`easytier-core`、`easytier-cli`、`libeasytier_ffi.so`/`easytier_ffi.dll`，在线下载升级或本地上传后永久保存在此）
-- `easytier/nodes/`：**EasyTier 节点运行时配置**（`<实例名称>.toml`，启动时从数据库加载并持久化生成）
-- `easytier/staging/`：在线升级包临时缓冲下载目录
-- `logs/`：系统按天滚动日志（`app-*.txt`）与调试日志（`debug-*.txt`）
-- `mount-creds/`、`rclone-config/`、`rclone-cache/`：网络挂载凭据与写入缓存
+LinuxWebTool 遵循**严格的单一数据根目录规范**。无论运行方式如何，所有需要落盘的动态资产均完全聚合在 `data/` 目录（容器内为 `/app/data`）：
 
-> **单卷挂载优势**：无论通过 Docker 命名卷 `-v linuxwebtool-data:/app/data` 还是本地路径映射 `-v /opt/linuxwebtool/data:/app/data`，所有 EasyTier 核心文件、版本更新、节点网络规则和系统数据全部落在此卷内。容器销毁、重建或镜像升级（`docker pull`）时，**已安装的 EasyTier 内核与网络节点配置 100% 完整保留并自启**，无需重复下载或重新配置。
->
-> 自定义路径：可通过配置 `Data:Directory` 或环境变量 `Data__Directory`（如 `Data__Directory=/var/lib/linuxwebtool`）自定义持久化绝对路径。
+```
+data/
+├── linuxweb.db           # SQLite 核心数据库（指令、历史、定时计划、网关、组网节点元数据）
+├── admin.json            # 管理员凭据持久化（用户名、随机哈希与 SecurityStamp 安全戳记）
+├── jwt-secret.key        # HS256 JWT 自动生成的 64 字节密钥（确保重启后 Token 有效）
+├── easytier/
+│   ├── bin/              # EasyTier 原生内核（支持在线一键升级与本地上传，持久化不丢失）
+│   ├── nodes/            # 节点运行时配置（*.toml，由系统自动生成和热载入）
+│   └── staging/          # 云端拉取升级包临时缓冲区
+├── mount-creds/          # SMB 网络挂载凭据（600 权限存储，密码不进命令行）
+├── rclone-cache/         # WebDAV/SFTP/S3 FUSE 挂载写入缓冲与运行状态
+└── logs/                 # 系统按天滚动应用日志 (app-*.txt) 与动态调试日志 (debug-*.txt)
+```
 
-管理员凭据优先级：`Admin__UserName`/`Admin__Password` 环境变量或 appsettings 显式配置 **>** `data/admin.json`（记录最后一次生效的凭据）**>** 首次启动随机生成（打印在启动日志）。网页右上角 ⚙ 可随时修改用户名 / 密码。
+> 💡 **单卷迁移优势**：备份或迁移机器时，**只需完整打包这一个 `data/` 目录**。在新机器上恢复挂载后启动，管理员账号、所有历史数据、EasyTier 内核和网关路由将 100% 完整复原，无需任何额外环境初始化！
 
-### 挂载 / 转码 / EasyTier 虚拟组网的运行要求
+---
 
-- **EasyTier 虚拟组网**：基于 Rust 原生内核的去中心化全互联 P2P 虚拟局域网。
-  - **Linux 宿主 / Docker 容器**：创建 TUN 虚拟网卡需要 Root 用户或 `CAP_NET_ADMIN` 能力。在 Docker 下运行必须透传设备与权限：`--cap-add=NET_ADMIN --device=/dev/net/tun`（或 `--privileged --user root`）；宿主非 root 运行可执行 `sudo setcap cap_net_admin=+ep data/easytier/bin/easytier-core` 赋予网卡管理能力。
-  - **Windows 宿主机**：创建 TUN 虚拟网卡需要以管理员身份运行 WebHost（右键“以管理员身份运行”），否则虚拟网卡创建失败，DHCP 将无法分配虚拟 IP。
-  - **内核引擎管理与热升级**：Web 端提供【⚙️ 内核管理】界面，支持从 GitHub Releases 官方仓库一键云端自动拉取适配系统的内核包（内置 ghproxy 加速），或手动上传 `libeasytier_ffi.so` / `easytier_ffi.dll`。内核支持双模调度（C ABI Native FFI 高性能直调模式与 Core Binary 独立守护进程模式），更新时自动排空旧实例、解压到持久化 `bin/` 目录并平滑恢复所有网络节点。
-  - **P2P 真直连与流量卸载（UDP 监听预设）**：为获得最佳 P2P 穿透效果并卸载中继/Cloudflare Worker 流量，推荐开启本地 UDP 监听端口（UI 提供一键预设：如 `udp://0.0.0.0:11010` 或 IPv4+IPv6 双栈 `udp://0.0.0.0:11010` + `udp://[::]:11010`）。只要路由器开启 UPnP、Full Cone NAT 或具备原生 IPv6，两端节点通过中继完成握手后，所有虚拟内网数据传输将自动切换为点对点 UDP 直连（P2P），流量完全不消耗中继服务器。Docker 部署若需外部节点直连本节点，可映射对应 UDP 端口（如 `-p 11010:11010/udp`）或采用 host 网络模式。
-- **SMB 挂载**：仅 Linux 生效。Docker 部署需在以 `--privileged --user root` 运行时挂载（特权不足会返回 EPERM，UI 有明确提示）；镜像已内置 `cifs-utils`。挂载点需在容器内可访问（`/mnt/*`），凭据写入 `data/mount-creds/<id>`（600 权限），密码不经命令行。
-- **WebDAV 挂载**：仅 Linux 生效。镜像包含 `rclone` 和 `fuse3`；容器需提供 `/dev/fuse` 及挂载权限，例如可信环境下使用 `--privileged --device=/dev/fuse --user root`。仅接受 HTTPS WebDAV URL。配置写入数据卷中的 `webdav-config`（600 权限），写入缓存保存在 `webdav-cache`；卸载前请确认文件已上传。WebDAV 服务端不提供容量时，系统状态页不显示估算容量。容器内创建的挂载默认只在本容器可见；要供宿主机或其他容器访问，还需配置并验证 Linux 绑定挂载传播。
-- **SFTP / S3 挂载**：同样需要 `rclone`、`/dev/fuse` 和挂载权限。SFTP 需要用户名及密码或容器内私钥文件，并须填入从可信渠道获得的完整 SSH 主机公钥；S3 支持 AWS 区域或自定义 HTTPS 端点、存储桶及访问密钥。两者共用 `data/rclone-config`（凭据文件 600 权限）和 `data/rclone-cache`（写缓存），卸载前请确认待上传文件已同步。健康检查每 30 秒直接读取远端目录，并检查本地挂载目录；连续三次本地失败且远端正常时尝试正常卸载重挂。详见 [SFTP/S3 配置说明](docs/rclone-sftp-s3.md)。
-- **媒体转码**：依赖 ffmpeg。Docker 镜像已内置；桌面 / systemd 部署需自行安装 ffmpeg（或 `Media__FfmpegPath` 指定路径），转码页顶部显示检测状态。媒体目录建议映射进容器以便网页直接访问（如 SMB 挂载 `/mnt/media` 或 `-v /media:/media:ro`）。
+## 高阶能力实战指南
 
-### 终端与目录联动
+### 1. EasyTier 虚拟局域网与 P2P UDP 流量卸载
 
-在文件管理器当前目录或文件夹菜单选择“在终端打开”，会创建以该目录为起点的新终端。Linux Bash 和 Windows PowerShell 返回提示符后会报告当前目录；终端中的“打开当前目录”会先验证文件管理器能访问该目录。Windows 文件管理器首页列出可访问盘符，支持盘符绝对路径及 UNC 共享路径；系统根目录、程序数据目录和 Windows junction/符号链接路径禁止修改。
+LinuxWebTool 原生集成了高性能的 **EasyTier P2P 去中心化组网内核**：
+- **零环境依赖升级**：Web 界面提供【⚙️ 内核管理】，支持直接从 GitHub 官方仓库一键云端自动拉取并部署对应架构内核（内置国内加速中继），或直接上传二进制文件，热更新过程不中断已有系统服务。
+- **P2P 真直连优化**：建议在创建节点时开启本地 UDP 监听端口（如 `udp://0.0.0.0:11010` 与 IPv6 `udp://[::]:11010`）。两端节点在通过公共中继服务器握手完成后，流量将自动协商穿透为端到端 UDP 点对点直连，极大降低中转服务器带宽开销，实现内网级高速互访。
 
-终端默认以后台会话运行。关闭标签或浏览器断线只断开连接；已输入的会话可在“后台终端”列表接回，重新连接保持同一进程。未输入且空闲的会话断开超过 2 分钟后自动清理，显式“结束会话”会终止进程。后台输出持续读取并保留最近 1 MiB，较早输出截断时页面会提示；全屏程序恢复可能需要重新绘制。Web 服务或容器停止会结束会话。
+### 2. YARP 智能网关与端口转发
 
-Linux 使用内置原生 PTY，Windows 使用原生 ConPTY，无需安装额外后台终端工具。终端页面可检测原生交互能力，后台列表按会话显示实际管道回退状态；回退模式的全屏程序、窗口缩放及 Ctrl-C 能力受限。后台续跑仅支持软件运行期间，软件退出或容器停止时会话结束。
+基于微软生产级反向代理引擎 **YARP (Yet Another Reverse Proxy)** 构建：
+- **L7 网站反向代理**：轻松为内网群晖、Alist、路由器后台配置即席代理路由，支持按前缀匹配、路径重写（PathRewrite）与访问白名单。
+- **L4 高性能端口转发**：内置 TCP / UDP 四层流式转发引擎，支持将边缘主机的特定端口直接穿透映射至内网数据库、SSH 或专属游戏服务。
 
+### 3. AI 智能体集成：MCP Server 连接配置
 
-## 开发约定（门禁强制）
+LinuxWebTool 原生实现了 **Model Context Protocol (MCP)** 规范，可通过 SSE（Server-Sent Events）与 Streamable HTTP 协议让 AI 智能体直接安全操作 LinuxWebTool 平台：
+
+#### 1) 在管理界面生成 API Key：
+进入【系统设置】→【API 密钥管理】，新建一个 Key 并确保勾选 **`MCP 访问`** 权限（例如得到 `lwt_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`）。
+
+#### 2) 配置 Claude Desktop / Cursor：
+在 Claude Desktop 配置文件（`claude_desktop_config.json`）中添加：
+
+```json
+{
+  "mcpServers": {
+    "linux-web-tool": {
+      "url": "http://127.0.0.1:5270/mcp/sse",
+      "headers": {
+        "X-Api-Key": "lwt_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    }
+  }
+}
+```
+
+连接成功后，AI 即可直接调用以下内置工具：
+- `terminal_execute_command`：在受控会话中执行特定 Linux 指令并即时获取回显；
+- `file_read_text` / `file_write_text`：读取与修改服务器文件内容；
+- `system_get_status`：实时洞察当前主机 CPU、内存、负载与磁盘用量；
+- `gateway_list_routes` / `schedule_list`：查询和触发网关与自动化任务。
+
+### 4. FFmpeg 硬件转码加速与 GPU 直通排查
+
+转码中心集成多级硬件探测器，在提交任务或启动时动态侦测 GPU 编解码支持状态：
+- **Intel 核显**：要求宿主机加载 `/dev/dri`，镜像内预置 `libva` 与 `intel-media-driver (iHD)`。转码状态指示灯显示绿色即代表 VAAPI / QSV 硬件流水线就绪。
+- **AMD 核显/独显**：要求映射 `/dev/dri`，系统自动加载 `mesa-va-gallium` 驱动层。
+- **NVIDIA 独显**：宿主机安装 `nvidia-container-toolkit` 后，通过 `--gpus all` 注入驱动。
+
+---
+
+## 安全体系与权限控制
+
+### 凭据优先级体系
+为兼顾开箱即用与自动化部署，管理员凭据按以下严格优先级加载：
+1. **显式环境变量**：`Admin__UserName` 与 `Admin__Password`（最高优先级，每次启动覆盖本地文件）；
+2. **配置文件**：`appsettings.json` 中的 `Admin:Password`；
+3. **持久化文件**：`data/admin.json`（记录最后一次生效的凭据）；
+4. **随机初次生成**：首次启动随机生成并在控制台回显。
+
+### 安全戳记与改密即刻失效机制
+- 每次用户通过 Web 端修改密码或变更用户名，系统会自动刷新管理员专用的 **`SecurityStamp`（独立 GUID 安全戳记）**。
+- 系统在每次验证 JWT 或建立 WebSocket 终端握手时均实时核验安全戳记一致性。一旦改密，**旧 Token 及其衍生的所有连接与终端会话立即失效被断开**，杜绝历史 Token 泄露隐患。
+- 内置 **JWT 滑动窗口无感续期**：当活跃用户的 Token 剩余生命期小于阈值（默认 72 小时）时，系统自动在响应头回发新 Token 并平滑置换，无需频繁强制登出。
+
+### API Key 细粒度权限矩阵 (Default-Deny)
+- 采用 **Default-Deny 默认拒绝原则**：未在权限模型中显式放行的接口一律严禁 API Key 访问；
+- 敏感管理模块（如 `/api/Auth` 改密、`/api/ApiKeys` 密钥增删、`/api/FrpTunnel` 穿透配置、`/api/EasyTier` 虚拟网卡、`DELETE /api/History` 清空审计记录）被**硬编码严格禁止** API Key 调用；
+- 针对非法格式与长度的 Key 进行 **纳秒级内存预检**，不触发哈希计算与数据库查询，防范缓存穿透攻击。
+
+### 反代 IP 辨析与防暴力破解锁定
+- 仅当底层网络直连来源于**本机环回（127.0.0.1 / ::1）或受信任的私网反向代理（RFC 1918 / ULA）** 时，系统才信任 `X-Real-IP` 反代头；公网不可信直连客户端强制使用底层 TCP 真实地址，防止伪造 IP 实施恶意封禁攻击；
+- 针对单一 IP 累计密码错误达到 10 次，系统自动施加 5 分钟锁定，返回 `429 Too Many Requests`；失败计数具备 10 分钟平滑滑动保留期，多 IP 交叉试探无法冲刷计数。
+
+---
+
+## 本地开发与架构门禁
+
+本项目建立了全方位的**架构防御体系与自动化质量门禁**。提交代码前运行以下脚本执行快速门禁验证：
 
 ```powershell
-./scripts/verify-fast.ps1          # 提交前必跑
-dotnet test LinuxWebTool.slnx -c Release # 运行全部单元/架构/集成测试
-./scripts/verify-aot.ps1            # Docker Native AOT 构建 + 61 路由冒烟
+# 执行全量自动化质量门禁（必须全绿通过）
+./scripts/verify-fast.ps1
 ```
 
-测试分层：`tests/LinuxWebTool.ArchitectureTests` 包含架构门禁和核心纯单元测试；`tests/LinuxWebTool.IntegrationTests` 使用 TestServer、SQLite 和 Quartz 验证认证、CRUD 及 AOT 敏感接口；`scripts/smoke-aot.ps1` 在 Native AOT Docker 容器中调用全部后端路由，并扫描动态代码生成与 JSON metadata 错误。
+门禁执行内容涵盖：
+1. **编译与 Native AOT 静态分析**：断言 0 警告、0 错误，严格禁止无源生成上下文的反射 JSON 序列化；
+2. **后端架构守卫测试 (`LinuxWebTool.ArchitectureTests`)**：
+   - `LinuxArch001`：Contracts 严格零外部依赖、仅纯 BCL；
+   - `LinuxArch002 / 004`：严格验证单向依赖方向，下层严禁反向引用上层；
+   - `LinuxArch005`：控制器严禁直接触碰数据库 ORM，必须经由 Store 仓储层；
+   - `LinuxArch007`：代码命名空间必须与物理文件路径 100% 保持一致；
+   - `LinuxArch008 / 010`：AOT 关键出参必须为显式强类型 DTO，严禁匿名对象；
+   - `LinuxArch013 / 014`：SQLite GUID 比较必须声明 `COLLATE NOCASE`，防止大小写错配；
+   - `LinuxArch022`：关键 HostedService 依赖注入双重注册守卫；
+   - `LinuxArch023`：物理目录规范白名单守卫（禁止根目录平铺业务代码）；
+   - **`LinuxArch024`**：**所有控制器必须在 ApiKeyMiddleware 中显式声明权限归属，杜绝隐式漏控**；
+3. **API 集成测试 (`LinuxWebTool.IntegrationTests`)**：覆盖真实 SQLite 数据库、WebSocket 终端连接与权限隔离；
+4. **前端架构门禁与 ESLint**：约束 API 路径收敛、禁止未受控 fetch、规范模板事件绑定。
 
-- Contracts 零依赖；Infrastructure 不引上层；Controller 禁直接 using SqlSugar（经 `*Store` 访问数据）
-- 命名空间 = 物理路径
-- 前端：API 字符串只在 `config.js`、fetch 只在 `api/client.js`、Storage 只在 `client.js/auth.js`、禁跨层 import、**模板事件必须 `method()`**（裸标识符会被 Vue 运行时编译错误提升导致 handler 丢失）
-- 规则详见 `docs/dev/architecture-gates.md`；前端存量债务用 `frontend-gate-baseline.json` 冻结（只减不增）
+详细门禁清单参见 [后端架构门禁规范文档](./docs/dev/architecture-gates.md)。
 
-## 关键配置（appsettings.json）
+---
 
-| 配置 | 默认 | 说明 |
-|---|---|---|
-| `Urls` | `http://localhost:5270` | 监听地址（appsettings.json 顶层；Docker 镜像内已改写为 `0.0.0.0:5270`，勿在容器内依赖此值） |
-| `Data:Directory` | `data` | 数据根目录（相对路径锚定应用根；环境变量 `Data__Directory`） |
-| `Shell:DefaultTimeoutSeconds` | 60 | 指令默认超时 |
-| `Shell:MaxOutputBytes` | 65536 | stdout/stderr 截断上限 |
-| `Shell:MaxConcurrent` | 4 | 并发执行上限（排队等待） |
-| `Shell:WorkingDirectory` | 空 | 指令执行工作目录（空=继承进程目录） |
-| `Terminal:MaxSessions` | 16 | 同时保留的终端会话上限 |
-| `Terminal:BufferBytes` | 1048576 | 每个会话的最近输出缓存字节数 |
-| `Terminal:UnusedGraceSeconds` | 120 | 未输入且空闲的终端断开后的清理宽限秒数 |
-| `Terminal:ExitedRetentionSeconds` | 300 | 已退出会话在列表中保留的秒数 |
-| `Jwt:ExpireHours` | 12 | 登录有效期 |
-| `FileLog:Directory` | `logs` | 日志目录（相对路径锚定到数据目录） |
-| `Logging:LogFile:LinuxWebTool` | Debug | 调试日志开关（写入 debug-*.txt） |
-| `Retention:FileLogDays` | 30 | 程序日志和调试日志保留天数 |
-| `Media:LogRetentionDays` | 7 | 转码日志保留天数 |
-| `Retention:ExecutionHistoryDays` | 90 | 指令执行历史保留天数 |
-| `Retention:OperationLogDays` | 180 | 操作审计日志保留天数 |
-| `Retention:CleanupIntervalHours` | 24 | 自动清理执行间隔（小时） |
+## 关键配置 (appsettings.json)
+
+| 配置键名 | 默认值 | 对应环境变量 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `Urls` | `http://localhost:5270` | `ASPNETCORE_URLS` | 监听端口与地址（容器内已锁定为 `0.0.0.0:5270`） |
+| `Data:Directory` | `data` | `Data__Directory` | 单持久化数据根目录（相对路径锚定应用执行根） |
+| `Jwt:ExpireHours` | `168` (7天) | `Jwt__ExpireHours` | JWT Token 默认有效期时长（小时） |
+| `Jwt:RefreshThresholdHours`| `72` (3天) | `Jwt__RefreshThresholdHours` | 触发滑动无感续签的剩余时长阈值（小时） |
+| `Jwt:EnableAutoRenewal` | `true` | `Jwt__EnableAutoRenewal` | 是否开启滑动窗口无感自动续期 |
+| `Shell:DefaultTimeoutSeconds` | `60` | `Shell__DefaultTimeoutSeconds` | 指令单次执行默认超时中断秒数 |
+| `Shell:MaxOutputBytes` | `65536` (64KB) | `Shell__MaxOutputBytes` | 指令标准输出 stdout/stderr 单次截断上限 |
+| `Shell:MaxConcurrent` | `4` | `Shell__MaxConcurrent` | 允许并发执行指令的最大队列深度 |
+| `Terminal:MaxSessions` | `16` | `Terminal__MaxSessions` | 允许同时并存的终端会话最大数量 |
+| `Terminal:BufferBytes` | `1048576` (1MB)| `Terminal__BufferBytes` | 单个终端会话后台环形历史输出缓冲区容量 |
+| `Terminal:UnusedGraceSeconds` | `120` | `Terminal__UnusedGraceSeconds` | 空闲且无输入的断线终端会话自动清理宽限期 |
+| `FileLog:Directory` | `logs` | `FileLog__Directory` | 日志相对存储子目录（锚定在 `data/` 下） |
+| `Retention:ExecutionHistoryDays` | `90` | `Retention__ExecutionHistoryDays`| 指令执行历史记录最大保留天数 |
+| `Retention:OperationLogDays` | `180` | `Retention__OperationLogDays` | 用户操作行为审计日志最大保留天数 |
+
+---
+
+## 常见问题 (FAQ)
+
+<details>
+<summary><b>Q1: 忘记了管理员初始密码，该如何找回或重置？</b></summary>
+<br/>
+
+重置管理员密码非常简单，有两种方式：
+1. **方式一（环境变量覆盖）**：停止程序，设置环境变量 `Admin__Password=你的新密码` 并重启程序。系统启动时会优先检测环境变量并自动覆盖原密码；
+2. **方式二（重新生成）**：停止程序，进入 `data/` 目录删除 `admin.json` 文件并重新启动。系统将自动生成新密码并输出在控制台启动日志中。
+</details>
+
+<details>
+<summary><b>Q2: 为什么在 Docker 中运行 EasyTier 时无法创建 TUN 网卡？</b></summary>
+<br/>
+
+创建 Linux TUN 虚拟网络设备属于内核级网络操作。Docker 容器默认处于未提权沙箱状态，无法直接操作底层设备。
+请在运行命令中补充 `--cap-add=NET_ADMIN --device=/dev/net/tun`（或直接使用 `--privileged --user root`），确保宿主机已加载 `tun` 内核模块（可先在宿主机执行 `lsmod | grep tun` 确认）。
+</details>
+
+<details>
+<summary><b>Q3: Windows 环境下运行终端为什么偶发出现 SmartScreen 或提示无法创建终端？</b></summary>
+<br/>
+
+- **SmartScreen 提示**：由于 Release 产物为原生 Native AOT 编译的独立 exe 且未购买昂贵的商业代码签名证书，Windows 会提示未知发布者，点击「更多信息」→「仍要运行」即可；
+- **终端要求**：Windows 原生 ConPTY 引擎依赖 **Windows 10 1809 (Build 17763) 或更高版本**（包括 Windows 11 与 Windows Server 2019+）。在极低版本 Windows 上系统会自动降级为管道模式。
+</details>
+
+<details>
+<summary><b>Q4: SMB 网络挂载提示 EPERM (Operation not permitted) 是什么原因？</b></summary>
+<br/>
+
+在 Linux 体系中执行 `mount -t cifs` 挂载远程文件系统属于特权操作。若在 Docker 容器内使用 SMB 挂载，容器必须以 `--privileged --user root` 模式启动，否则 Linux 内核会直接阻断挂载系统调用。
+</details>
+
+<details>
+<summary><b>Q5: 如何将 LinuxWebTool 部署到公网访问？</b></summary>
+<br/>
+
+本工具内置了极高的执行权限，**绝不建议直接将 5270 端口直接映射至公网**。推荐的访问路径为：
+1. 使用工具内置的 **EasyTier 虚拟组网**，通过虚拟 IP 点对点私有直连；
+2. 配合 **ProxyByCF** 或 Cloudflare Tunnel 建立受访问控制策略保护的加密隧道；
+3. 通过自建 WireGuard / Tailscale 接入家庭内网访问。
+</details>
+
+---
+
+## 许可证 (License)
+
+本项目采用 [MIT 许可证](LICENSE) 开源。欢迎提交 Issue 与 Pull Request 共同建设！
