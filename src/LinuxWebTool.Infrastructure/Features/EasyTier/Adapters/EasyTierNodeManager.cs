@@ -21,6 +21,18 @@ public class EasyTierNodeManager(
 {
     private readonly ConcurrentDictionary<string, NodeRuntimeState> _runtimeStates = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Process> _runningProcesses = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SemaphoreSlim lifecycle = new(1, 1);
+    private static readonly EasyTierNativeCallBoundary NativeCalls = new();
+    private Dictionary<string, string> lastNativeSnapshot = new(StringComparer.OrdinalIgnoreCase);
+    private DateTime nextNativeSnapshot;
+
+    private async Task<T> MutateAsync<T>(Func<Task<T>> operation, CancellationToken ct)
+    {
+        if (!await lifecycle.WaitAsync(TimeSpan.FromSeconds(5), ct))
+            throw new InvalidOperationException("EasyTier 节点操作正在执行，请稍后重试");
+        try { return await operation(); }
+        finally { lifecycle.Release(); }
+    }
 
     private sealed class NodeRuntimeState
     {
@@ -31,6 +43,7 @@ public class EasyTierNodeManager(
         public string? VirtualIpv4 { get; set; }
         public int RpcPort { get; set; }
         public EasyTierEngineMode Mode { get; set; }
+        public string? Network { get; set; }
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -49,7 +62,7 @@ public class EasyTierNodeManager(
         {
             try
             {
-                await StartNodeInternalAsync(node, cancellationToken);
+                await StartNodeAsync(node.Id, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -58,28 +71,32 @@ public class EasyTierNodeManager(
         }
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
-        logger.LogInformation("Stopping all active EasyTier nodes...");
-        foreach (var (id, state) in _runtimeStates)
+        if (!await lifecycle.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken)) return;
+        try
         {
-            try
+            logger.LogInformation("Stopping all active EasyTier nodes...");
+            foreach (var (id, state) in _runtimeStates)
             {
-                StopNodeInternal(id, state.InstanceName);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error stopping EasyTier node {Name}", state.InstanceName);
+                try
+                {
+                    await StopNodeInternalAsync(id, state.InstanceName, cancellationToken);
+                    _runtimeStates.TryRemove(id, out _);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error stopping EasyTier node {Name}", state.InstanceName);
+                }
             }
         }
-        _runtimeStates.Clear();
-        return Task.CompletedTask;
+        finally { lifecycle.Release(); }
     }
 
     public async Task<IReadOnlyList<EasyTierNodeStatusDto>> GetAllNodeStatusesAsync(CancellationToken ct = default)
     {
         var entities = await store.GetAllNodesAsync();
-        var snapshotMap = CollectNetworkInfosSafe();
+        var snapshotMap = await CollectNetworkInfosSafeAsync(ct);
 
         var results = new List<EasyTierNodeStatusDto>();
         foreach (var entity in entities)
@@ -366,7 +383,7 @@ public class EasyTierNodeManager(
         }
         else
         {
-            var snapshotMap = CollectNetworkInfosSafe();
+            var snapshotMap = await CollectNetworkInfosSafeAsync(ct);
             if (snapshotMap.TryGetValue(entity.InstanceName, out var infoJson) && !string.IsNullOrWhiteSpace(infoJson))
             {
                 try
@@ -443,6 +460,9 @@ public class EasyTierNodeManager(
     }
 
     public async Task<EasyTierNodeStatusDto> CreateNodeAsync(CreateEasyTierNodeRequest request, CancellationToken ct = default)
+        => await MutateAsync(() => CreateNodeCoreAsync(request, ct), ct);
+
+    private async Task<EasyTierNodeStatusDto> CreateNodeCoreAsync(CreateEasyTierNodeRequest request, CancellationToken ct)
     {
         var existing = await store.GetNodeByNameAsync(request.InstanceName);
         if (existing != null)
@@ -493,6 +513,9 @@ public class EasyTierNodeManager(
     }
 
     public async Task<EasyTierNodeStatusDto> UpdateNodeAsync(string nodeId, UpdateEasyTierNodeRequest request, CancellationToken ct = default)
+        => await MutateAsync(() => UpdateNodeCoreAsync(nodeId, request, ct), ct);
+
+    private async Task<EasyTierNodeStatusDto> UpdateNodeCoreAsync(string nodeId, UpdateEasyTierNodeRequest request, CancellationToken ct)
     {
         var entity = await store.GetNodeByIdAsync(nodeId)
             ?? throw new KeyNotFoundException($"未找到 ID 为 '{nodeId}' 的节点");
@@ -507,6 +530,9 @@ public class EasyTierNodeManager(
             || !string.Equals(entity.RawTomlOverride, request.RawTomlOverride, StringComparison.Ordinal)
             || !ListsEqual(DeserializeList(entity.ListenersJson), request.Listeners ?? []);
 
+        var duplicate = await store.GetNodeByNameAsync(request.InstanceName.Trim());
+        if (duplicate is not null && duplicate.Id != entity.Id)
+            throw new InvalidOperationException("节点实例名称已存在");
         entity.InstanceName = request.InstanceName.Trim();
         entity.NetworkName = request.NetworkName.Trim();
         entity.NetworkSecret = request.NetworkSecret?.Trim() ?? string.Empty;
@@ -520,6 +546,10 @@ public class EasyTierNodeManager(
         entity.AutoStart = request.AutoStart;
         entity.UpdateTime = DateTime.UtcNow;
 
+        var updatedToml = EasyTierConfigGenerator.GenerateToml(entity);
+        if (!EasyTierConfigGenerator.ValidateConfig(updatedToml, out var configError))
+            throw new ArgumentException($"EasyTier 配置格式校验失败: {configError}");
+        if (isRunning) ValidateNetwork(updatedToml, entity.Id);
         await store.UpsertNodeAsync(entity);
 
         if (isRunning)
@@ -527,8 +557,8 @@ public class EasyTierNodeManager(
             if (requiresRestart)
             {
                 logger.LogInformation("Node {Name} critical configuration changed. Performing graceful reload...", entity.InstanceName);
-                StopNodeInternal(entity.Id, entity.InstanceName);
-                await Task.Delay(150, ct);
+                await StopNodeInternalAsync(entity.Id, _runtimeStates[entity.Id].InstanceName, ct);
+                _runtimeStates.TryRemove(entity.Id, out _);
                 await StartNodeInternalAsync(entity, ct);
             }
             else
@@ -542,7 +572,8 @@ public class EasyTierNodeManager(
                     Hostname: entity.InstanceName,
                     DisableRelayData: null,
                     PreferPeerRelay: null);
-                await PatchNodeConfigAsync(entity.Id, patch, ct);
+                var applied = await PatchNodeConfigCoreAsync(entity.Id, patch, ct);
+                if (!applied.Success) throw new InvalidOperationException(applied.Message);
             }
         }
 
@@ -551,13 +582,17 @@ public class EasyTierNodeManager(
     }
 
     public async Task<bool> DeleteNodeAsync(string nodeId, CancellationToken ct = default)
+        => await MutateAsync(() => DeleteNodeCoreAsync(nodeId, ct), ct);
+
+    private async Task<bool> DeleteNodeCoreAsync(string nodeId, CancellationToken ct)
     {
         var entity = await store.GetNodeByIdAsync(nodeId);
         if (entity == null) return false;
 
-        if (_runtimeStates.TryRemove(entity.Id, out var state))
+        if (_runtimeStates.TryGetValue(entity.Id, out var state))
         {
-            StopNodeInternal(entity.Id, state.InstanceName);
+            await StopNodeInternalAsync(entity.Id, state.InstanceName, ct);
+            _runtimeStates.TryRemove(entity.Id, out _);
         }
 
         await store.DeleteNodeAsync(nodeId);
@@ -565,6 +600,9 @@ public class EasyTierNodeManager(
     }
 
     public async Task<bool> StartNodeAsync(string nodeId, CancellationToken ct = default)
+        => await MutateAsync(() => StartNodeCoreAsync(nodeId, ct), ct);
+
+    private async Task<bool> StartNodeCoreAsync(string nodeId, CancellationToken ct)
     {
         var entity = await store.GetNodeByIdAsync(nodeId)
             ?? throw new KeyNotFoundException($"未找到 ID 为 '{nodeId}' 的节点");
@@ -573,17 +611,23 @@ public class EasyTierNodeManager(
     }
 
     public async Task<bool> StopNodeAsync(string nodeId, CancellationToken ct = default)
+        => await MutateAsync(() => StopNodeCoreAsync(nodeId, ct), ct);
+
+    private async Task<bool> StopNodeCoreAsync(string nodeId, CancellationToken ct)
     {
         var entity = await store.GetNodeByIdAsync(nodeId)
             ?? throw new KeyNotFoundException($"未找到 ID 为 '{nodeId}' 的节点");
 
-        StopNodeInternal(entity.Id, entity.InstanceName);
+        await StopNodeInternalAsync(entity.Id, _runtimeStates.TryGetValue(entity.Id, out var running) ? running.InstanceName : entity.InstanceName, ct);
         _runtimeStates.TryRemove(entity.Id, out _);
         await store.UpdateStatusAsync(entity.Id, 0, null);
         return true;
     }
 
     public async Task<EasyTierPatchResultDto> PatchNodeConfigAsync(string nodeId, EasyTierPatchRequestDto patch, CancellationToken ct = default)
+        => await MutateAsync(() => PatchNodeConfigCoreAsync(nodeId, patch, ct), ct);
+
+    private async Task<EasyTierPatchResultDto> PatchNodeConfigCoreAsync(string nodeId, EasyTierPatchRequestDto patch, CancellationToken ct)
     {
         var entity = await store.GetNodeByIdAsync(nodeId)
             ?? throw new KeyNotFoundException($"未找到 ID 为 '{nodeId}' 的节点");
@@ -640,6 +684,8 @@ public class EasyTierNodeManager(
                 };
 
                 var payloadJson = payload.ToJsonString();
+                var response = await NativeCalls.RunAsync(() =>
+                {
                 var ret = EasyTierNativeMethods.call_json_rpc(
                     "api.config.ConfigRpcService",
                     "PatchConfig",
@@ -655,6 +701,8 @@ public class EasyTierNodeManager(
 
                 if (respPtr != IntPtr.Zero) EasyTierNativeMethods.free_string(respPtr);
                 return new EasyTierPatchResultDto(true, false, "原地热打补丁成功应用，网络零中断", DateTime.UtcNow);
+                }, TimeSpan.FromSeconds(3), ct);
+                return response;
             }
             catch (Exception ex)
             {
@@ -677,6 +725,9 @@ public class EasyTierNodeManager(
     }
 
     public async Task<EasyTierUpgradeResultDto> InstallGitHubReleaseAsync(InstallGitHubReleaseRequest request, CancellationToken ct = default)
+        => await MutateAsync(() => InstallGitHubReleaseCoreAsync(request, ct), ct);
+
+    private async Task<EasyTierUpgradeResultDto> InstallGitHubReleaseCoreAsync(InstallGitHubReleaseRequest request, CancellationToken ct)
     {
         var activeIds = _runtimeStates.Keys.ToList();
 
@@ -687,9 +738,10 @@ public class EasyTierNodeManager(
                 logger.LogInformation("Draining {Count} active nodes before GitHub core install...", activeIds.Count);
                 foreach (var id in activeIds)
                 {
-                    if (_runtimeStates.TryRemove(id, out var state))
+                    if (_runtimeStates.TryGetValue(id, out var state))
                     {
-                        StopNodeInternal(id, state.InstanceName);
+                        await StopNodeInternalAsync(id, state.InstanceName, ct);
+                        _runtimeStates.TryRemove(id, out _);
                     }
                 }
                 await Task.Delay(200, ct);
@@ -723,6 +775,9 @@ public class EasyTierNodeManager(
     }
 
     public async Task<EasyTierUpgradeResultDto> UpgradeEngineAsync(Stream binaryStream, string fileName, CancellationToken ct = default)
+        => await MutateAsync(() => UpgradeEngineCoreAsync(binaryStream, fileName, ct), ct);
+
+    private async Task<EasyTierUpgradeResultDto> UpgradeEngineCoreAsync(Stream binaryStream, string fileName, CancellationToken ct)
     {
         var activeIds = _runtimeStates.Keys.ToList();
 
@@ -734,9 +789,10 @@ public class EasyTierNodeManager(
                 logger.LogInformation("Draining {Count} active nodes before binary hot swap...", activeIds.Count);
                 foreach (var id in activeIds)
                 {
-                    if (_runtimeStates.TryRemove(id, out var state))
+                    if (_runtimeStates.TryGetValue(id, out var state))
                     {
-                        StopNodeInternal(id, state.InstanceName);
+                        await StopNodeInternalAsync(id, state.InstanceName, ct);
+                        _runtimeStates.TryRemove(id, out _);
                     }
                 }
                 await Task.Delay(200, ct);
@@ -769,8 +825,20 @@ public class EasyTierNodeManager(
         return result;
     }
 
-    private async Task<bool> StartNodeInternalAsync(EasyTierNodeEntity node, CancellationToken ct)
+    protected virtual async Task<bool> StartNodeInternalAsync(EasyTierNodeEntity node, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+        if (_runtimeStates.TryGetValue(node.Id, out var existing))
+        {
+            if (existing.LastError is not null) throw new InvalidOperationException(existing.LastError);
+            if (!_runningProcesses.TryGetValue(node.Id, out var current) || !current.HasExited) return true;
+            current.Dispose();
+            _runningProcesses.TryRemove(node.Id, out _);
+            _runtimeStates.TryRemove(node.Id, out _);
+        }
+        if (NativeCalls.IsBusy) throw new InvalidOperationException("上次 EasyTier 原生调用尚未完成，暂停启动");
+        var toml = EasyTierConfigGenerator.GenerateToml(node);
+        ValidateNetwork(toml, node.Id);
         var mode = supervisor.GetEngineMode(out var resolvedPath);
         if (mode == EasyTierEngineMode.None || string.IsNullOrWhiteSpace(resolvedPath))
         {
@@ -779,20 +847,32 @@ public class EasyTierNodeManager(
             throw new InvalidOperationException(err);
         }
 
-        var toml = EasyTierConfigGenerator.GenerateToml(node);
         logger.LogInformation("Starting EasyTier instance '{Name}' via mode {Mode}...", node.InstanceName, mode);
 
-        var rpcPort = 15888 + (Math.Abs(node.InstanceName.GetHashCode()) % 1000);
+        var usedPorts = _runtimeStates.Values.Select(r => r.RpcPort).ToHashSet();
+        var rpcPort = Enumerable.Range(15888, 1000).FirstOrDefault(p => !usedPorts.Contains(p));
+        if (rpcPort == 0) throw new InvalidOperationException("没有可用的 EasyTier RPC 端口");
 
         if (mode == EasyTierEngineMode.NativeFfi)
         {
-            var ret = EasyTierNativeMethods.run_network_instance(toml);
-            if (ret != 0)
+            var reservation = new NodeRuntimeState { InstanceName = node.InstanceName, Mode = mode,
+                VirtualIpv4 = node.VirtualIpv4, Network = EasyTierNetworkGuard.GetVirtualNetwork(toml), RpcPort = rpcPort };
+            _runtimeStates[node.Id] = reservation;
+            var knownFailure = false;
+            try
             {
-                var err = EasyTierNativeMethods.GetLastErrorMessage();
-                logger.LogError("Failed to start EasyTier node '{Name}': {Error}", node.InstanceName, err);
-                await store.UpdateStatusAsync(node.Id, 2, err);
-                throw new InvalidOperationException($"启动 EasyTier 实例失败: {err}");
+                var error = await NativeCalls.RunAsync(() =>
+                    EasyTierNativeMethods.run_network_instance(toml) == 0 ? null : EasyTierNativeMethods.GetLastErrorMessage(),
+                    TimeSpan.FromSeconds(5), ct);
+                knownFailure = error is not null;
+                if (error is not null) throw new InvalidOperationException($"启动 EasyTier 实例失败: {error}");
+            }
+            catch (Exception ex)
+            {
+                if (knownFailure) _runtimeStates.TryRemove(node.Id, out _);
+                else reservation.LastError = "原生启动结果未确认，请先停止此节点再重试：" + ex.Message;
+                await store.UpdateStatusAsync(node.Id, 2, ex.Message);
+                throw;
             }
         }
         else if (mode == EasyTierEngineMode.CoreBinary)
@@ -823,7 +903,8 @@ public class EasyTierNodeManager(
                 StartedAt = DateTime.UtcNow,
                 VirtualIpv4 = node.VirtualIpv4,
                 RpcPort = rpcPort,
-                Mode = mode
+                Mode = mode,
+                Network = EasyTierNetworkGuard.GetVirtualNetwork(toml)
             };
 
             proc.OutputDataReceived += (_, e) =>
@@ -868,7 +949,8 @@ public class EasyTierNodeManager(
                 StartedAt = DateTime.UtcNow,
                 VirtualIpv4 = node.VirtualIpv4,
                 RpcPort = rpcPort,
-                Mode = mode
+                Mode = mode,
+                Network = EasyTierNetworkGuard.GetVirtualNetwork(toml)
             };
         }
 
@@ -877,37 +959,39 @@ public class EasyTierNodeManager(
         return true;
     }
 
-    private void StopNodeInternal(string nodeId, string instanceName)
+    protected virtual async Task StopNodeInternalAsync(string nodeId, string instanceName, CancellationToken ct)
     {
-        if (_runningProcesses.TryRemove(nodeId, out var proc))
+        if (_runningProcesses.TryGetValue(nodeId, out var proc))
         {
-            try
+            if (!proc.HasExited)
             {
-                if (!proc.HasExited)
-                {
-                    proc.Kill(entireProcessTree: true);
-                    proc.WaitForExit(2000);
-                }
-                proc.Dispose();
+                proc.Kill(entireProcessTree: true);
+                await proc.WaitForExitAsync(ct).WaitAsync(TimeSpan.FromSeconds(2), ct);
             }
-            catch { }
+            _runningProcesses.TryRemove(nodeId, out _);
+            proc.Dispose();
+            return;
         }
 
-        if (EasyTierNativeMethods.ProbeLibrary(out _))
+        if (_runtimeStates.TryGetValue(nodeId, out var state) && state.Mode == EasyTierEngineMode.NativeFfi)
         {
-            try
+            await NativeCalls.RunAsync(() =>
             {
                 var namePtr = Marshal.StringToCoTaskMemUTF8(instanceName);
                 var arrPtr = Marshal.AllocCoTaskMem(IntPtr.Size);
                 Marshal.WriteIntPtr(arrPtr, namePtr);
-                try { EasyTierNativeMethods.delete_network_instance(arrPtr, 1); }
+                try
+                {
+                    if (EasyTierNativeMethods.delete_network_instance(arrPtr, 1) != 0)
+                        throw new InvalidOperationException(EasyTierNativeMethods.GetLastErrorMessage());
+                }
                 finally
                 {
                     Marshal.FreeCoTaskMem(namePtr);
                     Marshal.FreeCoTaskMem(arrPtr);
                 }
-            }
-            catch { }
+                return true;
+            }, TimeSpan.FromSeconds(3), ct);
         }
     }
 
@@ -940,7 +1024,28 @@ public class EasyTierNodeManager(
         }
     }
 
-    private Dictionary<string, string> CollectNetworkInfosSafe()
+    private void ValidateNetwork(string toml, string nodeId)
+    {
+        var running = _runtimeStates.Where(p => p.Key != nodeId).Select(p => p.Value).ToArray();
+        EasyTierNetworkGuard.Validate(toml, running.Where(r => r.Network is not null).Select(r => r.Network!).ToArray(),
+            EasyTierNetworkGuard.GetLocalNetworks(_runtimeStates.Values.Select(r => r.DeviceName ?? ""),
+                _runtimeStates.Values.Select(r => r.Network)));
+    }
+
+    private async Task<Dictionary<string, string>> CollectNetworkInfosSafeAsync(CancellationToken ct)
+    {
+        if (DateTime.UtcNow < nextNativeSnapshot || NativeCalls.IsBusy) return lastNativeSnapshot;
+        try
+        {
+            lastNativeSnapshot = await NativeCalls.RunAsync(CollectNetworkInfos, TimeSpan.FromSeconds(2), ct);
+            nextNativeSnapshot = DateTime.UtcNow.AddSeconds(3);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex) { logger.LogWarning("EasyTier 状态采集未完成，返回上次快照：{Reason}", ex.Message); }
+        return lastNativeSnapshot;
+    }
+
+    protected virtual Dictionary<string, string> CollectNetworkInfos()
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (!EasyTierNativeMethods.ProbeLibrary(out _)) return result;

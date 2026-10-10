@@ -54,7 +54,7 @@ export async function renewToken() {
 }
 
 export async function login(userName, password) {
-  const result = await http(API.auth.login, { method: 'POST', body: { userName, password } });
+  const result = await http(API.auth.login, { method: 'POST', body: { userName, password }, timeoutMs: 15_000 });
   if (result.ok) {
     auth.token = result.data.token;
     auth.userName = result.data.userName || userName;

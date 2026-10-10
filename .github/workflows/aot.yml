@@ -7,16 +7,26 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
       - name: Build Native AOT image
         run: docker build --pull --tag linuxwebtool:aot .
       - name: Verify architecture gates
-        run: dotnet test LinuxWebTool.slnx -c Release --nologo
+        run: dotnet test LinuxWebTool.slnx -c Release --nologo --filter 'Category!=External'
       - name: Verify all API routes in AOT container
         shell: pwsh
         run: ./scripts/smoke-aot.ps1 -ImageTag linuxwebtool:aot
+      - name: Smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aot-smoke-logs
+          path: artifacts/smoke/

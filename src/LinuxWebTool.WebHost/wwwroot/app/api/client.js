@@ -54,7 +54,7 @@ function clearSession() {
   localStorage.removeItem(LS_KEYS.user);
 }
 
-export async function http(url, { method = 'GET', params, body } = {}) {
+export async function http(url, { method = 'GET', params, body, timeoutMs = 0 } = {}) {
   const headers = { Accept: 'application/json' };
   const token = localStorage.getItem(LS_KEYS.token);
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -65,22 +65,32 @@ export async function http(url, { method = 'GET', params, body } = {}) {
     payload = JSON.stringify(body);
   }
 
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timeout = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   let response;
+  let text;
   try {
       response = await fetch(buildUrl(url, params), {
         method,
         headers,
         body: payload,
+        ...(controller ? { signal: controller.signal } : {}),
         ...(method === 'GET' ? { cache: 'no-store' } : {}),
       });
+    // Keep the deadline active while consuming the body as well as waiting for headers.
+    text = await response.text();
   } catch {
-    toast.error('网络请求失败，请检查服务是否可达');
-    return { ok: false, status: 0, data: null, message: '网络请求失败' };
+    const message = controller?.signal.aborted
+      ? '请求超时，请检查服务状态后重试'
+      : '网络请求失败，请检查服务是否可达';
+    toast.error(message);
+    return { ok: false, status: 0, data: null, message };
+  } finally {
+    if (timeout !== null) clearTimeout(timeout);
   }
 
   inspectRenewedToken(response);
 
-  const text = await response.text();
   const contentType = response.headers.get('content-type') || '';
   let data = null;
   let parsedJson = true;

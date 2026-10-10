@@ -192,7 +192,7 @@ export default defineComponent({
     });
 
     async function loadEngineStatus() {
-      const res = await http(API.easytier.engineStatus, { method: 'GET' });
+      const res = await http(API.easytier.engineStatus, { method: 'GET', timeoutMs: 10_000 });
       if (res.ok && res.data) {
         engineStatus.value = res.data;
       }
@@ -200,15 +200,25 @@ export default defineComponent({
 
     async function loadNodes() {
       loading.value = true;
-      const res = await http(API.easytier.nodes, { method: 'GET' });
-      loading.value = false;
-      if (res.ok && Array.isArray(res.data)) {
-        nodes.value = res.data;
+      try {
+        const res = await http(API.easytier.nodes, { method: 'GET', timeoutMs: 10_000 });
+        if (res.ok && Array.isArray(res.data)) {
+          nodes.value = res.data;
+        }
+      } finally {
+        loading.value = false;
       }
     }
 
+    let refreshing = false;
     async function refreshAll() {
-      await Promise.all([loadNodes(), loadEngineStatus()]);
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        await Promise.all([loadNodes(), loadEngineStatus()]);
+      } finally {
+        refreshing = false;
+      }
     }
 
     const probingPort = ref(false);
@@ -361,7 +371,7 @@ export default defineComponent({
         networkName: nodeForm.networkName.trim(),
         networkSecret: nodeForm.networkSecret.trim() || null,
         virtualIpv4: nodeForm.virtualIpv4.trim() || null,
-        enableDhcp: nodeForm.enableDhcp,
+        enableDhcp: nodeForm.enableDhcp && !nodeForm.virtualIpv4.trim(),
         listeners: splitLines(nodeForm.listenersText),
         peers: splitLines(nodeForm.peersText),
         proxyNetworks: splitLines(nodeForm.proxyNetworksText),
@@ -939,14 +949,15 @@ export default defineComponent({
                   <input
                     v-model="nodeForm.virtualIpv4"
                     class="input font-mono"
-                    placeholder="如 10.144.144.1/24 (留空则 DHCP 自动分配)" />
+                    placeholder="如 10.126.127.1/24 (填写后使用静态 IP)" />
+                  <p class="mt-1 text-xs text-slate-500">填写地址后禁用 DHCP；留空并启用 DHCP 才会自动分配。原始 TOML 覆盖配置优先。</p>
                 </div>
               </div>
 
               <div class="border-t border-slate-800/80 pt-2 flex flex-col sm:flex-row items-start sm:items-center gap-4 text-xs">
                 <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer flex-1 w-full">
-                  <input type="checkbox" v-model="nodeForm.enableDhcp" class="accent-cyan-500" />
-                  <span class="text-slate-200">启用 DHCP 自动分配虚拟 IP</span>
+                  <input type="checkbox" v-model="nodeForm.enableDhcp" :disabled="!!nodeForm.virtualIpv4.trim()" class="accent-cyan-500" />
+                  <span class="text-slate-200">{{ nodeForm.virtualIpv4.trim() ? '已指定静态 IP，DHCP 不生效' : '启用 DHCP 自动分配虚拟 IP' }}</span>
                 </label>
                 <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer flex-1 w-full">
                   <input type="checkbox" v-model="nodeForm.autoStart" class="accent-emerald-500" />

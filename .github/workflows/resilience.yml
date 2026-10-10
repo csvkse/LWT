@@ -1,0 +1,30 @@
+name: Resilience Whitebox
+on:
+  schedule:
+    - cron: '17 19 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fault-injection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build
+        run: dotnet build LinuxWebTool.slnx -c Release --nologo
+      - name: Repeat concurrency and contention regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for round in $(seq 1 10); do
+            dotnet test tests/LinuxWebTool.IntegrationTests/LinuxWebTool.IntegrationTests.csproj -c Release --no-build --filter 'FullyQualifiedName~EasyTierLifecycleSafetyTests|FullyQualifiedName~LoginAuditContentionTests' --logger "trx;LogFileName=round-$round.trx" --results-directory artifacts/resilience
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resilience-reports
+          path: artifacts/resilience/

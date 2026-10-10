@@ -29,7 +29,8 @@ public static class EasyTierConfigGenerator
             sb.AppendLine($"ipv4 = \"{EscapeTomlString(entity.VirtualIpv4)}\"");
         }
 
-        sb.AppendLine($"dhcp = {(entity.EnableDhcp ? "true" : "false")}");
+        // 表单中的地址代表静态配置，不能再让 DHCP 根据对端网段重新选址。
+        sb.AppendLine($"dhcp = {(entity.EnableDhcp && string.IsNullOrWhiteSpace(entity.VirtualIpv4) ? "true" : "false")}");
 
         // 兼容 CoreBinary [network_identity] 表与 FFI 顶层字段
         sb.AppendLine("[network_identity]");
@@ -106,7 +107,7 @@ public static class EasyTierConfigGenerator
             sb.AppendLine($"ipv4 = \"{EscapeTomlString(request.VirtualIpv4)}\"");
         }
 
-        sb.AppendLine($"dhcp = {(request.EnableDhcp ? "true" : "false")}");
+        sb.AppendLine($"dhcp = {(request.EnableDhcp && string.IsNullOrWhiteSpace(request.VirtualIpv4) ? "true" : "false")}");
 
         // 兼容 CoreBinary [network_identity] 表与 FFI 顶层字段
         sb.AppendLine("[network_identity]");

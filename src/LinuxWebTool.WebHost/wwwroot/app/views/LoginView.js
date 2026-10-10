@@ -17,12 +17,17 @@ export default defineComponent({
       }
       loading.value = true;
       error.value = '';
-      const result = await login(form.userName, form.password);
-      loading.value = false;
-      if (result.ok) {
-        router.push('/');
-      } else {
-        error.value = result.message || '登录失败';
+      try {
+        const result = await login(form.userName, form.password);
+        if (result.ok) {
+          router.push('/');
+        } else {
+          error.value = result.message || '登录失败';
+        }
+      } catch {
+        error.value = '登录失败，请检查网络或浏览器存储权限后重试';
+      } finally {
+        loading.value = false;
       }
     }
 
