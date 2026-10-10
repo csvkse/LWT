@@ -78,4 +78,20 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + MCP 端点
 
 ## 扩展门禁
 
+### EasyTier 地址模式门禁
+
+- `FE-EASYTIER-IP-MODE`：`frontend-gate.cjs` 自动执行 `tests/frontend/easytier-static-ip.test.mjs`。加载实际 EasyTier 组件及 Vue 响应式实现，隔离网络和生命周期，调用新建/编辑的保存事件并检查提交请求；静态 IPv4 必须关闭 DHCP，空地址必须保留用户的 DHCP 选择，原始 TOML 不被改写。
+- 包含旧错误写法的内存回归样例，验证断言确实能够识别“静态 IP + DHCP=true”。只改变测试内存中的模块，不修改产品文件。
+- `EasyTierStaticIpTests` 保护请求与持久化实体两条 TOML 生成路径；`EasyTierFunctionalTests` 的创建、更新流程检查 API 返回的有效 TOML，防止后端遗漏静态地址优先规则。
+- 已接入现有 CI 和 `scripts/verify-fast.ps1`，无需新增工作流。前端行为门禁不可通过静态违规基线豁免，测试缺失、执行错误、超时或断言失败都会返回非零退出码。
+- 单独运行前端规则：`node --experimental-vm-modules --test tests/frontend/easytier-static-ip.test.mjs`；完整前端门禁：`node src/LinuxWebTool.WebHost/wwwroot/frontend-gate.cjs`。不需要安装新依赖，也不连接 EasyTier 服务器或创建 TUN 网卡。
+
 新增规则遵循测试先行：先写一个会失败的最小样例（xUnit 用例或 frontend-gate 规则 + 临时违规文件），再实现规则，最后补充无违规反例。
+
+### EasyTier 多节点与故障隔离门禁
+
+- `LinuxArch020`：`EasyTierSafetyTests` 执行网段检查行为，保护重叠/包含关系、本机网段、裸 IP、Raw TOML 覆盖及未知 DHCP 网段，检查不同网段的通过反例。
+- `LinuxArch021`：原生调用超时仍保留唯一槽位，后续调用不得新建工作线程；仅模拟阻塞，不调用真实 FFI 或更改网络。
+- `LinuxArch022`：`EasyTierLifecycleSafetyTests` 使用真实节点仓储，保护并发启停串行边界、重复启动复用、启动前拒绝冲突、改名停止旧名称及停止失败禁止重启。
+- `FE-EASYTIER-REFRESH`：前端门禁加载真实 EasyTier/Vue 组件，模拟迟到请求与时钟；上一轮未完成时不得重复发起节点查询，失败后忙碌状态必须恢复并允许下一轮。查询必须指定超时。
+- 后端用例自动纳入既有架构/集成测试；前端用例直接由 `frontend-gate.cjs` 执行，缺失、失败或超时均返回非零退出码，不允许基线豁免。方案及边界见 `docs/easytier-multi-node-safety-plan.md`。

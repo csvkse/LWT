@@ -14,3 +14,4 @@ publish/
 .env
 .env.*
 scratch/
+artifacts/

@@ -54,6 +54,7 @@ jobs:
     name: Build ${{ matrix.rid }}
     needs: prepare
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
@@ -69,7 +70,7 @@ jobs:
       - name: Setup Node (前端门禁)
         uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Frontend Gate (前端架构门禁)
         run: node src/LinuxWebTool.WebHost/wwwroot/frontend-gate.cjs
@@ -87,6 +88,20 @@ jobs:
           --nologo
           /p:DebugSymbols=false
           /p:DebugType=None
+
+      - name: Smoke published program on target platform
+        shell: pwsh
+        run: ./scripts/smoke-published.ps1 -PublishDirectory ./publish
+
+      - name: Published program smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs-${{ matrix.rid }}
+          path: |
+            artifacts/desktop-smoke/**/*.log
+            artifacts/desktop-smoke/**/performance.json
+            artifacts/desktop-smoke/**/resources.json
 
       - name: Bundle 运行脚本与部署文件
         shell: bash
@@ -130,6 +145,7 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: linuxwebtool-*
           path: artifacts
 
       - name: Generate Release Body with Collapsible Changelog
@@ -175,25 +191,25 @@ jobs:
             echo "</details>"
             echo ""
             cat << 'STATIC_EOF'
-各平台压缩包为**自包含发布**，目标机**无需安装 .NET 运行时**，解压即可运行。
+          各平台压缩包为**自包含发布**，目标机**无需安装 .NET 运行时**，解压即可运行。
 
-### 📦 下载与运行
+          ### 📦 下载与运行
 
-* **🐧 Linux x64 / ARM64**：
-    * 下载 `linuxwebtool-linux-*.tar.gz`，解压后执行 `./start.sh`（或 `./LinuxWebTool.WebHost`）。
-    * 系统服务：使用包内 `linuxwebtool.service` 注册 systemd。
-* **🪟 Windows x64**：
-    * 下载 `linuxwebtool-win-x64.zip`，解压后双击 `start.bat`（或 `LinuxWebTool.WebHost.exe`）。
+          * **🐧 Linux x64 / ARM64**：
+              * 下载 `linuxwebtool-linux-*.tar.gz`，解压后执行 `./start.sh`（或 `./LinuxWebTool.WebHost`）。
+              * 系统服务：使用包内 `linuxwebtool.service` 注册 systemd。
+          * **🪟 Windows x64**：
+              * 下载 `linuxwebtool-win-x64.zip`，解压后双击 `start.bat`（或 `LinuxWebTool.WebHost.exe`）。
 
-### 🔑 首次启动
+          ### 🔑 首次启动
 
-* 管理员口令自动生成：见程序日志，或 `data/admin.json`；
-* 也可用环境变量注入：`Admin__UserName` / `Admin__Password`。
+          * 管理员口令自动生成：见程序日志，或 `data/admin.json`；
+          * 也可用环境变量注入：`Admin__UserName` / `Admin__Password`。
 
-### ⚠️ 安全提示
+          ### ⚠️ 安全提示
 
-本工具可在网页上远程执行 shell，请仅部署于内网/本机，勿暴露公网。
-STATIC_EOF
+          本工具可在网页上远程执行 shell，请仅部署于内网/本机，勿暴露公网。
+          STATIC_EOF
           } > release_body.md
 
       - name: Create Release

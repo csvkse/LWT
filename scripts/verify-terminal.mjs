@@ -8,7 +8,7 @@ if (!password) throw new Error('Set TERMINAL_TEST_PASSWORD for the temporary tes
 let token;
 async function api(path, method = 'GET', body) {
   const response = await fetch(base + '/api/Terminal/' + path, {
-    method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+    method, signal: AbortSignal.timeout(10000), headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   if (!response.ok) throw new Error(`${method} ${path}: HTTP ${response.status}`);
@@ -38,7 +38,7 @@ async function attach(id, after = 0) {
   connection.close = () => new Promise(resolve => { socket.addEventListener('close', resolve, { once: true }); socket.close(); });
   return connection;
 }
-const login = await fetch(base + '/api/Auth/Login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+const login = await fetch(base + '/api/Auth/Login', { method: 'POST', signal: AbortSignal.timeout(10000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
 assert.equal(login.status, 200);
 token = (await login.json()).token;
 const support = await api('Support');

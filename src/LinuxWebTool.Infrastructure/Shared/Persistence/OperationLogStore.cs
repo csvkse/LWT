@@ -13,7 +13,9 @@ public partial class OperationLogStore(DbConnectionFactory factory)
         var sql = @"
 INSERT INTO operation_log (Id, Time, Action, TargetType, TargetName, Detail, ClientIp, Success) 
 VALUES (@Id, @Time, @Action, @TargetType, @TargetName, @Detail, @ClientIp, @Success)";
-        await db.ExecuteAsync(sql, log);
+        // Audit logging is best effort: do not hold login or mount workers for the
+        // database's default 30-second busy retry when another writer holds a lock.
+        await db.ExecuteAsync(sql, log, commandTimeout: 2);
         return log.Id;
     }
 

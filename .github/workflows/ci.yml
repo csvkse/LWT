@@ -17,10 +17,18 @@ env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-test:
     name: Build & Gates
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -33,24 +41,35 @@ jobs:
       - name: Setup Node (前端门禁)
         uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Restore & Build
         run: dotnet build LinuxWebTool.slnx -c Release --nologo
 
       - name: Architecture Tests (后端架构门禁)
-        run: dotnet test tests/LinuxWebTool.ArchitectureTests/LinuxWebTool.ArchitectureTests.csproj -c Release --no-build --nologo
+        run: dotnet test tests/LinuxWebTool.ArchitectureTests/LinuxWebTool.ArchitectureTests.csproj -c Release --no-build --nologo --logger trx --results-directory artifacts/architecture
 
       - name: API Integration Tests (后端接口集成门禁)
-        run: dotnet test tests/LinuxWebTool.IntegrationTests/LinuxWebTool.IntegrationTests.csproj -c Release --no-build --nologo
+        run: dotnet test tests/LinuxWebTool.IntegrationTests/LinuxWebTool.IntegrationTests.csproj -c Release --no-build --nologo --filter 'Category!=External' --logger trx --results-directory artifacts/integration
 
       - name: Frontend Gate (前端架构门禁)
         run: node src/LinuxWebTool.WebHost/wwwroot/frontend-gate.cjs
 
+      - name: Smoke harness regression tests
+        run: node --test tests/smoke/http-contract.test.mjs tests/smoke/performance.test.mjs
+
+      - name: Test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whitebox-reports
+          path: artifacts/
+
   docker:
-    name: Docker Image
+    name: Docker Image (${{ matrix.vendor }})
     runs-on: ubuntu-latest
     needs: build-test
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -74,7 +93,18 @@ jobs:
       - name: Setup Buildx
         uses: docker/setup-buildx-action@v3
 
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install browser smoke dependencies
+        working-directory: tests/smoke
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
       - name: Login to GHCR
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -95,15 +125,38 @@ jobs:
           tags: |
             type=sha,prefix=sha-
 
-      - name: Build & Push (${{ matrix.tag }})
+      - name: Build candidate (${{ matrix.tag }})
         uses: docker/build-push-action@v6
         with:
           context: .
           build-args: VENDOR=${{ matrix.vendor }}
-          push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+          load: true
+          push: false
           tags: |
             ghcr.io/${{ steps.repo.outputs.repo_lower }}:${{ matrix.tag }}
             ghcr.io/${{ steps.repo.outputs.repo_lower }}:sha-${{ github.sha }}-${{ matrix.vendor }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Blackbox API, browser and PTY gates
+        env:
+          SMOKE_TARGET: container-${{ matrix.vendor }}
+        shell: pwsh
+        run: ./scripts/smoke-aot.ps1 -ImageTag 'ghcr.io/${{ steps.repo.outputs.repo_lower }}:sha-${{ github.sha }}-${{ matrix.vendor }}' -Browser -Terminal
+
+      - name: Publish tested candidate
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          docker push ghcr.io/${{ steps.repo.outputs.repo_lower }}:sha-${{ github.sha }}-${{ matrix.vendor }}
+          docker push ghcr.io/${{ steps.repo.outputs.repo_lower }}:${{ matrix.tag }}
+
+      - name: Blackbox evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-${{ matrix.vendor }}
+          path: |
+            artifacts/smoke/
+            tests/smoke/playwright-report/
+            tests/smoke/test-results/

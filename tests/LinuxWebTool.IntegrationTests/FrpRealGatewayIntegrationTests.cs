@@ -6,6 +6,7 @@ using Xunit;
 
 namespace LinuxWebTool.IntegrationTests;
 
+[Trait("Category", "External")]
 public sealed class FrpRealGatewayIntegrationTests(Xunit.Abstractions.ITestOutputHelper output)
 {
     private static readonly Lazy<Dictionary<string, string>> EnvConfig = new(LoadEnvFile);

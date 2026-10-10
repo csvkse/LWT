@@ -16,6 +16,7 @@
  *  FE-TEMPLATE-VALUE-REF Vue 模板禁止访问 setup 暴露变量的 .value（模板自动解包，写 .value 为反模式）
  *  FE-TEMPLATE-TAG-BALANCE Vue 组件模板关键结构标签（div/table/thead/tbody/section/aside）必须严格开闭平衡
  *  FE-TERMINAL-SESSION-HEAL TerminalView 必须具备失效会话自动重置与新建降级机制，防止服务重启后前端卡死
+ *  FE-EASYTIER-IP-MODE EasyTier 新建/编辑提交必须保证静态 IPv4 优先于 DHCP（组件行为测试）
  *
  * 基线：frontend-gate-baseline.json 冻结存量债务，只允许删除条目，不允许新增。
  */
@@ -24,6 +25,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { spawnSync } = require('child_process');
 
 const appDir = path.join(__dirname, 'app');
 const baselineFile = path.join(__dirname, 'frontend-gate-baseline.json');
@@ -335,4 +337,29 @@ if (unusedBaseline.length > 0) {
   console.warn(`⚠ 基线中 ${unusedBaseline.length} 条已失效，请从 frontend-gate-baseline.json 删除（基线只减不增）：`);
   for (const key of unusedBaseline) console.warn(`   - ${key}`);
 }
+// 行为门禁不加入静态扫描基线：测试失败、缺失或超时均阻止通过。
+const easyTierTests = path.resolve(__dirname, '../../../tests/frontend/easytier-static-ip.test.mjs');
+const easyTierResult = spawnSync(process.execPath, ['--experimental-vm-modules', '--test', easyTierTests], {
+  encoding: 'utf8',
+  timeout: 30000,
+  windowsHide: true,
+});
+if (easyTierResult.error || easyTierResult.status !== 0) {
+  console.error('[FE-EASYTIER-IP-MODE] EasyTier 静态 IPv4 / DHCP 行为门禁失败');
+  if (easyTierResult.stdout) console.error(easyTierResult.stdout);
+  if (easyTierResult.stderr) console.error(easyTierResult.stderr);
+  if (easyTierResult.error) console.error(easyTierResult.error.message);
+  process.exit(1);
+}
+console.log('✅ FE-EASYTIER-IP-MODE：EasyTier 静态 IPv4 / DHCP 行为门禁通过');
+const refreshTests = path.resolve(__dirname, '../../../tests/frontend/easytier-refresh-safety.test.mjs');
+const refreshResult = spawnSync(process.execPath, ['--experimental-vm-modules', '--test', refreshTests], {
+  encoding: 'utf8', timeout: 30000, windowsHide: true,
+});
+if (refreshResult.error || refreshResult.status !== 0) {
+  console.error('[FE-EASYTIER-REFRESH] EasyTier 轮询并发行为门禁失败');
+  console.error(refreshResult.stdout || refreshResult.stderr || refreshResult.error?.message);
+  process.exit(1);
+}
+console.log('✅ FE-EASYTIER-REFRESH：EasyTier 单次在途轮询行为门禁通过');
 console.log('✅ 前端架构门禁通过');

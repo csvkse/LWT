@@ -69,6 +69,8 @@ public sealed class EasyTierFunctionalTests
         Assert.Equal(instName, detail.Config.InstanceName);
         Assert.Contains("integration_vnet", detail.GeneratedToml);
         Assert.Contains(instName, detail.GeneratedToml);
+        Assert.Contains("ipv4 = \"10.144.144.10/24\"", detail.GeneratedToml);
+        Assert.Contains("dhcp = false", detail.GeneratedToml);
         Assert.Contains("192.168.100.0/24", detail.GeneratedToml);
 
         // 4. 更新节点配置
@@ -77,7 +79,7 @@ public sealed class EasyTierFunctionalTests
             NetworkName: "integration_vnet_renamed",
             NetworkSecret: "updated_secret",
             VirtualIpv4: "10.144.144.12/24",
-            EnableDhcp: false,
+            EnableDhcp: true,
             Listeners: ["tcp://0.0.0.0:11011"],
             Peers: ["tcp://peer.test.com:11010"],
             ProxyNetworks: ["10.200.0.0/16"],
@@ -91,6 +93,12 @@ public sealed class EasyTierFunctionalTests
 
         var updated = JsonSerializer.Deserialize<EasyTierNodeStatusDto>(await updateResp.Content.ReadAsStringAsync(), AppJsonSerializerContext.Default.Options);
         Assert.NotNull(updated);
+        var updatedDetailResp = await client.GetAsync($"/api/EasyTier/Nodes/{nodeId}");
+        Assert.Equal(HttpStatusCode.OK, updatedDetailResp.StatusCode);
+        var updatedDetail = JsonSerializer.Deserialize<EasyTierNodeDetailDto>(await updatedDetailResp.Content.ReadAsStringAsync(), AppJsonSerializerContext.Default.Options);
+        Assert.NotNull(updatedDetail);
+        Assert.Contains("ipv4 = \"10.144.144.12/24\"", updatedDetail.GeneratedToml);
+        Assert.Contains("dhcp = false", updatedDetail.GeneratedToml);
         Assert.Equal("integration_vnet_renamed", updated.NetworkName);
 
         // 5. 验证删除节点

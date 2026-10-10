@@ -16,7 +16,7 @@ public class EasyTierController(
     [HttpGet("Nodes")]
     public async Task<IResult> GetNodes()
     {
-        var nodes = await manager.GetAllNodeStatusesAsync();
+        var nodes = await manager.GetAllNodeStatusesAsync(HttpContext.RequestAborted);
         return Ok(nodes);
     }
 
@@ -30,7 +30,7 @@ public class EasyTierController(
     [HttpGet("Nodes/{id}")]
     public async Task<IResult> GetNodeDetail(string id)
     {
-        var detail = await manager.GetNodeDetailAsync(id);
+        var detail = await manager.GetNodeDetailAsync(id, HttpContext.RequestAborted);
         if (detail == null) return NotFound(new MessageResponse("未找到指定的 EasyTier 节点"));
         return Ok(detail);
     }
@@ -49,7 +49,7 @@ public class EasyTierController(
 
         try
         {
-            var created = await manager.CreateNodeAsync(request);
+            var created = await manager.CreateNodeAsync(request, HttpContext.RequestAborted);
             await operationLogger.LogAsync("新建 EasyTier 节点", "虚拟网络", created.InstanceName, created.NetworkName, clientIp: HttpContext.GetClientIp());
             return Ok(created);
         }
@@ -73,7 +73,7 @@ public class EasyTierController(
 
         try
         {
-            var updated = await manager.UpdateNodeAsync(id, request);
+            var updated = await manager.UpdateNodeAsync(id, request, HttpContext.RequestAborted);
             await operationLogger.LogAsync("更新 EasyTier 节点配置", "虚拟网络", updated.InstanceName, updated.NetworkName, clientIp: HttpContext.GetClientIp());
             return Ok(updated);
         }
@@ -90,7 +90,7 @@ public class EasyTierController(
     [HttpPost("Nodes/{id}/Config")]
     public async Task<IResult> PatchNodeConfig(string id, [FromBody] EasyTierPatchRequestDto patch)
     {
-        var result = await manager.PatchNodeConfigAsync(id, patch);
+        var result = await manager.PatchNodeConfigAsync(id, patch, HttpContext.RequestAborted);
         if (!result.Success)
         {
             return BadRequest(new MessageResponse(result.Message));
@@ -103,10 +103,10 @@ public class EasyTierController(
     [HttpDelete("Nodes/{id}")]
     public async Task<IResult> DeleteNode(string id)
     {
-        var detail = await manager.GetNodeDetailAsync(id);
+        var detail = await manager.GetNodeDetailAsync(id, HttpContext.RequestAborted);
         var name = detail?.Config.InstanceName ?? id;
 
-        var deleted = await manager.DeleteNodeAsync(id);
+        var deleted = await manager.DeleteNodeAsync(id, HttpContext.RequestAborted);
         if (!deleted) return NotFound(new MessageResponse("未找到指定的 EasyTier 节点"));
 
         await operationLogger.LogAsync("删除 EasyTier 节点", "虚拟网络", name, id, clientIp: HttpContext.GetClientIp());
@@ -118,7 +118,7 @@ public class EasyTierController(
     {
         try
         {
-            var success = await manager.StartNodeAsync(id);
+            var success = await manager.StartNodeAsync(id, HttpContext.RequestAborted);
             if (!success) return BadRequest(new MessageResponse("启动节点失败"));
 
             await operationLogger.LogAsync("启动 EasyTier 节点", "虚拟网络", id, "启动成功", clientIp: HttpContext.GetClientIp());
@@ -135,7 +135,7 @@ public class EasyTierController(
     {
         try
         {
-            var success = await manager.StopNodeAsync(id);
+            var success = await manager.StopNodeAsync(id, HttpContext.RequestAborted);
             if (!success) return BadRequest(new MessageResponse("停止节点失败"));
 
             await operationLogger.LogAsync("停止 EasyTier 节点", "虚拟网络", id, "停止成功", clientIp: HttpContext.GetClientIp());
