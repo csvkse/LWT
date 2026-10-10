@@ -76,3 +76,9 @@ Linux CI 安装浏览器使用 `npx playwright install --with-deps chromium`。�
 - 浏览器：本机 Edge 桌面/窄屏共四项通过，覆盖登录网络失败后重试和正常登录/页面/退出。CI 使用锁定 Playwright Chromium；本地 Chromium 下载未完成时启动失败，不能将其算作通过。可用 `SMOKE_BROWSER_CHANNEL=msedge` 选择已安装的 Edge 做本地验证。
 - 四份 workflow YAML 解析、PowerShell 脚本解析及差异空白检查通过。
 - Linux AOT 容器、Linux PTY、ARM64 和 GitHub runner 发布链路未在本地验证，必须以首次远程执行结果为准。本机 `docker` 是 wslc 包装器，不是 CI 的 Docker Engine，未把它的输出当作容器测试结果。
+
+### 首次 GitHub 执行与终端 fixture 修正
+
+提交 `e84f9e1` 的 Native AOT workflow 和 CI 白盒全部通过。CI 的 Intel 容器完成真实 PTY、resize、Ctrl-C、UTF-8 目录、60 秒断开重连和输出缓冲截断验证，但最后未使用会话回收断言失败，导致其他矩阵项取消，浏览器/发布未执行。
+
+根因：应用默认 `Terminal:UnusedGraceSeconds=120`，脚本只等待十秒回收。修复仅在临时冒烟容器注入 `Terminal__UnusedGraceSeconds=2`；保持十秒断言、每秒真实清理检查和生产 120 秒配置，不跳过用例或延长为无界等待。相关 `TerminalSessionTests` 验证配置宽限期和会话保留行为。
