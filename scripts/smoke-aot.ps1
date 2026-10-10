@@ -26,7 +26,9 @@ function Get-ContainerResourceSample($phase) {
 }
 try {
     $env:SMOKE_LAUNCH_EPOCH_MS = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString()
-    docker run -d --name $container --publish "127.0.0.1:$Port`:5270" -e Admin__UserName=admin -e "Admin__Password=$password" $ImageTag | Out-Null
+    # The idle-reclamation assertion waits 10 seconds; production defaults to 120.
+    # Shorten only the disposable fixture's grace, preserving the real cleanup logic.
+    docker run -d --name $container --publish "127.0.0.1:$Port`:5270" -e Admin__UserName=admin -e "Admin__Password=$password" -e Terminal__UnusedGraceSeconds=2 $ImageTag | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Docker startup failed' }
     $resources.samples += Get-ContainerResourceSample 'before'
     $env:SMOKE_URL = $base
