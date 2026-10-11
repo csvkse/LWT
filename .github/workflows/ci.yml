@@ -74,6 +74,7 @@ jobs:
       contents: read
       packages: write
     strategy:
+      fail-fast: false
       # 按 GPU 厂商分 tag：每档只含所需 VA 驱动（见 Dockerfile 的 VENDOR 层）。
       # latest = all 兜底（原行为）；latest-intel/amd/nv 为按需驱动档，体积更小。
       matrix:

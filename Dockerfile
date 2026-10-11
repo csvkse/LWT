@@ -36,8 +36,14 @@ ENV TZ=Asia/Shanghai \
 #
 # 镜像瘦身：VA 驱动（intel iHD 39.5M / mesa gallium 42M）不再无条件全打包，按 VENDOR 分层选装，
 #   仅装所用 GPU 厂商的用户态驱动，避免"全能镜像"白白增容（详见 base 阶段底部"按厂商装 VA 驱动"层）。
-RUN apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc cifs-utils rclone fuse3 nethogs findutils \
-      ffmpeg libva libva-utils tzdata icu-libs && \
+RUN set -e; \
+    for i in 1 2 3 4 5; do \
+      apk update && apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc cifs-utils rclone fuse3 nethogs findutils \
+        ffmpeg libva libva-utils tzdata icu-libs && break || { \
+          echo "apk add base dependencies failed, retrying ($i/5)..."; \
+          sleep 3; \
+      }; \
+    done; \
     cp /usr/share/zoneinfo/$TZ /etc/localtime && \
     echo $TZ > /etc/timezone
 
@@ -49,11 +55,20 @@ RUN apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc cifs-u
 #   all   -> 全装（兜底，与原行为一致）
 #   cpu/none -> 纯软件编码，不装 VA 驱动
 RUN echo "==> VENDOR=${VENDOR}" && \
+    apk_install() { \
+      for i in 1 2 3 4 5; do \
+        apk update && apk add --no-cache "$@" && return 0 || { \
+          echo "apk add $* failed, retrying ($i/5)..."; \
+          sleep 3; \
+        }; \
+      done; \
+      return 1; \
+    }; \
     case "${VENDOR}" in \
-      intel) apk add --no-cache intel-media-driver ;; \
-      amd)   apk add --no-cache mesa-va-gallium ;; \
+      intel) apk_install intel-media-driver ;; \
+      amd)   apk_install mesa-va-gallium ;; \
       nv|nvidia) echo "nvenc 由 nvidia-container-toolkit 透传驱动，镜像内置 nvenc 编码器支持，不装 VA 驱动" ;; \
-      all)   apk add --no-cache intel-media-driver mesa-va-gallium ;; \
+      all)   apk_install intel-media-driver mesa-va-gallium ;; \
       cpu|none|*) echo "纯软件编码，不装 VA 驱动" ;; \
     esac
 
@@ -83,7 +98,13 @@ RUN dotnet restore "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj"
 
 COPY src ./src
 
-RUN apk add --no-cache clang build-base zlib-dev
+RUN set -e; \
+    for i in 1 2 3 4 5; do \
+      apk update && apk add --no-cache clang build-base zlib-dev && break || { \
+        echo "apk add build tools failed, retrying ($i/5)..."; \
+        sleep 3; \
+      }; \
+    done
 RUN cc -shared -fPIC -O2 -Wall -Wextra -Werror src/LinuxWebTool.Infrastructure/Features/Terminal/Platform/native/linuxwebtool_pty.c -o /tmp/liblinuxwebtool_pty.so -lutil
 RUN dotnet publish "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj" \
     -c $BUILD_CONFIGURATION \
