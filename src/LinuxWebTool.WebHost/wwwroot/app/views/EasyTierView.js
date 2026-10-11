@@ -19,6 +19,7 @@ export default defineComponent({
     const isEditNode = ref(false);
     const editNodeId = ref(null);
     const activeTab = ref('wizard'); // 'wizard' | 'toml'
+    const wizardTab = ref('basic'); // 'basic' | 'routing' | 'advanced'
 
     const activeBasePort = ref(11010);
     const activeWgPort = ref(11011);
@@ -140,7 +141,38 @@ export default defineComponent({
       routesText: '',
       rawTomlOverride: '',
       autoStart: true,
+      routingMode: 'auto',
+      hostname: '',
+      virtualIpv6: '',
+      mappedListenersText: '',
+      proxyNetworkRules: [],
+      advancedConfig: {
+        devName: '',
+        mtu: null,
+        enableIpv6: null,
+        latencyFirst: null,
+        bindDevice: null,
+        p2pMode: '',
+        defaultProtocol: '',
+        enableUpnp: null,
+        enableTcpHolePunching: null,
+        enableUdpHolePunching: null,
+        enableSymHolePunching: null,
+      },
     });
+
+    function addProxyRule() {
+      if (!Array.isArray(nodeForm.proxyNetworkRules)) {
+        nodeForm.proxyNetworkRules = [];
+      }
+      nodeForm.proxyNetworkRules.push({ cidr: '', mappedCidr: '' });
+    }
+
+    function removeProxyRule(index) {
+      if (Array.isArray(nodeForm.proxyNetworkRules)) {
+        nodeForm.proxyNetworkRules.splice(index, 1);
+      }
+    }
 
     // 抽屉：运行时配置热打补丁（零丢包）
     const showPatchDrawer = ref(false);
@@ -259,6 +291,7 @@ export default defineComponent({
       isEditNode.value = false;
       editNodeId.value = null;
       activeTab.value = 'wizard';
+      wizardTab.value = 'basic';
 
       const { basePort, wgPort, isIncremented, maxFoundPort } = computeNextNodePorts();
       activeBasePort.value = basePort;
@@ -279,6 +312,24 @@ export default defineComponent({
         routesText: '',
         rawTomlOverride: '',
         autoStart: true,
+        routingMode: 'auto',
+        hostname: '',
+        virtualIpv6: '',
+        mappedListenersText: '',
+        proxyNetworkRules: [],
+        advancedConfig: {
+          devName: '',
+          mtu: null,
+          enableIpv6: null,
+          latencyFirst: null,
+          bindDevice: null,
+          p2pMode: '',
+          defaultProtocol: '',
+          enableUpnp: null,
+          enableTcpHolePunching: null,
+          enableUdpHolePunching: null,
+          enableSymHolePunching: null,
+        },
       });
       showNodeModal.value = true;
 
@@ -329,6 +380,7 @@ export default defineComponent({
       isEditNode.value = true;
       editNodeId.value = node.id;
       activeTab.value = 'wizard';
+      wizardTab.value = 'basic';
       portIncrementInfo.value = '';
 
       const res = await http(API.easytier.nodeItem(node.id), { method: 'GET' });
@@ -344,9 +396,18 @@ export default defineComponent({
           activeWgPort.value = 11011;
         }
 
+        let rules = [];
+        if (Array.isArray(cfg.proxyNetworkRules) && cfg.proxyNetworkRules.length > 0) {
+          rules = cfg.proxyNetworkRules.map(r => ({ cidr: r.cidr || '', mappedCidr: r.mappedCidr || '' }));
+        } else if (Array.isArray(cfg.proxyNetworks) && cfg.proxyNetworks.length > 0) {
+          rules = cfg.proxyNetworks.map(cidr => ({ cidr: cidr || '', mappedCidr: '' }));
+        }
+
+        const adv = cfg.advancedConfig || {};
+
         Object.assign(nodeForm, {
-          instanceName: cfg.instanceName,
-          networkName: cfg.networkName,
+          instanceName: cfg.instanceName || '',
+          networkName: cfg.networkName || '',
           networkSecret: cfg.networkSecret || '',
           virtualIpv4: cfg.virtualIpv4 || '',
           enableDhcp: cfg.enableDhcp,
@@ -356,6 +417,24 @@ export default defineComponent({
           routesText: (cfg.routes || []).join('\n'),
           rawTomlOverride: cfg.rawTomlOverride || '',
           autoStart: cfg.autoStart,
+          routingMode: cfg.routingMode || 'auto',
+          hostname: cfg.hostname || '',
+          virtualIpv6: cfg.virtualIpv6 || '',
+          mappedListenersText: (cfg.mappedListeners || []).join('\n'),
+          proxyNetworkRules: rules,
+          advancedConfig: {
+            devName: adv.devName || '',
+            mtu: adv.mtu ?? null,
+            enableIpv6: adv.enableIpv6 ?? null,
+            latencyFirst: adv.latencyFirst ?? null,
+            bindDevice: adv.bindDevice ?? null,
+            p2pMode: adv.p2pMode || '',
+            defaultProtocol: adv.defaultProtocol || '',
+            enableUpnp: adv.enableUpnp ?? null,
+            enableTcpHolePunching: adv.enableTcpHolePunching ?? null,
+            enableUdpHolePunching: adv.enableUdpHolePunching ?? null,
+            enableSymHolePunching: adv.enableSymHolePunching ?? null,
+          },
         });
       }
       showNodeModal.value = true;
@@ -365,7 +444,15 @@ export default defineComponent({
       if (!nodeForm.instanceName.trim()) return toast.error('请输入实例名称');
       if (!nodeForm.networkName.trim()) return toast.error('请输入虚拟网络名称');
 
+      const rules = (nodeForm.proxyNetworkRules || [])
+        .filter(r => r.cidr && r.cidr.trim())
+        .map(r => ({
+          cidr: r.cidr.trim(),
+          mappedCidr: r.mappedCidr && r.mappedCidr.trim() ? r.mappedCidr.trim() : null,
+        }));
+
       saving.value = true;
+      const adv = nodeForm.advancedConfig || {};
       const payload = {
         instanceName: nodeForm.instanceName.trim(),
         networkName: nodeForm.networkName.trim(),
@@ -374,10 +461,28 @@ export default defineComponent({
         enableDhcp: nodeForm.enableDhcp && !nodeForm.virtualIpv4.trim(),
         listeners: splitLines(nodeForm.listenersText),
         peers: splitLines(nodeForm.peersText),
-        proxyNetworks: splitLines(nodeForm.proxyNetworksText),
-        routes: splitLines(nodeForm.routesText),
+        proxyNetworks: rules.length > 0 ? rules.map(r => r.cidr) : splitLines(nodeForm.proxyNetworksText),
+        routes: nodeForm.routingMode === 'manual' ? splitLines(nodeForm.routesText) : [],
         rawTomlOverride: nodeForm.rawTomlOverride.trim() || null,
         autoStart: nodeForm.autoStart,
+        routingMode: nodeForm.routingMode || 'auto',
+        hostname: nodeForm.hostname ? nodeForm.hostname.trim() || null : null,
+        virtualIpv6: nodeForm.virtualIpv6 ? nodeForm.virtualIpv6.trim() || null : null,
+        mappedListeners: splitLines(nodeForm.mappedListenersText),
+        proxyNetworkRules: rules,
+        advancedConfig: {
+          devName: adv.devName ? adv.devName.trim() || null : null,
+          mtu: adv.mtu ? Number(adv.mtu) : null,
+          enableIpv6: adv.enableIpv6 === null || adv.enableIpv6 === '' ? null : Boolean(adv.enableIpv6),
+          latencyFirst: adv.latencyFirst === null || adv.latencyFirst === '' ? null : Boolean(adv.latencyFirst),
+          bindDevice: adv.bindDevice === null || adv.bindDevice === '' ? null : Boolean(adv.bindDevice),
+          p2pMode: adv.p2pMode ? adv.p2pMode.trim() || null : null,
+          defaultProtocol: adv.defaultProtocol ? adv.defaultProtocol.trim() || null : null,
+          enableUpnp: adv.enableUpnp === null || adv.enableUpnp === '' ? null : Boolean(adv.enableUpnp),
+          enableTcpHolePunching: adv.enableTcpHolePunching === null || adv.enableTcpHolePunching === '' ? null : Boolean(adv.enableTcpHolePunching),
+          enableUdpHolePunching: adv.enableUdpHolePunching === null || adv.enableUdpHolePunching === '' ? null : Boolean(adv.enableUdpHolePunching),
+          enableSymHolePunching: adv.enableSymHolePunching === null || adv.enableSymHolePunching === '' ? null : Boolean(adv.enableSymHolePunching),
+        },
       };
 
       const res = isEditNode.value
@@ -562,7 +667,10 @@ export default defineComponent({
       showNodeModal,
       isEditNode,
       activeTab,
+      wizardTab,
       nodeForm,
+      addProxyRule,
+      removeProxyRule,
       showPatchDrawer,
       patchNode,
       patchForm,
@@ -712,10 +820,19 @@ export default defineComponent({
                 <span class="relative inline-flex rounded-full h-3 w-3" :class="node.isRunning ? 'bg-emerald-500' : 'bg-slate-600'"></span>
               </span>
               <div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
                   <span class="text-base font-bold text-slate-100">{{ node.instanceName }}</span>
+                  <span v-if="node.hostname" class="text-xs text-indigo-300 bg-indigo-950/50 px-1.5 py-0.5 rounded border border-indigo-800/60 font-mono" :title="'节点主机名: ' + node.hostname">
+                    {{ node.hostname }}
+                  </span>
                   <span class="badge border-slate-700 text-slate-300 bg-slate-800/80 text-[11px]">
                     网段: {{ node.networkName }}
+                  </span>
+                  <span v-if="node.routingMode === 'virtual_only'" class="badge border-purple-500/40 text-purple-300 bg-purple-950/30 text-[10px]" title="仅虚拟节点互通 (routes = [])，已阻断外部子网">
+                    仅虚拟互通
+                  </span>
+                  <span v-else-if="node.routingMode === 'manual'" class="badge border-cyan-500/40 text-cyan-300 bg-cyan-950/30 text-[10px]" title="指定远端静态路由">
+                    指定路由
                   </span>
                   <span v-if="node.deviceName" class="text-xs font-mono text-cyan-400 bg-cyan-950/40 px-1.5 py-0.5 rounded border border-cyan-800/50">
                     网卡: {{ node.deviceName }}
@@ -726,6 +843,9 @@ export default defineComponent({
                     <strong v-if="node.virtualIpv4" class="text-emerald-400 font-mono">{{ node.virtualIpv4 }}</strong>
                     <span v-else class="text-amber-400 font-mono" :title="node.lastError || '正在等待对端连接与 DHCP 协商分配'">
                       {{ node.lastError ? '待就绪 (见下方提示)' : 'DHCP 分配中...' }}
+                    </span>
+                    <span v-if="node.virtualIpv6" class="ml-1 text-slate-400 font-mono text-[11px]" :title="'虚拟 IPv6: ' + node.virtualIpv6">
+                      ({{ node.virtualIpv6 }})
                     </span>
                   </span>
                   <span>对端: <strong class="text-cyan-400">{{ node.peerCount }}</strong> 节点 (直连: {{ node.directPeerCount }})</span>
@@ -786,14 +906,26 @@ export default defineComponent({
 
           <!-- 展开的拓扑详情抽屉/面板 -->
           <div v-if="activeNodeDetail && activeNodeDetail.config.id === node.id" class="mt-4 pt-3 border-t border-slate-700/60 flex flex-col gap-3">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs bg-slate-900/60 p-3 rounded border border-slate-800">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs bg-slate-900/60 p-3 rounded border border-slate-800">
               <div>
                 <span class="text-slate-400">物理监听:</span>
-                <span class="text-slate-200 font-mono ml-1">{{ (activeNodeDetail.activeListeners || []).join(', ') || '未开启监听 (纯客户端出站模式)' }}</span>
+                <span class="text-slate-200 font-mono ml-1">{{ (activeNodeDetail.activeListeners || []).join(', ') || '纯客户端出站' }}</span>
               </div>
               <div>
                 <span class="text-slate-400">STUN NAT 诊断:</span>
                 <span class="text-emerald-400 font-mono ml-1">{{ activeNodeDetail.stunNatType || '探测中...' }}</span>
+              </div>
+              <div>
+                <span class="text-slate-400">路由模式:</span>
+                <span class="text-cyan-300 font-mono ml-1">
+                  {{ activeNodeDetail.config.routingMode === 'virtual_only' ? '仅虚拟互通' : (activeNodeDetail.config.routingMode === 'manual' ? '指定路由' : '自动学习') }}
+                </span>
+              </div>
+              <div>
+                <span class="text-slate-400">子网代理:</span>
+                <span class="text-indigo-300 font-mono ml-1">
+                  {{ (activeNodeDetail.config.proxyNetworkRules || []).length || (activeNodeDetail.config.proxyNetworks || []).length }} 条
+                </span>
               </div>
             </div>
 
@@ -917,154 +1049,435 @@ export default defineComponent({
           <div class="flex flex-col gap-3 text-xs">
             <!-- 向导模式 -->
             <div v-if="activeTab === 'wizard'" class="flex flex-col gap-3">
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label class="block text-slate-400 mb-1">节点实例名称 (Instance Name) <span class="text-rose-400">*</span></label>
-                  <input
-                    v-model="nodeForm.instanceName"
-                    class="input font-mono"
-                    placeholder="如 node_nas, home_gateway"
-                    :disabled="isEditNode" />
-                </div>
-                <div>
-                  <label class="block text-slate-400 mb-1">虚拟网络名称 (Network Name) <span class="text-rose-400">*</span></label>
-                  <input
-                    v-model="nodeForm.networkName"
-                    class="input font-mono"
-                    placeholder="如 my_vnet, default" />
-                </div>
+              <!-- 向导子分类 Tab 切换 -->
+              <div class="flex items-center gap-1.5 p-1 bg-slate-900/60 rounded-lg border border-slate-800">
+                <button
+                  type="button"
+                  class="flex-1 py-1 px-2.5 rounded text-xs font-medium transition-all text-center flex items-center justify-center gap-1.5"
+                  :class="wizardTab === 'basic' ? 'bg-cyan-950/70 text-cyan-300 border border-cyan-700/60 shadow-sm' : 'text-slate-400 hover:text-slate-200'"
+                  @click="wizardTab = 'basic'">
+                  <span>🌐</span>
+                  <span>1. 基础组网</span>
+                </button>
+                <button
+                  type="button"
+                  class="flex-1 py-1 px-2.5 rounded text-xs font-medium transition-all text-center flex items-center justify-center gap-1.5"
+                  :class="wizardTab === 'routing' ? 'bg-cyan-950/70 text-cyan-300 border border-cyan-700/60 shadow-sm' : 'text-slate-400 hover:text-slate-200'"
+                  @click="wizardTab = 'routing'">
+                  <span>🔀</span>
+                  <span>2. 路由与子网代理</span>
+                  <span v-if="nodeForm.routingMode === 'virtual_only'" class="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+                </button>
+                <button
+                  type="button"
+                  class="flex-1 py-1 px-2.5 rounded text-xs font-medium transition-all text-center flex items-center justify-center gap-1.5"
+                  :class="wizardTab === 'advanced' ? 'bg-cyan-950/70 text-cyan-300 border border-cyan-700/60 shadow-sm' : 'text-slate-400 hover:text-slate-200'"
+                  @click="wizardTab = 'advanced'">
+                  <span>⚡</span>
+                  <span>3. 进阶连接与性能</span>
+                </button>
               </div>
 
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label class="block text-slate-400 mb-1">网络通信密钥 (Network Secret)</label>
-                  <input
-                    v-model="nodeForm.networkSecret"
-                    type="password"
-                    class="input font-mono"
-                    placeholder="可选，异地节点间端对端加密密码" />
-                </div>
-                <div>
-                  <label class="block text-slate-400 mb-1">虚拟 IPv4 地址 (可选静态指定)</label>
-                  <input
-                    v-model="nodeForm.virtualIpv4"
-                    class="input font-mono"
-                    placeholder="如 10.126.127.1/24 (填写后使用静态 IP)" />
-                  <p class="mt-1 text-xs text-slate-500">填写地址后禁用 DHCP；留空并启用 DHCP 才会自动分配。原始 TOML 覆盖配置优先。</p>
-                </div>
-              </div>
-
-              <div class="border-t border-slate-800/80 pt-2 flex flex-col sm:flex-row items-start sm:items-center gap-4 text-xs">
-                <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer flex-1 w-full">
-                  <input type="checkbox" v-model="nodeForm.enableDhcp" :disabled="!!nodeForm.virtualIpv4.trim()" class="accent-cyan-500" />
-                  <span class="text-slate-200">{{ nodeForm.virtualIpv4.trim() ? '已指定静态 IP，DHCP 不生效' : '启用 DHCP 自动分配虚拟 IP' }}</span>
-                </label>
-                <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer flex-1 w-full">
-                  <input type="checkbox" v-model="nodeForm.autoStart" class="accent-emerald-500" />
-                  <span class="text-slate-200">服务启动时自动拉起本节点</span>
-                </label>
-              </div>
-
-              <div v-if="engineStatus && !engineStatus.hasAdminPrivilege" class="p-2 rounded bg-amber-950/30 border border-amber-800/50 text-[11px] text-amber-300/90 flex items-start gap-1.5">
-                <span>⚠️</span>
-                <span>提示：当前服务以普通用户权限运行，系统在创建本地 TUN 虚拟网卡时可能会失败。若遇到网卡创建失败，建议以管理员身份重新启动 WebHost 服务。</span>
-              </div>
-
-              <div>
-                <div class="flex items-center justify-between mb-1">
-                  <label class="text-slate-400">对端节点地址列表 (Peers / 每行一个)</label>
-                  <div class="flex items-center gap-1 flex-wrap">
-                    <span class="text-[10px] text-slate-500">快速填入:</span>
-                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-slate-800 text-slate-300 hover:bg-slate-700"
-                      @click="applyPeerPreset('public_tcp')">
-                      官方 TCP
-                    </button>
-                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-slate-800 text-slate-300 hover:bg-slate-700"
-                      @click="applyPeerPreset('public_udp')">
-                      官方 UDP
-                    </button>
-                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-indigo-950/40 text-indigo-300 border border-indigo-800/60 hover:bg-indigo-900/60"
-                      @click="applyPeerPreset('worker_wss')">
-                      Worker WSS
-                    </button>
+              <!-- 子标签 1：基础组网 -->
+              <div v-show="wizardTab === 'basic'" class="flex flex-col gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-slate-400 mb-1">节点实例名称 (Instance Name) <span class="text-rose-400">*</span></label>
+                    <input
+                      v-model="nodeForm.instanceName"
+                      class="input font-mono"
+                      placeholder="如 node_nas, home_gateway"
+                      :disabled="isEditNode" />
+                  </div>
+                  <div>
+                    <label class="block text-slate-400 mb-1">节点显示名称 (Hostname)</label>
+                    <input
+                      v-model="nodeForm.hostname"
+                      class="input font-mono"
+                      placeholder="如 office-pc (对端拓扑友好识别)" />
                   </div>
                 </div>
-                <textarea
-                  v-model="nodeForm.peersText"
-                  rows="2"
-                  class="input font-mono text-xs"
-                  placeholder="tcp://public.easytier.top:11010&#10;udp://public.easytier.top:11010&#10;wss://your-domain.workers.dev/"></textarea>
-                <span class="text-[11px] text-slate-500 mt-0.5 block">连接到公共根节点、自建节点或 Cloudflare Worker 即可全网自动发现并建立 P2P 穿透</span>
-              </div>
 
-              <div>
-                <div class="flex items-center justify-between mb-1">
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <label class="text-slate-400">本地监听端口 (Listeners / 全协议双栈)</label>
-                    <span v-if="portIncrementInfo" class="badge text-[10px] bg-emerald-950/60 text-emerald-300 border-emerald-700/50">
-                      ⚡ {{ portIncrementInfo }}
-                    </span>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-slate-400 mb-1">虚拟网络名称 (Network Name) <span class="text-rose-400">*</span></label>
+                    <input
+                      v-model="nodeForm.networkName"
+                      class="input font-mono"
+                      placeholder="如 my_vnet, default" />
                   </div>
-                  <div class="flex items-center gap-1 flex-wrap">
-                    <button type="button" class="btn btn-xs py-0.5 px-2 text-[10px] bg-amber-950/40 text-amber-300 border border-amber-700/60 hover:bg-amber-900/60 flex items-center gap-1"
-                      :disabled="probingPort"
-                      title="向宿主机探测系统空闲端口，自动避开已被占用的端口"
-                      @click="probeAvailablePorts(activeBasePort)">
-                      <span v-if="probingPort" class="animate-spin text-[10px]">⌛</span>
-                      <span v-else>🔍</span>
-                      <span>{{ probingPort ? '探测中...' : '探测可用端口' }}</span>
-                    </button>
-                    <span class="text-[10px] text-slate-500">预设:</span>
-                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-emerald-950/50 text-emerald-300 border border-emerald-700/60 hover:bg-emerald-900/60"
-                      @click="applyListenerPreset('all_dual_stack')">
-                      🌟 全协议双栈
-                    </button>
-                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-sky-950/40 text-sky-300 border border-sky-800/60 hover:bg-sky-900/60"
-                      @click="applyListenerPreset('all_ipv4')">
-                      仅 IPv4
-                    </button>
-                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-slate-800 text-slate-300 hover:bg-slate-700"
-                      @click="applyListenerPreset('udp_dual_stack')">
-                      UDP 双栈
-                    </button>
-                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-slate-800 text-slate-300 hover:bg-slate-700"
-                      @click="applyListenerPreset('tcp_udp_dual')">
-                      TCP+UDP
-                    </button>
-                    <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-slate-800 text-slate-400 hover:bg-slate-700"
-                      @click="applyListenerPreset('none')">
-                      纯客户端(清空)
-                    </button>
+                  <div>
+                    <label class="block text-slate-400 mb-1">网络通信密钥 (Network Secret)</label>
+                    <input
+                      v-model="nodeForm.networkSecret"
+                      type="password"
+                      class="input font-mono"
+                      placeholder="可选，异地节点间端对端加密密码" />
                   </div>
                 </div>
-                <textarea
-                  v-model="nodeForm.listenersText"
-                  rows="4"
-                  class="input font-mono text-xs"
-                  placeholder="tcp://0.0.0.0:11010&#10;udp://0.0.0.0:11010&#10;wg://0.0.0.0:11011&#10;tcp://[::]:11010&#10;udp://[::]:11010&#10;wg://[::]:11011"></textarea>
-                <span class="text-[11px] text-slate-500 mt-0.5 block">
-                  💡 <strong>全栈互通优势</strong>：默认开启 <code>tcp</code>、<code>udp</code> 和 <code>wg</code> 的 IPv4 与 IPv6 ([::]) 全量监听。即使在复杂对称 NAT 下，只要双端支持 IPv6 即可直接点对点极速通信，<strong>完全脱离 Cloudflare Worker 中继流量</strong>。
-                </span>
-              </div>
 
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-slate-400 mb-1">虚拟 IPv4 地址 (可选静态指定)</label>
+                    <input
+                      v-model="nodeForm.virtualIpv4"
+                      class="input font-mono"
+                      placeholder="如 10.126.127.1/24 (填写后使用静态 IP)" />
+                    <p class="mt-1 text-xs text-slate-500">填写地址后禁用 DHCP；留空并启用 DHCP 才会自动分配。原始 TOML 覆盖配置优先。</p>
+                  </div>
+                  <div>
+                    <label class="block text-slate-400 mb-1">虚拟 IPv6 地址 (可选静态双栈)</label>
+                    <input
+                      v-model="nodeForm.virtualIpv6"
+                      class="input font-mono"
+                      placeholder="如 fd00:1::1/64 (留空禁用虚拟 IPv6)" />
+                    <p class="mt-1 text-xs text-slate-500">提供虚拟局域网纯双栈支持，需指定 CIDR 掩码前缀。</p>
+                  </div>
+                </div>
+
+                <div class="border-t border-slate-800/80 pt-2 flex flex-col sm:flex-row items-start sm:items-center gap-4 text-xs">
+                  <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer flex-1 w-full">
+                    <input type="checkbox" v-model="nodeForm.enableDhcp" :disabled="!!nodeForm.virtualIpv4.trim()" class="accent-cyan-500" />
+                    <span class="text-slate-200">{{ nodeForm.virtualIpv4.trim() ? '已指定静态 IP，DHCP 不生效' : '启用 DHCP 自动分配虚拟 IP' }}</span>
+                  </label>
+                  <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer flex-1 w-full">
+                    <input type="checkbox" v-model="nodeForm.autoStart" class="accent-emerald-500" />
+                    <span class="text-slate-200">服务启动时自动拉起本节点</span>
+                  </label>
+                </div>
+
+                <div v-if="engineStatus && !engineStatus.hasAdminPrivilege" class="p-2 rounded bg-amber-950/30 border border-amber-800/50 text-[11px] text-amber-300/90 flex items-start gap-1.5">
+                  <span>⚠️</span>
+                  <span>提示：当前服务以普通用户权限运行，系统在创建本地 TUN 虚拟网卡时可能会失败。若遇到网卡创建失败，建议以管理员身份重新启动 WebHost 服务。</span>
+                </div>
+
                 <div>
-                  <label class="block text-slate-400 mb-1">子网代理网段 (Proxy Networks)</label>
+                  <div class="flex items-center justify-between mb-1">
+                    <label class="text-slate-400">对端节点地址列表 (Peers / 每行一个)</label>
+                    <div class="flex items-center gap-1 flex-wrap">
+                      <span class="text-[10px] text-slate-500">快速填入:</span>
+                      <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-slate-800 text-slate-300 hover:bg-slate-700"
+                        @click="applyPeerPreset('public_tcp')">
+                        官方 TCP
+                      </button>
+                      <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-slate-800 text-slate-300 hover:bg-slate-700"
+                        @click="applyPeerPreset('public_udp')">
+                        官方 UDP
+                      </button>
+                      <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-indigo-950/40 text-indigo-300 border border-indigo-800/60 hover:bg-indigo-900/60"
+                        @click="applyPeerPreset('worker_wss')">
+                        Worker WSS
+                      </button>
+                    </div>
+                  </div>
                   <textarea
-                    v-model="nodeForm.proxyNetworksText"
+                    v-model="nodeForm.peersText"
                     rows="2"
-                    class="input font-mono"
-                    placeholder="如 192.168.1.0/24"></textarea>
-                  <span class="text-[11px] text-slate-500 mt-0.5 block">打通内网 LAN，其他对端可直接访问该子网</span>
+                    class="input font-mono text-xs"
+                    placeholder="tcp://public.easytier.top:11010&#10;udp://public.easytier.top:11010&#10;wss://your-domain.workers.dev/"></textarea>
+                  <span class="text-[11px] text-slate-500 mt-0.5 block">连接到公共根节点、自建节点或 Cloudflare Worker 即可全网自动发现并建立 P2P 穿透</span>
                 </div>
+
                 <div>
-                  <label class="block text-slate-400 mb-1">静态路由 (Routes)</label>
+                  <div class="flex items-center justify-between mb-1">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <label class="text-slate-400">本地监听端口 (Listeners / 全协议双栈)</label>
+                      <span v-if="portIncrementInfo" class="badge text-[10px] bg-emerald-950/60 text-emerald-300 border-emerald-700/50">
+                        ⚡ {{ portIncrementInfo }}
+                      </span>
+                    </div>
+                    <div class="flex items-center gap-1 flex-wrap">
+                      <button type="button" class="btn btn-xs py-0.5 px-2 text-[10px] bg-amber-950/40 text-amber-300 border border-amber-700/60 hover:bg-amber-900/60 flex items-center gap-1"
+                        :disabled="probingPort"
+                        title="向宿主机探测系统空闲端口，自动避开已被占用的端口"
+                        @click="probeAvailablePorts(activeBasePort)">
+                        <span v-if="probingPort" class="animate-spin text-[10px]">⌛</span>
+                        <span v-else>🔍</span>
+                        <span>{{ probingPort ? '探测中...' : '探测可用端口' }}</span>
+                      </button>
+                      <span class="text-[10px] text-slate-500">预设:</span>
+                      <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-emerald-950/50 text-emerald-300 border border-emerald-700/60 hover:bg-emerald-900/60"
+                        @click="applyListenerPreset('all_dual_stack')">
+                        🌟 全协议双栈
+                      </button>
+                      <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-sky-950/40 text-sky-300 border border-sky-800/60 hover:bg-sky-900/60"
+                        @click="applyListenerPreset('all_ipv4')">
+                        仅 IPv4
+                      </button>
+                      <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-slate-800 text-slate-300 hover:bg-slate-700"
+                        @click="applyListenerPreset('udp_dual_stack')">
+                        UDP 双栈
+                      </button>
+                      <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-slate-800 text-slate-300 hover:bg-slate-700"
+                        @click="applyListenerPreset('tcp_udp_dual')">
+                        TCP+UDP
+                      </button>
+                      <button type="button" class="btn btn-xs py-0.5 px-1.5 text-[10px] bg-slate-800 text-slate-400 hover:bg-slate-700"
+                        @click="applyListenerPreset('none')">
+                        纯客户端(清空)
+                      </button>
+                    </div>
+                  </div>
+                  <textarea
+                    v-model="nodeForm.listenersText"
+                    rows="3"
+                    class="input font-mono text-xs"
+                    placeholder="tcp://0.0.0.0:11010&#10;udp://0.0.0.0:11010&#10;wg://0.0.0.0:11011&#10;tcp://[::]:11010&#10;udp://[::]:11010&#10;wg://[::]:11011"></textarea>
+                  <span class="text-[11px] text-slate-500 mt-0.5 block">
+                    💡 默认开启 <code>tcp</code>、<code>udp</code> 和 <code>wg</code> 的 IPv4 与 IPv6 ([::]) 全量监听。
+                  </span>
+                </div>
+              </div>
+
+              <!-- 子标签 2：路由与子网代理 -->
+              <div v-show="wizardTab === 'routing'" class="flex flex-col gap-4">
+                <!-- 路由模式选择卡片 -->
+                <div>
+                  <label class="block text-slate-300 font-semibold mb-2">
+                    路由广播与转发模式 (Routing Mode)
+                  </label>
+                  <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div
+                      class="p-2.5 rounded-lg border cursor-pointer transition-all flex flex-col justify-between"
+                      :class="nodeForm.routingMode === 'auto' ? 'bg-cyan-950/40 border-cyan-500 text-slate-100 shadow' : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:border-slate-700'"
+                      @click="nodeForm.routingMode = 'auto'">
+                      <div>
+                        <div class="flex items-center justify-between mb-1">
+                          <span class="font-bold text-xs" :class="nodeForm.routingMode === 'auto' ? 'text-cyan-300' : 'text-slate-200'">🌐 自动学习全网</span>
+                          <input type="radio" value="auto" v-model="nodeForm.routingMode" class="accent-cyan-500" />
+                        </div>
+                        <p class="text-[11px] leading-relaxed text-slate-400">
+                          缺省 routes 配置。自动向所有节点学习并接管其广播的代理子网路由。
+                        </p>
+                      </div>
+                      <span class="text-[10px] text-slate-500 mt-2 block font-mono">内核缺省行为</span>
+                    </div>
+
+                    <div
+                      class="p-2.5 rounded-lg border cursor-pointer transition-all flex flex-col justify-between"
+                      :class="nodeForm.routingMode === 'virtual_only' ? 'bg-purple-950/40 border-purple-500 text-slate-100 shadow' : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:border-slate-700'"
+                      @click="nodeForm.routingMode = 'virtual_only'">
+                      <div>
+                        <div class="flex items-center justify-between mb-1">
+                          <span class="font-bold text-xs" :class="nodeForm.routingMode === 'virtual_only' ? 'text-purple-300' : 'text-slate-200'">🛡️ 仅虚拟节点互通</span>
+                          <input type="radio" value="virtual_only" v-model="nodeForm.routingMode" class="accent-purple-500" />
+                        </div>
+                        <p class="text-[11px] leading-relaxed text-slate-400">
+                          显式生成 routes = []。阻断学习任何远端子网，彻底消除局域网网段重叠冲突！
+                        </p>
+                      </div>
+                      <span class="text-[10px] text-purple-400 mt-2 block font-mono">routes = []</span>
+                    </div>
+
+                    <div
+                      class="p-2.5 rounded-lg border cursor-pointer transition-all flex flex-col justify-between"
+                      :class="nodeForm.routingMode === 'manual' ? 'bg-cyan-950/40 border-cyan-500 text-slate-100 shadow' : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:border-slate-700'"
+                      @click="nodeForm.routingMode = 'manual'">
+                      <div>
+                        <div class="flex items-center justify-between mb-1">
+                          <span class="font-bold text-xs" :class="nodeForm.routingMode === 'manual' ? 'text-cyan-300' : 'text-slate-200'">🎯 指定远端路由</span>
+                          <input type="radio" value="manual" v-model="nodeForm.routingMode" class="accent-cyan-500" />
+                        </div>
+                        <p class="text-[11px] leading-relaxed text-slate-400">
+                          显式指定远端路由列表。仅由 EasyTier 转发下方手动声明的特定目标子网。
+                        </p>
+                      </div>
+                      <span class="text-[10px] text-cyan-400 mt-2 block font-mono">routes = [...]</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 手动路由列表 (仅在 manual 模式下呈现) -->
+                <div v-if="nodeForm.routingMode === 'manual'" class="p-3 rounded-lg bg-slate-900/60 border border-slate-800 flex flex-col gap-2">
+                  <label class="block text-slate-300 font-medium">指定承载的远端静态路由列表 (每行一个 CIDR)</label>
                   <textarea
                     v-model="nodeForm.routesText"
+                    rows="3"
+                    class="input font-mono text-xs"
+                    placeholder="如 10.0.0.0/8&#10;192.168.100.0/24"></textarea>
+                  <span class="text-[11px] text-slate-500">仅有此处列出的子网流量才会走虚拟网卡转发，其他远端子网将被忽略。</span>
+                </div>
+
+                <!-- 子网代理与网段映射 -->
+                <div class="p-3 rounded-lg bg-slate-900/60 border border-slate-800 flex flex-col gap-2.5">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <div class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                        <span>局域网代理与网段映射</span>
+                        <span class="badge border-cyan-800 text-cyan-400 bg-cyan-950/40 text-[10px]">Subnet Proxy</span>
+                      </div>
+                      <div class="text-[11px] text-slate-400 mt-0.5">
+                        将本地局域网暴露给对端；若出现重叠 LAN，可配置映射网段（两端掩码长度须一致，如 /24 对 /24）。
+                      </div>
+                    </div>
+                    <button type="button" class="btn btn-xs py-1 px-2.5 bg-slate-800 text-cyan-300 border border-slate-700 hover:bg-slate-700" @click="addProxyRule()">
+                      + 新增子网规则
+                    </button>
+                  </div>
+
+                  <div v-if="!nodeForm.proxyNetworkRules || nodeForm.proxyNetworkRules.length === 0" class="text-xs text-slate-500 py-3 text-center border border-dashed border-slate-800 rounded">
+                    未配置子网代理。如需让其他虚拟节点直接访问本机的物理局域网设备，请点击上方“+ 新增子网规则”。
+                  </div>
+
+                  <div v-else class="overflow-x-auto">
+                    <table class="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr class="text-slate-400 border-b border-slate-800 bg-slate-950/50">
+                          <th class="p-2">本地真实子网 CIDR (必填)</th>
+                          <th class="p-2">映射虚拟网段 Mapped CIDR (可选)</th>
+                          <th class="p-2 text-right">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="(rule, idx) in nodeForm.proxyNetworkRules" :key="idx" class="border-b border-slate-800/40">
+                          <td class="p-1.5">
+                            <input
+                              v-model="rule.cidr"
+                              class="input font-mono text-xs py-1"
+                              placeholder="如 192.168.1.0/24" />
+                          </td>
+                          <td class="p-1.5">
+                            <input
+                              v-model="rule.mappedCidr"
+                              class="input font-mono text-xs py-1"
+                              placeholder="如 10.200.1.0/24 (留空直通)" />
+                          </td>
+                          <td class="p-1.5 text-right">
+                            <button
+                              type="button"
+                              class="btn btn-xs py-0.5 px-2 text-rose-400 hover:bg-rose-950/40 border border-rose-900/40"
+                              @click="removeProxyRule(idx)">
+                              删除
+                            </button>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 子标签 3：进阶连接与性能 -->
+              <div v-show="wizardTab === 'advanced'" class="flex flex-col gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label class="block text-slate-400 mb-1">TUN 网卡名称 (dev_name)</label>
+                    <input
+                      v-model="nodeForm.advancedConfig.devName"
+                      class="input font-mono"
+                      placeholder="留空默认 (如 easytier-tun0)" />
+                    <span class="text-[10px] text-slate-500 mt-0.5 block">自定义创建的系统虚拟接口名称</span>
+                  </div>
+                  <div>
+                    <label class="block text-slate-400 mb-1">MTU 大小 (mtu)</label>
+                    <input
+                      v-model.number="nodeForm.advancedConfig.mtu"
+                      type="number"
+                      min="576"
+                      max="65535"
+                      class="input font-mono"
+                      placeholder="留空默认 (1400/1420)" />
+                    <span class="text-[10px] text-slate-500 mt-0.5 block">有效范围: 576 ~ 65535</span>
+                  </div>
+                  <div>
+                    <label class="block text-slate-400 mb-1">绑定物理出口 (bind_device)</label>
+                    <select v-model="nodeForm.advancedConfig.bindDevice" class="input font-mono">
+                      <option :value="null">继承内核默认 (不绑定)</option>
+                      <option :value="true">强制绑定 (bind_device = true)</option>
+                      <option :value="false">禁用绑定 (bind_device = false)</option>
+                    </select>
+                    <span class="text-[10px] text-slate-500 mt-0.5 block">防止出口套接字形成路由环路</span>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-slate-400 mb-1">默认连接协议 (default_protocol)</label>
+                    <select v-model="nodeForm.advancedConfig.defaultProtocol" class="input font-mono">
+                      <option value="">继承内核默认 (auto)</option>
+                      <option value="tcp">TCP</option>
+                      <option value="udp">UDP (推荐直连)</option>
+                      <option value="wg">WireGuard (wg)</option>
+                      <option value="ws">WebSocket (ws)</option>
+                      <option value="wss">Secure WebSocket (wss)</option>
+                    </select>
+                    <span class="text-[10px] text-slate-500 mt-0.5 block">对端未指明协议前缀时使用的默认协议</span>
+                  </div>
+                  <div>
+                    <label class="block text-slate-400 mb-1">P2P 穿透模式 (p2p_mode)</label>
+                    <select v-model="nodeForm.advancedConfig.p2pMode" class="input font-mono">
+                      <option value="">继承内核默认 (自动探测并中继)</option>
+                      <option value="p2p_only">p2p_only (仅允许直连，禁止中继)</option>
+                      <option value="disable_p2p">disable_p2p (禁用直连，仅走中继)</option>
+                      <option value="lazy_p2p">lazy_p2p (延迟 P2P，有流量才直连)</option>
+                      <option value="need_p2p">need_p2p (强制要求 P2P 直连)</option>
+                    </select>
+                    <span class="text-[10px] text-slate-500 mt-0.5 block">调度模式互斥，避免冲突标志</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block text-slate-400 mb-1">对外声明监听地址 (Mapped Listeners / 每行一个)</label>
+                  <textarea
+                    v-model="nodeForm.mappedListenersText"
                     rows="2"
-                    class="input font-mono"
-                    placeholder="如 10.0.0.0/8"></textarea>
-                  <span class="text-[11px] text-slate-500 mt-0.5 block">声明需要由虚拟网络承载的远端路由</span>
+                    class="input font-mono text-xs"
+                    placeholder="tcp://203.0.113.1:11010&#10;udp://203.0.113.1:11010"></textarea>
+                  <span class="text-[10px] text-slate-500 mt-0.5 block">在 NAT/端口映射后向对端声明自身可直接访问的公网地址</span>
+                </div>
+
+                <div class="p-3 rounded-lg bg-slate-900/50 border border-slate-800 flex flex-col gap-2.5">
+                  <div class="text-xs font-semibold text-slate-300">网络协议与 NAT 打洞微调 (Flags)</div>
+                  <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label class="block text-[11px] text-slate-400 mb-1">IPv6 底层连接能力</label>
+                      <select v-model="nodeForm.advancedConfig.enableIpv6" class="input font-mono text-xs">
+                        <option :value="null">继承内核 (启用)</option>
+                        <option :value="true">强制启用</option>
+                        <option :value="false">禁用 IPv6</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-[11px] text-slate-400 mb-1">延迟优先调度</label>
+                      <select v-model="nodeForm.advancedConfig.latencyFirst" class="input font-mono text-xs">
+                        <option :value="null">继承内核 (关闭)</option>
+                        <option :value="true">开启延迟优先</option>
+                        <option :value="false">关闭延迟优先</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-[11px] text-slate-400 mb-1">UPnP 自动端口映射</label>
+                      <select v-model="nodeForm.advancedConfig.enableUpnp" class="input font-mono text-xs">
+                        <option :value="null">继承内核 (开启)</option>
+                        <option :value="true">开启 UPnP</option>
+                        <option :value="false">禁用 UPnP</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-[11px] text-slate-400 mb-1">TCP 打洞</label>
+                      <select v-model="nodeForm.advancedConfig.enableTcpHolePunching" class="input font-mono text-xs">
+                        <option :value="null">继承内核 (开启)</option>
+                        <option :value="true">开启</option>
+                        <option :value="false">禁用 TCP 打洞</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-[11px] text-slate-400 mb-1">UDP 打洞</label>
+                      <select v-model="nodeForm.advancedConfig.enableUdpHolePunching" class="input font-mono text-xs">
+                        <option :value="null">继承内核 (开启)</option>
+                        <option :value="true">开启</option>
+                        <option :value="false">禁用 UDP 打洞</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-[11px] text-slate-400 mb-1">对称 NAT 打洞</label>
+                      <select v-model="nodeForm.advancedConfig.enableSymHolePunching" class="input font-mono text-xs">
+                        <option :value="null">继承内核 (开启)</option>
+                        <option :value="true">开启</option>
+                        <option :value="false">禁用对称打洞</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

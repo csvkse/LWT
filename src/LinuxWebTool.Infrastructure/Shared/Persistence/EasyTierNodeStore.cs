@@ -35,11 +35,13 @@ public partial class EasyTierNodeStore(DbConnectionFactory factory)
             INSERT INTO easytier_nodes (
                 Id, InstanceName, NetworkName, NetworkSecret, VirtualIpv4, EnableDhcp,
                 ListenersJson, PeersJson, ProxyNetworksJson, RoutesJson, RawTomlOverride,
-                AutoStart, Status, LastError, UpdateTime
+                AutoStart, Status, LastError, UpdateTime,
+                RoutingMode, Hostname, VirtualIpv6, MappedListenersJson, ProxyNetworkRulesJson, AdvancedConfigJson
             ) VALUES (
                 @Id, @InstanceName, @NetworkName, @NetworkSecret, @VirtualIpv4, @EnableDhcp,
                 @ListenersJson, @PeersJson, @ProxyNetworksJson, @RoutesJson, @RawTomlOverride,
-                @AutoStart, @Status, @LastError, @UpdateTime
+                @AutoStart, @Status, @LastError, @UpdateTime,
+                @RoutingMode, @Hostname, @VirtualIpv6, @MappedListenersJson, @ProxyNetworkRulesJson, @AdvancedConfigJson
             ) ON CONFLICT(Id) DO UPDATE SET
                 InstanceName = excluded.InstanceName,
                 NetworkName = excluded.NetworkName,
@@ -54,7 +56,13 @@ public partial class EasyTierNodeStore(DbConnectionFactory factory)
                 AutoStart = excluded.AutoStart,
                 Status = excluded.Status,
                 LastError = excluded.LastError,
-                UpdateTime = excluded.UpdateTime";
+                UpdateTime = excluded.UpdateTime,
+                RoutingMode = excluded.RoutingMode,
+                Hostname = excluded.Hostname,
+                VirtualIpv6 = excluded.VirtualIpv6,
+                MappedListenersJson = excluded.MappedListenersJson,
+                ProxyNetworkRulesJson = excluded.ProxyNetworkRulesJson,
+                AdvancedConfigJson = excluded.AdvancedConfigJson";
         await db.ExecuteAsync(sql, entity);
     }
 

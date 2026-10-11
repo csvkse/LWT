@@ -99,7 +99,7 @@ export default defineComponent({
       closeTimer = setTimeout(() => {
         activeMenu.value = null;
         closeTimer = null;
-      }, 200);
+      }, 300);
     }
 
     function closeDropdownImmediate() {
@@ -211,6 +211,7 @@ export default defineComponent({
                 :to="group.path"
                 class="nav-link shrink-0 whitespace-nowrap"
                 :class="{ active: isActive(group.path) }"
+                @mouseenter="closeDropdownImmediate()"
               >{{ group.label }}</router-link>
 
               <!-- 逻辑分组下拉菜单 -->
@@ -224,6 +225,7 @@ export default defineComponent({
                   type="button"
                   class="nav-link flex items-center gap-1 shrink-0 whitespace-nowrap cursor-pointer select-none"
                   :class="{ active: isGroupActive(group) || activeMenu === group.key }"
+                  @mouseenter="openDropdown(group.key)"
                   @click.stop="toggleMenu(group.key)"
                 >
                   <span>{{ group.label }}</span>
@@ -235,7 +237,6 @@ export default defineComponent({
                   v-if="activeMenu === group.key"
                   class="absolute top-full left-0 pt-1.5 z-50"
                   @mouseenter="openDropdown(group.key)"
-                  @mouseleave="closeDropdown()"
                 >
                   <div class="w-56 py-1.5 rounded-xl bg-slate-900/95 border border-slate-700/80 shadow-2xl backdrop-blur-md flex flex-col gap-0.5">
                     <router-link

@@ -212,6 +212,9 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(List<int>))]
 [JsonSerializable(typeof(EasyTierNodeEntity))]
 [JsonSerializable(typeof(List<EasyTierNodeEntity>))]
+[JsonSerializable(typeof(EasyTierProxyNetworkItem))]
+[JsonSerializable(typeof(List<EasyTierProxyNetworkItem>))]
+[JsonSerializable(typeof(EasyTierAdvancedConfig))]
 
 public partial class AppJsonSerializerContext
  : JsonSerializerContext

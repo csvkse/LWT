@@ -144,18 +144,28 @@ public sealed class EasyTierLifecycleSafetyTests
     }
 
     [Fact]
-    public async Task LinuxArch022_Conflict_is_rejected_before_engine_launch()
+    public async Task LinuxArch022_Second_node_on_same_virtual_subnet_is_rejected_and_login_stays_responsive()
     {
         var services = (await TestServerFixture.GetAppAsync()).Services;
         var store = services.GetRequiredService<EasyTierNodeStore>();
-        var node = Node("overlap");
+        var node = Node("second-overlap");
+        node.VirtualIpv4 = "10.126.126.2/24";
         await store.UpsertNodeAsync(node);
         var manager = new EasyTierNodeManager(store, services.GetRequiredService<EasyTierHostSupervisor>(), NullLogger<EasyTierNodeManager>.Instance);
-        Seed(manager, "other-id", "other", "198.18.254.1/24");
+        Seed(manager, "first-id", "first", "10.126.126.1/24");
         try
         {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() => manager.StartNodeAsync(node.Id));
+            clock.Stop();
             Assert.Contains("重叠", error.Message);
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(2), $"拒绝耗时 {clock.Elapsed}");
+
+            using var client = await TestServerFixture.CreateAnonymousClientAsync();
+            using var response = await client.PostAsync("/api/Auth/Login", TestServerFixture.Json(
+                "{\"userName\":\"admin\",\"password\":\"integration-test-password\"}"))
+                .WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
         }
         finally { await store.DeleteNodeAsync(node.Id); }
     }
