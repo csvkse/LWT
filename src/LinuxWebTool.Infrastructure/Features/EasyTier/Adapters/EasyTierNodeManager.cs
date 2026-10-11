@@ -711,19 +711,19 @@ public class EasyTierNodeManager(
                 if (patch.ConnectorsToAdd != null)
                 {
                     var connArr = new JsonArray();
-                    foreach (var c in patch.ConnectorsToAdd) connArr.Add(c);
+                    foreach (var c in patch.ConnectorsToAdd) connArr.Add((JsonNode?)JsonValue.Create(c));
                     patchNode["connectors"] = connArr;
                 }
                 if (patch.ProxyNetworks != null)
                 {
                     var pArr = new JsonArray();
-                    foreach (var p in patch.ProxyNetworks) pArr.Add(p);
+                    foreach (var p in patch.ProxyNetworks) pArr.Add((JsonNode?)JsonValue.Create(p));
                     patchNode["proxy_networks"] = pArr;
                 }
                 if (patch.Routes != null)
                 {
                     var rArr = new JsonArray();
-                    foreach (var r in patch.Routes) rArr.Add(r);
+                    foreach (var r in patch.Routes) rArr.Add((JsonNode?)JsonValue.Create(r));
                     patchNode["routes"] = rArr;
                 }
                 if (!string.IsNullOrWhiteSpace(patch.Hostname))

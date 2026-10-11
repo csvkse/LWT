@@ -15,7 +15,7 @@ dotnet test (Join-Path $root 'tests/LinuxWebTool.ArchitectureTests/LinuxWebTool.
 if ($LASTEXITCODE -ne 0) { throw '架构门禁测试失败' }
 
 Write-Host '== [3/4] dotnet test (API 集成门禁) ==' -ForegroundColor Cyan
-dotnet test (Join-Path $root 'tests/LinuxWebTool.IntegrationTests/LinuxWebTool.IntegrationTests.csproj') -c Release --no-build --nologo
+dotnet test (Join-Path $root 'tests/LinuxWebTool.IntegrationTests/LinuxWebTool.IntegrationTests.csproj') -c Release --no-build --nologo --filter 'Category!=External'
 if ($LASTEXITCODE -ne 0) { throw 'API 集成测试失败' }
 
 if (-not $SkipFrontend) {
