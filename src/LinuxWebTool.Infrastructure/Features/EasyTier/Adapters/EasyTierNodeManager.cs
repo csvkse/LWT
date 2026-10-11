@@ -226,7 +226,10 @@ public class EasyTierNodeManager(
                 LastError: rt?.LastError ?? entity.LastError,
                 StartedAt: rt?.StartedAt,
                 UpdateTime: entity.UpdateTime,
-                Listeners: DeserializeList(entity.ListenersJson)));
+                Listeners: DeserializeList(entity.ListenersJson),
+                Hostname: entity.Hostname,
+                VirtualIpv6: entity.VirtualIpv6,
+                RoutingMode: entity.RoutingMode));
         }
 
         return results;
@@ -239,7 +242,7 @@ public class EasyTierNodeManager(
 
         var allStatuses = await GetAllNodeStatusesAsync(ct);
         var status = allStatuses.FirstOrDefault(s => s.Id == entity.Id)
-            ?? new EasyTierNodeStatusDto(entity.Id, entity.InstanceName, entity.NetworkName, false, 0, null, null, 0, 0, 0, 0, null, null, entity.UpdateTime, DeserializeList(entity.ListenersJson));
+            ?? new EasyTierNodeStatusDto(entity.Id, entity.InstanceName, entity.NetworkName, false, 0, null, null, 0, 0, 0, 0, null, null, entity.UpdateTime, DeserializeList(entity.ListenersJson), entity.Hostname, entity.VirtualIpv6, entity.RoutingMode);
 
         var configDto = new EasyTierNodeConfigDto(
             Id: entity.Id,
@@ -256,7 +259,13 @@ public class EasyTierNodeManager(
             AutoStart: entity.AutoStart,
             Status: entity.Status,
             LastError: entity.LastError,
-            UpdateTime: entity.UpdateTime);
+            UpdateTime: entity.UpdateTime,
+            RoutingMode: entity.RoutingMode,
+            Hostname: entity.Hostname,
+            VirtualIpv6: entity.VirtualIpv6,
+            MappedListeners: DeserializeList(entity.MappedListenersJson),
+            ProxyNetworkRules: EasyTierConfigGenerator.DeserializeProxyRules(entity.ProxyNetworkRulesJson, entity.ProxyNetworksJson),
+            AdvancedConfig: EasyTierConfigGenerator.DeserializeAdvancedConfig(entity.AdvancedConfigJson));
 
         var peers = new List<EasyTierPeerDetailDto>();
         var routes = new List<EasyTierRouteDetailDto>();
@@ -470,11 +479,15 @@ public class EasyTierNodeManager(
             throw new InvalidOperationException($"节点实例名称 '{request.InstanceName}' 已存在");
         }
 
+        supervisor.GetEngineMode(out var binaryPath);
         var toml = EasyTierConfigGenerator.GenerateToml(request);
-        if (!EasyTierConfigGenerator.ValidateConfig(toml, out var error))
+        if (!EasyTierConfigGenerator.ValidateConfig(toml, binaryPath, out var error))
         {
             throw new ArgumentException($"EasyTier 配置格式校验失败: {error}");
         }
+
+        var proxyRules = EasyTierConfigGenerator.ResolveProxyRules(request.ProxyNetworkRules, request.ProxyNetworks);
+        var proxyNetworksList = proxyRules.Select(r => string.IsNullOrEmpty(r.MappedCidr) ? r.Cidr : $"{r.Cidr} => {r.MappedCidr}").ToList();
 
         var entity = new EasyTierNodeEntity
         {
@@ -486,12 +499,19 @@ public class EasyTierNodeManager(
             EnableDhcp = request.EnableDhcp,
             ListenersJson = JsonSerializer.Serialize(request.Listeners ?? [], EasyTierJsonContext.Default.ListString),
             PeersJson = JsonSerializer.Serialize(request.Peers ?? [], EasyTierJsonContext.Default.ListString),
-            ProxyNetworksJson = JsonSerializer.Serialize(request.ProxyNetworks ?? [], EasyTierJsonContext.Default.ListString),
+            ProxyNetworksJson = JsonSerializer.Serialize(proxyNetworksList, EasyTierJsonContext.Default.ListString),
             RoutesJson = JsonSerializer.Serialize(request.Routes ?? [], EasyTierJsonContext.Default.ListString),
             RawTomlOverride = string.IsNullOrWhiteSpace(request.RawTomlOverride) ? null : request.RawTomlOverride.Trim(),
             AutoStart = request.AutoStart,
             Status = 0,
-            UpdateTime = DateTime.UtcNow
+            UpdateTime = DateTime.UtcNow,
+
+            RoutingMode = string.IsNullOrWhiteSpace(request.RoutingMode) ? "auto" : request.RoutingMode.Trim().ToLowerInvariant(),
+            Hostname = string.IsNullOrWhiteSpace(request.Hostname) ? null : request.Hostname.Trim(),
+            VirtualIpv6 = string.IsNullOrWhiteSpace(request.VirtualIpv6) ? null : request.VirtualIpv6.Trim(),
+            MappedListenersJson = JsonSerializer.Serialize(request.MappedListeners ?? [], EasyTierJsonContext.Default.ListString),
+            ProxyNetworkRulesJson = JsonSerializer.Serialize(proxyRules, EasyTierJsonContext.Default.ListEasyTierProxyNetworkItem),
+            AdvancedConfigJson = request.AdvancedConfig != null ? JsonSerializer.Serialize(request.AdvancedConfig, EasyTierJsonContext.Default.EasyTierAdvancedConfig) : "{}"
         };
 
         await store.UpsertNodeAsync(entity);
@@ -522,17 +542,31 @@ public class EasyTierNodeManager(
 
         var isRunning = _runtimeStates.ContainsKey(entity.Id);
 
+        var newRoutingMode = string.IsNullOrWhiteSpace(request.RoutingMode) ? "auto" : request.RoutingMode.Trim().ToLowerInvariant();
+        var newProxyRules = EasyTierConfigGenerator.ResolveProxyRules(request.ProxyNetworkRules, request.ProxyNetworks);
+        var oldProxyRules = EasyTierConfigGenerator.DeserializeProxyRules(entity.ProxyNetworkRulesJson, entity.ProxyNetworksJson);
+
         var requiresRestart = !string.Equals(entity.InstanceName, request.InstanceName, StringComparison.Ordinal)
             || !string.Equals(entity.NetworkName, request.NetworkName, StringComparison.Ordinal)
             || !string.Equals(entity.NetworkSecret, request.NetworkSecret ?? "", StringComparison.Ordinal)
             || entity.EnableDhcp != request.EnableDhcp
             || !string.Equals(entity.VirtualIpv4, request.VirtualIpv4, StringComparison.Ordinal)
             || !string.Equals(entity.RawTomlOverride, request.RawTomlOverride, StringComparison.Ordinal)
-            || !ListsEqual(DeserializeList(entity.ListenersJson), request.Listeners ?? []);
+            || !ListsEqual(DeserializeList(entity.ListenersJson), request.Listeners ?? [])
+            || !string.Equals(entity.RoutingMode, newRoutingMode, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(entity.Hostname, request.Hostname, StringComparison.Ordinal)
+            || !string.Equals(entity.VirtualIpv6, request.VirtualIpv6, StringComparison.Ordinal)
+            || !ListsEqual(DeserializeList(entity.MappedListenersJson), request.MappedListeners ?? [])
+            || !ListsEqual(DeserializeList(entity.RoutesJson), request.Routes ?? [])
+            || !ProxyRulesEqual(oldProxyRules, newProxyRules)
+            || !AdvancedConfigsEqual(entity.AdvancedConfigJson, request.AdvancedConfig);
 
         var duplicate = await store.GetNodeByNameAsync(request.InstanceName.Trim());
         if (duplicate is not null && duplicate.Id != entity.Id)
             throw new InvalidOperationException("节点实例名称已存在");
+
+        var proxyNetworksList = newProxyRules.Select(r => string.IsNullOrEmpty(r.MappedCidr) ? r.Cidr : $"{r.Cidr} => {r.MappedCidr}").ToList();
+
         entity.InstanceName = request.InstanceName.Trim();
         entity.NetworkName = request.NetworkName.Trim();
         entity.NetworkSecret = request.NetworkSecret?.Trim() ?? string.Empty;
@@ -540,14 +574,21 @@ public class EasyTierNodeManager(
         entity.EnableDhcp = request.EnableDhcp;
         entity.ListenersJson = JsonSerializer.Serialize(request.Listeners ?? [], EasyTierJsonContext.Default.ListString);
         entity.PeersJson = JsonSerializer.Serialize(request.Peers ?? [], EasyTierJsonContext.Default.ListString);
-        entity.ProxyNetworksJson = JsonSerializer.Serialize(request.ProxyNetworks ?? [], EasyTierJsonContext.Default.ListString);
+        entity.ProxyNetworksJson = JsonSerializer.Serialize(proxyNetworksList, EasyTierJsonContext.Default.ListString);
         entity.RoutesJson = JsonSerializer.Serialize(request.Routes ?? [], EasyTierJsonContext.Default.ListString);
         entity.RawTomlOverride = string.IsNullOrWhiteSpace(request.RawTomlOverride) ? null : request.RawTomlOverride.Trim();
         entity.AutoStart = request.AutoStart;
+        entity.RoutingMode = newRoutingMode;
+        entity.Hostname = string.IsNullOrWhiteSpace(request.Hostname) ? null : request.Hostname.Trim();
+        entity.VirtualIpv6 = string.IsNullOrWhiteSpace(request.VirtualIpv6) ? null : request.VirtualIpv6.Trim();
+        entity.MappedListenersJson = JsonSerializer.Serialize(request.MappedListeners ?? [], EasyTierJsonContext.Default.ListString);
+        entity.ProxyNetworkRulesJson = JsonSerializer.Serialize(newProxyRules, EasyTierJsonContext.Default.ListEasyTierProxyNetworkItem);
+        entity.AdvancedConfigJson = request.AdvancedConfig != null ? JsonSerializer.Serialize(request.AdvancedConfig, EasyTierJsonContext.Default.EasyTierAdvancedConfig) : "{}";
         entity.UpdateTime = DateTime.UtcNow;
 
+        supervisor.GetEngineMode(out var binaryPath);
         var updatedToml = EasyTierConfigGenerator.GenerateToml(entity);
-        if (!EasyTierConfigGenerator.ValidateConfig(updatedToml, out var configError))
+        if (!EasyTierConfigGenerator.ValidateConfig(updatedToml, binaryPath, out var configError))
             throw new ArgumentException($"EasyTier 配置格式校验失败: {configError}");
         if (isRunning) ValidateNetwork(updatedToml, entity.Id);
         await store.UpsertNodeAsync(entity);
@@ -567,7 +608,7 @@ public class EasyTierNodeManager(
                 var patch = new EasyTierPatchRequestDto(
                     ConnectorsToAdd: request.Peers,
                     ConnectorsToRemove: null,
-                    ProxyNetworks: request.ProxyNetworks,
+                    ProxyNetworks: proxyNetworksList,
                     Routes: request.Routes,
                     Hostname: entity.InstanceName,
                     DisableRelayData: null,
@@ -639,6 +680,9 @@ public class EasyTierNodeManager(
 
         if (rt.Mode == EasyTierEngineMode.CoreBinary && supervisor.GetCliPath(out var cliPath))
         {
+            var hasUnsupported = (patch.ProxyNetworks != null && patch.ProxyNetworks.Count > 0)
+                || (patch.Routes != null && patch.Routes.Count > 0);
+
             // 通过 CLI 动态更新 connectors
             if (patch.ConnectorsToAdd != null && patch.ConnectorsToAdd.Count > 0)
             {
@@ -647,6 +691,16 @@ public class EasyTierNodeManager(
                     await RunCliJsonSafeAsync(cliPath!, rt.RpcPort, $"connector add {c}", ct);
                 }
             }
+
+            if (hasUnsupported)
+            {
+                return new EasyTierPatchResultDto(
+                    Success: false,
+                    RequiredRestart: true,
+                    Message: "已通过 CLI 注入动态对端；但 CoreBinary 模式不支持热打补丁子网代理与路由，需要重启节点生效",
+                    AppliedAt: DateTime.UtcNow);
+            }
+
             return new EasyTierPatchResultDto(true, false, "已通过 CLI 成功注入动态对端", DateTime.UtcNow);
         }
         else if (rt.Mode == EasyTierEngineMode.NativeFfi)
@@ -1109,6 +1163,38 @@ public class EasyTierNodeManager(
     {
         if (a.Count != b.Count) return false;
         return a.OrderBy(x => x).SequenceEqual(b.OrderBy(x => x));
+    }
+
+    private static bool ProxyRulesEqual(List<EasyTierProxyNetworkItem> left, List<EasyTierProxyNetworkItem> right)
+    {
+        if (left.Count != right.Count) return false;
+        for (var i = 0; i < left.Count; i++)
+        {
+            if (!string.Equals(left[i].Cidr, right[i].Cidr, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(left[i].MappedCidr, right[i].MappedCidr, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool AdvancedConfigsEqual(string existingJson, EasyTierAdvancedConfig? next)
+    {
+        var existing = EasyTierConfigGenerator.DeserializeAdvancedConfig(existingJson);
+        if (existing == null && next == null) return true;
+        if (existing == null || next == null) return false;
+        return string.Equals(existing.DevName, next.DevName, StringComparison.Ordinal)
+            && existing.Mtu == next.Mtu
+            && existing.EnableIpv6 == next.EnableIpv6
+            && existing.LatencyFirst == next.LatencyFirst
+            && existing.BindDevice == next.BindDevice
+            && string.Equals(existing.P2pMode, next.P2pMode, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(existing.DefaultProtocol, next.DefaultProtocol, StringComparison.OrdinalIgnoreCase)
+            && existing.EnableUpnp == next.EnableUpnp
+            && existing.EnableTcpHolePunching == next.EnableTcpHolePunching
+            && existing.EnableUdpHolePunching == next.EnableUdpHolePunching
+            && existing.EnableSymHolePunching == next.EnableSymHolePunching;
     }
 
     public async Task<EasyTierAvailablePortDto> GetNextAvailablePortAsync(int? preferredStartPort = null, CancellationToken ct = default)

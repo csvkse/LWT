@@ -1,5 +1,24 @@
 namespace LinuxWebTool.Contracts.Features.EasyTier.Contracts;
 
+/// <summary>子网代理与网段映射规则项</summary>
+public sealed record EasyTierProxyNetworkItem(
+    string Cidr,
+    string? MappedCidr = null);
+
+/// <summary>EasyTier 节点高级连接与协议微调配置</summary>
+public sealed record EasyTierAdvancedConfig(
+    string? DevName = null,
+    int? Mtu = null,
+    bool? EnableIpv6 = null,
+    bool? LatencyFirst = null,
+    bool? BindDevice = null,
+    string? P2pMode = null,
+    string? DefaultProtocol = null,
+    bool? EnableUpnp = null,
+    bool? EnableTcpHolePunching = null,
+    bool? EnableUdpHolePunching = null,
+    bool? EnableSymHolePunching = null);
+
 /// <summary>EasyTier 节点配置传输对象</summary>
 public sealed record EasyTierNodeConfigDto(
     string Id,
@@ -16,7 +35,13 @@ public sealed record EasyTierNodeConfigDto(
     bool AutoStart,
     int Status,
     string? LastError,
-    DateTime UpdateTime);
+    DateTime UpdateTime,
+    string RoutingMode = "auto",
+    string? Hostname = null,
+    string? VirtualIpv6 = null,
+    List<string>? MappedListeners = null,
+    List<EasyTierProxyNetworkItem>? ProxyNetworkRules = null,
+    EasyTierAdvancedConfig? AdvancedConfig = null);
 
 /// <summary>创建 EasyTier 节点请求契约</summary>
 public sealed record CreateEasyTierNodeRequest(
@@ -30,7 +55,13 @@ public sealed record CreateEasyTierNodeRequest(
     List<string>? ProxyNetworks,
     List<string>? Routes,
     string? RawTomlOverride,
-    bool AutoStart);
+    bool AutoStart,
+    string? RoutingMode = "auto",
+    string? Hostname = null,
+    string? VirtualIpv6 = null,
+    List<string>? MappedListeners = null,
+    List<EasyTierProxyNetworkItem>? ProxyNetworkRules = null,
+    EasyTierAdvancedConfig? AdvancedConfig = null);
 
 /// <summary>更新 EasyTier 节点请求契约</summary>
 public sealed record UpdateEasyTierNodeRequest(
@@ -44,7 +75,13 @@ public sealed record UpdateEasyTierNodeRequest(
     List<string>? ProxyNetworks,
     List<string>? Routes,
     string? RawTomlOverride,
-    bool AutoStart);
+    bool AutoStart,
+    string? RoutingMode = "auto",
+    string? Hostname = null,
+    string? VirtualIpv6 = null,
+    List<string>? MappedListeners = null,
+    List<EasyTierProxyNetworkItem>? ProxyNetworkRules = null,
+    EasyTierAdvancedConfig? AdvancedConfig = null);
 
 /// <summary>EasyTier 节点概览与健康状态</summary>
 public sealed record EasyTierNodeStatusDto(
@@ -62,7 +99,10 @@ public sealed record EasyTierNodeStatusDto(
     string? LastError,
     DateTime? StartedAt,
     DateTime UpdateTime,
-    List<string>? Listeners = null);
+    List<string>? Listeners = null,
+    string? Hostname = null,
+    string? VirtualIpv6 = null,
+    string? RoutingMode = null);
 
 /// <summary>对端 Peer 详情</summary>
 public sealed record EasyTierPeerDetailDto(

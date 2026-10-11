@@ -45,3 +45,13 @@ dotnet build LinuxWebTool.slnx -c Release --no-restore --nologo --verbosity quie
 ```
 
 未执行全部无关 API 集成测试或 Linux 生产故障注入。原来的操作日志、导航和静态 IP/DHCP 修改均保留，没有覆盖其他任务的成果。网络失联最终原因仍需现场路由和引擎模式证据，不能把这些本地回归结果当作生产恢复证明。
+
+## 第二节点启动卡住：现场问题补充调查
+
+现场补充信息：两个 EasyTier 节点运行在同一台服务器，并且同时使用 `10.126.126.0/24`。这属于确定的虚拟网段重叠。两个节点各自创建 TUN 接口时，会把相同目标前缀关联到不同接口；内核的路由选择、EasyTier 注入的路由以及原有默认路由之间可能发生竞争。因此外部客户端访问原 LAN IP 时，也可能被影响。具体哪些目的地址被改道取决于实际路由表和每个节点的 `routes` / `proxy_networks` 配置；仅凭相同 `/24` 不能证明默认路由一定改变。
+
+代码路径核对：`StartNodeInternalAsync` 在选择或调用 FFI/Core 引擎之前生成 TOML 并执行 `ValidateNetwork`。检查会比较候选虚拟网段与所有已登记运行节点的网段，重叠时抛出明确错误，不执行第二次 `run_network_instance`。所以在当前版本中，该配置的预期行为是第二节点快速失败，而不是继续启动造成路由冲突。原生启动本身在独立线程上有 5 秒等待预算；这只约束 HTTP 等待，不会强制取消已经进入原生库的调用。
+
+新增长期 CI 验收 `LinuxArch022_Second_node_on_same_virtual_subnet_is_rejected_and_login_stays_responsive`：以现场的 `.1/24` 和 `.2/24` 配置启动第二节点，验证操作在 2 秒内以“重叠”原因被拒绝，并紧接着通过真实 TestServer 登录接口，要求 2 秒内返回 HTTP 200。该集成测试进入现有 GitHub Actions `API Integration Tests` 步骤，不需要单独工作流。它验证应用层的重叠门禁和 Web/API 可用性；它不创建真实 TUN，也不证明宿主机路由恢复，因此不替代现场路由表检查。
+
+建议部署修复版本前后对照 `ip -4 route show table all`、`ip rule`、`ip -br addr` 以及服务日志，并确认访问的是服务器 LAN 地址。若 LAN 请求仍卡住，应重点比对 EasyTier 启动前后 `default`、`10.126.126.0/24`、`0.0.0.0/0` 及 `proxy_networks` 对应路由。原始附件主要显示 SMB `umount` 的 D-state 等待日志，没有足以确认 EasyTier 添加/替换了哪条路由的记录，故“路由冲突影响非虚拟网段”是与现场配置吻合的机制判断，最终网络层因果仍需路由快照确认。

@@ -20,4 +20,12 @@ public sealed class EasyTierNodeEntity
     public int Status { get; set; } // 0: Stopped, 1: Running, 2: Error
     public string? LastError { get; set; }
     public DateTime UpdateTime { get; set; } = DateTime.UtcNow;
+
+    // 扩展功能配置
+    public string RoutingMode { get; set; } = "auto";
+    public string? Hostname { get; set; }
+    public string? VirtualIpv6 { get; set; }
+    public string MappedListenersJson { get; set; } = "[]";
+    public string ProxyNetworkRulesJson { get; set; } = "[]";
+    public string AdvancedConfigJson { get; set; } = "{}";
 }

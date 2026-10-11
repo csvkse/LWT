@@ -362,11 +362,41 @@ CREATE TABLE IF NOT EXISTS easytier_nodes (
   AutoStart INTEGER NOT NULL DEFAULT 1,
   Status INTEGER NOT NULL DEFAULT 0,
   LastError TEXT,
-  UpdateTime TEXT NOT NULL
+  UpdateTime TEXT NOT NULL,
+  RoutingMode TEXT NOT NULL DEFAULT 'auto',
+  Hostname TEXT,
+  VirtualIpv6 TEXT,
+  MappedListenersJson TEXT NOT NULL DEFAULT '[]',
+  ProxyNetworkRulesJson TEXT NOT NULL DEFAULT '[]',
+  AdvancedConfigJson TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_easytier_instance_name ON easytier_nodes(InstanceName);
 ";
         cmd.ExecuteNonQuery();
+
+        EnsureColumnExists(db, "easytier_nodes", "RoutingMode", "TEXT NOT NULL DEFAULT 'auto'");
+        EnsureColumnExists(db, "easytier_nodes", "Hostname", "TEXT");
+        EnsureColumnExists(db, "easytier_nodes", "VirtualIpv6", "TEXT");
+        EnsureColumnExists(db, "easytier_nodes", "MappedListenersJson", "TEXT NOT NULL DEFAULT '[]'");
+        EnsureColumnExists(db, "easytier_nodes", "ProxyNetworkRulesJson", "TEXT NOT NULL DEFAULT '[]'");
+        EnsureColumnExists(db, "easytier_nodes", "AdvancedConfigJson", "TEXT NOT NULL DEFAULT '{}'");
+    }
+
+    private static void EnsureColumnExists(SqliteConnection db, string table, string column, string definition)
+    {
+        using var checkCmd = db.CreateCommand();
+        checkCmd.CommandText = $"PRAGMA table_info({table});";
+        using var reader = checkCmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var colName = reader.GetString(1);
+            if (colName.Equals(column, StringComparison.OrdinalIgnoreCase))
+                return;
+        }
+        reader.Close();
+        using var alterCmd = db.CreateCommand();
+        alterCmd.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition};";
+        alterCmd.ExecuteNonQuery();
     }
 
     private static string EnsureSqliteOptions(string connectionString)
