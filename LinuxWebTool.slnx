@@ -8,5 +8,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/LinuxWebTool.ArchitectureTests/LinuxWebTool.ArchitectureTests.csproj" />
     <Project Path="tests/LinuxWebTool.IntegrationTests/LinuxWebTool.IntegrationTests.csproj" />
+    <Project Path="tests/LinuxWebTool.UnitTests/LinuxWebTool.UnitTests.csproj" />
   </Folder>
 </Solution>

@@ -371,6 +371,43 @@ CREATE TABLE IF NOT EXISTS easytier_nodes (
   AdvancedConfigJson TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_easytier_instance_name ON easytier_nodes(InstanceName);
+CREATE TABLE IF NOT EXISTS backup_sync_task (
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
+  Name TEXT NOT NULL,
+  Mode INTEGER NOT NULL,
+  SourcePath TEXT NOT NULL,
+  TargetPath TEXT NOT NULL,
+  Enabled INTEGER NOT NULL DEFAULT 1,
+  CronExpression TEXT NOT NULL,
+  CronDescription TEXT,
+  SyncDirection INTEGER NOT NULL DEFAULT 1,
+  DeleteHandling INTEGER NOT NULL DEFAULT 2,
+  TrashRetentionDays INTEGER NOT NULL DEFAULT 30,
+  KeepLastCount INTEGER NOT NULL DEFAULT 5,
+  KeepDays INTEGER NOT NULL DEFAULT 7,
+  KeepWeeks INTEGER NOT NULL DEFAULT 4,
+  KeepMonths INTEGER NOT NULL DEFAULT 12,
+  ExcludePatterns TEXT,
+  LastRunTime TEXT,
+  LastRunStatus TEXT,
+  LastRunMessage TEXT,
+  NextRunTime TEXT,
+  CreateTime TEXT NOT NULL,
+  UpdateTime TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS backup_snapshot (
+  SnapshotId TEXT NOT NULL COLLATE NOCASE,
+  TaskId TEXT NOT NULL COLLATE NOCASE,
+  CreatedAt TEXT NOT NULL,
+  TotalFiles INTEGER NOT NULL DEFAULT 0,
+  TotalSizeBytes INTEGER NOT NULL DEFAULT 0,
+  SnapshotPath TEXT NOT NULL,
+  Tag TEXT NOT NULL DEFAULT '',
+  IsPinned INTEGER NOT NULL DEFAULT 0,
+  Note TEXT,
+  PRIMARY KEY (TaskId, SnapshotId)
+);
+CREATE INDEX IF NOT EXISTS idx_backup_snapshot_task ON backup_snapshot(TaskId);
 ";
         cmd.ExecuteNonQuery();
 

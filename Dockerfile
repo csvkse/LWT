@@ -38,7 +38,7 @@ ENV TZ=Asia/Shanghai \
 #   仅装所用 GPU 厂商的用户态驱动，避免"全能镜像"白白增容（详见 base 阶段底部"按厂商装 VA 驱动"层）。
 RUN set -e; \
     for i in 1 2 3 4 5; do \
-      apk update && apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc cifs-utils rclone fuse3 nethogs findutils \
+      apk update && apk add --no-cache bash procps usbutils pciutils kmod util-linux-misc cifs-utils rclone fuse3 nethogs findutils openssh-client \
         ffmpeg libva libva-utils tzdata icu-libs && break || { \
           echo "apk add base dependencies failed, retrying ($i/5)..."; \
           sleep 3; \

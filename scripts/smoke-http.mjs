@@ -4,13 +4,19 @@ import { pathToFileURL } from 'node:url';
 import { createReport, measure, saveReport } from './smoke-performance.mjs';
 
 // Status AND body are contracts: an authentication error cannot pass a success case.
-export async function request(base, path, { method = 'GET', body, token, status = 200, timeout = 10000 } = {}) {
+export async function request(base, path, { method = 'GET', body, token, status = 200, timeout = 10000, verifyTrace = false } = {}) {
   const response = await fetch(base + path, {
     method, signal: AbortSignal.timeout(timeout),
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   assert.equal(response.status, status, `${method} ${path}: expected HTTP ${status}`);
+  if (verifyTrace) {
+    const traceparent = response.headers.get('traceparent');
+    const traceId = response.headers.get('x-trace-id');
+    assert.match(traceparent || '', /^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/, `${method} ${path}: invalid traceparent header`);
+    assert.match(traceId || '', /^[0-9a-f]{32}$/, `${method} ${path}: invalid x-trace-id header`);
+  }
   const text = await response.text();
   return text ? JSON.parse(text) : null;
 }
@@ -31,13 +37,16 @@ export async function smoke(base, username, password, report) {
       await delay(500);
     }
   }
-  await request(base, '/api/Commands', { status: 401 });
-  await request(base, '/api/Auth/Login', { method: 'POST', body: { username, password: password + '-wrong' }, status: 401 });
-  const login = await request(base, '/api/Auth/Login', { method: 'POST', body: { username, password } });
+  await request(base, '/api/Commands', { status: 401, verifyTrace: true });
+  await request(base, '/api/Auth/Login', { method: 'POST', body: { username, password: password + '-wrong' }, status: 401, verifyTrace: true });
+  const login = await request(base, '/api/Auth/Login', { method: 'POST', body: { username, password }, verifyTrace: true });
   assert.ok(typeof login.token === 'string' && login.token.length > 20, 'Login must return a token');
   const token = login.token;
-  const api = (path, options = {}) => request(base, path, { token, ...options });
+  const api = (path, options = {}) => request(base, path, { token, verifyTrace: true, ...options });
   await api('/api/Auth/Check');
+  const metrics = await request(base, '/api/Metrics', { verifyTrace: true });
+  assert.ok(metrics && metrics.totalRequests > 0, '/api/Metrics must return valid snapshot');
+  assert.ok(metrics.uptimeSeconds >= 0, '/api/Metrics uptimeSeconds must be non-negative');
   for (const path of ['/api/Commands', '/api/Groups', '/api/Schedules', '/api/SmbMounts', '/api/EasyTier/Nodes']) {
     assert.ok(Array.isArray(await api(path)), `${path} must return an array`);
   }

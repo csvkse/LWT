@@ -1,4 +1,5 @@
 using System.Text;
+using System.IO.Compression;
 using Directory = System.IO.Directory;
 namespace LinuxWebTool.WebHost.Features.Files.Routes;
 
@@ -282,6 +283,98 @@ public class FilesController(
     }
 
     // ---------- 校验与工具 ----------
+
+    /// <summary>下载文件或将文件夹打包为 zip 下载。</summary>
+    [HttpGet("Download")]
+    public async Task<IResult> Download([FromQuery] string path)
+    {
+        if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
+        if (FileBrowserPath.IsRoot(normalized))
+        {
+            return BadRequest(new MessageResponse("不能下载根目录"));
+        }
+        if (IsProtected(normalized))
+        {
+            return BadRequest(new MessageResponse("程序数据目录禁止下载"));
+        }
+
+        if (System.IO.File.Exists(normalized))
+        {
+            var fileName = Path.GetFileName(normalized);
+            await operationLogger.LogAsync("下载文件", "文件管理", fileName, Parent(normalized), clientIp: HttpContext.GetClientIp());
+            return PhysicalFile(normalized, "application/octet-stream", fileName);
+        }
+
+        if (Directory.Exists(normalized))
+        {
+            var folderName = Name(normalized);
+            if (string.IsNullOrWhiteSpace(folderName)) folderName = "folder";
+            var downloadName = $"{folderName}.zip";
+
+            var tempZipPath = Path.Combine(Path.GetTempPath(), $"lwt_dl_{Guid.NewGuid():N}.zip");
+            try
+            {
+                BuildDirectoryZip(normalized, tempZipPath);
+            }
+            catch (Exception ex)
+            {
+                try { if (System.IO.File.Exists(tempZipPath)) System.IO.File.Delete(tempZipPath); } catch { /* ignore */ }
+                return BadRequest(new MessageResponse($"打包文件夹失败：{ex.Message}"));
+            }
+
+            await operationLogger.LogAsync("打包下载文件夹", "文件管理", folderName, Parent(normalized), clientIp: HttpContext.GetClientIp());
+            var stream = new FileStream(tempZipPath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.DeleteOnClose);
+            return File(stream, "application/zip", downloadName);
+        }
+
+        return NotFound(new MessageResponse($"路径不存在：{normalized}"));
+    }
+
+    private static void BuildDirectoryZip(string rootPath, string zipFilePath)
+    {
+        const int maxFiles = 20000;
+        const long maxTotalBytes = 2L * 1024 * 1024 * 1024; // 2GB
+
+        int fileCount = 0;
+        long totalBytes = 0;
+
+        using var archive = ZipFile.Open(zipFilePath, ZipArchiveMode.Create, Encoding.UTF8);
+        var rootDir = new DirectoryInfo(rootPath);
+
+        void AddDirectory(DirectoryInfo currentDir, string relativePath)
+        {
+            if ((currentDir.Attributes & FileAttributes.ReparsePoint) != 0) return;
+
+            foreach (var subDir in currentDir.EnumerateDirectories())
+            {
+                if ((subDir.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                var nextRel = string.IsNullOrEmpty(relativePath) ? subDir.Name : $"{relativePath}/{subDir.Name}";
+                archive.CreateEntry($"{nextRel}/");
+                AddDirectory(subDir, nextRel);
+            }
+
+            foreach (var file in currentDir.EnumerateFiles())
+            {
+                if ((file.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                if (++fileCount > maxFiles)
+                    throw new InvalidOperationException($"文件夹内文件数量过多（超过 {maxFiles} 个），建议使用命令行打包");
+
+                totalBytes += file.Length;
+                if (totalBytes > maxTotalBytes)
+                    throw new InvalidOperationException($"文件夹总大小超过安全上限（{maxTotalBytes / 1024 / 1024 / 1024}GB），建议使用系统工具传输");
+
+                var entryName = string.IsNullOrEmpty(relativePath) ? file.Name : $"{relativePath}/{file.Name}";
+                var entry = archive.CreateEntry(entryName, CompressionLevel.Fastest);
+                entry.LastWriteTime = file.LastWriteTime;
+
+                using var fs = file.Open(FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var entryStream = entry.Open();
+                fs.CopyTo(entryStream);
+            }
+        }
+
+        AddDirectory(rootDir, "");
+    }
 
     private bool IsProtected(string normalized)
     {

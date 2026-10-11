@@ -31,6 +31,7 @@ const NAV_GROUPS = [
     children: [
       { path: '/files', label: '文件管理', desc: '在线浏览、编辑与上传下载' },
       { path: '/mounts', label: '挂载管理', desc: 'SMB / WebDAV / Rclone 挂载' },
+      { path: '/backup-sync', label: '备份与同步', desc: '文件夹直接镜像与增量多版本快照' },
       { path: '/transcode', label: '媒体转码', desc: 'FFmpeg 硬件加速队列转码' },
     ],
   },

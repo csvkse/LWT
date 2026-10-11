@@ -35,7 +35,7 @@ const FAILURE_LABELS = { Unreachable: '远端不可达', AuthenticationFailed: '
 
 const emptyForm = () => ({
   kind: 'smb', name: '', server: '', url: '', localPath: '', username: '', password: '', domain: '', options: 'vers=3.0,uid=1001,gid=1001',
-  host: '', port: 22, remotePath: '', keyFile: '', hostKey: '', endpoint: '', bucket: '', region: '', accessKeyId: '', secretAccessKey: '',
+  host: '', port: 22, remotePath: '', keyFile: '', privateKeyContent: '', authType: 'password', hostKey: '', endpoint: '', bucket: '', region: '', accessKeyId: '', secretAccessKey: '',
   autoMount: false, enabled: true, description: '',
 });
 
@@ -57,6 +57,88 @@ export default defineComponent({
     const editingId = ref(null);
     const saving = ref(false);
     const form = reactive(emptyForm());
+    const probingHostKey = ref(false);
+    const probedFingerprint = ref('');
+    const testingConn = ref(false);
+
+    function buildPayload() {
+      const shared = {
+        name: form.name,
+        localPath: form.localPath,
+        username: form.username || null,
+        password: form.password || null,
+        autoMount: form.autoMount,
+        enabled: form.enabled,
+        description: form.description || null,
+      };
+      if (form.kind === 'smb') {
+        return { ...shared, server: form.server, domain: form.domain || null, options: form.options || null };
+      }
+      if (form.kind === 'webdav') {
+        return { ...shared, url: form.url };
+      }
+      return {
+        ...shared,
+        kind: form.kind,
+        host: form.host || null,
+        port: Number(form.port) || 22,
+        remotePath: form.remotePath || null,
+        keyFile: form.authType === 'keyFile' ? (form.keyFile || null) : null,
+        privateKeyContent: form.authType === 'privateKey' ? (form.privateKeyContent || null) : null,
+        hostKey: form.hostKey || null,
+        endpoint: form.endpoint || null,
+        bucket: form.bucket || null,
+        region: form.region || null,
+        accessKeyId: form.accessKeyId || null,
+        secretAccessKey: form.secretAccessKey || null,
+      };
+    }
+
+    async function probeHostKey() {
+      if (!form.host?.trim()) return toast.error('请输入 SFTP / SSH 主机地址');
+      const port = Number(form.port) || 22;
+      probingHostKey.value = true;
+      try {
+        const result = await http(API.rcloneMounts.probeHostKey, {
+          method: 'POST',
+          body: { host: form.host.trim(), port },
+        });
+        if (result.ok && result.data?.success && result.data.hostKey) {
+          form.hostKey = result.data.hostKey;
+          probedFingerprint.value = result.data.fingerprintSha256 || '';
+          toast.success(`成功探测到主机公钥（指纹：${result.data.fingerprintSha256}）`);
+        } else {
+          toast.error(result.data?.errorMessage || result.message || '探测主机公钥失败');
+        }
+      } catch (err) {
+        toast.error(err?.message || '探测请求失败');
+      } finally {
+        probingHostKey.value = false;
+      }
+    }
+
+    async function testConnection() {
+      if (!form.host?.trim()) return toast.error('请输入 SFTP / SSH 主机地址');
+      if (!form.username?.trim()) return toast.error('请输入用户名');
+      if (!form.hostKey?.trim()) return toast.error('请填写或探测主机公钥');
+      testingConn.value = true;
+      try {
+        const payload = buildPayload();
+        const result = await http(API.rcloneMounts.testConnection, {
+          method: 'POST',
+          body: payload,
+        });
+        if (result.ok && result.data?.success) {
+          toast.success(result.data.message || '连接测试成功！');
+        } else {
+          toast.error(result.data?.message || result.message || '连接测试失败');
+        }
+      } catch (err) {
+        toast.error(err?.message || '连接测试请求异常');
+      } finally {
+        testingConn.value = false;
+      }
+    }
 
     async function load() {
       if (loading.value || disposed) return;
@@ -110,6 +192,7 @@ export default defineComponent({
 
     function openCreate() {
       editingId.value = null;
+      probedFingerprint.value = '';
       Object.assign(form, emptyForm());
       showEditor.value = true;
     }
@@ -155,6 +238,8 @@ export default defineComponent({
 
     function openEdit(mount) {
       editingId.value = mount.id;
+      probedFingerprint.value = '';
+      const authType = mount.hasPrivateKey ? 'privateKey' : (mount.keyFile ? 'keyFile' : 'password');
       Object.assign(form, {
         name: mount.name,
         kind: mount.kind,
@@ -169,6 +254,8 @@ export default defineComponent({
         port: mount.port || 22,
         remotePath: mount.remotePath || '',
         keyFile: mount.keyFile || '',
+        privateKeyContent: '',
+        authType,
         hostKey: mount.hostKey || '',
         endpoint: mount.endpoint || '',
         bucket: mount.bucket || '',
@@ -191,22 +278,7 @@ export default defineComponent({
       if (!form.localPath.trim()) return toast.error('请输入本地挂载点');
       saving.value = true;
       try {
-        const shared = {
-          name: form.name,
-          localPath: form.localPath,
-          username: form.username || null,
-          password: form.password || null,
-          autoMount: form.autoMount,
-          enabled: form.enabled,
-          description: form.description || null,
-        };
-        const payload = form.kind === 'smb'
-          ? { ...shared, server: form.server, domain: form.domain || null, options: form.options || null }
-          : form.kind === 'webdav' ? { ...shared, url: form.url }
-            : { ...shared, kind: form.kind, host: form.host || null, port: Number(form.port),
-              remotePath: form.remotePath || null, keyFile: form.keyFile || null, hostKey: form.hostKey || null,
-              endpoint: form.endpoint || null, bucket: form.bucket || null, region: form.region || null,
-              accessKeyId: form.accessKeyId || null, secretAccessKey: form.secretAccessKey || null };
+        const payload = buildPayload();
         const endpoint = form.kind === 'smb' ? API.smbMounts
           : form.kind === 'webdav' ? API.webDavMounts : API.rcloneMounts;
         const result = editingId.value
@@ -290,6 +362,7 @@ export default defineComponent({
 
     return {
       items, loading, actingId, unsupported, webDavUnsupported, rcloneUnsupported, loadError, showEditor, editingId, saving, form,
+      probingHostKey, probedFingerprint, testingConn, probeHostKey, testConnection,
       load, openCreate, openEdit, save, remove, mountNow, browse, unmount, statusMeta, healthMeta, phaseText, modeText, failureText, formatTime,
     };
   },
@@ -346,7 +419,7 @@ export default defineComponent({
               <td class="font-mono text-xs text-slate-400">{{ mount.localPath }}</td>
               <td class="text-slate-500 text-xs">
                 {{ mount.username || mount.accessKeyId || '访客' }}
-                <span v-if="mount.hasPassword || mount.hasSecretAccessKey" class="text-slate-600"> · <span class="text-emerald-500/70">密钥已存</span></span>
+                <span v-if="mount.hasPassword || mount.hasSecretAccessKey || mount.hasPrivateKey" class="text-slate-600"> · <span class="text-emerald-500/70">密钥已存</span></span>
               </td>
               <td class="max-w-[10rem] truncate text-slate-600 text-xs" :title="mount.options">{{ mount.kind === 'smb' ? (mount.options || '—') : '写缓存' }}</td>
               <td class="text-slate-500 text-xs">{{ mount.autoMount ? '是' : '否' }}</td>
@@ -375,8 +448,8 @@ export default defineComponent({
             <label class="block">
               <span class="text-xs text-slate-500 mb-1 block">协议 *</span>
               <select class="input" v-model="form.kind" :disabled="!!editingId">
-                <option value="smb">SMB</option><option value="webdav">WebDAV</option>
-                <option value="sftp">SFTP</option><option value="s3">S3</option>
+                <option value="smb">SMB (网络共享)</option><option value="webdav">WebDAV</option>
+                <option value="sftp">SFTP (SSH 远端主机)</option><option value="s3">S3 (对象存储)</option>
               </select>
             </label>
             <label class="block">
@@ -404,11 +477,49 @@ export default defineComponent({
                 <input class="input font-mono" v-model="form.remotePath" :placeholder="form.kind === 'sftp' ? '/data' : 'optional/prefix'" />
               </label>
             </div>
-            <div v-if="form.kind === 'sftp'" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label class="block"><span class="text-xs text-slate-500 mb-1 block">SFTP 主机 *</span><input class="input" v-model="form.host" placeholder="sftp.example.com" /></label>
-              <label class="block"><span class="text-xs text-slate-500 mb-1 block">端口 *</span><input class="input" type="number" min="1" max="65535" v-model.number="form.port" /></label>
-              <label class="block sm:col-span-2"><span class="text-xs text-slate-500 mb-1 block">SSH 主机公钥 *（算法 + Base64 公钥）</span><input class="input font-mono" v-model="form.hostKey" placeholder="ssh-ed25519 AAAAC3..." /></label>
-              <label class="block sm:col-span-2"><span class="text-xs text-slate-500 mb-1 block">容器内私钥文件路径（可代替密码）</span><input class="input font-mono" v-model="form.keyFile" placeholder="/app/data/ssh/id_ed25519" /></label>
+            <div v-if="form.kind === 'sftp'" class="flex flex-col gap-3">
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label class="block sm:col-span-2">
+                  <span class="text-xs text-slate-500 mb-1 block">SFTP / SSH 主机 *</span>
+                  <input class="input font-mono" v-model="form.host" placeholder="例如：192.168.1.50 或 sftp.example.com" />
+                </label>
+                <label class="block">
+                  <span class="text-xs text-slate-500 mb-1 block">端口 *</span>
+                  <div class="flex gap-2">
+                    <input class="input font-mono w-24" type="number" min="1" max="65535" v-model.number="form.port" />
+                    <button type="button" class="btn btn-xs self-center whitespace-nowrap" :disabled="probingHostKey" @click="probeHostKey()">
+                      {{ probingHostKey ? '探测中…' : '🔍 探测公钥' }}
+                    </button>
+                  </div>
+                </label>
+              </div>
+              <label class="block">
+                <div class="flex items-center justify-between mb-1">
+                  <span class="text-xs text-slate-500">SSH 主机公钥 *（算法 + Base64 公钥）</span>
+                  <span v-if="probedFingerprint" class="text-[11px] text-cyan-300 font-mono">指纹: {{ probedFingerprint }}</span>
+                </div>
+                <input class="input font-mono text-xs" v-model="form.hostKey" placeholder="ssh-ed25519 AAAAC3... 或点击上方「探测公钥」自动抓取" />
+              </label>
+              <div class="flex items-center gap-4 text-xs text-slate-400 mt-1">
+                <span>认证模式：</span>
+                <label class="inline-flex items-center gap-1 cursor-pointer">
+                  <input type="radio" value="password" v-model="form.authType" class="accent-cyan-400" /> 密码认证
+                </label>
+                <label class="inline-flex items-center gap-1 cursor-pointer">
+                  <input type="radio" value="privateKey" v-model="form.authType" class="accent-cyan-400" /> 粘贴私钥
+                </label>
+                <label class="inline-flex items-center gap-1 cursor-pointer">
+                  <input type="radio" value="keyFile" v-model="form.authType" class="accent-cyan-400" /> 容器私钥路径
+                </label>
+              </div>
+              <div v-if="form.authType === 'privateKey'" class="block">
+                <span class="text-xs text-slate-500 mb-1 block">SSH 私钥内容（OpenSSH / PEM 格式，自动以 600 权限隔离落地）</span>
+                <textarea class="input font-mono text-xs h-24 resize-y" v-model="form.privateKeyContent" :placeholder="editingId ? '留空=保持既有私钥不变' : '-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----'"></textarea>
+              </div>
+              <div v-if="form.authType === 'keyFile'" class="block">
+                <span class="text-xs text-slate-500 mb-1 block">容器内私钥文件绝对路径</span>
+                <input class="input font-mono" v-model="form.keyFile" placeholder="/app/data/ssh/id_ed25519" />
+              </div>
             </div>
             <div v-if="form.kind === 's3'" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label class="block"><span class="text-xs text-slate-500 mb-1 block">存储桶 *</span><input class="input font-mono" v-model="form.bucket" placeholder="my-bucket" /></label>
@@ -417,12 +528,12 @@ export default defineComponent({
               <label class="block"><span class="text-xs text-slate-500 mb-1 block">Access Key ID *</span><input class="input font-mono" v-model="form.accessKeyId" autocomplete="off" /></label>
               <label class="block"><span class="text-xs text-slate-500 mb-1 block">Secret Access Key *</span><input class="input" type="password" v-model="form.secretAccessKey" :placeholder="editingId ? '留空=保持不变' : ''" autocomplete="new-password" /></label>
             </div>
-            <div v-if="form.kind === 'smb' || form.kind === 'webdav' || form.kind === 'sftp'" class="grid grid-cols-3 gap-3">
+            <div v-if="form.kind === 'smb' || form.kind === 'webdav' || form.kind === 'sftp'" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <label class="block">
                 <span class="text-xs text-slate-500 mb-1 block">用户名{{ form.kind === 'sftp' ? ' *' : '' }}</span>
-                <input class="input" v-model="form.username" :placeholder="form.kind === 'sftp' ? 'SFTP 用户' : '留空=访客'" />
+                <input class="input" v-model="form.username" :placeholder="form.kind === 'sftp' ? 'SFTP 用户名' : '留空=访客'" />
               </label>
-              <label class="block">
+              <label v-if="form.kind !== 'sftp' || form.authType === 'password'" class="block">
                 <span class="text-xs text-slate-500 mb-1 block">密码</span>
                 <input class="input" type="password" v-model="form.password" :placeholder="editingId ? '留空=保持不变' : ''" autocomplete="new-password" />
               </label>
@@ -444,7 +555,7 @@ export default defineComponent({
               WebDAV 使用 rclone FUSE 挂载与写缓存；请使用 HTTPS 和应用密码。缓存中的待上传文件在卸载后仍会保留。
             </p>
             <p v-if="form.kind === 'sftp'" class="text-[11px] text-slate-500 leading-relaxed">
-              SFTP 必须校验服务器主机公钥。请从可信渠道取得完整公钥；私钥文件需预先放进容器可访问的路径。
+              SFTP 挂载通过 SSH 安全传输；可点击「探测公钥」自动验证远端服务器身份，支持密码或 OpenSSH 私钥认证。
             </p>
             <p v-if="form.kind === 's3'" class="text-[11px] text-slate-500 leading-relaxed">
               S3 挂载使用 rclone FUSE 写缓存。自定义兼容服务仅接受 HTTPS 端点；卸载前请确认待上传文件已同步。
@@ -462,9 +573,15 @@ export default defineComponent({
               <input class="input" v-model="form.description" placeholder="可选" />
             </label>
           </div>
-          <div class="flex justify-end gap-2 mt-5">
-            <button class="btn" @click="showEditor = false">取消</button>
-            <button class="btn btn-primary" :disabled="saving" @click="save()">{{ saving ? '保存中…' : '保存' }}</button>
+          <div class="flex items-center justify-between mt-5">
+            <button v-if="form.kind === 'sftp'" type="button" class="btn btn-xs" :disabled="testingConn" @click="testConnection()">
+              {{ testingConn ? '测试中…' : '⚡ 测试连通性' }}
+            </button>
+            <div v-else></div>
+            <div class="flex gap-2">
+              <button class="btn" @click="showEditor = false">取消</button>
+              <button class="btn btn-primary" :disabled="saving" @click="save()">{{ saving ? '保存中…' : '保存' }}</button>
+            </div>
           </div>
         </div>
       </div>

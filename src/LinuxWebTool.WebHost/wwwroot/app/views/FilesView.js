@@ -1,6 +1,6 @@
 import { computed, defineComponent, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { http, httpUpload } from '../api/client.js';
+import { http, httpUpload, httpDownload } from '../api/client.js';
 import { API } from '../config.js';
 import { openConfirm } from '../store/modal.js';
 import { toast } from '../store/toast.js';
@@ -20,6 +20,10 @@ export default defineComponent({
     const loadError = ref('');
     const directoryReady = ref(false);
     const virtualRoot = ref(false);
+
+    // 下载状态
+    const downloadingPath = ref('');
+    const isDownloadingCurrent = computed(() => downloadingPath.value === currentPath.value);
 
     // 文本编辑器
     const showEditor = ref(false);
@@ -111,14 +115,44 @@ export default defineComponent({
       return '📄';
     }
 
-    // 打开目录 / 文本文件
+    // 打开目录 / 文本文件（非文本文件直接触发下载）
     function openEntry(entry) {
       if (entry.isDirectory) {
         goPath(entry.path);
       } else if (entry.isTextual) {
         openEditor(entry.path);
       } else {
-        toast.info('该文件非文本，暂不支持在线编辑');
+        downloadEntry(entry);
+      }
+    }
+
+    async function downloadEntry(entry) {
+      if (!entry?.path || downloadingPath.value) return;
+      downloadingPath.value = entry.path;
+      try {
+        await httpDownload(API.files.download, { params: { path: entry.path } });
+      } finally {
+        downloadingPath.value = '';
+      }
+    }
+
+    async function downloadCurrent() {
+      if (!directoryReady.value || virtualRoot.value || isRoot.value || downloadingPath.value) return;
+      downloadingPath.value = currentPath.value;
+      try {
+        await httpDownload(API.files.download, { params: { path: currentPath.value } });
+      } finally {
+        downloadingPath.value = '';
+      }
+    }
+
+    async function downloadCurrentEditor() {
+      if (!editorPath.value || downloadingPath.value) return;
+      downloadingPath.value = editorPath.value;
+      try {
+        await httpDownload(API.files.download, { params: { path: editorPath.value } });
+      } finally {
+        downloadingPath.value = '';
       }
     }
 
@@ -287,9 +321,10 @@ export default defineComponent({
       currentPath, entries, breadcrumbs, isRoot, loading, loadError, dirName, directoryReady, virtualRoot, openTerminal,
       showEditor, editorPath, editorName, editorContent, editorLoading, editorSaving,
       showMkdir, mkdirName, showRename, renameName, renamePath, uploadInput,
+      downloadingPath, isDownloadingCurrent,
       load, goPath, goUp, goHome, formatBytes, formatTime, iconFor, openEntry,
       openEditor, saveEditor, openMkdir, createMkdir, renameEntry, saveRename, removeEntry,
-      triggerUpload, onUpload,
+      triggerUpload, onUpload, downloadEntry, downloadCurrent, downloadCurrentEditor,
     };
   },
   template: `
@@ -298,6 +333,7 @@ export default defineComponent({
         <h2 class="text-sm text-slate-400">文件管理器</h2>
         <div class="ml-auto flex gap-1">
           <button class="btn btn-xs" :disabled="!directoryReady || virtualRoot || loading || !!loadError" @click="openTerminal()">在此打开终端</button>
+          <button class="btn btn-xs" :disabled="!directoryReady || virtualRoot || isRoot || loading || !!loadError || isDownloadingCurrent" @click="downloadCurrent()">{{ isDownloadingCurrent ? '打包中…' : '📦 打包当前目录' }}</button>
           <button class="btn btn-xs" :disabled="virtualRoot" @click="openMkdir()">＋ 新建文件夹</button>
           <button class="btn btn-xs" :disabled="virtualRoot" @click="triggerUpload()">⬆ 上传</button>
         </div>
@@ -344,6 +380,7 @@ export default defineComponent({
               <td class="text-right whitespace-nowrap text-xs" @click.stop>
                 <div class="inline-flex items-center gap-1.5">
                   <button v-if="entry.isDirectory" class="btn btn-xs" @click="openTerminal(entry.path)">在终端打开</button>
+                  <button v-if="!virtualRoot" class="btn btn-xs" :disabled="downloadingPath === entry.path" @click="downloadEntry(entry)">{{ downloadingPath === entry.path ? '下载中…' : (entry.isDirectory ? '打包下载' : '下载') }}</button>
                   <button v-if="!virtualRoot" class="btn btn-xs" @click="renameEntry(entry)">重命名</button>
                   <button v-if="!virtualRoot" class="btn btn-xs btn-danger" @click="removeEntry(entry)">删除</button>
                 </div>
@@ -359,6 +396,7 @@ export default defineComponent({
           <div class="flex items-center gap-2 mb-3">
             <h3 class="font-display text-base text-neon-soft shrink-0">编辑文本 · {{ editorName }}</h3>
             <span class="text-xs text-slate-500 truncate min-w-0 flex-1 ml-auto text-right" :title="editorPath">{{ editorPath }}</span>
+            <button class="btn btn-xs shrink-0" :disabled="downloadingPath === editorPath" @click="downloadCurrentEditor()">⬇ 下载</button>
             <button class="btn btn-xs shrink-0" @click="showEditor = false">✕</button>
           </div>
           <textarea class="input font-mono !text-[0.8rem] flex-1 min-h-[24rem] resize-y" v-model="editorContent"

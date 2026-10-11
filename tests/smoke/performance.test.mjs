@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, unlink, rmdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { summarize, compareBaseline, createReport, measure, saveReport } from '../../scripts/smoke-performance.mjs';
+import { summarize, compareBaseline, createReport, measure, saveReport, verifyBudgets } from '../../scripts/smoke-performance.mjs';
 
 test('percentiles use nearest rank and preserve failures and sample count', () => {
   const result = summarize([{ durationMs: 10, ok: true }, { durationMs: 20, ok: false }, { durationMs: 30, ok: true }], 1000);
@@ -56,4 +56,28 @@ test('missing advisory baseline still saves the performance evidence', async () 
     await unlink(filename).catch(() => {});
     await rmdir(directory);
   }
+});
+
+test('verifyBudgets asserts latency SLA and zero error rate', () => {
+  const goodReport = {
+    endpoints: {
+      login: { p95Ms: 50, errorRate: 0 },
+      commands: { p95Ms: 30, errorRate: 0 }
+    }
+  };
+  const goodResult = verifyBudgets(goodReport, { maxP95Ms: 100, maxErrorRate: 0 });
+  assert.equal(goodResult.passed, true);
+  assert.equal(goodResult.violations.length, 0);
+
+  const badReport = {
+    endpoints: {
+      login: { p95Ms: 150, errorRate: 0.05 },
+      commands: { p95Ms: 20, errorRate: 0 }
+    }
+  };
+  const badResult = verifyBudgets(badReport, { maxP95Ms: 100, maxErrorRate: 0 });
+  assert.equal(badResult.passed, false);
+  assert.equal(badResult.violations.length, 2);
+  assert.match(badResult.violations[0], /P95 150\.0ms exceeded budget/);
+  assert.match(badResult.violations[1], /error rate 5\.0% exceeded budget/);
 });

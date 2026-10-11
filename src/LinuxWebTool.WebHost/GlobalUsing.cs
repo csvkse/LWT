@@ -34,3 +34,6 @@ global using LinuxWebTool.WebHost.Features.Tunnel.Routes;
 global using LinuxWebTool.WebHost.Shared.Extensions;
 global using LinuxWebTool.WebHost.Shared.Middleware;
 global using LinuxWebTool.WebHost.Shared.Routes;
+global using LinuxWebTool.Contracts.Features.BackupSync.Contracts;
+global using LinuxWebTool.Infrastructure.Features.BackupSync.Adapters;
+global using LinuxWebTool.WebHost.Features.BackupSync.Routes;

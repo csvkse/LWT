@@ -44,6 +44,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             services.AddScoped<FrpTunnelController>();
             services.AddScoped<GatewayController>();
             services.AddScoped<EasyTierController>();
+            services.AddScoped<BackupSyncController>();
         }
 
         public static void MapAutoControllers(this WebApplication app)
@@ -83,6 +84,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_FilesController.MapPost("Rename", async ([FromServices] FilesController ctrl, HttpContext ctx, [FromBody] RenameRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Rename(request); });
             group_FilesController.MapDelete("", async ([FromServices] FilesController ctrl, HttpContext ctx, [FromQuery] string path, [FromQuery] bool recursive = false) => { ctrl.HttpContext = ctx; return await ctrl.Delete(path, recursive); });
             group_FilesController.MapPost("Upload", async ([FromServices] FilesController ctrl, HttpContext ctx, [FromQuery] string path, IFormFile? file) => { ctrl.HttpContext = ctx; return await ctrl.Upload(path, file); }).DisableAntiforgery();
+            group_FilesController.MapGet("Download", async ([FromServices] FilesController ctrl, HttpContext ctx, [FromQuery] string path) => { ctrl.HttpContext = ctx; return await ctrl.Download(path); });
 
             var group_GroupsController = app.MapGroup("/api/Groups");
             group_GroupsController.RequireAuthorization();
@@ -160,6 +162,8 @@ namespace LinuxWebTool.WebHost.MinimalApi
             var group_RcloneMountsController = app.MapGroup("/api/RcloneMounts");
             group_RcloneMountsController.RequireAuthorization();
             group_RcloneMountsController.MapGet("Support", ([FromServices] RcloneMountsController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.Support(); });
+            group_RcloneMountsController.MapPost("ProbeHostKey", async ([FromServices] RcloneMountsController ctrl, HttpContext ctx, [FromBody] ProbeSshHostKeyRequest request) => { ctrl.HttpContext = ctx; return await ctrl.ProbeHostKey(request); });
+            group_RcloneMountsController.MapPost("TestConnection", async ([FromServices] RcloneMountsController ctrl, HttpContext ctx, [FromBody] SaveRcloneMountRequest request) => { ctrl.HttpContext = ctx; return await ctrl.TestConnection(request); });
             group_RcloneMountsController.MapGet("", async ([FromServices] RcloneMountsController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.GetAll(); });
             group_RcloneMountsController.MapPost("", async ([FromServices] RcloneMountsController ctrl, HttpContext ctx, [FromBody] SaveRcloneMountRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Create(request); });
             group_RcloneMountsController.MapPut("{id:guid}", async ([FromServices] RcloneMountsController ctrl, HttpContext ctx, Guid id, [FromBody] SaveRcloneMountRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Update(id, request); });
@@ -265,6 +269,24 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_EasyTierController.MapPost("Engine/Upgrade", async ([FromServices] EasyTierController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.UpgradeEngine(); });
             group_EasyTierController.MapGet("Engine/Releases", async ([FromServices] EasyTierController ctrl, HttpContext ctx, [FromQuery] string? proxyPrefix) => { ctrl.HttpContext = ctx; return await ctrl.GetGitHubReleases(proxyPrefix); });
             group_EasyTierController.MapPost("Engine/InstallGitHub", async ([FromServices] EasyTierController ctrl, HttpContext ctx, [FromBody] InstallGitHubReleaseRequest request) => { ctrl.HttpContext = ctx; return await ctrl.InstallGitHubRelease(request); });
+
+            var group_BackupSyncController = app.MapGroup("/api/BackupSync");
+            group_BackupSyncController.RequireAuthorization();
+            group_BackupSyncController.MapGet("Tasks", async ([FromServices] BackupSyncController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.GetTasks(); });
+            group_BackupSyncController.MapGet("Tasks/{id:guid}", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.GetTask(id); });
+            group_BackupSyncController.MapPost("Tasks", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, [FromBody] SaveBackupSyncTaskRequest request) => { ctrl.HttpContext = ctx; return await ctrl.CreateTask(request); });
+            group_BackupSyncController.MapPut("Tasks/{id:guid}", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id, [FromBody] SaveBackupSyncTaskRequest request) => { ctrl.HttpContext = ctx; return await ctrl.UpdateTask(id, request); });
+            group_BackupSyncController.MapDelete("Tasks/{id:guid}", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.DeleteTask(id); });
+            group_BackupSyncController.MapPost("Tasks/{id:guid}/Run", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.RunTask(id); });
+            group_BackupSyncController.MapGet("Tasks/{id:guid}/Snapshots", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.GetSnapshots(id); });
+            group_BackupSyncController.MapGet("Tasks/{id:guid}/Snapshots/{snapshotId}/Files", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id, string snapshotId, [FromQuery] string path = "") => { ctrl.HttpContext = ctx; return await ctrl.GetSnapshotFiles(id, snapshotId, path); });
+            group_BackupSyncController.MapPost("Tasks/{id:guid}/Snapshots/{snapshotId}/Restore", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id, string snapshotId, [FromBody] RestoreSnapshotRequest request) => { ctrl.HttpContext = ctx; return await ctrl.RestoreSnapshot(id, snapshotId, request); });
+            group_BackupSyncController.MapPut("Tasks/{id:guid}/Snapshots/{snapshotId}/Pin", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id, string snapshotId, [FromBody] TogglePinSnapshotRequest request) => { ctrl.HttpContext = ctx; return await ctrl.TogglePinSnapshot(id, snapshotId, request); });
+            group_BackupSyncController.MapPost("Snapshots/BatchDeletePreview", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, [FromBody] BatchDeleteSnapshotsRequest request) => { ctrl.HttpContext = ctx; return await ctrl.BatchDeletePreview(request); });
+            group_BackupSyncController.MapPost("Snapshots/BatchDelete", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, [FromBody] BatchDeleteSnapshotsRequest request) => { ctrl.HttpContext = ctx; return await ctrl.BatchDelete(request); });
+            group_BackupSyncController.MapGet("Tasks/{id:guid}/PrunePreview", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.PrunePreview(id); });
+            group_BackupSyncController.MapPost("Tasks/{id:guid}/PruneExecute", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.PruneExecute(id); });
+            group_BackupSyncController.MapPost("CronPreview", ([FromServices] BackupSyncController ctrl, HttpContext ctx, [FromBody] CronPreviewRequest request) => { ctrl.HttpContext = ctx; return ctrl.CronPreview(request); });
         }
     }
 }

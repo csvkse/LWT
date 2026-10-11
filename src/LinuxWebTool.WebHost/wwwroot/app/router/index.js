@@ -10,6 +10,7 @@ const routes = [
   { path: '/system', name: 'system', component: () => import('../views/SystemStatusView.js') },
   { path: '/files', name: 'files', component: () => import('../views/FilesView.js') },
   { path: '/mounts', name: 'mounts', component: () => import('../views/SmbMountsView.js') },
+  { path: '/backup-sync', name: 'backup-sync', component: () => import('../views/BackupSyncView.js') },
   { path: '/transcode', name: 'transcode', component: () => import('../views/TranscodeView.js') },
   { path: '/gateway', name: 'gateway', component: () => import('../views/GatewayView.js') },
   { path: '/frp', name: 'frp', component: () => import('../views/FrpView.js') },
