@@ -24,6 +24,25 @@ export function compareBaseline(current, baseline) {
   });
 }
 
+export function verifyBudgets(report, budgets = {}) {
+  const violations = [];
+  const maxP95 = budgets.maxP95Ms ?? 250;
+  const maxErrorRate = budgets.maxErrorRate ?? 0;
+
+  for (const [endpoint, summary] of Object.entries(report.endpoints || {})) {
+    if (summary.p95Ms !== null && summary.p95Ms > maxP95) {
+      violations.push(`${endpoint}: P95 ${summary.p95Ms.toFixed(1)}ms exceeded budget ${maxP95}ms`);
+    }
+    if (summary.errorRate !== null && summary.errorRate > maxErrorRate) {
+      violations.push(`${endpoint}: error rate ${(summary.errorRate * 100).toFixed(1)}% exceeded budget ${(maxErrorRate * 100).toFixed(1)}%`);
+    }
+  }
+  return {
+    passed: violations.length === 0,
+    violations,
+  };
+}
+
 export function createReport() {
   return {
     schemaVersion: 1, generatedAt: new Date().toISOString(),
@@ -72,8 +91,16 @@ export async function saveReport(report, filename) {
       };
     } catch (error) { report.baselineUnavailable = error.name; }
   }
+  const budgetResult = verifyBudgets(report, {
+    maxP95Ms: Number(process.env.SMOKE_MAX_P95_MS) || 250,
+    maxErrorRate: Number(process.env.SMOKE_MAX_ERROR_RATE) || 0,
+  });
+  report.budgetVerification = budgetResult;
   await mkdir(path.dirname(filename), { recursive: true });
   await writeFile(filename, JSON.stringify(report, null, 2) + '\n');
+  if (process.env.SMOKE_STRICT_PERF === 'true' && !budgetResult.passed) {
+    throw new Error('Performance budget exceeded: ' + budgetResult.violations.join('; '));
+  }
   if (process.env.GITHUB_STEP_SUMMARY) {
     const { appendFile } = await import('node:fs/promises');
     const rows = Object.entries(report.endpoints).map(([key, s]) => `| ${key} | ${s.samples} | ${s.p50Ms?.toFixed(1)} | ${s.p95Ms?.toFixed(1)} | ${s.p99Ms?.toFixed(1)} | ${s.failures} |`);

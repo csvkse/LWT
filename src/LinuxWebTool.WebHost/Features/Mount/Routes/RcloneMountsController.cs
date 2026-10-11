@@ -8,6 +8,7 @@ public class RcloneMountsController(
     SmbMountStore smbStore,
     WebDavMountStore webDavStore,
     RcloneMountService operations,
+    SshHostKeyProbe sshProbe,
     MountStateMachineService health,
     MountBackendCatalog catalog,
     MountOperationCoordinator coordinator,
@@ -17,6 +18,24 @@ public class RcloneMountsController(
     [HttpGet("Support")]
     public IResult Support() => Ok(new SmbSupportResponse(RcloneMountService.IsSupported,
         RcloneMountService.IsSupported ? string.Empty : "SFTP/S3 挂载需要 Linux、rclone、/dev/fuse 和挂载权限"));
+
+    [HttpPost("ProbeHostKey")]
+    public async Task<IResult> ProbeHostKey([FromBody] ProbeSshHostKeyRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Host) || request.Port is < 1 or > 65535)
+            return BadRequest(new MessageResponse("请输入有效的 SFTP 主机和端口"));
+        var result = await sshProbe.ProbeAsync(request.Host.Trim(), request.Port, HttpContext.RequestAborted);
+        return Ok(result);
+    }
+
+    [HttpPost("TestConnection")]
+    public async Task<IResult> TestConnection([FromBody] SaveRcloneMountRequest request)
+    {
+        var validation = Validate(request, null);
+        if (validation.Error is not null) return BadRequest(new MessageResponse(validation.Error));
+        var result = await operations.TestTemporaryConnectionAsync(request, HttpContext.RequestAborted);
+        return Ok(new TestMountConnectionResult(result.Success, result.Message));
+    }
 
     [HttpGet]
     public async Task<IResult> GetAll()
@@ -29,7 +48,8 @@ public class RcloneMountsController(
                 m.Host, m.Port, m.Username, m.KeyFile, m.HostKey, m.Endpoint, m.Bucket, m.Region,
                 m.AccessKeyId, !string.IsNullOrEmpty(m.Password), !string.IsNullOrEmpty(m.SecretAccessKey),
                 m.AutoMount, m.Enabled, m.Description, (int)status, StatusText(status),
-                m.CreateTime, m.UpdateTime, health.GetSnapshot(m.LocalPath));
+                m.CreateTime, m.UpdateTime, health.GetSnapshot(m.LocalPath),
+                HasPrivateKey: !string.IsNullOrEmpty(m.KeyFile));
         }).ToList());
     }
 
@@ -43,6 +63,11 @@ public class RcloneMountsController(
         if (await PathInUseAsync(validation.Path, null)) return BadRequest(new MessageResponse("本地挂载点已被其他配置使用"));
         var mount = new RcloneMount();
         Assign(mount, request, validation.Path);
+        if (!string.IsNullOrWhiteSpace(request.PrivateKeyContent))
+        {
+            await operations.SavePrivateKeyAsync(mount.Id, request.PrivateKeyContent, HttpContext.RequestAborted);
+            mount.KeyFile = operations.GetPrivateKeyPath(mount.Id);
+        }
         await store.InsertAsync(mount);
         if (mount.Enabled) SystemStatusProvider.ManagedMountPoints[mount.LocalPath] = 0;
         if (await catalog.LoadAsync(new("rclone", mount.Id)) is { } descriptor) health.ConfigurationChanged(descriptor);
@@ -66,16 +91,28 @@ public class RcloneMountsController(
         if (await PathInUseAsync(validation.Path, id)) return BadRequest(new MessageResponse("本地挂载点已被其他配置使用"));
         var remotePath = request.Kind == "sftp" ? "/" + (request.RemotePath ?? "").Trim().Trim('/') : (request.RemotePath ?? "").Trim().Trim('/');
         var endpoint = string.IsNullOrWhiteSpace(request.Endpoint) ? null : request.Endpoint.Trim().TrimEnd('/');
+        var hasNewPrivateKey = !string.IsNullOrWhiteSpace(request.PrivateKeyContent);
         var connectionChanged = mount.LocalPath != validation.Path || mount.RemotePath != remotePath
             || mount.Host != request.Host?.Trim() || mount.Port != request.Port || mount.Username != request.Username?.Trim()
             || mount.KeyFile != request.KeyFile?.Trim() || mount.HostKey != request.HostKey?.Trim()
             || mount.Endpoint != endpoint || mount.Bucket != request.Bucket?.Trim() || mount.Region != request.Region?.Trim()
             || mount.AccessKeyId != request.AccessKeyId?.Trim() || !string.IsNullOrEmpty(request.Password) && mount.Password != request.Password
-            || !string.IsNullOrEmpty(request.SecretAccessKey) && mount.SecretAccessKey != request.SecretAccessKey;
+            || !string.IsNullOrEmpty(request.SecretAccessKey) && mount.SecretAccessKey != request.SecretAccessKey
+            || hasNewPrivateKey;
         if (connectionChanged && operations.GetStatus(mount) == SmbMountStatus.Mounted)
             return BadRequest(new MessageResponse("请先卸载，再修改配置"));
         var oldPath = mount.LocalPath;
+        var previousKeyFile = mount.KeyFile;
         Assign(mount, request, validation.Path);
+        if (hasNewPrivateKey)
+        {
+            await operations.SavePrivateKeyAsync(id, request.PrivateKeyContent!, HttpContext.RequestAborted);
+            mount.KeyFile = operations.GetPrivateKeyPath(id);
+        }
+        else if (string.IsNullOrWhiteSpace(request.KeyFile) && !string.IsNullOrWhiteSpace(previousKeyFile))
+        {
+            mount.KeyFile = previousKeyFile;
+        }
         await store.UpdateAsync(mount);
         if (oldPath != mount.LocalPath || !mount.Enabled)
             SystemStatusProvider.ManagedMountPoints.TryRemove(oldPath, out _);
@@ -167,9 +204,13 @@ public class RcloneMountsController(
                 return ("请输入有效的 SFTP 主机名或 IP", string.Empty);
             if (request.Port is < 1 or > 65535) return ("SFTP 端口须为 1–65535", string.Empty);
             if (string.IsNullOrWhiteSpace(request.Username)) return ("SFTP 用户名不能为空", string.Empty);
-            if (string.IsNullOrEmpty(request.Password) && string.IsNullOrEmpty(existing?.Password)
-                && string.IsNullOrWhiteSpace(request.KeyFile))
-                return ("SFTP 需要密码或容器内私钥文件路径", string.Empty);
+            var hasPassword = !string.IsNullOrEmpty(request.Password) || !string.IsNullOrEmpty(existing?.Password);
+            var hasKeyFile = !string.IsNullOrWhiteSpace(request.KeyFile) || !string.IsNullOrWhiteSpace(existing?.KeyFile);
+            var hasKeyContent = !string.IsNullOrWhiteSpace(request.PrivateKeyContent);
+            if (!hasPassword && !hasKeyFile && !hasKeyContent)
+                return ("SFTP 需要密码、直接粘贴私钥或容器内私钥文件路径", string.Empty);
+            if (hasKeyContent && request.PrivateKeyContent!.Length > 16384)
+                return ("私钥内容长度不能超过 16KB", string.Empty);
             if (!string.IsNullOrWhiteSpace(request.KeyFile) && !SafePath(request.KeyFile.Trim()))
                 return ("私钥文件须为容器内 Linux 绝对路径", string.Empty);
             var keyParts = request.HostKey?.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);

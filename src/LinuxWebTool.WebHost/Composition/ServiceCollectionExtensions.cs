@@ -38,6 +38,7 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<ScheduleStore>();
         builder.Services.AddSingleton<ExecutionStore>();
         builder.Services.AddSingleton<OperationLogStore>();
+        builder.Services.AddSingleton<BackupSyncStore>();
         builder.Services.AddSingleton<IOperationLogger, OperationLogger>();
         var retentionOptions = new LogRetentionOptions
         {
@@ -60,6 +61,7 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<WebDavMountProbe>();
         builder.Services.AddSingleton<RcloneMountStore>();
         builder.Services.AddSingleton<RcloneMountService>();
+        builder.Services.AddSingleton<SshHostKeyProbe>();
         builder.Services.AddSingleton<MountBackendCatalog>();
         builder.Services.AddSingleton<MountStateMachineService>();
         builder.Services.AddSingleton<SmbDirectoryReader>();
@@ -90,6 +92,8 @@ public static class ServiceCollectionExtensions
         // 系统状态采集与历史采样
         var systemStatusOptions = configuration.GetSection(SystemStatusOptions.SectionName).Get<SystemStatusOptions>() ?? new SystemStatusOptions();
         builder.Services.AddSingleton(systemStatusOptions);
+        builder.Services.AddSingleton<AppMetricsService>();
+        builder.Services.AddSingleton<IAppMetricsService>(sp => sp.GetRequiredService<AppMetricsService>());
         builder.Services.AddSingleton<ISystemStatusProvider, SystemStatusProvider>();
         builder.Services.AddSingleton<DiskStatusCache>();
         builder.Services.AddSingleton<IDiskStatusCache>(sp => sp.GetRequiredService<DiskStatusCache>());
@@ -167,6 +171,7 @@ public static class ServiceCollectionExtensions
 
         // Quartz 定时调度
         builder.Services.AddScheduling();
+        builder.Services.AddBackupSync();
 
         // MVC + OpenAPI（AOT 兼容，替代 Swashbuckle）
         builder.Services.AddAutoControllers();

@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 using LinuxWebTool.Infrastructure.Shared.Persistence;
+using LinuxWebTool.Contracts.Features.BackupSync.Contracts;
 
 namespace LinuxWebTool.WebHost.Composition;
 
@@ -98,6 +99,7 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(OperationLogQuery))]
 [JsonSerializable(typeof(MountHealthSnapshot))]
 [JsonSerializable(typeof(OverviewResult))]
+[JsonSerializable(typeof(AppMetricsSnapshot))]
 [JsonSerializable(typeof(LinuxWebTool.WebHost.Features.Files.Routes.FilesController.PathRequest))]
 [JsonSerializable(typeof(ProcessSnapshotPoint))]
 [JsonSerializable(typeof(ProcessStatus))]
@@ -110,6 +112,9 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(SaveSmbMountRequest))]
 [JsonSerializable(typeof(SaveWebDavMountRequest))]
 [JsonSerializable(typeof(SaveRcloneMountRequest))]
+[JsonSerializable(typeof(ProbeSshHostKeyRequest))]
+[JsonSerializable(typeof(SshHostKeyProbeResult))]
+[JsonSerializable(typeof(TestMountConnectionResult))]
 [JsonSerializable(typeof(LinuxWebTool.WebHost.Features.Files.Routes.FilesController.SaveTextRequest))]
 [JsonSerializable(typeof(SaveWatchRuleRequest))]
 [JsonSerializable(typeof(ScheduleBrief))]
@@ -215,6 +220,26 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(EasyTierProxyNetworkItem))]
 [JsonSerializable(typeof(List<EasyTierProxyNetworkItem>))]
 [JsonSerializable(typeof(EasyTierAdvancedConfig))]
+[JsonSerializable(typeof(BackupSyncTaskItem))]
+[JsonSerializable(typeof(List<BackupSyncTaskItem>))]
+[JsonSerializable(typeof(SaveBackupSyncTaskRequest))]
+[JsonSerializable(typeof(BackupSnapshotItem))]
+[JsonSerializable(typeof(List<BackupSnapshotItem>))]
+[JsonSerializable(typeof(SnapshotFileNode))]
+[JsonSerializable(typeof(List<SnapshotFileNode>))]
+[JsonSerializable(typeof(BatchDeleteSnapshotsRequest))]
+[JsonSerializable(typeof(BatchDeleteSnapshotsResult))]
+[JsonSerializable(typeof(TogglePinSnapshotRequest))]
+[JsonSerializable(typeof(RestoreSnapshotRequest))]
+[JsonSerializable(typeof(RestoreSnapshotResult))]
+[JsonSerializable(typeof(PrunePreviewResult))]
+[JsonSerializable(typeof(CronPreviewRequest))]
+[JsonSerializable(typeof(CronPreviewResponse))]
+[JsonSerializable(typeof(TaskRunResultResponse))]
+[JsonSerializable(typeof(BackupSyncTask))]
+[JsonSerializable(typeof(List<BackupSyncTask>))]
+[JsonSerializable(typeof(BackupSnapshot))]
+[JsonSerializable(typeof(List<BackupSnapshot>))]
 
 public partial class AppJsonSerializerContext
  : JsonSerializerContext

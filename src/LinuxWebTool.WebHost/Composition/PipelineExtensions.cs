@@ -7,9 +7,10 @@ namespace LinuxWebTool.WebHost.Composition;
 
 public static class PipelineExtensions
 {
-    /// <summary>中间件管线：异常 → 静态前端 → 认证 → APIKey → 授权 → API / 终端 / MCP / 网关 → SPA 回退。</summary>
+    /// <summary>中间件管线：追踪/度量 → 异常 → 静态前端 → 认证 → APIKey → 授权 → API / 终端 / MCP / 网关 → SPA 回退。</summary>
     public static WebApplication UseApplicationPipeline(this WebApplication app)
     {
+        app.UseMiddleware<TraceContextMiddleware>();
         app.UseMiddleware<ExceptionHandlingMiddleware>();
 
         app.MapGet("/health", async (DbConnectionFactory factory) =>
@@ -37,6 +38,12 @@ public static class PipelineExtensions
             return database
                 ? Results.Ok(response)
                 : Results.Json(response, Composition.AppJsonSerializerContext.Default.HealthResponse, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }).AllowAnonymous();
+
+        app.MapGet("/api/Metrics", (IAppMetricsService metricsService) =>
+        {
+            var snapshot = metricsService.GetSnapshot();
+            return Results.Json(snapshot, Composition.AppJsonSerializerContext.Default.AppMetricsSnapshot);
         }).AllowAnonymous();
 
         // 根路径跳转到前端入口

@@ -51,7 +51,8 @@ public record RcloneMountItemResponse(
     string? Endpoint, string? Bucket, string? Region, string? AccessKeyId,
     bool HasPassword, bool HasSecretAccessKey, bool AutoMount, bool Enabled,
     string? Description, int Status, string StatusText, DateTime CreateTime,
-    DateTime UpdateTime, MountHealthSnapshot? Health = null);
+    DateTime UpdateTime, MountHealthSnapshot? Health = null,
+    bool HasPrivateKey = false);
 
 public sealed record HealthResponse(
     string Status,

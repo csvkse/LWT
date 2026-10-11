@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Net.Sockets;
 using System.Text;
+using LinuxWebTool.Contracts.Features.Mount.Contracts;
 namespace LinuxWebTool.Infrastructure.Features.Mount.Adapters;
 
 /// <summary>SFTP / S3 共用的 rclone FUSE 执行器；每个配置独占凭据文件和写缓存。</summary>
@@ -7,6 +9,7 @@ public sealed class RcloneMountService(DataPaths dataPaths, ILogger<RcloneMountS
 {
     private const string ConfigFolder = "rclone-config";
     private const string CacheFolder = "rclone-cache";
+    private const string SshKeyFolder = "ssh-keys";
 
     public static bool IsSupported => WebDavMountService.IsSupported;
 
@@ -90,13 +93,112 @@ public sealed class RcloneMountService(DataPaths dataPaths, ILogger<RcloneMountS
         SmbMountRuntimeProbe.RunFsProbeAsync(["ls", "-A", "--", mount.LocalPath], TimeSpan.FromSeconds(5),
             "本地目录探测超时", cancellationToken);
 
+    public string GetPrivateKeyPath(Guid id) => PrivateKeyPath(id);
+
+    public async Task SavePrivateKeyAsync(Guid id, string privateKeyContent, CancellationToken cancellationToken = default)
+    {
+        var dir = dataPaths.Resolve(SshKeyFolder);
+        Directory.CreateDirectory(dir);
+        var path = PrivateKeyPath(id);
+        await WritePrivateFileAsync(path, privateKeyContent.Trim() + "\n", cancellationToken);
+    }
+
     public void DeleteConfig(Guid id)
     {
         var path = ConfigPath(id);
         if (File.Exists(path)) File.Delete(path);
         var knownHosts = KnownHostsPath(id);
         if (File.Exists(knownHosts)) File.Delete(knownHosts);
+        var keyPath = PrivateKeyPath(id);
+        if (File.Exists(keyPath)) File.Delete(keyPath);
     }
+
+    public async Task<(bool Success, string Message)> TestTemporaryConnectionAsync(
+        SaveRcloneMountRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.Kind == "sftp")
+        {
+            if (string.IsNullOrWhiteSpace(request.Host) || string.IsNullOrWhiteSpace(request.Username))
+                return (false, "缺少 SFTP 主机或用户名");
+        }
+
+        if (!IsSupported)
+        {
+            if (request.Kind == "sftp")
+            {
+                try
+                {
+                    using var client = new TcpClient();
+                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    cts.CancelAfter(TimeSpan.FromSeconds(4));
+                    await client.ConnectAsync(request.Host!.Trim(), request.Port, cts.Token);
+                    return (true, "目标 SSH 端口可正常连通（当前环境未启用 FUSE，挂载需在 Linux 容器中运行）");
+                }
+                catch (Exception ex)
+                {
+                    return (false, $"SSH 端口连接失败：{ex.Message}");
+                }
+            }
+            return (true, "配置格式验证通过（当前环境未启用 FUSE，挂载需在 Linux 容器中运行）");
+        }
+
+        var tempId = Guid.NewGuid();
+        string? tempKeyFile = null;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(request.PrivateKeyContent))
+            {
+                await SavePrivateKeyAsync(tempId, request.PrivateKeyContent, cancellationToken);
+                tempKeyFile = PrivateKeyPath(tempId);
+            }
+            else if (!string.IsNullOrWhiteSpace(request.KeyFile))
+            {
+                tempKeyFile = request.KeyFile.Trim();
+            }
+
+            var tempMount = new RcloneMount
+            {
+                Id = tempId,
+                Name = "probe_" + tempId.ToString("N"),
+                Kind = request.Kind,
+                LocalPath = "/tmp",
+                RemotePath = request.RemotePath ?? string.Empty,
+                Host = request.Host,
+                Port = request.Port,
+                Username = request.Username,
+                Password = request.Password,
+                KeyFile = tempKeyFile,
+                HostKey = request.HostKey,
+                Endpoint = request.Endpoint,
+                Bucket = request.Bucket,
+                Region = request.Region,
+                AccessKeyId = request.AccessKeyId,
+                SecretAccessKey = request.SecretAccessKey,
+            };
+
+            var config = await EnsureConfigAsync(tempMount, cancellationToken);
+            var result = await RunAsync(["--config", config, "lsf", Remote(tempMount), "--max-depth", "1"],
+                null, TimeSpan.FromSeconds(10), cancellationToken, captureStdout: false, stopAfterFirstEntry: true);
+
+            if (result.ExitCode == 0)
+            {
+                return (true, "连接成功，远端路径验证通过");
+            }
+
+            var error = Redact(result.Stderr, tempMount);
+            return (false, $"连接验证失败（exit {result.ExitCode}）：{error}");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"连接探测异常：{ex.Message}");
+        }
+        finally
+        {
+            DeleteConfig(tempId);
+        }
+    }
+
+    private string PrivateKeyPath(Guid id) => Path.Combine(dataPaths.Resolve(SshKeyFolder), id.ToString("N") + ".key");
 
     private async Task<string> EnsureConfigAsync(RcloneMount mount, CancellationToken cancellationToken)
     {
@@ -112,9 +214,10 @@ public sealed class RcloneMountService(DataPaths dataPaths, ILogger<RcloneMountS
             config.Append("type = sftp\n")
                 .Append("host = ").Append(mount.Host).Append('\n')
                 .Append("port = ").Append(mount.Port).Append('\n')
-                .Append("user = ").Append(mount.Username).Append('\n')
-                .Append("pass = ").Append(password).Append('\n')
-                .Append("known_hosts_file = ").Append(knownHostsPath).Append('\n');
+                .Append("user = ").Append(mount.Username).Append('\n');
+            if (!string.IsNullOrEmpty(password))
+                config.Append("pass = ").Append(password).Append('\n');
+            config.Append("known_hosts_file = ").Append(knownHostsPath).Append('\n');
             if (!string.IsNullOrEmpty(mount.KeyFile)) config.Append("key_file = ").Append(mount.KeyFile).Append('\n');
         }
         else if (mount.Kind == "s3")

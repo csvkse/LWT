@@ -148,12 +148,13 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
             return entity.AllowSchedules;
         }
 
-        // 4. 文件与挂载模块
+        // 4. 文件与挂载与备份模块
         if (path.StartsWith("/api/Files", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/api/SmbMounts", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/api/WebDavMounts", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/api/RcloneMounts", StringComparison.OrdinalIgnoreCase) ||
-            path.StartsWith("/api/MountTasks", StringComparison.OrdinalIgnoreCase))
+            path.StartsWith("/api/MountTasks", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/api/BackupSync", StringComparison.OrdinalIgnoreCase))
         {
             return entity.AllowFiles;
         }

@@ -643,5 +643,131 @@ public sealed class ApiIntegrationTests
         }
     }
 
+    [Fact]
+    public async Task Files_download_supports_single_file_and_directory_zip_with_protection()
+    {
+        var client = await Client.Value;
+        await LoginAsync(client);
+        var directory = Path.Combine(Path.GetTempPath(), "lwt-file-dl-" + Guid.NewGuid().ToString("N"));
+        var subDir = Path.Combine(directory, "sub-folder");
+        Directory.CreateDirectory(subDir);
+        var file1 = Path.Combine(directory, "hello-中文.txt");
+        var file2 = Path.Combine(subDir, "nested.json");
+        await File.WriteAllTextAsync(file1, "世界你好 UTF-8", Encoding.UTF8);
+        await File.WriteAllTextAsync(file2, "{\"key\":\"value\"}", Encoding.UTF8);
+
+        try
+        {
+            // 1. 单文件下载测试
+            var fileResp = await client.GetAsync("/api/Files/Download?path=" + Uri.EscapeDataString(file1));
+            Assert.Equal(HttpStatusCode.OK, fileResp.StatusCode);
+            Assert.Equal("application/octet-stream", fileResp.Content.Headers.ContentType?.MediaType);
+            var fileContent = await fileResp.Content.ReadAsStringAsync();
+            Assert.Equal("世界你好 UTF-8", fileContent);
+            Assert.NotNull(fileResp.Content.Headers.ContentDisposition);
+            Assert.Contains("hello", fileResp.Content.Headers.ContentDisposition.ToString());
+
+            // 2. 文件夹 ZIP 打包下载测试
+            var dirResp = await client.GetAsync("/api/Files/Download?path=" + Uri.EscapeDataString(directory));
+            Assert.Equal(HttpStatusCode.OK, dirResp.StatusCode);
+            Assert.Equal("application/zip", dirResp.Content.Headers.ContentType?.MediaType);
+            var zipBytes = await dirResp.Content.ReadAsByteArrayAsync();
+            Assert.True(zipBytes.Length > 0);
+
+            using (var zipStream = new MemoryStream(zipBytes))
+            using (var archive = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Read))
+            {
+                var entryNames = archive.Entries.Select(e => e.FullName.Replace('\\', '/')).ToList();
+                Assert.Contains(entryNames, e => e.EndsWith("hello-中文.txt"));
+                Assert.Contains(entryNames, e => e.EndsWith("sub-folder/nested.json"));
+
+                var helloEntry = archive.Entries.First(e => e.FullName.EndsWith("hello-中文.txt"));
+                using var reader = new StreamReader(helloEntry.Open(), Encoding.UTF8);
+                var text = await reader.ReadToEndAsync();
+                Assert.Equal("世界你好 UTF-8", text);
+            }
+
+            // 3. 安全防护测试：不存在路径返回 404
+            var notFoundResp = await client.GetAsync("/api/Files/Download?path=" + Uri.EscapeDataString(directory + "/non-existent.txt"));
+            Assert.Equal(HttpStatusCode.NotFound, notFoundResp.StatusCode);
+
+            // 4. 安全防护测试：受保护程序目录返回 400
+            var protectedPath = Path.Combine(DataDirectory, "secret.db");
+            var protectedResp = await client.GetAsync("/api/Files/Download?path=" + Uri.EscapeDataString(protectedPath));
+            Assert.Equal(HttpStatusCode.BadRequest, protectedResp.StatusCode);
+
+            // 5. 安全防护测试：根目录返回 400
+            var rootResp = await client.GetAsync("/api/Files/Download?path=%2F");
+            Assert.Equal(HttpStatusCode.BadRequest, rootResp.StatusCode);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task RcloneMounts_ssh_endpoints_and_lifecycle()
+    {
+        var client = await Client.Value;
+        await LoginAsync(client);
+
+        // 1. ProbeHostKey 校验：非法输入拒绝
+        var invalidProbeResp = await client.PostAsync("/api/RcloneMounts/ProbeHostKey", Json("{\"host\":\"\",\"port\":22}"));
+        Assert.Equal(HttpStatusCode.BadRequest, invalidProbeResp.StatusCode);
+
+        // 2. ProbeHostKey 测试：不可达端口返回优雅错误而不会抛出 500
+        var unreachableProbeResp = await client.PostAsync("/api/RcloneMounts/ProbeHostKey", Json("{\"host\":\"127.0.0.1\",\"port\":65534}"));
+        Assert.Equal(HttpStatusCode.OK, unreachableProbeResp.StatusCode);
+        using var probeDoc = JsonDocument.Parse(await unreachableProbeResp.Content.ReadAsStringAsync());
+        Assert.False(probeDoc.RootElement.GetProperty("success").GetBoolean());
+
+        // 3. 创建带 PrivateKeyContent 的 SFTP 挂载
+        var uniqueName = "ssh-test-" + Guid.NewGuid().ToString("N")[..8];
+        var testPrivateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\ntest-key-content\n-----END OPENSSH PRIVATE KEY-----";
+        var createPayload = new
+        {
+            name = uniqueName,
+            kind = "sftp",
+            localPath = "/mnt/ssh-test-" + Guid.NewGuid().ToString("N")[..6],
+            remotePath = "/remote/dir",
+            host = "192.168.1.100",
+            port = 22,
+            username = "root",
+            privateKeyContent = testPrivateKey,
+            hostKey = "ssh-ed25519 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            autoMount = false,
+            enabled = false
+        };
+
+        var createResp = await client.PostAsync("/api/RcloneMounts", Json(JsonSerializer.Serialize(createPayload)));
+        Assert.Equal(HttpStatusCode.OK, createResp.StatusCode);
+        using var createDoc = JsonDocument.Parse(await createResp.Content.ReadAsStringAsync());
+        var mountId = createDoc.RootElement.GetProperty("id").GetString();
+        Assert.False(string.IsNullOrEmpty(mountId));
+
+        try
+        {
+            // 4. 查询列表，确认 HasPrivateKey 为 true 且不泄露明文
+            var listResp = await client.GetAsync("/api/RcloneMounts");
+            Assert.Equal(HttpStatusCode.OK, listResp.StatusCode);
+            using var listDoc = JsonDocument.Parse(await listResp.Content.ReadAsStringAsync());
+            var matched = listDoc.RootElement.EnumerateArray()
+                .FirstOrDefault(e => e.GetProperty("id").GetString() == mountId);
+            Assert.Equal(JsonValueKind.Object, matched.ValueKind);
+            Assert.True(matched.GetProperty("hasPrivateKey").GetBoolean());
+            Assert.Equal(uniqueName, matched.GetProperty("name").GetString());
+        }
+        finally
+        {
+            // 5. 删除配置，确认物理清理
+            var deleteResp = await client.DeleteAsync($"/api/RcloneMounts/{mountId}");
+            Assert.Equal(HttpStatusCode.Accepted, deleteResp.StatusCode);
+        }
+    }
+
     private static StringContent Json(string value) => new(value, Encoding.UTF8, "application/json");
 }

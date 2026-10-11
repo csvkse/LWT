@@ -65,6 +65,10 @@ public sealed record SaveRcloneMountRequest
     public string? Username { get; init; }
     public string? Password { get; init; }
     public string? KeyFile { get; init; }
+
+    /// <summary>网页直接录入的 SSH 私钥明文内容，保存后以 0600 权限落地，更新时为 null 表示保持不变。</summary>
+    public string? PrivateKeyContent { get; init; }
+
     public string? HostKey { get; init; }
     public string? Endpoint { get; init; }
     public string? Bucket { get; init; }
@@ -75,3 +79,18 @@ public sealed record SaveRcloneMountRequest
     public bool Enabled { get; init; } = true;
     public string? Description { get; init; }
 }
+
+/// <summary>探测远端 SSH 主机公钥请求。</summary>
+public sealed record ProbeSshHostKeyRequest(string Host, int Port = 22);
+
+/// <summary>探测远端 SSH 主机公钥结果。</summary>
+public sealed record SshHostKeyProbeResult(
+    bool Success,
+    string? KeyType,
+    string? HostKey,
+    string? FingerprintSha256,
+    string? ErrorMessage);
+
+/// <summary>测试挂载连通性结果。</summary>
+public sealed record TestMountConnectionResult(bool Success, string? Message);
+
