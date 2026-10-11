@@ -214,10 +214,22 @@ for (const file of files) {
       }
     }
 
+    // FE-THEME-NO-RAW-BG-WHITE：禁止在暗黑主题下使用裸 bg-white（必须使用 .panel 或半透明指示如 bg-white/5）
+    for (const [, cls] of classMatches) {
+      if (/\bbg-white\b(?!\/)/.test(cls)) {
+        add('FE-THEME-NO-RAW-BG-WHITE', file, `禁止使用裸 "bg-white"，请使用系统统一的 ".panel" 或透明指示类（如 bg-white/5）`);
+      }
+    }
+
     // 针对 Vue 组件 template: `...` 的静态模板检查
     const tplMatch = content.match(/template:\s*`([\s\S]*?)`/);
     if (tplMatch) {
       const tpl = tplMatch[1];
+
+      // FE-TEMPLATE-STRING-ESCAPES：禁止在动态属性单引号内直接使用 \n 换行符（会被反引号解析为真实换行导致 Vue 编译器 Function 语法错误）
+      if (/:[\w-]+\s*=\s*["'][^"']*'[^']*\n[^']*'[^"']*["']/.test(tpl)) {
+        add('FE-TEMPLATE-STRING-ESCAPES', file, '动态属性内禁止直接使用未保护的真实换行符，反引号解析后将破坏 Vue 编译为 Function 时的语法解析');
+      }
 
       // FE-TEMPLATE-WINDOW：模板禁止直接访问全局 window.*
       if (/\{\{[^}]*\bwindow\./.test(tpl) || /:[\w-]+\s*=\s*["'][^"']*\bwindow\./.test(tpl)) {

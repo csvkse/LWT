@@ -660,139 +660,132 @@ export default defineComponent({
     };
   },
   template: `
-    <div class="space-y-6">
+    <div class="flex flex-col gap-4">
       <!-- 页面标题与顶部操作栏 -->
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-            <span>文件夹备份与同步</span>
-            <span class="text-xs px-2.5 py-0.5 rounded-full font-medium bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300">
-              增量硬链接 & GFS 治理
-            </span>
-          </h1>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            支持目录多版本增量快照、实时/定时直接镜像同步，提供秒级回溯与批量生命周期修剪
-          </p>
-        </div>
-        <div class="flex items-center gap-3">
+      <div class="flex flex-wrap items-center gap-2">
+        <h2 class="text-sm text-slate-400">
+          文件夹备份与同步 <span class="text-slate-600">（增量硬链接 & GFS 治理 · 目录直接镜像同步）</span>
+        </h2>
+        <div class="ml-auto flex items-center gap-2">
           <button
             type="button"
-            class="px-3.5 py-2 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors shadow-sm"
+            class="btn btn-xs"
+            :disabled="loading"
             @click="refreshAll()"
           >
-            刷新
+            {{ loading ? '刷新中…' : '刷新' }}
           </button>
           <button
             type="button"
-            class="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors shadow-sm flex items-center gap-1.5"
+            class="btn btn-primary"
             @click="openCreateTaskModal()"
           >
-            <span>+ 新建任务</span>
+            ＋ 新建任务
           </button>
         </div>
       </div>
 
       <!-- 核心指标卡片 -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 shadow-sm">
-          <div class="text-xs font-medium text-gray-500 dark:text-gray-400">全部任务</div>
-          <div class="mt-2 text-2xl font-semibold text-gray-900 dark:text-gray-100">{{ tasks.length }}</div>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="panel p-4">
+          <div class="text-xs text-slate-400">全部任务</div>
+          <div class="mt-1 text-2xl font-semibold text-slate-200 font-mono">{{ tasks.length }}</div>
         </div>
-        <div class="p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 shadow-sm">
-          <div class="text-xs font-medium text-blue-600 dark:text-blue-400">增量备份任务</div>
-          <div class="mt-2 text-2xl font-semibold text-gray-900 dark:text-gray-100">{{ backupTasks.length }}</div>
+        <div class="panel p-4">
+          <div class="text-xs text-cyan-300">增量备份任务</div>
+          <div class="mt-1 text-2xl font-semibold text-slate-200 font-mono">{{ backupTasks.length }}</div>
         </div>
-        <div class="p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 shadow-sm">
-          <div class="text-xs font-medium text-emerald-600 dark:text-emerald-400">镜像同步任务</div>
-          <div class="mt-2 text-2xl font-semibold text-gray-900 dark:text-gray-100">{{ syncTasks.length }}</div>
+        <div class="panel p-4">
+          <div class="text-xs text-emerald-400">镜像同步任务</div>
+          <div class="mt-1 text-2xl font-semibold text-slate-200 font-mono">{{ syncTasks.length }}</div>
         </div>
-        <div class="p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 shadow-sm">
-          <div class="text-xs font-medium text-purple-600 dark:text-purple-400">历史快照总计</div>
-          <div class="mt-2 text-2xl font-semibold text-gray-900 dark:text-gray-100">{{ snapshots.length }}</div>
+        <div class="panel p-4">
+          <div class="text-xs text-neon-soft">历史快照总计</div>
+          <div class="mt-1 text-2xl font-semibold text-slate-200 font-mono">{{ snapshots.length }}</div>
         </div>
       </div>
 
       <!-- 标签页导航 (Tabs) -->
-      <div class="border-b border-gray-200 dark:border-gray-700">
-        <nav class="flex space-x-6">
-          <button
-            type="button"
-            class="py-3 px-1 border-b-2 font-medium text-sm transition-colors"
-            :class="activeTab === 'backup' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'"
-            @click="activeTab = 'backup'"
-          >
-            增量备份任务 ({{ backupTasks.length }})
-          </button>
-          <button
-            type="button"
-            class="py-3 px-1 border-b-2 font-medium text-sm transition-colors"
-            :class="activeTab === 'sync' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'"
-            @click="activeTab = 'sync'"
-          >
-            直接同步任务 ({{ syncTasks.length }})
-          </button>
-          <button
-            type="button"
-            class="py-3 px-1 border-b-2 font-medium text-sm transition-colors"
-            :class="activeTab === 'snapshots' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'"
-            @click="activeTab = 'snapshots'"
-          >
-            快照库与恢复 ({{ snapshots.length }})
-          </button>
-        </nav>
+      <div class="flex border-b border-cyber-line gap-2">
+        <button
+          type="button"
+          class="nav-link !rounded-b-none border-b-2"
+          :class="activeTab === 'backup' ? '!border-cyan-400 text-cyan-300 bg-cyber-panel font-medium' : '!border-transparent text-slate-400 hover:text-slate-200'"
+          @click="activeTab = 'backup'"
+        >
+          增量备份任务 ({{ backupTasks.length }})
+        </button>
+        <button
+          type="button"
+          class="nav-link !rounded-b-none border-b-2"
+          :class="activeTab === 'sync' ? '!border-cyan-400 text-cyan-300 bg-cyber-panel font-medium' : '!border-transparent text-slate-400 hover:text-slate-200'"
+          @click="activeTab = 'sync'"
+        >
+          直接同步任务 ({{ syncTasks.length }})
+        </button>
+        <button
+          type="button"
+          class="nav-link !rounded-b-none border-b-2"
+          :class="activeTab === 'snapshots' ? '!border-cyan-400 text-cyan-300 bg-cyber-panel font-medium' : '!border-transparent text-slate-400 hover:text-slate-200'"
+          @click="activeTab = 'snapshots'"
+        >
+          快照库与恢复 ({{ snapshots.length }})
+        </button>
       </div>
 
       <!-- Tab 1: 增量备份任务列表 -->
-      <div v-if="activeTab === 'backup'" class="space-y-4">
-        <div v-if="backupTasks.length === 0" class="p-8 text-center bg-white dark:bg-gray-850 rounded-xl border border-gray-200 dark:border-gray-800 text-gray-500">
-          暂无增量备份任务，点击右上角“+ 新建任务”创建首个版本备份作业。
+      <div v-if="activeTab === 'backup'" class="flex flex-col gap-3">
+        <div v-if="backupTasks.length === 0" class="panel p-8 text-center text-slate-500 text-xs">
+          暂无增量备份任务，点击右上角「＋ 新建任务」创建首个版本备份作业。
         </div>
-        <div v-else class="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 shadow-sm">
-          <table class="w-full text-left text-sm">
-            <thead class="bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 font-medium border-b border-gray-200 dark:border-gray-700">
+        <div v-else class="panel overflow-x-auto">
+          <table class="data-table min-w-[52rem]">
+            <thead>
               <tr>
-                <th class="p-4">任务名称</th>
-                <th class="p-4">路径 (源端 -> 备份库)</th>
-                <th class="p-4">调度频率</th>
-                <th class="p-4">GFS 保留策略</th>
-                <th class="p-4">上次运行</th>
-                <th class="p-4 text-right">操作</th>
+                <th>任务名称</th>
+                <th>路径 (源端 -> 备份库)</th>
+                <th>调度频率</th>
+                <th>GFS 保留策略</th>
+                <th>上次运行</th>
+                <th class="text-right">操作</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
-              <tr v-for="t in backupTasks" :key="t.id" class="hover:bg-gray-50/50 dark:hover:bg-gray-800/50 transition-colors">
-                <td class="p-4 font-medium text-gray-900 dark:text-gray-100">
+            <tbody>
+              <tr v-for="t in backupTasks" :key="t.id">
+                <td class="font-medium text-slate-200">
                   <div class="flex items-center gap-2">
                     <span>{{ t.name }}</span>
-                    <span v-if="!t.enabled" class="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">停用</span>
+                    <span v-if="!t.enabled" class="badge border-slate-600/60 text-slate-500">停用</span>
                   </div>
                 </td>
-                <td class="p-4 text-gray-600 dark:text-gray-400">
-                  <div class="font-mono text-xs">{{ t.sourcePath }}</div>
-                  <div class="text-xs text-gray-400 mt-0.5">↳ {{ t.targetPath }}</div>
+                <td class="text-slate-400">
+                  <div class="font-mono text-xs text-cyan-300/80">{{ t.sourcePath }}</div>
+                  <div class="text-xs text-slate-500 mt-0.5">↳ {{ t.targetPath }}</div>
                 </td>
-                <td class="p-4">
-                  <span class="inline-block px-2 py-1 rounded text-xs font-mono bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                <td>
+                  <span class="badge border-slate-600/60 text-slate-300 font-mono">
                     {{ t.cronDescription || t.cronExpression }}
                   </span>
                 </td>
-                <td class="p-4 text-xs text-gray-600 dark:text-gray-400">
+                <td class="text-xs text-slate-400">
                   <span>最近{{ t.keepLastCount }}次</span> · 
                   <span>{{ t.keepDays }}天</span> · 
                   <span>{{ t.keepWeeks }}周</span> · 
                   <span>{{ t.keepMonths }}月</span>
                 </td>
-                <td class="p-4 text-xs">
-                  <div :class="t.lastRunStatus === 'Success' ? 'text-emerald-600 dark:text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-red-600 dark:text-red-400' : 'text-gray-500')">
+                <td class="text-xs">
+                  <div :class="t.lastRunStatus === 'Success' ? 'text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-rose-400' : 'text-slate-500')">
                     {{ t.lastRunStatus || '未运行' }}
                   </div>
-                  <div class="text-gray-400 mt-0.5">{{ formatTime(t.lastRunTime) }}</div>
+                  <div class="text-slate-500 mt-0.5 text-[11px]">{{ formatTime(t.lastRunTime) }}</div>
                 </td>
-                <td class="p-4 text-right space-x-2">
-                  <button type="button" class="text-xs text-blue-600 hover:text-blue-800 font-medium" @click="runTask(t)">立即备份</button>
-                  <button type="button" class="text-xs text-purple-600 hover:text-purple-800 font-medium" @click="viewTaskSnapshots(t)">查看快照</button>
-                  <button type="button" class="text-xs text-gray-600 hover:text-gray-900 dark:text-gray-300 font-medium" @click="openEditTaskModal(t)">编辑</button>
-                  <button type="button" class="text-xs text-red-600 hover:text-red-800 font-medium" @click="deleteTask(t)">删除</button>
+                <td class="text-right whitespace-nowrap">
+                  <div class="inline-flex items-center gap-1.5">
+                    <button type="button" class="btn btn-xs btn-primary" @click="runTask(t)">立即备份</button>
+                    <button type="button" class="btn btn-xs" @click="viewTaskSnapshots(t)">查看快照</button>
+                    <button type="button" class="btn btn-xs" @click="openEditTaskModal(t)">编辑</button>
+                    <button type="button" class="btn btn-xs btn-danger" @click="deleteTask(t)">删除</button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -801,55 +794,57 @@ export default defineComponent({
       </div>
 
       <!-- Tab 2: 直接同步任务列表 -->
-      <div v-if="activeTab === 'sync'" class="space-y-4">
-        <div v-if="syncTasks.length === 0" class="p-8 text-center bg-white dark:bg-gray-850 rounded-xl border border-gray-200 dark:border-gray-800 text-gray-500">
-          暂无直接镜像同步任务，点击右上角“+ 新建任务”创建首个目录镜像作业。
+      <div v-if="activeTab === 'sync'" class="flex flex-col gap-3">
+        <div v-if="syncTasks.length === 0" class="panel p-8 text-center text-slate-500 text-xs">
+          暂无直接镜像同步任务，点击右上角「＋ 新建任务」创建首个目录镜像作业。
         </div>
-        <div v-else class="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 shadow-sm">
-          <table class="w-full text-left text-sm">
-            <thead class="bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 font-medium border-b border-gray-200 dark:border-gray-700">
+        <div v-else class="panel overflow-x-auto">
+          <table class="data-table min-w-[52rem]">
+            <thead>
               <tr>
-                <th class="p-4">任务名称</th>
-                <th class="p-4">路径 (源端 -> 镜像目标)</th>
-                <th class="p-4">同步策略</th>
-                <th class="p-4">调度频率</th>
-                <th class="p-4">上次同步</th>
-                <th class="p-4 text-right">操作</th>
+                <th>任务名称</th>
+                <th>路径 (源端 -> 镜像目标)</th>
+                <th>同步策略</th>
+                <th>调度频率</th>
+                <th>上次同步</th>
+                <th class="text-right">操作</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
-              <tr v-for="t in syncTasks" :key="t.id" class="hover:bg-gray-50/50 dark:hover:bg-gray-800/50 transition-colors">
-                <td class="p-4 font-medium text-gray-900 dark:text-gray-100">
+            <tbody>
+              <tr v-for="t in syncTasks" :key="t.id">
+                <td class="font-medium text-slate-200">
                   <div class="flex items-center gap-2">
                     <span>{{ t.name }}</span>
-                    <span v-if="!t.enabled" class="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">停用</span>
+                    <span v-if="!t.enabled" class="badge border-slate-600/60 text-slate-500">停用</span>
                   </div>
                 </td>
-                <td class="p-4 text-gray-600 dark:text-gray-400">
-                  <div class="font-mono text-xs">{{ t.sourcePath }}</div>
-                  <div class="text-xs text-gray-400 mt-0.5">↳ {{ t.targetPath }}</div>
+                <td class="text-slate-400">
+                  <div class="font-mono text-xs text-cyan-300/80">{{ t.sourcePath }}</div>
+                  <div class="text-xs text-slate-500 mt-0.5">↳ {{ t.targetPath }}</div>
                 </td>
-                <td class="p-4 text-xs text-gray-600 dark:text-gray-400">
+                <td class="text-xs text-slate-400">
                   <div>{{ t.syncDirection === 1 ? '单向镜像 (跟随删除)' : '单向累加 (不删目标)' }}</div>
-                  <div v-if="t.syncDirection === 1" class="text-gray-400 mt-0.5">
+                  <div v-if="t.syncDirection === 1" class="text-slate-500 mt-0.5">
                     {{ t.deleteHandling === 2 ? '暂存目标回收站 (' + t.trashRetentionDays + '天)' : '直接永久删除' }}
                   </div>
                 </td>
-                <td class="p-4">
-                  <span class="inline-block px-2 py-1 rounded text-xs font-mono bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                <td>
+                  <span class="badge border-slate-600/60 text-slate-300 font-mono">
                     {{ t.cronDescription || t.cronExpression }}
                   </span>
                 </td>
-                <td class="p-4 text-xs">
-                  <div :class="t.lastRunStatus === 'Success' ? 'text-emerald-600 dark:text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-red-600 dark:text-red-400' : 'text-gray-500')">
+                <td class="text-xs">
+                  <div :class="t.lastRunStatus === 'Success' ? 'text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-rose-400' : 'text-slate-500')">
                     {{ t.lastRunStatus || '未运行' }}
                   </div>
-                  <div class="text-gray-400 mt-0.5">{{ formatTime(t.lastRunTime) }}</div>
+                  <div class="text-slate-500 mt-0.5 text-[11px]">{{ formatTime(t.lastRunTime) }}</div>
                 </td>
-                <td class="p-4 text-right space-x-2">
-                  <button type="button" class="text-xs text-blue-600 hover:text-blue-800 font-medium" @click="runTask(t)">立即同步</button>
-                  <button type="button" class="text-xs text-gray-600 hover:text-gray-900 dark:text-gray-300 font-medium" @click="openEditTaskModal(t)">编辑</button>
-                  <button type="button" class="text-xs text-red-600 hover:text-red-800 font-medium" @click="deleteTask(t)">删除</button>
+                <td class="text-right whitespace-nowrap">
+                  <div class="inline-flex items-center gap-1.5">
+                    <button type="button" class="btn btn-xs btn-primary" @click="runTask(t)">立即同步</button>
+                    <button type="button" class="btn btn-xs" @click="openEditTaskModal(t)">编辑</button>
+                    <button type="button" class="btn btn-xs btn-danger" @click="deleteTask(t)">删除</button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -858,14 +853,14 @@ export default defineComponent({
       </div>
 
       <!-- Tab 3: 快照库与恢复 (Snapshots & Restore) -->
-      <div v-if="activeTab === 'snapshots'" class="space-y-4">
+      <div v-if="activeTab === 'snapshots'" class="flex flex-col gap-3">
         <!-- 筛选与批量操作工具栏 -->
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 shadow-sm">
+        <div class="panel p-3 flex flex-wrap items-center justify-between gap-3">
           <div class="flex items-center gap-3">
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">归属任务:</span>
+            <span class="text-xs font-medium text-slate-400">归属任务:</span>
             <select
               v-model="selectedTaskId"
-              class="text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-gray-900 dark:text-gray-100"
+              class="input font-mono text-xs w-auto py-1"
             >
               <option value="">全部备份任务 ({{ snapshots.length }})</option>
               <option v-for="t in backupTasks" :key="t.id" :value="t.id">
@@ -878,7 +873,7 @@ export default defineComponent({
           <div class="flex items-center gap-2">
             <button
               type="button"
-              class="px-3 py-1.5 rounded-lg text-xs font-medium border border-red-300 dark:border-red-800/60 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              class="btn btn-xs btn-danger"
               :disabled="selectedSnapshotIds.length === 0"
               @click="previewManualBatchDelete()"
             >
@@ -886,14 +881,14 @@ export default defineComponent({
             </button>
             <button
               type="button"
-              class="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              class="btn btn-xs"
               @click="openRulePruneModal()"
             >
               条件规则清理
             </button>
             <button
               type="button"
-              class="px-3 py-1.5 rounded-lg text-xs font-medium border border-purple-300 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/60 transition-colors"
+              class="btn btn-xs btn-primary"
               @click="previewGfsPrune()"
             >
               GFS 一键修剪
@@ -901,81 +896,82 @@ export default defineComponent({
           </div>
         </div>
 
-        <div v-if="filteredSnapshots.length === 0" class="p-8 text-center bg-white dark:bg-gray-850 rounded-xl border border-gray-200 dark:border-gray-800 text-gray-500">
+        <div v-if="filteredSnapshots.length === 0" class="panel p-8 text-center text-slate-500 text-xs">
           暂无快照数据。当增量备份任务执行后，生成的独立时间线快照将呈现在此。
         </div>
 
-        <div v-else class="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 shadow-sm">
-          <table class="w-full text-left text-sm">
-            <thead class="bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 font-medium border-b border-gray-200 dark:border-gray-700">
+        <div v-else class="panel overflow-x-auto">
+          <table class="data-table min-w-[56rem]">
+            <thead>
               <tr>
-                <th class="p-4 w-10">
+                <th class="w-10">
                   <input
                     type="checkbox"
                     :checked="isAllSelected"
-                    class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    class="accent-cyan-400"
                     @change="toggleSelectAll()"
                   />
                 </th>
-                <th class="p-4">快照编号 (时间戳)</th>
-                <th class="p-4">归属任务</th>
-                <th class="p-4">归档标记</th>
-                <th class="p-4">锁状态 (误删防线)</th>
-                <th class="p-4">文件数 / 容量</th>
-                <th class="p-4 text-right">操作</th>
+                <th>快照编号 (时间戳)</th>
+                <th>归属任务</th>
+                <th>归档标记</th>
+                <th>锁状态 (误删防线)</th>
+                <th>文件数 / 容量</th>
+                <th class="text-right">操作</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
-              <tr v-for="s in filteredSnapshots" :key="s.snapshotId" class="hover:bg-gray-50/50 dark:hover:bg-gray-800/50 transition-colors">
-                <td class="p-4">
+            <tbody>
+              <tr v-for="s in filteredSnapshots" :key="s.snapshotId">
+                <td>
                   <input
                     type="checkbox"
                     :checked="selectedSnapshotIds.includes(s.snapshotId)"
-                    class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    class="accent-cyan-400"
                     @change="toggleSelectSnapshot(s.snapshotId)"
                   />
                 </td>
-                <td class="p-4 font-mono font-medium text-gray-900 dark:text-gray-100">
-                  <div>{{ s.snapshotId }}</div>
-                  <div class="text-xs text-gray-400 mt-0.5">{{ formatTime(s.createdAt) }}</div>
+                <td class="font-mono font-medium text-slate-200">
+                  <div class="text-cyan-300">{{ s.snapshotId }}</div>
+                  <div class="text-xs text-slate-500 mt-0.5">{{ formatTime(s.createdAt) }}</div>
                 </td>
-                <td class="p-4 text-xs text-gray-600 dark:text-gray-400">
+                <td class="text-xs text-slate-400">
                   {{ getTaskName(s.taskId) }}
                 </td>
-                <td class="p-4">
+                <td>
                   <span
-                    class="inline-block px-2 py-0.5 rounded text-xs font-medium"
-                    :class="s.tag === 'Latest' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300' : (s.tag === 'Daily' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300' : (s.tag === 'Weekly' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300' : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'))"
+                    class="badge"
+                    :class="s.tag === 'Latest' ? 'border-cyan-500/50 text-cyan-300' : (s.tag === 'Daily' ? 'border-emerald-500/50 text-emerald-300' : (s.tag === 'Weekly' ? 'border-purple-500/50 text-purple-300' : 'border-slate-600/60 text-slate-400'))"
                   >
                     {{ s.tag || '普通' }}
                   </span>
                 </td>
-                <td class="p-4">
+                <td>
                   <button
                     type="button"
-                    class="px-2.5 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1"
-                    :class="s.isPinned ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 hover:bg-amber-200' : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200'"
+                    class="btn btn-xs"
+                    :class="s.isPinned ? '!border-amber-500/50 text-amber-300 bg-amber-500/10' : 'text-slate-400'"
                     @click="togglePin(s)"
                   >
                     <span>{{ s.isPinned ? '🔒 已锁定' : '🔓 未锁定' }}</span>
                   </button>
                 </td>
-                <td class="p-4 text-xs text-gray-600 dark:text-gray-400">
+                <td class="text-xs text-slate-400">
                   <div>{{ s.totalFiles }} 个文件</div>
-                  <div class="font-mono mt-0.5">{{ formatBytes(s.totalSizeBytes) }}</div>
+                  <div class="font-mono mt-0.5 text-slate-300">{{ formatBytes(s.totalSizeBytes) }}</div>
                 </td>
-                <td class="p-4 text-right space-x-2">
-                  <button type="button" class="text-xs text-blue-600 hover:text-blue-800 font-medium" @click="openFileTree(s)">浏览文件</button>
-                  <button type="button" class="text-xs text-emerald-600 hover:text-emerald-800 font-medium" @click="openRestoreModal(s)">还原</button>
-                  <button
-                    type="button"
-                    class="text-xs font-medium"
-                    :class="s.isPinned ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:text-red-800'"
-                    :disabled="s.isPinned"
-                    @click="deleteSingleSnapshot(s)"
-                  >
-                    删除
-                  </button>
+                <td class="text-right whitespace-nowrap">
+                  <div class="inline-flex items-center gap-1.5">
+                    <button type="button" class="btn btn-xs" @click="openFileTree(s)">浏览文件</button>
+                    <button type="button" class="btn btn-xs btn-primary" @click="openRestoreModal(s)">还原</button>
+                    <button
+                      type="button"
+                      class="btn btn-xs btn-danger"
+                      :disabled="s.isPinned"
+                      @click="deleteSingleSnapshot(s)"
+                    >
+                      删除
+                    </button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -984,32 +980,32 @@ export default defineComponent({
       </div>
 
       <!-- 新建 / 编辑任务弹窗 -->
-      <div v-if="showTaskModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-        <div class="bg-white dark:bg-gray-850 rounded-2xl max-w-2xl w-full p-6 space-y-5 border border-gray-200 dark:border-gray-800 shadow-xl max-h-[90vh] overflow-y-auto">
-          <div class="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
-            <h2 class="text-lg font-bold text-gray-900 dark:text-gray-100">
+      <div v-if="showTaskModal" class="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <div class="panel w-full max-w-2xl p-5 max-h-[90vh] overflow-y-auto flex flex-col gap-4" style="background: rgba(13, 21, 38, 0.97)">
+          <div class="flex items-center justify-between border-b border-cyber-line pb-3">
+            <h3 class="font-display text-base text-neon-soft">
               {{ editingTaskId ? '编辑任务' : '新建备份与同步任务' }}
-            </h2>
-            <button type="button" class="text-gray-400 hover:text-gray-600" @click="showTaskModal = false">✕</button>
+            </h3>
+            <button type="button" class="btn btn-xs" @click="showTaskModal = false">✕</button>
           </div>
 
-          <div class="space-y-4">
+          <div class="flex flex-col gap-3">
             <!-- 模式选择 -->
             <div>
-              <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">运作模式</label>
-              <div class="grid grid-cols-2 gap-3">
-                <label class="flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors" :class="taskForm.mode === 2 ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-950/20' : 'border-gray-200 dark:border-gray-700'">
-                  <input type="radio" v-model="taskForm.mode" :value="2" class="text-blue-600" />
+              <label class="block text-xs text-slate-400 mb-1">运作模式</label>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label class="flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors" :class="taskForm.mode === 2 ? 'border-cyan-500/50 bg-cyan-950/40 text-cyan-200' : 'border-cyber-line bg-cyber-panel/40 text-slate-300'">
+                  <input type="radio" v-model="taskForm.mode" :value="2" class="accent-cyan-400" />
                   <div>
-                    <div class="text-sm font-medium text-gray-900 dark:text-gray-100">增量版本备份 (Backup)</div>
-                    <div class="text-xs text-gray-500">硬链接多版本快照，GFS生命周期管理与历史回滚</div>
+                    <div class="text-xs font-semibold text-slate-200">增量版本备份 (Backup)</div>
+                    <div class="text-[11px] text-slate-400 mt-0.5">硬链接多版本快照，GFS生命周期管理与历史回滚</div>
                   </div>
                 </label>
-                <label class="flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors" :class="taskForm.mode === 1 ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-950/20' : 'border-gray-200 dark:border-gray-700'">
-                  <input type="radio" v-model="taskForm.mode" :value="1" class="text-blue-600" />
+                <label class="flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors" :class="taskForm.mode === 1 ? 'border-cyan-500/50 bg-cyan-950/40 text-cyan-200' : 'border-cyber-line bg-cyber-panel/40 text-slate-300'">
+                  <input type="radio" v-model="taskForm.mode" :value="1" class="accent-cyan-400" />
                   <div>
-                    <div class="text-sm font-medium text-gray-900 dark:text-gray-100">直接镜像同步 (Sync)</div>
-                    <div class="text-xs text-gray-500">源目录最新状态镜像至目标端，支持删除暂存回收站</div>
+                    <div class="text-xs font-semibold text-slate-200">直接镜像同步 (Sync)</div>
+                    <div class="text-[11px] text-slate-400 mt-0.5">源目录最新状态镜像至目标端，支持删除暂存回收站</div>
                   </div>
                 </label>
               </div>
@@ -1017,95 +1013,93 @@ export default defineComponent({
 
             <!-- 任务名称 -->
             <div>
-              <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">任务名称</label>
+              <label class="block text-xs text-slate-400 mb-1">任务名称</label>
               <input
                 type="text"
                 v-model="taskForm.name"
                 placeholder="例如：开发代码每日增量备份"
-                class="w-full text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-gray-100"
+                class="input text-xs"
               />
             </div>
 
             <!-- 源目录与目标目录 -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">源端目录 (Source)</label>
+                <label class="block text-xs text-slate-400 mb-1">源端目录 (Source)</label>
                 <div class="flex gap-2">
                   <input
                     type="text"
                     v-model="taskForm.sourcePath"
                     placeholder="/data/projects"
-                    class="w-full text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 font-mono text-xs text-gray-900 dark:text-gray-100"
+                    class="input font-mono text-xs"
                   />
                   <button
                     type="button"
-                    class="px-3 py-2 rounded-lg text-xs font-medium border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 shrink-0"
+                    class="btn btn-xs shrink-0 self-center"
                     @click="openPickerFor('sourcePath')"
                   >
-                    选择
+                    📂 浏览
                   </button>
                 </div>
               </div>
 
               <div>
-                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">目标目录 (Target)</label>
+                <label class="block text-xs text-slate-400 mb-1">目标目录 (Target)</label>
                 <div class="flex gap-2">
                   <input
                     type="text"
                     v-model="taskForm.targetPath"
                     placeholder="/backup/projects"
-                    class="w-full text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 font-mono text-xs text-gray-900 dark:text-gray-100"
+                    class="input font-mono text-xs"
                   />
                   <button
                     type="button"
-                    class="px-3 py-2 rounded-lg text-xs font-medium border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 shrink-0"
+                    class="btn btn-xs shrink-0 self-center"
                     @click="openPickerFor('targetPath')"
                   >
-                    选择
+                    📂 浏览
                   </button>
                 </div>
               </div>
             </div>
 
             <!-- 定时调度 (Cron) -->
-            <div class="p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40 space-y-3">
+            <div class="panel p-3 flex flex-col gap-2">
               <div class="flex items-center justify-between">
-                <label class="text-xs font-medium text-gray-700 dark:text-gray-300">定时触发设置</label>
-                <div class="flex gap-2">
-                  <select
-                    v-model="taskForm.cronPreset"
-                    class="text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-gray-900 dark:text-gray-100"
-                    @change="onCronPresetChange()"
-                  >
-                    <option value="daily_02">每天凌晨 02:00</option>
-                    <option value="hourly">每小时一次</option>
-                    <option value="weekly_sun">每周日凌晨 03:00</option>
-                    <option value="monthly_1st">每月 1 号凌晨 04:00</option>
-                    <option value="custom">高级自定义 Cron</option>
-                  </select>
-                </div>
+                <label class="text-xs text-slate-400">定时触发设置</label>
+                <select
+                  v-model="taskForm.cronPreset"
+                  class="input text-xs w-auto py-1"
+                  @change="onCronPresetChange()"
+                >
+                  <option value="daily_02">每天凌晨 02:00</option>
+                  <option value="hourly">每小时一次</option>
+                  <option value="weekly_sun">每周日凌晨 03:00</option>
+                  <option value="monthly_1st">每月 1 号凌晨 04:00</option>
+                  <option value="custom">高级自定义 Cron</option>
+                </select>
               </div>
 
               <div class="flex gap-2">
                 <input
                   type="text"
                   v-model="taskForm.cronExpression"
-                  class="w-full text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 font-mono text-xs text-gray-900 dark:text-gray-100"
+                  class="input font-mono text-xs flex-1"
                   @input="fetchCronPreview()"
                 />
                 <button
                   type="button"
-                  class="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 shrink-0"
+                  class="btn btn-xs"
                   @click="fetchCronPreview()"
                 >
                   测试预测
                 </button>
               </div>
 
-              <div v-if="cronPreviewError" class="text-xs text-red-500 font-mono">{{ cronPreviewError }}</div>
-              <div v-else-if="cronPreviewList.length > 0" class="text-xs text-gray-500 space-y-0.5">
-                <span class="font-medium text-gray-700 dark:text-gray-300">预计未来触发节点：</span>
-                <div class="grid grid-cols-2 gap-1 font-mono text-xs text-blue-600 dark:text-blue-400">
+              <div v-if="cronPreviewError" class="text-xs text-rose-400 font-mono">{{ cronPreviewError }}</div>
+              <div v-else-if="cronPreviewList.length > 0" class="text-xs text-slate-400 space-y-0.5">
+                <span class="text-slate-400">预计未来触发节点：</span>
+                <div class="grid grid-cols-2 gap-1 font-mono text-xs text-cyan-300">
                   <div v-for="(pTime, idx) in cronPreviewList" :key="idx">
                     {{ idx + 1 }}. {{ formatTime(pTime) }}
                   </div>
@@ -1114,42 +1108,42 @@ export default defineComponent({
             </div>
 
             <!-- 增量备份专属设置 (GFS 轮转) -->
-            <div v-if="taskForm.mode === 2" class="p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40 space-y-3">
-              <div class="text-xs font-medium text-gray-700 dark:text-gray-300">GFS 多维快照保留轮转策略</div>
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div v-if="taskForm.mode === 2" class="panel p-3 flex flex-col gap-2">
+              <div class="text-xs text-slate-400">GFS 多维快照保留轮转策略</div>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <div>
-                  <label class="block text-xs text-gray-500 mb-1">保留最近连续次数</label>
-                  <input type="number" min="1" v-model.number="taskForm.keepLastCount" class="w-full text-xs rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 p-1.5 text-gray-900 dark:text-gray-100" />
+                  <label class="block text-[11px] text-slate-500 mb-1">保留最近连续次数</label>
+                  <input type="number" min="1" v-model.number="taskForm.keepLastCount" class="input font-mono text-xs" />
                 </div>
                 <div>
-                  <label class="block text-xs text-gray-500 mb-1">每日快照天数</label>
-                  <input type="number" min="0" v-model.number="taskForm.keepDays" class="w-full text-xs rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 p-1.5 text-gray-900 dark:text-gray-100" />
+                  <label class="block text-[11px] text-slate-500 mb-1">每日快照天数</label>
+                  <input type="number" min="0" v-model.number="taskForm.keepDays" class="input font-mono text-xs" />
                 </div>
                 <div>
-                  <label class="block text-xs text-gray-500 mb-1">每周快照周数</label>
-                  <input type="number" min="0" v-model.number="taskForm.keepWeeks" class="w-full text-xs rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 p-1.5 text-gray-900 dark:text-gray-100" />
+                  <label class="block text-[11px] text-slate-500 mb-1">每周快照周数</label>
+                  <input type="number" min="0" v-model.number="taskForm.keepWeeks" class="input font-mono text-xs" />
                 </div>
                 <div>
-                  <label class="block text-xs text-gray-500 mb-1">每月快照月数</label>
-                  <input type="number" min="0" v-model.number="taskForm.keepMonths" class="w-full text-xs rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 p-1.5 text-gray-900 dark:text-gray-100" />
+                  <label class="block text-[11px] text-slate-500 mb-1">每月快照月数</label>
+                  <input type="number" min="0" v-model.number="taskForm.keepMonths" class="input font-mono text-xs" />
                 </div>
               </div>
             </div>
 
             <!-- 直接同步专属设置 -->
-            <div v-if="taskForm.mode === 1" class="p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40 space-y-3">
-              <div class="text-xs font-medium text-gray-700 dark:text-gray-300">同步模式专属设置</div>
+            <div v-if="taskForm.mode === 1" class="panel p-3 flex flex-col gap-2">
+              <div class="text-xs text-slate-400">同步模式专属设置</div>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label class="block text-xs text-gray-500 mb-1">同步方向</label>
-                  <select v-model="taskForm.syncDirection" class="w-full text-xs rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 p-1.5 text-gray-900 dark:text-gray-100">
+                  <label class="block text-[11px] text-slate-500 mb-1">同步方向</label>
+                  <select v-model="taskForm.syncDirection" class="input text-xs">
                     <option :value="1">单向镜像 (源端删除时目标跟随删除)</option>
                     <option :value="2">单向累加 (源端删除时目标端保留)</option>
                   </select>
                 </div>
                 <div v-if="taskForm.syncDirection === 1">
-                  <label class="block text-xs text-gray-500 mb-1">删除行为</label>
-                  <select v-model="taskForm.deleteHandling" class="w-full text-xs rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 p-1.5 text-gray-900 dark:text-gray-100">
+                  <label class="block text-[11px] text-slate-500 mb-1">删除行为</label>
+                  <select v-model="taskForm.deleteHandling" class="input text-xs">
                     <option :value="2">暂存目标回收站 (.lwt_trash)</option>
                     <option :value="1">直接永久删除目标多余文件</option>
                   </select>
@@ -1159,27 +1153,27 @@ export default defineComponent({
 
             <!-- 排除规则 -->
             <div>
-              <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">排除规则 (通配符以分号或逗号分隔)</label>
+              <label class="block text-xs text-slate-400 mb-1">排除规则 (通配符以分号或逗号分隔)</label>
               <input
                 type="text"
                 v-model="taskForm.excludePatternsText"
                 placeholder="例如：node_modules; *.tmp; .git; *.cache"
-                class="w-full text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 font-mono text-xs text-gray-900 dark:text-gray-100"
+                class="input font-mono text-xs"
               />
             </div>
           </div>
 
-          <div class="flex items-center justify-end gap-3 pt-4 border-t border-gray-100 dark:border-gray-800">
+          <div class="flex items-center justify-end gap-2 pt-3 border-t border-cyber-line">
             <button
               type="button"
-              class="px-4 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 text-gray-700 dark:text-gray-200"
+              class="btn"
               @click="showTaskModal = false"
             >
               取消
             </button>
             <button
               type="button"
-              class="px-5 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium disabled:opacity-50"
+              class="btn btn-primary"
               :disabled="taskSaving"
               @click="saveTask()"
             >
@@ -1190,92 +1184,92 @@ export default defineComponent({
       </div>
 
       <!-- 条件规则清理弹窗 -->
-      <div v-if="showRulePruneModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-        <div class="bg-white dark:bg-gray-850 rounded-2xl max-w-md w-full p-6 space-y-4 border border-gray-200 dark:border-gray-800 shadow-xl">
-          <div class="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
-            <h2 class="text-base font-bold text-gray-900 dark:text-gray-100">条件规则批量清理</h2>
-            <button type="button" class="text-gray-400 hover:text-gray-600" @click="showRulePruneModal = false">✕</button>
+      <div v-if="showRulePruneModal" class="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <div class="panel w-full max-w-md p-5 flex flex-col gap-4" style="background: rgba(13, 21, 38, 0.97)">
+          <div class="flex items-center justify-between border-b border-cyber-line pb-3">
+            <h3 class="font-display text-base text-neon-soft">条件规则批量清理</h3>
+            <button type="button" class="btn btn-xs" @click="showRulePruneModal = false">✕</button>
           </div>
 
-          <div class="space-y-3">
-            <label class="flex items-center gap-2 p-3 rounded-lg border cursor-pointer" :class="rulePruneForm.mode === 'olderThan' ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-950/20' : 'border-gray-200 dark:border-gray-700'">
-              <input type="radio" v-model="rulePruneForm.mode" value="olderThan" class="text-blue-600" />
-              <div class="flex items-center gap-2 text-sm">
+          <div class="flex flex-col gap-3">
+            <label class="flex items-center gap-2 p-3 rounded-lg border cursor-pointer" :class="rulePruneForm.mode === 'olderThan' ? 'border-cyan-500/50 bg-cyan-950/40 text-cyan-200' : 'border-cyber-line bg-cyber-panel/40 text-slate-300'">
+              <input type="radio" v-model="rulePruneForm.mode" value="olderThan" class="accent-cyan-400" />
+              <div class="flex items-center gap-2 text-xs">
                 <span>清理早于</span>
-                <input type="number" min="1" v-model.number="rulePruneForm.olderThanDays" class="w-16 p-1 text-center border rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
+                <input type="number" min="1" v-model.number="rulePruneForm.olderThanDays" class="input font-mono text-xs w-16 text-center py-0.5 inline-block" />
                 <span>天的所有快照</span>
               </div>
             </label>
 
-            <label class="flex items-center gap-2 p-3 rounded-lg border cursor-pointer" :class="rulePruneForm.mode === 'keepLatest' ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-950/20' : 'border-gray-200 dark:border-gray-700'">
-              <input type="radio" v-model="rulePruneForm.mode" value="keepLatest" class="text-blue-600" />
-              <div class="flex items-center gap-2 text-sm">
+            <label class="flex items-center gap-2 p-3 rounded-lg border cursor-pointer" :class="rulePruneForm.mode === 'keepLatest' ? 'border-cyan-500/50 bg-cyan-950/40 text-cyan-200' : 'border-cyber-line bg-cyber-panel/40 text-slate-300'">
+              <input type="radio" v-model="rulePruneForm.mode" value="keepLatest" class="accent-cyan-400" />
+              <div class="flex items-center gap-2 text-xs">
                 <span>仅保留最近</span>
-                <input type="number" min="1" v-model.number="rulePruneForm.keepLatestCount" class="w-16 p-1 text-center border rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" />
+                <input type="number" min="1" v-model.number="rulePruneForm.keepLatestCount" class="input font-mono text-xs w-16 text-center py-0.5 inline-block" />
                 <span>份快照，批量清理其余</span>
               </div>
             </label>
-            <p class="text-xs text-amber-600 dark:text-amber-400">
+            <p class="text-[11px] text-amber-300">
               * 安全底线保护：处于加锁保护 🔒 状态的快照与最新 1 份快照将被自动跳过。
             </p>
           </div>
 
-          <div class="flex items-center justify-end gap-3 pt-3 border-t border-gray-100 dark:border-gray-800">
-            <button type="button" class="px-3.5 py-1.5 rounded-lg text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200" @click="showRulePruneModal = false">取消</button>
-            <button type="button" class="px-4 py-1.5 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium" @click="previewRulePrune()">开始预演</button>
+          <div class="flex items-center justify-end gap-2 pt-3 border-t border-cyber-line">
+            <button type="button" class="btn" @click="showRulePruneModal = false">取消</button>
+            <button type="button" class="btn btn-primary" @click="previewRulePrune()">开始预演</button>
           </div>
         </div>
       </div>
 
       <!-- 批量清理 / GFS 修剪 Dry-Run 预演确认弹窗 -->
-      <div v-if="showPrunePreviewModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-        <div class="bg-white dark:bg-gray-850 rounded-2xl max-w-lg w-full p-6 space-y-4 border border-gray-200 dark:border-gray-800 shadow-xl">
-          <div class="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
-            <h2 class="text-base font-bold text-gray-900 dark:text-gray-100">{{ pruneActionTitle }}</h2>
-            <button type="button" class="text-gray-400 hover:text-gray-600" @click="showPrunePreviewModal = false">✕</button>
+      <div v-if="showPrunePreviewModal" class="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <div class="panel w-full max-w-lg p-5 flex flex-col gap-4" style="background: rgba(13, 21, 38, 0.97)">
+          <div class="flex items-center justify-between border-b border-cyber-line pb-3">
+            <h3 class="font-display text-base text-neon-soft">{{ pruneActionTitle }}</h3>
+            <button type="button" class="btn btn-xs" @click="showPrunePreviewModal = false">✕</button>
           </div>
 
-          <div class="grid grid-cols-2 gap-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-800/40 border border-gray-100 dark:border-gray-700">
+          <div class="grid grid-cols-2 gap-3 p-3 rounded-xl bg-cyber-panel border border-cyber-line">
             <div>
-              <div class="text-xs text-gray-500">待清理快照数</div>
-              <div class="text-lg font-bold text-red-600 dark:text-red-400">{{ pruneResult.deletedCount }} 份</div>
+              <div class="text-xs text-slate-400">待清理快照数</div>
+              <div class="text-lg font-bold text-rose-400">{{ pruneResult.deletedCount }} 份</div>
             </div>
             <div>
-              <div class="text-xs text-gray-500">锁定保护跳过数</div>
-              <div class="text-lg font-bold text-amber-600 dark:text-amber-400">{{ pruneResult.skippedPinnedCount }} 份</div>
+              <div class="text-xs text-slate-400">锁定保护跳过数</div>
+              <div class="text-lg font-bold text-amber-300">{{ pruneResult.skippedPinnedCount }} 份</div>
             </div>
-            <div class="col-span-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-              <div class="text-xs text-gray-500">预估释放物理空间</div>
-              <div class="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
+            <div class="col-span-2 pt-2 border-t border-cyber-line">
+              <div class="text-xs text-slate-400">预估释放物理空间</div>
+              <div class="text-xl font-bold font-mono text-emerald-400">
                 {{ formatBytes(pruneResult.estimatedReclaimedBytes) }}
               </div>
             </div>
           </div>
 
-          <div v-if="pruneResult.deletedCount === 0" class="p-3 text-sm text-gray-500 text-center">
+          <div v-if="pruneResult.deletedCount === 0" class="p-3 text-xs text-slate-500 text-center">
             未发现符合修剪条件的快照（或快照均已被锁定/熔断保护）。
           </div>
 
-          <div v-else class="space-y-2">
-            <div class="text-xs font-medium text-gray-700 dark:text-gray-300">将受影响的快照清单：</div>
-            <div class="max-h-36 overflow-y-auto p-2 rounded border border-gray-200 dark:border-gray-700 text-xs font-mono text-gray-600 dark:text-gray-400 space-y-1">
+          <div v-else class="flex flex-col gap-1.5">
+            <div class="text-xs font-medium text-slate-300">将受影响的快照清单：</div>
+            <div class="max-h-36 overflow-y-auto p-2 rounded border border-cyber-line bg-cyber-bg text-xs font-mono text-slate-400 space-y-1">
               <div v-for="sid in pruneResult.affectedSnapshotIds" :key="sid">
                 • {{ sid }}
               </div>
             </div>
           </div>
 
-          <div class="flex items-center justify-end gap-3 pt-3 border-t border-gray-100 dark:border-gray-800">
+          <div class="flex items-center justify-end gap-2 pt-3 border-t border-cyber-line">
             <button
               type="button"
-              class="px-4 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"
+              class="btn"
               @click="showPrunePreviewModal = false"
             >
               取消
             </button>
             <button
               type="button"
-              class="px-5 py-2 rounded-lg text-sm bg-red-600 hover:bg-red-700 text-white font-medium disabled:opacity-40"
+              class="btn btn-danger"
               :disabled="pruneResult.deletedCount === 0 || pruneExecuting"
               @click="executeConfirmedPrune()"
             >
@@ -1286,85 +1280,85 @@ export default defineComponent({
       </div>
 
       <!-- 快照目录树浏览弹窗 -->
-      <div v-if="showFileTreeModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-        <div class="bg-white dark:bg-gray-850 rounded-2xl max-w-2xl w-full p-6 space-y-4 border border-gray-200 dark:border-gray-800 shadow-xl max-h-[85vh] flex flex-col">
-          <div class="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
+      <div v-if="showFileTreeModal" class="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <div class="panel w-full max-w-2xl p-5 max-h-[85vh] flex flex-col gap-3" style="background: rgba(13, 21, 38, 0.97)">
+          <div class="flex items-center justify-between border-b border-cyber-line pb-3">
             <div>
-              <h2 class="text-base font-bold text-gray-900 dark:text-gray-100">
+              <h3 class="font-display text-base text-neon-soft">
                 快照文件浏览: {{ currentSnapshot?.snapshotId }}
-              </h2>
-              <div class="text-xs text-gray-400 mt-0.5">{{ currentSnapshot?.snapshotPath }}</div>
+              </h3>
+              <div class="text-xs text-slate-500 font-mono mt-0.5">{{ currentSnapshot?.snapshotPath }}</div>
             </div>
-            <button type="button" class="text-gray-400 hover:text-gray-600" @click="showFileTreeModal = false">✕</button>
+            <button type="button" class="btn btn-xs" @click="showFileTreeModal = false">✕</button>
           </div>
 
-          <div v-if="fileTreeLoading" class="p-8 text-center text-sm text-gray-500">正在解析快照目录树...</div>
+          <div v-if="fileTreeLoading" class="p-8 text-center text-xs text-slate-500">正在解析快照目录树...</div>
           <div v-else class="flex-1 overflow-y-auto space-y-1 font-mono text-xs">
-            <div v-for="node in fileTreeNodes" :key="node.relativePath" class="p-1 hover:bg-gray-50 dark:hover:bg-gray-800 rounded flex items-center justify-between">
-              <span class="flex items-center gap-1.5 text-gray-800 dark:text-gray-200">
+            <div v-for="node in fileTreeNodes" :key="node.relativePath" class="p-1 hover:bg-cyber-panel-2 rounded flex items-center justify-between">
+              <span class="flex items-center gap-1.5 text-slate-200">
                 <span>{{ node.isDirectory ? '📁' : '📄' }}</span>
                 <span>{{ node.relativePath }}</span>
               </span>
-              <span v-if="!node.isDirectory" class="text-gray-400 text-2xs">{{ formatBytes(node.sizeBytes) }}</span>
+              <span v-if="!node.isDirectory" class="text-slate-500 text-[11px]">{{ formatBytes(node.sizeBytes) }}</span>
             </div>
           </div>
 
-          <div class="flex justify-end pt-3 border-t border-gray-100 dark:border-gray-800">
-            <button type="button" class="px-4 py-1.5 rounded-lg text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200" @click="showFileTreeModal = false">关闭</button>
+          <div class="flex justify-end pt-3 border-t border-cyber-line">
+            <button type="button" class="btn" @click="showFileTreeModal = false">关闭</button>
           </div>
         </div>
       </div>
 
       <!-- 快照还原确认弹窗 -->
-      <div v-if="showRestoreModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-        <div class="bg-white dark:bg-gray-850 rounded-2xl max-w-lg w-full p-6 space-y-4 border border-gray-200 dark:border-gray-800 shadow-xl">
-          <div class="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
-            <h2 class="text-base font-bold text-gray-900 dark:text-gray-100">快照还原作业</h2>
-            <button type="button" class="text-gray-400 hover:text-gray-600" @click="showRestoreModal = false">✕</button>
+      <div v-if="showRestoreModal" class="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <div class="panel w-full max-w-lg p-5 flex flex-col gap-4" style="background: rgba(13, 21, 38, 0.97)">
+          <div class="flex items-center justify-between border-b border-cyber-line pb-3">
+            <h3 class="font-display text-base text-neon-soft">快照还原作业</h3>
+            <button type="button" class="btn btn-xs" @click="showRestoreModal = false">✕</button>
           </div>
 
-          <div class="space-y-3">
+          <div class="flex flex-col gap-3">
             <div>
-              <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">还原模式</label>
-              <div class="space-y-2">
-                <label class="flex items-center gap-2 p-3 rounded-lg border cursor-pointer" :class="restoreForm.restoreMode === 'source' ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-950/20' : 'border-gray-200 dark:border-gray-700'">
-                  <input type="radio" v-model="restoreForm.restoreMode" value="source" class="text-blue-600" />
+              <label class="block text-xs text-slate-400 mb-1">还原模式</label>
+              <div class="flex flex-col gap-2">
+                <label class="flex items-center gap-2 p-3 rounded-lg border cursor-pointer" :class="restoreForm.restoreMode === 'source' ? 'border-cyan-500/50 bg-cyan-950/40 text-cyan-200' : 'border-cyber-line bg-cyber-panel/40 text-slate-300'">
+                  <input type="radio" v-model="restoreForm.restoreMode" value="source" class="accent-cyan-400" />
                   <div>
-                    <div class="text-sm font-medium text-gray-900 dark:text-gray-100">原位覆盖回滚 (In-place Restore)</div>
-                    <div class="text-xs text-gray-500">将快照数据直接写回原工作目录</div>
+                    <div class="text-xs font-semibold text-slate-200">原位覆盖回滚 (In-place Restore)</div>
+                    <div class="text-[11px] text-slate-400 mt-0.5">将快照数据直接写回原工作目录</div>
                   </div>
                 </label>
-                <label class="flex items-center gap-2 p-3 rounded-lg border cursor-pointer" :class="restoreForm.restoreMode === 'custom' ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-950/20' : 'border-gray-200 dark:border-gray-700'">
-                  <input type="radio" v-model="restoreForm.restoreMode" value="custom" class="text-blue-600" />
+                <label class="flex items-center gap-2 p-3 rounded-lg border cursor-pointer" :class="restoreForm.restoreMode === 'custom' ? 'border-cyan-500/50 bg-cyan-950/40 text-cyan-200' : 'border-cyber-line bg-cyber-panel/40 text-slate-300'">
+                  <input type="radio" v-model="restoreForm.restoreMode" value="custom" class="accent-cyan-400" />
                   <div>
-                    <div class="text-sm font-medium text-gray-900 dark:text-gray-100">提取还原至指定新目录 (Custom Directory)</div>
-                    <div class="text-xs text-gray-500">安全还原到单独目录进行校验，不影响当前生产文件</div>
+                    <div class="text-xs font-semibold text-slate-200">提取还原至指定新目录 (Custom Directory)</div>
+                    <div class="text-[11px] text-slate-400 mt-0.5">安全还原到单独目录进行校验，不影响当前生产文件</div>
                   </div>
                 </label>
               </div>
             </div>
 
             <div v-if="restoreForm.restoreMode === 'custom'">
-              <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">目标提取目录</label>
+              <label class="block text-xs text-slate-400 mb-1">目标提取目录</label>
               <input
                 type="text"
                 v-model="restoreForm.customPath"
                 placeholder="/restore/20261011_extracted"
-                class="w-full text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 font-mono text-xs text-gray-900 dark:text-gray-100"
+                class="input font-mono text-xs"
               />
             </div>
 
-            <label class="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 cursor-pointer pt-1">
-              <input type="checkbox" v-model="restoreForm.cleanTarget" class="rounded border-gray-300 text-blue-600" />
+            <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer pt-1">
+              <input type="checkbox" v-model="restoreForm.cleanTarget" class="accent-cyan-400" />
               <span>还原前彻底清空目标目录已有文件</span>
             </label>
           </div>
 
-          <div class="flex items-center justify-end gap-3 pt-3 border-t border-gray-100 dark:border-gray-800">
-            <button type="button" class="px-4 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200" @click="showRestoreModal = false">取消</button>
+          <div class="flex items-center justify-end gap-2 pt-3 border-t border-cyber-line">
+            <button type="button" class="btn" @click="showRestoreModal = false">取消</button>
             <button
               type="button"
-              class="px-5 py-2 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-700 text-white font-medium disabled:opacity-50"
+              class="btn btn-primary"
               :disabled="restoreForm.restoring || (restoreForm.restoreMode === 'custom' && !restoreForm.customPath.trim())"
               @click="executeRestore()"
             >
@@ -1379,8 +1373,8 @@ export default defineComponent({
         :show="picker.show"
         :mode="picker.mode"
         :start-path="picker.startPath"
-        @confirm="onPickerConfirm($event)"
-        @cancel="picker.show = false"
+        @select="onPickerConfirm($event)"
+        @close="picker.show = false"
       />
     </div>
   `,

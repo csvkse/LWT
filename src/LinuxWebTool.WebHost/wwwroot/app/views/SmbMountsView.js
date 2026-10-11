@@ -514,7 +514,7 @@ export default defineComponent({
               </div>
               <div v-if="form.authType === 'privateKey'" class="block">
                 <span class="text-xs text-slate-500 mb-1 block">SSH 私钥内容（OpenSSH / PEM 格式，自动以 600 权限隔离落地）</span>
-                <textarea class="input font-mono text-xs h-24 resize-y" v-model="form.privateKeyContent" :placeholder="editingId ? '留空=保持既有私钥不变' : '-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----'"></textarea>
+                <textarea class="input font-mono text-xs h-24 resize-y" v-model="form.privateKeyContent" :placeholder="editingId ? '留空=保持既有私钥不变' : '-----BEGIN OPENSSH PRIVATE KEY----- ... -----END OPENSSH PRIVATE KEY-----'"></textarea>
               </div>
               <div v-if="form.authType === 'keyFile'" class="block">
                 <span class="text-xs text-slate-500 mb-1 block">容器内私钥文件绝对路径</span>
