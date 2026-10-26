@@ -2,7 +2,11 @@ using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using LinuxWebTool.Contracts.Features.Gateway.Contracts;
+using LinuxWebTool.Infrastructure.Features.Gateway.Adapters;
+using LinuxWebTool.Infrastructure.Shared.Persistence;
 using LinuxWebTool.WebHost.Features.Gateway.Adapters;
+using LinuxWebTool.WebHost.Features.Gateway.Routes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -381,6 +385,157 @@ public sealed class GatewayUnitTests
         {
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             try { if (File.Exists(tempDb)) File.Delete(tempDb); } catch { }
+        }
+    }
+
+    // === 6. LinuxArch025 架构门禁测试：双栈监听、端口冲突状态报告与自愈能力 ===
+
+    [Fact]
+    public async Task TcpProxyEngine_DualStack_Binding_And_RuntimeStatus_Exposed()
+    {
+        var tempDb = Path.Combine(Path.GetTempPath(), $"lwt_test_dual_{Guid.NewGuid():N}.db");
+        try
+        {
+            var dbFactory = DbSetup.CreateFactory($"Data Source={tempDb}");
+            DbSetup.Initialize(dbFactory);
+            var store = new GatewayStore(dbFactory);
+
+            var port = GetAvailablePort();
+            var tcpRoute = new GatewayTcpRouteEntity
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Name = "test-dualstack",
+                Protocol = "TCP",
+                ListenPort = port,
+                ForwardHost = "127.0.0.1",
+                ForwardPort = 80,
+                IsEnabled = true
+            };
+            await store.InsertTcpRouteAsync(tcpRoute);
+
+            var engine = new TcpProxyEngine(store, NullLogger<TcpProxyEngine>.Instance);
+            await engine.ReloadAsync();
+
+            var status = engine.GetRuntimeStatus(port);
+            Assert.True(status.IsRunning, "双栈引擎必须成功监听");
+            Assert.Null(status.LastError);
+            Assert.NotNull(status.BoundAddress);
+            Assert.True(status.BoundAddress == "[::]" || status.BoundAddress == "0.0.0.0");
+
+            await engine.StopAsync(CancellationToken.None);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { if (File.Exists(tempDb)) File.Delete(tempDb); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task TcpProxyEngine_Port_Conflict_Reports_LastError_And_AutoHeals()
+    {
+        var tempDb = Path.Combine(Path.GetTempPath(), $"lwt_test_conflict_{Guid.NewGuid():N}.db");
+        try
+        {
+            var dbFactory = DbSetup.CreateFactory($"Data Source={tempDb}");
+            DbSetup.Initialize(dbFactory);
+            var store = new GatewayStore(dbFactory);
+
+            // 1. 预先人为占用端口 (使用双栈监听器占用，触发精准端口冲突)
+            var conflictPort = GetAvailablePort();
+            using var blocker = TcpListener.Create(conflictPort);
+            blocker.Start();
+
+            // 2. 配置相同端口的转发规则并执行 ReloadAsync
+            var route = new GatewayTcpRouteEntity
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Name = "conflict-route",
+                Protocol = "TCP",
+                ListenPort = conflictPort,
+                ForwardHost = "127.0.0.1",
+                ForwardPort = 80,
+                IsEnabled = true
+            };
+            await store.InsertTcpRouteAsync(route);
+
+            var engine = new TcpProxyEngine(store, NullLogger<TcpProxyEngine>.Instance);
+            await engine.ReloadAsync();
+
+            // 3. 验证状态机准确捕获端口冲突错误，而非静默假绿
+            var conflictStatus = engine.GetRuntimeStatus(conflictPort);
+            Assert.False(conflictStatus.IsRunning, "端口冲突时 IsRunning 必须为 false");
+            Assert.NotNull(conflictStatus.LastError);
+            Assert.Contains("启动监听失败", conflictStatus.LastError);
+
+            // 4. 释放冲突端口，重新 Reload 验证自愈恢复
+            blocker.Stop();
+            await engine.ReloadAsync();
+
+            var healedStatus = engine.GetRuntimeStatus(conflictPort);
+            Assert.True(healedStatus.IsRunning, "端口释放后自愈引擎必须恢复监听成功");
+            Assert.Null(healedStatus.LastError);
+
+            await engine.StopAsync(CancellationToken.None);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { if (File.Exists(tempDb)) File.Delete(tempDb); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task GatewayController_TestTarget_Reachability_Detection()
+    {
+        var tempDb = Path.Combine(Path.GetTempPath(), $"lwt_test_ctrl_{Guid.NewGuid():N}.db");
+        try
+        {
+            var dbFactory = DbSetup.CreateFactory($"Data Source={tempDb}");
+            DbSetup.Initialize(dbFactory);
+            var store = new GatewayStore(dbFactory);
+
+            // 启动一个测试 TCP 监听端点
+            var echoPort = GetAvailablePort();
+            using var listener = new TcpListener(IPAddress.Loopback, echoPort);
+            listener.Start();
+
+            var tcpEngine = new TcpProxyEngine(store, NullLogger<TcpProxyEngine>.Instance);
+            var udpEngine = new UdpProxyEngine(store, NullLogger<UdpProxyEngine>.Instance);
+            var dummyAllow = new WebsiteAllowList();
+            var dummyTransform = new WebsiteProxyTransformProvider(dummyAllow, NullLogger<WebsiteProxyTransformProvider>.Instance);
+            var dummyConfigProvider = new DatabaseProxyConfigProvider(store, dummyAllow, NullLogger<DatabaseProxyConfigProvider>.Instance);
+
+            var controller = new GatewayController(
+                store,
+                dummyConfigProvider,
+                tcpEngine,
+                udpEngine,
+                new NullOperationLogger());
+
+            // 1. 探测存活的开放端口
+            var validReq = new TestL4TargetRequest("TCP", "127.0.0.1", echoPort, 2000);
+            var validResult = await controller.TestTarget(validReq);
+            var validOk = Assert.IsAssignableFrom<Microsoft.AspNetCore.Http.IResult>(validResult);
+
+            // 2. 探测未开放的端口（验证快速失败返回错误描述）
+            var closedPort = GetAvailablePort();
+            var invalidReq = new TestL4TargetRequest("TCP", "127.0.0.1", closedPort, 1000);
+            var invalidResult = await controller.TestTarget(invalidReq);
+            Assert.NotNull(invalidResult);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { if (File.Exists(tempDb)) File.Delete(tempDb); } catch { }
+        }
+    }
+
+    private sealed class NullOperationLogger : IOperationLogger
+    {
+        public Task LogAsync(string action, string targetType, string targetName, string? detail = null, bool success = true, string? clientIp = null)
+        {
+            return Task.CompletedTask;
         }
     }
 

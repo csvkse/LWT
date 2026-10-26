@@ -251,6 +251,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_GatewayController.MapDelete("Websites/{id}", async ([FromServices] GatewayController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; return await ctrl.DeleteWebsite(id); });
             group_GatewayController.MapGet("TcpRoutes", async ([FromServices] GatewayController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.GetTcpRoutes(); });
             group_GatewayController.MapPost("TcpRoutes", async ([FromServices] GatewayController ctrl, HttpContext ctx, [FromBody] SaveGatewayTcpRouteRequest request) => { ctrl.HttpContext = ctx; return await ctrl.CreateTcpRoute(request); });
+            group_GatewayController.MapPost("TcpRoutes/TestTarget", async ([FromServices] GatewayController ctrl, HttpContext ctx, [FromBody] TestL4TargetRequest request) => { ctrl.HttpContext = ctx; return await ctrl.TestTarget(request); });
             group_GatewayController.MapPut("TcpRoutes/{id}", async ([FromServices] GatewayController ctrl, HttpContext ctx, string id, [FromBody] SaveGatewayTcpRouteRequest request) => { ctrl.HttpContext = ctx; return await ctrl.UpdateTcpRoute(id, request); });
             group_GatewayController.MapDelete("TcpRoutes/{id}", async ([FromServices] GatewayController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; return await ctrl.DeleteTcpRoute(id); });
 

@@ -67,7 +67,11 @@ public sealed record GatewayTcpRouteItem(
     string ForwardHost,
     int ForwardPort,
     bool IsEnabled,
-    DateTime UpdateTime);
+    DateTime UpdateTime,
+    bool IsRunning = false,
+    string? LastError = null,
+    int ActiveConnections = 0,
+    string? BoundAddress = null);
 
 /// <summary>保存四层 TCP/UDP 转发规则请求</summary>
 public sealed record SaveGatewayTcpRouteRequest(
@@ -77,3 +81,23 @@ public sealed record SaveGatewayTcpRouteRequest(
     string ForwardHost,
     int ForwardPort,
     bool IsEnabled);
+
+/// <summary>L4 目标连通性测试请求</summary>
+public sealed record TestL4TargetRequest(
+    string Protocol,
+    string Host,
+    int Port,
+    int TimeoutMs = 3000);
+
+/// <summary>L4 目标连通性测试响应</summary>
+public sealed record TestL4TargetResponse(
+    bool Success,
+    string Message,
+    long LatencyMs);
+
+/// <summary>L4 运行时状态快照</summary>
+public sealed record L4RuntimeState(
+    bool IsRunning,
+    string? LastError,
+    int ActiveConnections,
+    string? BoundAddress);
