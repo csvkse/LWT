@@ -12,6 +12,7 @@
 ARG VENDOR=all
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-alpine AS base
+ARG TARGETARCH
 # 重新声明全局 ARG（多阶段中 FROM 之前的 ARG 需在对应阶段重新 ARG 才能被 RUN 使用）
 ARG VENDOR
 WORKDIR /app
@@ -48,13 +49,15 @@ RUN set -e; \
     echo $TZ > /etc/timezone
 
 # 按 GPU 厂商装 VA 用户态驱动（编码器已在 ffmpeg 内，这里只装让 -vaapi_device 真正可用的驱动库）：
-#   intel -> iHD（Alder Lake-N / N100 等新核显必需，提供 iHD_drv_video.so）；
+#   intel -> iHD（Alder Lake-N / N100 等新核显必需，提供 iHD_drv_video.so；仅在 x86_64 存在）；
 #            Alpine 的 mesa-va-gallium 仅含 AMD/NVIDIA 空壳链接，缺 Intel iHD 时 vainfo 报 "va_openDriver() -1"
 #   amd   -> mesa-va-gallium（radeonsi 解码；Alpine 该包以 VA 解码为主，AMD VA 编码受限，跑不了时应用自动回退软件编码）
 #   nv    -> 不装 VA 驱动：NVIDIA 走 NVENC，由部署侧 nvidia-container-toolkit + --gpus 透传驱动，ffmpeg 已含 nvenc 支持
-#   all   -> 全装（兜底，与原行为一致）
+#   all   -> 全装（amd64 装 intel+mesa，arm64 仅装 mesa 驱动）
 #   cpu/none -> 纯软件编码，不装 VA 驱动
 RUN echo "==> VENDOR=${VENDOR}" && \
+    ARCH="${TARGETARCH:-$(uname -m)}" && \
+    echo "==> ARCH=${ARCH}" && \
     apk_install() { \
       for i in 1 2 3 4 5; do \
         apk update && apk add --no-cache "$@" && return 0 || { \
@@ -65,10 +68,21 @@ RUN echo "==> VENDOR=${VENDOR}" && \
       return 1; \
     }; \
     case "${VENDOR}" in \
-      intel) apk_install intel-media-driver ;; \
+      intel) \
+        case "${ARCH}" in \
+          arm64|aarch64) echo "Intel VA 驱动仅支持 x86_64/amd64 架构，arm64 环境跳过安装" ;; \
+          *) apk_install intel-media-driver ;; \
+        esac ;; \
       amd)   apk_install mesa-va-gallium ;; \
       nv|nvidia) echo "nvenc 由 nvidia-container-toolkit 透传驱动，镜像内置 nvenc 编码器支持，不装 VA 驱动" ;; \
-      all)   apk_install intel-media-driver mesa-va-gallium ;; \
+      all) \
+        case "${ARCH}" in \
+          arm64|aarch64) \
+            echo "arm64 架构跳过 intel-media-driver，仅安装 mesa-va-gallium"; \
+            apk_install mesa-va-gallium ;; \
+          *) \
+            apk_install intel-media-driver mesa-va-gallium ;; \
+        esac ;; \
       cpu|none|*) echo "纯软件编码，不装 VA 驱动" ;; \
     esac
 
@@ -85,6 +99,7 @@ USER appuser
 
 # ---------- 阶段 2：构建与发布 ----------
 FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
+ARG TARGETARCH
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
@@ -94,7 +109,15 @@ COPY ["src/LinuxWebTool.Contracts/LinuxWebTool.Contracts.csproj", "src/LinuxWebT
 COPY ["src/LinuxWebTool.Infrastructure/LinuxWebTool.Infrastructure.csproj", "src/LinuxWebTool.Infrastructure/"]
 COPY ["src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj", "src/LinuxWebTool.WebHost/"]
 
-RUN dotnet restore "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj"
+RUN set -e; \
+    ARCH="${TARGETARCH:-$(uname -m)}"; \
+    case "${ARCH}" in \
+      arm64|aarch64) RID="linux-musl-arm64" ;; \
+      amd64|x86_64)  RID="linux-musl-x64" ;; \
+      *)             RID="linux-musl-x64" ;; \
+    esac; \
+    echo "Restoring dependencies for RID: ${RID}"; \
+    dotnet restore "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj" -r "${RID}"
 
 COPY src ./src
 
@@ -106,11 +129,19 @@ RUN set -e; \
       }; \
     done
 RUN cc -shared -fPIC -O2 -Wall -Wextra -Werror src/LinuxWebTool.Infrastructure/Features/Terminal/Platform/native/linuxwebtool_pty.c -o /tmp/liblinuxwebtool_pty.so -lutil
-RUN dotnet publish "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj" \
-    -c $BUILD_CONFIGURATION \
-    -o /app/publish \
-    /p:PublishAot=true \
-    -r linux-musl-x64
+RUN set -e; \
+    ARCH="${TARGETARCH:-$(uname -m)}"; \
+    case "${ARCH}" in \
+      arm64|aarch64) RID="linux-musl-arm64" ;; \
+      amd64|x86_64)  RID="linux-musl-x64" ;; \
+      *)             RID="linux-musl-x64" ;; \
+    esac; \
+    echo "Publishing Native AOT for RID: ${RID}"; \
+    dotnet publish "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj" \
+      -c $BUILD_CONFIGURATION \
+      -o /app/publish \
+      /p:PublishAot=true \
+      -r "${RID}"
 
 RUN cp /tmp/liblinuxwebtool_pty.so /app/publish/liblinuxwebtool_pty.so
 
