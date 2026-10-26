@@ -38,12 +38,16 @@ INSERT INTO backup_sync_task (
     Id, Name, Mode, SourcePath, TargetPath, Enabled, CronExpression, CronDescription,
     SyncDirection, DeleteHandling, TrashRetentionDays,
     KeepLastCount, KeepDays, KeepWeeks, KeepMonths, ExcludePatterns,
-    LastRunTime, LastRunStatus, LastRunMessage, NextRunTime, CreateTime, UpdateTime
+    LastRunTime, LastRunStatus, LastRunMessage, NextRunTime,
+    ConsecutiveFailures, AutoPausedReason,
+    CreateTime, UpdateTime
 ) VALUES (
     @Id, @Name, @Mode, @SourcePath, @TargetPath, @Enabled, @CronExpression, @CronDescription,
     @SyncDirection, @DeleteHandling, @TrashRetentionDays,
     @KeepLastCount, @KeepDays, @KeepWeeks, @KeepMonths, @ExcludePatterns,
-    @LastRunTime, @LastRunStatus, @LastRunMessage, @NextRunTime, @CreateTime, @UpdateTime
+    @LastRunTime, @LastRunStatus, @LastRunMessage, @NextRunTime,
+    @ConsecutiveFailures, @AutoPausedReason,
+    @CreateTime, @UpdateTime
 )";
         await db.ExecuteAsync(sql, task);
     }
@@ -86,6 +90,50 @@ UPDATE backup_sync_task SET
     UpdateTime = @UpdateTime
 WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, new { Id = id, Status = status, Message = message, LastRun = lastRun, NextRun = nextRun, UpdateTime = DateTime.Now });
+    }
+
+    public async Task UpdateTaskRunInfoAsync(
+        Guid id,
+        string? status,
+        string? message,
+        DateTime? lastRun,
+        DateTime? nextRun,
+        int consecutiveFailures,
+        string? autoPausedReason)
+    {
+        using var db = factory.CreateConnection();
+        const string sql = @"
+UPDATE backup_sync_task SET
+    LastRunStatus = @Status,
+    LastRunMessage = @Message,
+    LastRunTime = @LastRun,
+    NextRunTime = @NextRun,
+    ConsecutiveFailures = @ConsecutiveFailures,
+    AutoPausedReason = @AutoPausedReason,
+    UpdateTime = @UpdateTime
+WHERE Id = @Id COLLATE NOCASE";
+        await db.ExecuteAsync(sql, new
+        {
+            Id = id,
+            Status = status,
+            Message = message,
+            LastRun = lastRun,
+            NextRun = nextRun,
+            ConsecutiveFailures = consecutiveFailures,
+            AutoPausedReason = autoPausedReason,
+            UpdateTime = DateTime.Now
+        });
+    }
+
+    public async Task UpdateTaskNextRunTimeAsync(Guid id, DateTime? nextRun)
+    {
+        using var db = factory.CreateConnection();
+        const string sql = @"
+UPDATE backup_sync_task SET
+    NextRunTime = @NextRun,
+    UpdateTime = @UpdateTime
+WHERE Id = @Id COLLATE NOCASE";
+        await db.ExecuteAsync(sql, new { Id = id, NextRun = nextRun, UpdateTime = DateTime.Now });
     }
 
     public async Task DeleteTaskAsync(Guid id)

@@ -5,6 +5,7 @@ using Quartz;
 using LinuxWebTool.Contracts.Features.BackupSync.Contracts;
 using LinuxWebTool.Contracts.Shared.Contracts;
 using LinuxWebTool.Infrastructure.Features.BackupSync.Adapters;
+using LinuxWebTool.Infrastructure.Features.BackupSync.Safety;
 using LinuxWebTool.Infrastructure.Features.Scheduling.Adapters;
 using LinuxWebTool.Infrastructure.Shared.Persistence;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
@@ -23,6 +24,7 @@ public class BackupSyncController(
     BackupSyncCoordinator coordinator,
     BackupSnapshotCleaner cleaner,
     IBackupSyncScheduler scheduler,
+    BackupSyncStateMachine stateMachine,
     IOperationLogger operationLogger) : MinimalApi.ControllerBase
 {
     [HttpGet("Tasks")]
@@ -148,9 +150,22 @@ public class BackupSyncController(
             return NotFound(new MessageResponse("未找到指定任务"));
         }
 
-        var result = await coordinator.RunTaskAsync(id, HttpContext.RequestAborted);
+        var result = await coordinator.RunTaskAsync(id, HttpContext.RequestAborted, isManual: true, clientIp: HttpContext.GetClientIp());
         await operationLogger.LogAsync("立即触发备份同步", "备份同步", existing.Name, result.Message, clientIp: HttpContext.GetClientIp());
         return Ok(result);
+    }
+
+    [HttpPost("Tasks/{id:guid}/Resume")]
+    public async Task<IResult> ResumeTask(Guid id)
+    {
+        var existing = await store.GetTaskByIdAsync(id);
+        if (existing is null)
+        {
+            return NotFound(new MessageResponse("未找到指定任务"));
+        }
+
+        var resumedTask = await stateMachine.ResumeTaskAsync(id, clientIp: HttpContext.GetClientIp());
+        return Ok(ToTaskItem(resumedTask));
     }
 
     [HttpGet("Tasks/{id:guid}/Snapshots")]
@@ -353,6 +368,8 @@ public class BackupSyncController(
         LastRunStatus = t.LastRunStatus,
         LastRunMessage = t.LastRunMessage,
         NextRunTime = t.NextRunTime,
+        ConsecutiveFailures = t.ConsecutiveFailures,
+        AutoPausedReason = t.AutoPausedReason,
         CreateTime = t.CreateTime,
         UpdateTime = t.UpdateTime
     };

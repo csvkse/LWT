@@ -1,4 +1,5 @@
 using Quartz;
+using LinuxWebTool.Infrastructure.Features.BackupSync.Safety;
 using LinuxWebTool.Infrastructure.Shared.Persistence;
 using Microsoft.Extensions.Logging;
 
@@ -31,10 +32,19 @@ public class BackupSyncJob(
             return;
         }
 
-        logger.LogInformation("Quartz 触发备份同步任务：{Name}（{Id}）", task.Name, task.Id);
-        var result = await coordinator.RunTaskAsync(taskId, context.CancellationToken);
-
         var nextRun = context.NextFireTimeUtc?.LocalDateTime;
-        await store.UpdateTaskRunInfoAsync(task.Id, result.Success ? "Success" : "Failed", result.Message, DateTime.Now, nextRun);
+
+        // 若任务已被断路器熔断自动暂停，直接跳过本次执行，防止持续对异常挂载施压
+        if (task.LastRunStatus == BackupSyncStateMachine.StatusAutoPaused)
+        {
+            logger.LogWarning("备份同步任务 {Name} 处于自动暂停熔断状态，跳过本次调度执行：{Reason}", task.Name, task.AutoPausedReason);
+            await store.UpdateTaskNextRunTimeAsync(task.Id, nextRun);
+            return;
+        }
+
+        logger.LogInformation("Quartz 触发备份同步任务：{Name}（{Id}）", task.Name, task.Id);
+        var result = await coordinator.RunTaskAsync(taskId, context.CancellationToken, isManual: false);
+
+        await store.UpdateTaskNextRunTimeAsync(task.Id, nextRun);
     }
 }

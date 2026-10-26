@@ -418,6 +418,8 @@ CREATE TABLE IF NOT EXISTS backup_sync_task (
   LastRunStatus TEXT,
   LastRunMessage TEXT,
   NextRunTime TEXT,
+  ConsecutiveFailures INTEGER NOT NULL DEFAULT 0,
+  AutoPausedReason TEXT,
   CreateTime TEXT NOT NULL,
   UpdateTime TEXT NOT NULL
 );
@@ -449,6 +451,8 @@ CREATE INDEX IF NOT EXISTS idx_backup_snapshot_task ON backup_snapshot(TaskId);
         EnsureColumnExists(db, "api_key", "AllowedPaths", "TEXT");
         EnsureColumnExists(db, "api_key", "AllowRemoteHosts", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumnExists(db, "api_key", "AllowedHostIds", "TEXT");
+        EnsureColumnExists(db, "backup_sync_task", "ConsecutiveFailures", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumnExists(db, "backup_sync_task", "AutoPausedReason", "TEXT");
     }
 
     private static void EnsureColumnExists(SqliteConnection db, string table, string column, string definition)
