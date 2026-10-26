@@ -189,6 +189,20 @@ export default defineComponent({
       }
     }
 
+    async function resumeTask(task) {
+      try {
+        const res = await http(API.backupSync.taskResume(task.id), { method: 'POST' });
+        if (res.ok) {
+          toast.success(`任务「${task.name}」已解除熔断，恢复定时调度`);
+          await refreshAll();
+        } else {
+          toast.error(res.data?.message || '恢复调度失败');
+        }
+      } catch (e) {
+        toast.error(`恢复调度异常：${e.message}`);
+      }
+    }
+
     function viewTaskSnapshots(task) {
       selectedTaskId.value = task.id;
       activeTab.value = 'snapshots';
@@ -636,6 +650,7 @@ export default defineComponent({
       refreshAll,
       runTask,
       deleteTask,
+      resumeTask,
       viewTaskSnapshots,
       openCreateTaskModal,
       openEditTaskModal,
@@ -774,13 +789,20 @@ export default defineComponent({
                   <span>{{ t.keepMonths }}月</span>
                 </td>
                 <td class="text-xs">
-                  <div :class="t.lastRunStatus === 'Success' ? 'text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-rose-400' : 'text-slate-500')">
-                    {{ t.lastRunStatus || '未运行' }}
+                  <div v-if="t.lastRunStatus === 'AutoPaused'" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-500/50 bg-amber-500/10 text-amber-300 font-medium" :title="t.autoPausedReason || t.lastRunMessage">
+                    <span>⚠ 自动暂停</span>
                   </div>
-                  <div class="text-slate-500 mt-0.5 text-[11px]">{{ formatTime(t.lastRunTime) }}</div>
+                  <div v-else :class="t.lastRunStatus === 'Success' ? 'text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-rose-400' : (t.lastRunStatus === 'Running' ? 'text-cyan-400' : 'text-slate-500'))">
+                    {{ t.lastRunStatus === 'Success' ? '成功' : (t.lastRunStatus === 'Failed' ? '失败' : (t.lastRunStatus === 'Running' ? '执行中...' : (t.lastRunStatus || '未运行'))) }}
+                  </div>
+                  <div v-if="t.autoPausedReason" class="text-amber-400/90 text-[11px] mt-0.5 truncate max-w-[200px]" :title="t.autoPausedReason">
+                    {{ t.autoPausedReason }}
+                  </div>
+                  <div v-else class="text-slate-500 mt-0.5 text-[11px]">{{ formatTime(t.lastRunTime) }}</div>
                 </td>
                 <td class="text-right whitespace-nowrap">
                   <div class="inline-flex items-center gap-1.5">
+                    <button v-if="t.lastRunStatus === 'AutoPaused'" type="button" class="btn btn-xs border-amber-500/50 text-amber-300 hover:bg-amber-500/20" @click="resumeTask(t)" title="解除熔断状态并重新唤醒定时调度">恢复调度</button>
                     <button type="button" class="btn btn-xs btn-primary" @click="runTask(t)">立即备份</button>
                     <button type="button" class="btn btn-xs" @click="viewTaskSnapshots(t)">查看快照</button>
                     <button type="button" class="btn btn-xs" @click="openEditTaskModal(t)">编辑</button>
@@ -834,13 +856,20 @@ export default defineComponent({
                   </span>
                 </td>
                 <td class="text-xs">
-                  <div :class="t.lastRunStatus === 'Success' ? 'text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-rose-400' : 'text-slate-500')">
-                    {{ t.lastRunStatus || '未运行' }}
+                  <div v-if="t.lastRunStatus === 'AutoPaused'" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-500/50 bg-amber-500/10 text-amber-300 font-medium" :title="t.autoPausedReason || t.lastRunMessage">
+                    <span>⚠ 自动暂停</span>
                   </div>
-                  <div class="text-slate-500 mt-0.5 text-[11px]">{{ formatTime(t.lastRunTime) }}</div>
+                  <div v-else :class="t.lastRunStatus === 'Success' ? 'text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-rose-400' : (t.lastRunStatus === 'Running' ? 'text-cyan-400' : 'text-slate-500'))">
+                    {{ t.lastRunStatus === 'Success' ? '成功' : (t.lastRunStatus === 'Failed' ? '失败' : (t.lastRunStatus === 'Running' ? '执行中...' : (t.lastRunStatus || '未运行'))) }}
+                  </div>
+                  <div v-if="t.autoPausedReason" class="text-amber-400/90 text-[11px] mt-0.5 truncate max-w-[200px]" :title="t.autoPausedReason">
+                    {{ t.autoPausedReason }}
+                  </div>
+                  <div v-else class="text-slate-500 mt-0.5 text-[11px]">{{ formatTime(t.lastRunTime) }}</div>
                 </td>
                 <td class="text-right whitespace-nowrap">
                   <div class="inline-flex items-center gap-1.5">
+                    <button v-if="t.lastRunStatus === 'AutoPaused'" type="button" class="btn btn-xs border-amber-500/50 text-amber-300 hover:bg-amber-500/20" @click="resumeTask(t)" title="解除熔断状态并重新唤醒定时调度">恢复调度</button>
                     <button type="button" class="btn btn-xs btn-primary" @click="runTask(t)">立即同步</button>
                     <button type="button" class="btn btn-xs" @click="openEditTaskModal(t)">编辑</button>
                     <button type="button" class="btn btn-xs btn-danger" @click="deleteTask(t)">删除</button>

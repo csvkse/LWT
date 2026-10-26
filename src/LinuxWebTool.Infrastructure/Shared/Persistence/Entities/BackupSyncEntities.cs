@@ -33,6 +33,9 @@ public class BackupSyncTask
     public string? LastRunMessage { get; set; }
     public DateTime? NextRunTime { get; set; }
 
+    public int ConsecutiveFailures { get; set; } = 0;
+    public string? AutoPausedReason { get; set; }
+
     public DateTime CreateTime { get; set; } = DateTime.Now;
     public DateTime UpdateTime { get; set; } = DateTime.Now;
 }

@@ -51,6 +51,8 @@ public sealed record BackupSyncTaskItem
     public string? LastRunStatus { get; init; }
     public string? LastRunMessage { get; init; }
     public DateTime? NextRunTime { get; init; }
+    public int ConsecutiveFailures { get; init; } = 0;
+    public string? AutoPausedReason { get; init; }
     public DateTime CreateTime { get; init; }
     public DateTime UpdateTime { get; init; }
 }

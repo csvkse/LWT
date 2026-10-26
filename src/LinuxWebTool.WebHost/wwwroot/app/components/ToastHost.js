@@ -4,10 +4,11 @@ import { toastState, dismiss } from '../store/toast.js';
 const TYPE_CLASS = {
   success: 'border-emerald-500/50 text-emerald-300',
   error: 'border-rose-500/50 text-rose-300',
+  warning: 'border-amber-500/50 text-amber-300',
   info: 'border-cyan-500/50 text-cyan-300',
 };
 
-const TYPE_ICON = { success: '✓', error: '✕', info: 'ℹ' };
+const TYPE_ICON = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
 
 export default defineComponent({
   name: 'ToastHost',

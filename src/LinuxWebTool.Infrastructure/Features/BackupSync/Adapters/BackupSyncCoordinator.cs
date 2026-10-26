@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using LinuxWebTool.Contracts.Features.BackupSync.Contracts;
+using LinuxWebTool.Infrastructure.Features.BackupSync.Safety;
 using LinuxWebTool.Infrastructure.Shared.Persistence;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 using Microsoft.Extensions.Logging;
@@ -7,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace LinuxWebTool.Infrastructure.Features.BackupSync.Adapters;
 
 /// <summary>
-/// 备份与同步统一任务协调器：负责锁控制、作业派发、引擎调用与生命周期跟踪。
+/// 备份与同步统一任务协调器：负责锁控制、作业派发、安全预检、引擎调用与生命周期跟踪。
 /// </summary>
 public class BackupSyncCoordinator(
     BackupSyncStore store,
@@ -15,6 +16,8 @@ public class BackupSyncCoordinator(
     MirrorSyncEngine mirrorEngine,
     SnapshotRestoreEngine restoreEngine,
     BackupSnapshotCleaner cleaner,
+    BackupSyncSafetyPipeline safetyPipeline,
+    BackupSyncStateMachine stateMachine,
     ILogger<BackupSyncCoordinator> logger)
 {
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> TaskLocks = new();
@@ -22,7 +25,11 @@ public class BackupSyncCoordinator(
     /// <summary>
     /// 触发指定任务执行（备份或直接同步）
     /// </summary>
-    public async Task<TaskRunResultResponse> RunTaskAsync(Guid taskId, CancellationToken ct = default)
+    public async Task<TaskRunResultResponse> RunTaskAsync(
+        Guid taskId,
+        CancellationToken ct = default,
+        bool isManual = false,
+        string? clientIp = null)
     {
         var task = await store.GetTaskByIdAsync(taskId);
         if (task is null)
@@ -31,6 +38,17 @@ public class BackupSyncCoordinator(
             {
                 Success = false,
                 Message = $"未找到指定任务：{taskId}"
+            };
+        }
+
+        // 1. 检查断路器状态：若已处于自动暂停熔断状态且由定时调度触发，自动跳过执行
+        if (task.LastRunStatus == BackupSyncStateMachine.StatusAutoPaused && !isManual)
+        {
+            logger.LogWarning("任务 {Name} 已处于自动暂停熔断状态，已跳过定时调度：{Reason}", task.Name, task.AutoPausedReason);
+            return new TaskRunResultResponse
+            {
+                Success = false,
+                Message = $"任务 {task.Name} 已处于自动暂停熔断状态，已跳过定时调度：{task.AutoPausedReason}"
             };
         }
 
@@ -47,7 +65,42 @@ public class BackupSyncCoordinator(
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            await store.UpdateTaskRunInfoAsync(task.Id, "Running", "正在执行中...", DateTime.Now, task.NextRunTime);
+            // 2. 真实动作前执行安全预检流水线（挂载状态机检测、目录可读写 Canary 探针、灾难空源防误删、磁盘空间防护）
+            var preflight = await safetyPipeline.EvaluateAsync(task, ct);
+            if (!preflight.IsPassed)
+            {
+                sw.Stop();
+                var preflightMsg = preflight.ErrorMessage ?? "安全策略预检未通过";
+                if (preflight.IsFatal)
+                {
+                    await stateMachine.TripAutoPauseAsync(task, preflightMsg, clientIp);
+                    return new TaskRunResultResponse
+                    {
+                        Success = false,
+                        Message = $"[安全熔断] 任务已自动暂停：{preflightMsg}",
+                        DurationMs = sw.ElapsedMilliseconds
+                    };
+                }
+                else
+                {
+                    await stateMachine.RecordFailureAsync(task, preflightMsg, task.NextRunTime, clientIp);
+                    return new TaskRunResultResponse
+                    {
+                        Success = false,
+                        Message = preflightMsg,
+                        DurationMs = sw.ElapsedMilliseconds
+                    };
+                }
+            }
+
+            await store.UpdateTaskRunInfoAsync(
+                task.Id,
+                BackupSyncStateMachine.StatusRunning,
+                "正在执行中...",
+                DateTime.Now,
+                task.NextRunTime,
+                task.ConsecutiveFailures,
+                task.AutoPausedReason);
 
             var excludeList = string.IsNullOrWhiteSpace(task.ExcludePatterns)
                 ? []
@@ -89,7 +142,7 @@ public class BackupSyncCoordinator(
 
                 sw.Stop();
                 var msg = $"增量备份成功：创建快照 {result.SnapshotId}，包含文件 {result.TotalFiles}，容量 {result.TotalSizeBytes} 字节，耗时 {sw.ElapsedMilliseconds}ms";
-                await store.UpdateTaskRunInfoAsync(task.Id, "Success", msg, DateTime.Now, task.NextRunTime);
+                await stateMachine.RecordSuccessAsync(task, msg, task.NextRunTime);
 
                 return new TaskRunResultResponse
                 {
@@ -114,7 +167,7 @@ public class BackupSyncCoordinator(
 
                 sw.Stop();
                 var msg = $"同步完成：新增 {syncResult.AddedFiles}，更新 {syncResult.UpdatedFiles}，删除 {syncResult.DeletedFiles}，暂存回收站 {syncResult.TrashedFiles}，耗时 {sw.ElapsedMilliseconds}ms";
-                await store.UpdateTaskRunInfoAsync(task.Id, "Success", msg, DateTime.Now, task.NextRunTime);
+                await stateMachine.RecordSuccessAsync(task, msg, task.NextRunTime);
 
                 return new TaskRunResultResponse
                 {
@@ -131,7 +184,7 @@ public class BackupSyncCoordinator(
             sw.Stop();
             var errMsg = $"任务执行失败：{ex.Message}";
             logger.LogError(ex, "任务执行异常：{Name}", task.Name);
-            await store.UpdateTaskRunInfoAsync(task.Id, "Failed", errMsg, DateTime.Now, task.NextRunTime);
+            await stateMachine.RecordFailureAsync(task, errMsg, task.NextRunTime, clientIp);
 
             return new TaskRunResultResponse
             {
