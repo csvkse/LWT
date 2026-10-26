@@ -111,6 +111,7 @@ export const API = {
     update: (id) => `/ApiKeys/${id}`,
     delete: (id) => `/ApiKeys/${id}`,
     toggle: (id) => `/ApiKeys/${id}/Toggle`,
+    clone: (id) => `/ApiKeys/${id}/Clone`,
   },
   frp: {
     lines: '/FrpTunnel/Lines',

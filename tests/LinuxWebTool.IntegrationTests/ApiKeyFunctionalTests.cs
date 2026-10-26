@@ -436,4 +436,67 @@ public sealed class ApiKeyFunctionalTests
             try { Directory.Delete(outsideDir, true); } catch { }
         }
     }
+
+    [Fact]
+    public async Task ApiKey_Admin_Clone_Duplicates_Permissions_And_Scoping()
+    {
+        var adminClient = await TestServerFixture.CreateAdminClientAsync();
+
+        // 1. 创建源 Key，配置自定义权限和主机范围
+        var sourcePayload = new CreateApiKeyRequest(
+            Name: "Master Agent Key",
+            AllowApi: true,
+            AllowMcp: true,
+            AllowTerminal: true,
+            AllowSchedules: true,
+            AllowFiles: true,
+            AllowTranscode: false,
+            AllowGateway: false,
+            AllowRemoteHosts: true,
+            AllowedHostIds: "[\"host-1\",\"host-2\"]");
+
+        var sourceJson = JsonSerializer.Serialize(sourcePayload, AppJsonSerializerContext.Default.CreateApiKeyRequest);
+        var sourceResp = await adminClient.PostAsync("/api/ApiKeys", TestServerFixture.Json(sourceJson));
+        Assert.Equal(HttpStatusCode.OK, sourceResp.StatusCode);
+
+        using var sourceDoc = JsonDocument.Parse(await sourceResp.Content.ReadAsStringAsync());
+        var sourceId = sourceDoc.RootElement.GetProperty("id").GetString()!;
+        var sourcePrefix = sourceDoc.RootElement.GetProperty("keyPrefix").GetString()!;
+
+        // 2. 调用克隆接口（无 Body 默认克隆为 副本）
+        var cloneResp = await adminClient.PostAsync($"/api/ApiKeys/{sourceId}/Clone", null);
+        Assert.Equal(HttpStatusCode.OK, cloneResp.StatusCode);
+
+        using var cloneDoc = JsonDocument.Parse(await cloneResp.Content.ReadAsStringAsync());
+        var cloneId = cloneDoc.RootElement.GetProperty("id").GetString()!;
+        var cloneName = cloneDoc.RootElement.GetProperty("name").GetString()!;
+        var cloneRawKey = cloneDoc.RootElement.GetProperty("rawKey").GetString()!;
+        var clonePrefix = cloneDoc.RootElement.GetProperty("keyPrefix").GetString()!;
+
+        // 3. 验证克隆生成的属性
+        Assert.NotEqual(sourceId, cloneId);
+        Assert.NotEqual(sourcePrefix, clonePrefix);
+        Assert.Equal("Master Agent Key - 副本", cloneName);
+        Assert.StartsWith("lwt_live_", cloneRawKey);
+        Assert.True(cloneDoc.RootElement.GetProperty("allowApi").GetBoolean());
+        Assert.True(cloneDoc.RootElement.GetProperty("allowMcp").GetBoolean());
+        Assert.True(cloneDoc.RootElement.GetProperty("allowTerminal").GetBoolean());
+        Assert.True(cloneDoc.RootElement.GetProperty("allowRemoteHosts").GetBoolean());
+        Assert.Equal("[\"host-1\",\"host-2\"]", cloneDoc.RootElement.GetProperty("allowedHostIds").GetString());
+
+        // 4. 调用克隆接口（带自定义名称 Body）
+        var customClonePayload = new CloneApiKeyRequest("Cloned Custom Worker");
+        var customCloneJson = JsonSerializer.Serialize(customClonePayload, AppJsonSerializerContext.Default.CloneApiKeyRequest);
+        var customResp = await adminClient.PostAsync($"/api/ApiKeys/{sourceId}/Clone", TestServerFixture.Json(customCloneJson));
+        Assert.Equal(HttpStatusCode.OK, customResp.StatusCode);
+
+        using var customDoc = JsonDocument.Parse(await customResp.Content.ReadAsStringAsync());
+        Assert.Equal("Cloned Custom Worker", customDoc.RootElement.GetProperty("name").GetString());
+        Assert.True(customDoc.RootElement.GetProperty("allowRemoteHosts").GetBoolean());
+
+        // 5. 清理测试产生的密钥
+        await adminClient.DeleteAsync($"/api/ApiKeys/{sourceId}");
+        await adminClient.DeleteAsync($"/api/ApiKeys/{cloneId}");
+        await adminClient.DeleteAsync($"/api/ApiKeys/{customDoc.RootElement.GetProperty("id").GetString()}");
+    }
 }

@@ -130,4 +130,55 @@ public class ApiKeysController(
 
         return Ok(new MessageResponse(entity.IsEnabled ? "已启用" : "已禁用"));
     }
+
+    [HttpPost("{id}/Clone")]
+    public async Task<IResult> Clone(string id, [FromBody] CloneApiKeyRequest? request = null)
+    {
+        var source = await store.GetByIdAsync(id);
+        if (source is null)
+        {
+            return NotFound(new MessageResponse("原 API Key 不存在"));
+        }
+
+        var newName = !string.IsNullOrWhiteSpace(request?.Name)
+            ? request.Name.Trim()
+            : $"{source.Name} - 副本";
+
+        var createReq = new CreateApiKeyRequest(
+            newName,
+            source.AllowApi,
+            source.AllowMcp,
+            source.AllowTerminal,
+            source.AllowSchedules,
+            source.AllowFiles,
+            source.AllowTranscode,
+            source.AllowGateway,
+            source.AllowRemoteHosts,
+            source.AllowedPaths,
+            source.AllowedHostIds,
+            request?.ExpiresAt ?? source.ExpiresAt);
+
+        var (rawKey, entity) = await service.CreateAsync(createReq);
+        await operationLogger.LogAsync("克隆 API Key", "安全凭据", entity.Name, $"克隆自={source.Name}, 前缀={entity.KeyPrefix}", clientIp: HttpContext.GetClientIp());
+
+        var response = new ApiKeyCreatedResponse(
+            entity.Id,
+            entity.Name,
+            rawKey,
+            entity.KeyPrefix,
+            entity.AllowApi,
+            entity.AllowMcp,
+            entity.AllowTerminal,
+            entity.AllowSchedules,
+            entity.AllowFiles,
+            entity.AllowTranscode,
+            entity.AllowGateway,
+            entity.AllowRemoteHosts,
+            entity.AllowedPaths,
+            entity.AllowedHostIds,
+            entity.CreatedAt,
+            entity.ExpiresAt);
+
+        return Ok(response);
+    }
 }

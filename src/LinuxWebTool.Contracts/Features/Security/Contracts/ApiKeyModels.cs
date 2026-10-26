@@ -31,6 +31,11 @@ public sealed record UpdateApiKeyRequest(
     string? AllowedHostIds = null,
     DateTime? ExpiresAt = null);
 
+/// <summary>克隆 API Key 请求契约</summary>
+public sealed record CloneApiKeyRequest(
+    string? Name = null,
+    DateTime? ExpiresAt = null);
+
 /// <summary>API Key 创建响应契约（包含一次性明文 Key）</summary>
 public sealed record ApiKeyCreatedResponse(
     string Id,

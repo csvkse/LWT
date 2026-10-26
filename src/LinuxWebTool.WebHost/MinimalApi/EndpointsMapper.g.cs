@@ -219,6 +219,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_ApiKeysController.MapPut("{id}", async ([FromServices] ApiKeysController ctrl, HttpContext ctx, string id, [FromBody] UpdateApiKeyRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Update(id, request); });
             group_ApiKeysController.MapDelete("{id}", async ([FromServices] ApiKeysController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; return await ctrl.Delete(id); });
             group_ApiKeysController.MapPost("{id}/Toggle", async ([FromServices] ApiKeysController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; return await ctrl.Toggle(id); });
+            group_ApiKeysController.MapPost("{id}/Clone", async ([FromServices] ApiKeysController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; CloneApiKeyRequest? req = null; if (ctx.Request.HasJsonContentType()) { req = await ctx.Request.ReadFromJsonAsync(LinuxWebTool.WebHost.Composition.AppJsonSerializerContext.Default.CloneApiKeyRequest); } return await ctrl.Clone(id, req); });
 
             var group_FrpTunnelController = app.MapGroup("/api/FrpTunnel");
             group_FrpTunnelController.RequireAuthorization();

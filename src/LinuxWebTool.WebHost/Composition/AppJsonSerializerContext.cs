@@ -140,6 +140,7 @@ namespace LinuxWebTool.WebHost.Composition;
 // API Key Models
 [JsonSerializable(typeof(CreateApiKeyRequest))]
 [JsonSerializable(typeof(UpdateApiKeyRequest))]
+[JsonSerializable(typeof(CloneApiKeyRequest))]
 [JsonSerializable(typeof(ApiKeyItemResponse))]
 [JsonSerializable(typeof(ApiKeyCreatedResponse))]
 [JsonSerializable(typeof(List<ApiKeyItemResponse>))]
