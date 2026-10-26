@@ -202,6 +202,27 @@ public sealed class GatewayFunctionalTests
     }
 
     [Fact]
+    public async Task Gateway_TcpRoutes_TestTarget_Api()
+    {
+        var client = await TestServerFixture.CreateAdminClientAsync();
+
+        // 1. 测试未提供 Host 报 400
+        var badReq = new TestL4TargetRequest("TCP", "", 80, 2000);
+        var badResp = await client.PostAsync("/api/Gateway/TcpRoutes/TestTarget", TestServerFixture.Json(JsonSerializer.Serialize(badReq, AppJsonSerializerContext.Default.TestL4TargetRequest)));
+        Assert.Equal(HttpStatusCode.BadRequest, badResp.StatusCode);
+
+        // 2. 测试合法探测请求返回 200 与响应 DTO
+        var testReq = new TestL4TargetRequest("TCP", "127.0.0.1", 1, 1000);
+        var testResp = await client.PostAsync("/api/Gateway/TcpRoutes/TestTarget", TestServerFixture.Json(JsonSerializer.Serialize(testReq, AppJsonSerializerContext.Default.TestL4TargetRequest)));
+        Assert.Equal(HttpStatusCode.OK, testResp.StatusCode);
+        var body = await testResp.Content.ReadAsStringAsync();
+        var result = JsonSerializer.Deserialize<TestL4TargetResponse>(body, AppJsonSerializerContext.Default.Options)!;
+        Assert.NotNull(result);
+        Assert.False(result.Success);
+        Assert.Contains("无法连接到目标端口", result.Message);
+    }
+
+    [Fact]
     public async Task Gateway_Website_Does_Not_Break_Admin_Dashboard_And_Static_Files()
     {
         var client = await TestServerFixture.CreateAdminClientAsync();

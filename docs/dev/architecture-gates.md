@@ -48,6 +48,7 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + MCP 端点
 | `LinuxArch022` | IHostedService 双重注册守卫（防止后台单例服务解析失败） | xUnit（源码注册断言） |
 | `LinuxArch023` | 生产项目根目录必须遵循物理架构规范白名单（仅允许 Features/、Composition/、Shared/ 等） | xUnit（物理目录扫描） |
 | `LinuxArch024` | 所有控制器必须在 ApiKeyMiddleware 中显式声明权限归属（拒绝或绑定模块，严禁默认漏控） | xUnit（控制器路由与中间件匹配断言） |
+| `LinuxArch025` | L4 端口转发服务必须支持双栈监听、真实运行时状态暴露与端口冲突自愈 | xUnit（套接字行为与契约验证） |
 | `FE-HTML-INLINE` | index.html 内联脚本（importmap 除外）/ 内联事件 | frontend-gate.cjs |
 | `FE-API-OWNERSHIP` | API 路径字符串出现在 config.js 之外 | frontend-gate.cjs |
 | `FE-NO-FETCH` | fetch() 出现在 api/client.js 之外 | frontend-gate.cjs |

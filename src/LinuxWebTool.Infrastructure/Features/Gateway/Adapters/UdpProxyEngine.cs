@@ -2,78 +2,153 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using LinuxWebTool.Contracts.Features.Gateway.Contracts;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+
 namespace LinuxWebTool.Infrastructure.Features.Gateway.Adapters;
 
 /// <summary>
-/// 高性能四层 UDP 端口转发引擎（支持双向数据报转发与 NAT 会话跟踪）
+/// 高性能四层 UDP 端口转发引擎（支持双向数据报转发、双栈监听、自愈与 NAT 会话跟踪）
 /// </summary>
 public sealed class UdpProxyEngine(GatewayStore store, ILogger<UdpProxyEngine> logger) : BackgroundService
 {
     private readonly ConcurrentDictionary<int, UdpListenerContext> _listeners = new();
+    private readonly ConcurrentDictionary<int, L4RuntimeState> _statusMap = new();
+    private readonly SemaphoreSlim _reloadLock = new(1, 1);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("[Gateway UDP] 四层端口转发引擎已启动");
+        logger.LogInformation("[Gateway UDP] 四层端口转发引擎已启动 (Dual-Stack 就绪)");
         await ReloadAsync(stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            await Task.Delay(10000, stoppingToken);
-            PruneAllIdleSessions();
+            try
+            {
+                await Task.Delay(10000, stoppingToken);
+                PruneAllIdleSessions();
+                await HealFailedListenersAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) { break; }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "[Gateway UDP] 巡检过程出现异常");
+            }
         }
 
         StopAll();
         logger.LogInformation("[Gateway UDP] 四层端口转发引擎已停止");
     }
 
+    /// <summary>
+    /// 获取指定端口的实时运行状态
+    /// </summary>
+    public L4RuntimeState GetRuntimeStatus(int port)
+    {
+        if (_listeners.TryGetValue(port, out var ctx))
+        {
+            return new L4RuntimeState(
+                IsRunning: true,
+                LastError: null,
+                ActiveConnections: ctx.ActiveSessionCount,
+                BoundAddress: ctx.BoundAddress);
+        }
+
+        if (_statusMap.TryGetValue(port, out var state))
+        {
+            return state;
+        }
+
+        return new L4RuntimeState(
+            IsRunning: false,
+            LastError: null,
+            ActiveConnections: 0,
+            BoundAddress: null);
+    }
+
     public async Task ReloadAsync(CancellationToken cancellationToken = default)
     {
-        var routes = (await store.GetAllTcpRoutesAsync())
-            .Where(r => r.IsEnabled && r.Protocol.Equals("UDP", StringComparison.OrdinalIgnoreCase))
-            .GroupBy(r => r.ListenPort)
-            .ToDictionary(g => g.Key, g => g.First());
-
-        var desiredPorts = routes;
-
-        // 1. 停用不再需要的监听器
-        foreach (var port in _listeners.Keys.ToList())
+        await _reloadLock.WaitAsync(cancellationToken);
+        try
         {
-            if (!desiredPorts.ContainsKey(port))
+            var routes = (await store.GetAllTcpRoutesAsync())
+                .Where(r => r.IsEnabled && r.Protocol.Equals("UDP", StringComparison.OrdinalIgnoreCase))
+                .GroupBy(r => r.ListenPort)
+                .ToDictionary(g => g.Key, g => g.First());
+
+            var desiredPorts = routes;
+
+            // 1. 停用不再需要的监听器
+            foreach (var port in _listeners.Keys.ToList())
             {
-                if (_listeners.TryRemove(port, out var ctx))
+                if (!desiredPorts.ContainsKey(port))
                 {
-                    ctx.Dispose();
-                    logger.LogInformation("[Gateway UDP] 端口 {Port} 监听已注销", port);
+                    if (_listeners.TryRemove(port, out var ctx))
+                    {
+                        ctx.Dispose();
+                        logger.LogInformation("[Gateway UDP] 端口 {Port} 监听已注销", port);
+                    }
+                    _statusMap.TryRemove(port, out _);
+                }
+            }
+
+            // 2. 启动新监听器 或 更新既有监听器的目标配置
+            foreach (var (port, route) in desiredPorts)
+            {
+                if (_listeners.TryGetValue(port, out var existing))
+                {
+                    if (existing.ForwardHost != route.ForwardHost || existing.ForwardPort != route.ForwardPort)
+                    {
+                        existing.UpdateTarget(route.ForwardHost, route.ForwardPort);
+                        logger.LogInformation("[Gateway UDP] 端口 {Port} 转发目标已热更新为 {Host}:{ForwardPort}", port, route.ForwardHost, route.ForwardPort);
+                    }
+                    _statusMap[port] = new L4RuntimeState(true, null, existing.ActiveSessionCount, existing.BoundAddress);
+                }
+                else
+                {
+                    StartListener(route);
                 }
             }
         }
-
-        // 2. 启动新监听器 或 更新既有监听器的目标配置
-        foreach (var (port, route) in desiredPorts)
+        finally
         {
-            if (_listeners.TryGetValue(port, out var existing))
+            _reloadLock.Release();
+        }
+    }
+
+    private void StartListener(GatewayTcpRouteEntity route)
+    {
+        var port = route.ListenPort;
+        try
+        {
+            var ctx = new UdpListenerContext(port, route.ForwardHost, route.ForwardPort, logger);
+            _listeners[port] = ctx;
+            ctx.Start();
+            _statusMap[port] = new L4RuntimeState(true, null, 0, ctx.BoundAddress);
+            logger.LogInformation("[Gateway UDP] 端口 {Port} (绑定 {Bound}) 转发至 {Host}:{ForwardPort} 已就绪", port, ctx.BoundAddress, route.ForwardHost, route.ForwardPort);
+        }
+        catch (Exception ex)
+        {
+            var err = $"UDP 启动监听失败: {ex.Message}";
+            _statusMap[port] = new L4RuntimeState(false, err, 0, null);
+            logger.LogError(ex, "[Gateway UDP] 端口 {Port} 启动监听失败 ({Error})", port, ex.Message);
+        }
+    }
+
+    private async Task HealFailedListenersAsync(CancellationToken stoppingToken)
+    {
+        var routes = (await store.GetAllTcpRoutesAsync())
+            .Where(r => r.IsEnabled && r.Protocol.Equals("UDP", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        foreach (var route in routes)
+        {
+            if (stoppingToken.IsCancellationRequested) break;
+            if (!_listeners.ContainsKey(route.ListenPort))
             {
-                if (existing.ForwardHost != route.ForwardHost || existing.ForwardPort != route.ForwardPort)
-                {
-                    existing.UpdateTarget(route.ForwardHost, route.ForwardPort);
-                    logger.LogInformation("[Gateway UDP] 端口 {Port} 转发目标已热更新为 {Host}:{ForwardPort}", port, route.ForwardHost, route.ForwardPort);
-                }
-            }
-            else
-            {
-                try
-                {
-                    var ctx = new UdpListenerContext(port, route.ForwardHost, route.ForwardPort, logger);
-                    _listeners[port] = ctx;
-                    ctx.Start();
-                    logger.LogInformation("[Gateway UDP] 端口 {Port} 转发至 {Host}:{ForwardPort} 已就绪", port, route.ForwardHost, route.ForwardPort);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "[Gateway UDP] 端口 {Port} 启动监听失败", port);
-                }
+                logger.LogDebug("[Gateway UDP] 触发端口 {Port} 自愈重连尝试", route.ListenPort);
+                StartListener(route);
             }
         }
     }
@@ -99,6 +174,7 @@ public sealed class UdpProxyEngine(GatewayStore store, ILogger<UdpProxyEngine> l
             try { ctx.Dispose(); } catch { }
         }
         _listeners.Clear();
+        _statusMap.Clear();
     }
 }
 
@@ -112,6 +188,8 @@ internal sealed class UdpListenerContext : IDisposable
     public int Port { get; }
     public string ForwardHost { get; private set; }
     public int ForwardPort { get; private set; }
+    public string BoundAddress { get; }
+    public int ActiveSessionCount => _sessions.Count;
     private IPAddress? _cachedTargetIp;
     private DateTime _dnsResolvedTime = DateTime.MinValue;
     private static readonly TimeSpan DnsCacheTtl = TimeSpan.FromMinutes(5);
@@ -123,8 +201,24 @@ internal sealed class UdpListenerContext : IDisposable
         ForwardPort = forwardPort;
         _logger = logger;
 
-        _listenerSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        _listenerSocket.Bind(new IPEndPoint(IPAddress.Any, port));
+        Socket socket;
+        string boundAddr;
+        try
+        {
+            socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Dgram, ProtocolType.Udp);
+            socket.DualMode = true;
+            socket.Bind(new IPEndPoint(IPAddress.IPv6Any, port));
+            boundAddr = "[::]";
+        }
+        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressFamilyNotSupported || ex.SocketErrorCode == SocketError.ProtocolNotSupported)
+        {
+            socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            socket.Bind(new IPEndPoint(IPAddress.Any, port));
+            boundAddr = "0.0.0.0";
+        }
+
+        _listenerSocket = socket;
+        BoundAddress = boundAddr;
     }
 
     public void UpdateTarget(string forwardHost, int forwardPort)
@@ -177,6 +271,10 @@ internal sealed class UdpListenerContext : IDisposable
         var buffer = ArrayPool<byte>.Shared.Rent(65536);
         try
         {
+            var anyEp = _listenerSocket.AddressFamily == AddressFamily.InterNetworkV6
+                ? (EndPoint)new IPEndPoint(IPAddress.IPv6Any, 0)
+                : (EndPoint)new IPEndPoint(IPAddress.Any, 0);
+
             while (!_cts.Token.IsCancellationRequested)
             {
                 SocketReceiveFromResult result;
@@ -184,7 +282,7 @@ internal sealed class UdpListenerContext : IDisposable
                 {
                     result = await _listenerSocket.ReceiveFromAsync(
                         new ArraySegment<byte>(buffer), SocketFlags.None,
-                        new IPEndPoint(IPAddress.Any, 0), _cts.Token);
+                        anyEp, _cts.Token);
                 }
                 catch (OperationCanceledException) { break; }
                 catch (ObjectDisposedException) { break; }

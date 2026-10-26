@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using LinuxWebTool.WebHost.Composition;
 namespace LinuxWebTool.WebHost.Features.Gateway.Routes;
 
@@ -228,9 +230,25 @@ public class GatewayController(
     [HttpGet("TcpRoutes")]
     public async Task<IResult> GetTcpRoutes()
     {
-        var list = (await store.GetAllTcpRoutesAsync()).Select(t => new GatewayTcpRouteItem(
-            t.Id, t.Name, t.Protocol, t.ListenPort, t.ForwardHost, t.ForwardPort, t.IsEnabled, t.UpdateTime
-        )).ToList();
+        var entities = await store.GetAllTcpRoutesAsync();
+        var list = entities.Select(t =>
+        {
+            var isTcp = t.Protocol.Equals("TCP", StringComparison.OrdinalIgnoreCase);
+            var runtime = isTcp ? tcpEngine.GetRuntimeStatus(t.ListenPort) : udpEngine.GetRuntimeStatus(t.ListenPort);
+            return new GatewayTcpRouteItem(
+                t.Id,
+                t.Name,
+                t.Protocol,
+                t.ListenPort,
+                t.ForwardHost,
+                t.ForwardPort,
+                t.IsEnabled,
+                t.UpdateTime,
+                runtime.IsRunning,
+                runtime.LastError,
+                runtime.ActiveConnections,
+                runtime.BoundAddress);
+        }).ToList();
         return Ok(list);
     }
 
@@ -255,8 +273,8 @@ public class GatewayController(
             IsEnabled = request.IsEnabled
         };
         await store.InsertTcpRouteAsync(entity);
-        _ = tcpEngine.ReloadAsync();
-        _ = udpEngine.ReloadAsync();
+        await tcpEngine.ReloadAsync();
+        await udpEngine.ReloadAsync();
         await operationLogger.LogAsync("新建端口转发", "网关服务", $"{entity.Protocol}:{entity.ListenPort}", $"{entity.ForwardHost}:{entity.ForwardPort}", clientIp: HttpContext.GetClientIp());
         return Ok(new MessageResponse("端口转发规则已添加"));
     }
@@ -282,8 +300,8 @@ public class GatewayController(
         entity.IsEnabled = request.IsEnabled;
 
         await store.UpdateTcpRouteAsync(entity);
-        _ = tcpEngine.ReloadAsync();
-        _ = udpEngine.ReloadAsync();
+        await tcpEngine.ReloadAsync();
+        await udpEngine.ReloadAsync();
         await operationLogger.LogAsync("更新端口转发", "网关服务", $"{entity.Protocol}:{entity.ListenPort}", $"{entity.ForwardHost}:{entity.ForwardPort}", clientIp: HttpContext.GetClientIp());
         return Ok(new MessageResponse("端口转发规则已更新"));
     }
@@ -295,9 +313,83 @@ public class GatewayController(
         if (entity == null) return NotFound(new MessageResponse("转发规则不存在"));
 
         await store.DeleteTcpRouteAsync(id);
-        _ = tcpEngine.ReloadAsync();
-        _ = udpEngine.ReloadAsync();
+        await tcpEngine.ReloadAsync();
+        await udpEngine.ReloadAsync();
         await operationLogger.LogAsync("删除端口转发", "网关服务", $"{entity.Protocol}:{entity.ListenPort}", "", clientIp: HttpContext.GetClientIp());
         return Ok(new MessageResponse("端口转发规则已删除"));
+    }
+
+    [HttpPost("TcpRoutes/TestTarget")]
+    public async Task<IResult> TestTarget([FromBody] TestL4TargetRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Host)) return BadRequest(new MessageResponse("目标主机不能为空"));
+        if (request.Port <= 0 || request.Port > 65535) return BadRequest(new MessageResponse("目标端口必须在 1-65535 之间"));
+
+        var timeoutMs = Math.Clamp(request.TimeoutMs, 500, 10000);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var protocol = string.IsNullOrWhiteSpace(request.Protocol) ? "TCP" : request.Protocol.Trim().ToUpperInvariant();
+
+        if (protocol == "UDP")
+        {
+            try
+            {
+                using var udp = new UdpClient();
+                udp.Client.SendTimeout = timeoutMs;
+                var dummyData = new byte[] { 0x00 };
+                await udp.SendAsync(dummyData, dummyData.Length, request.Host.Trim(), request.Port);
+                sw.Stop();
+                return Ok(new TestL4TargetResponse(true, $"UDP 数据报已成功发往 {request.Host}:{request.Port}", sw.ElapsedMilliseconds));
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                return Ok(new TestL4TargetResponse(false, $"UDP 发送异常: {ex.Message}", sw.ElapsedMilliseconds));
+            }
+        }
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs));
+            System.Net.IPAddress[] targetIps;
+            if (System.Net.IPAddress.TryParse(request.Host.Trim(), out var directIp))
+            {
+                targetIps = [directIp];
+            }
+            else
+            {
+                targetIps = await System.Net.Dns.GetHostAddressesAsync(request.Host.Trim(), cts.Token);
+            }
+
+            if (targetIps.Length == 0)
+            {
+                sw.Stop();
+                return Ok(new TestL4TargetResponse(false, $"无法解析目标主机 {request.Host}", sw.ElapsedMilliseconds));
+            }
+
+            Exception? lastEx = null;
+            foreach (var ip in targetIps)
+            {
+                using var socket = new System.Net.Sockets.Socket(ip.AddressFamily, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+                try
+                {
+                    await socket.ConnectAsync(new System.Net.IPEndPoint(ip, request.Port), cts.Token);
+                    sw.Stop();
+                    return Ok(new TestL4TargetResponse(true, $"TCP 端口成功建立连接 (解析为 {ip}:{request.Port})", sw.ElapsedMilliseconds));
+                }
+                catch (Exception ex)
+                {
+                    lastEx = ex;
+                }
+            }
+
+            sw.Stop();
+            var errMsg = lastEx?.Message ?? "连接超时或被拒绝";
+            return Ok(new TestL4TargetResponse(false, $"无法连接到目标端口 {request.Host}:{request.Port} ({errMsg})", sw.ElapsedMilliseconds));
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return Ok(new TestL4TargetResponse(false, $"连接探测异常: {ex.Message}", sw.ElapsedMilliseconds));
+        }
     }
 }

@@ -54,6 +54,8 @@ export default defineComponent({
     const showTcpModal = ref(false);
     const isEditTcp = ref(false);
     const currentTcpId = ref(null);
+    const testingTarget = ref(false);
+    const targetTestResult = ref(null);
     const tcpForm = reactive({
       name: '',
       protocol: 'TCP',
@@ -274,6 +276,8 @@ export default defineComponent({
     function openCreateTcp() {
       isEditTcp.value = false;
       currentTcpId.value = null;
+      testingTarget.value = false;
+      targetTestResult.value = null;
       Object.assign(tcpForm, {
         name: '',
         protocol: 'TCP',
@@ -288,6 +292,8 @@ export default defineComponent({
     function openEditTcp(t) {
       isEditTcp.value = true;
       currentTcpId.value = t.id;
+      testingTarget.value = false;
+      targetTestResult.value = null;
       Object.assign(tcpForm, {
         name: t.name,
         protocol: t.protocol,
@@ -297,6 +303,39 @@ export default defineComponent({
         isEnabled: t.isEnabled,
       });
       showTcpModal.value = true;
+    }
+
+    async function testTargetConnection() {
+      if (!tcpForm.forwardHost.trim()) return toast.error('请先输入转发目标主机');
+      if (!tcpForm.forwardPort) return toast.error('请先输入目标端口');
+
+      testingTarget.value = true;
+      targetTestResult.value = null;
+      try {
+        const res = await http(API.gateway.testTarget, {
+          method: 'POST',
+          body: {
+            protocol: tcpForm.protocol,
+            host: tcpForm.forwardHost.trim(),
+            port: Number(tcpForm.forwardPort),
+            timeoutMs: 3000,
+          },
+        });
+        if (res.ok && res.data) {
+          targetTestResult.value = res.data;
+          if (res.data.success) {
+            toast.success(`目标连通性正常 (${res.data.latencyMs}ms)`);
+          } else {
+            toast.error(res.data.message);
+          }
+        } else {
+          toast.error(res.message || '探测失败');
+        }
+      } catch (err) {
+        toast.error('探测请求失败: ' + err.message);
+      } finally {
+        testingTarget.value = false;
+      }
     }
 
     async function saveTcp() {
@@ -381,6 +420,9 @@ export default defineComponent({
       openEditTcp,
       saveTcp,
       deleteTcp,
+      testingTarget,
+      targetTestResult,
+      testTargetConnection,
       buildProxyLink,
       formatTime,
     };
@@ -575,6 +617,15 @@ export default defineComponent({
 
       <!-- 4. L4 端口转发列表 -->
       <div v-if="currentTab === 'tcp'" class="panel p-4 flex flex-col gap-3">
+        <!-- 容器部署与防火墙放行引导提示 -->
+        <div class="rounded-lg border border-cyan-800/40 bg-cyan-950/20 p-3 flex items-start gap-2.5 text-xs text-slate-300">
+          <span class="text-cyan-400 font-bold shrink-0">ℹ 容器部署与端口放行排查：</span>
+          <div class="flex-1 space-y-1 text-slate-400">
+            <div>• <b class="text-slate-200">宿主网络模式 (--net=host)</b>：流量已直通物理主机。但若宿主机开启了 UFW/iptables，请务必执行 <code class="text-cyan-300 bg-slate-900 px-1 py-0.5 rounded font-mono">sudo ufw allow &lt;端口&gt;/tcp</code> 放行该端口，否则内核将直接拒连。</div>
+            <div>• <b class="text-slate-200">Docker Desktop / 桥接模式</b>：容器内动态新增的端口无法自动暴露到外部，建议采用 host 模式或在 docker run 中提前指定端口映射。</div>
+          </div>
+        </div>
+
         <div v-if="loading && tcpRoutes.length === 0" class="text-sm text-slate-400 py-8 text-center">加载中...</div>
         <div v-else-if="tcpRoutes.length === 0" class="text-sm text-slate-400 py-12 text-center">
           暂无端口转发规则。
@@ -599,11 +650,22 @@ export default defineComponent({
                     {{ t.protocol }}
                   </span>
                 </td>
-                <td class="py-3 px-3 font-mono text-cyan-300 whitespace-nowrap">:{{ t.listenPort }}</td>
+                <td class="py-3 px-3 font-mono text-cyan-300 whitespace-nowrap">
+                  :{{ t.listenPort }}
+                  <span v-if="t.boundAddress" class="text-[10px] text-slate-400 ml-1">({{ t.boundAddress }})</span>
+                </td>
                 <td class="py-3 px-3 font-mono text-slate-300 whitespace-nowrap">{{ t.forwardHost }}:{{ t.forwardPort }}</td>
                 <td class="py-3 px-3 whitespace-nowrap">
-                  <span class="badge" :class="t.isEnabled ? 'border-emerald-500/40 text-emerald-300 bg-emerald-950/30' : 'border-slate-600 text-slate-400 bg-slate-900'">
-                    {{ t.isEnabled ? '● 监听中' : '○ 已停止' }}
+                  <span v-if="!t.isEnabled" class="badge border-slate-600 text-slate-400 bg-slate-900">
+                    ○ 已停用
+                  </span>
+                  <span v-else-if="t.isRunning" class="badge border-emerald-500/40 text-emerald-300 bg-emerald-950/30 flex items-center gap-1.5 w-fit">
+                    <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    监听中
+                    <span v-if="t.activeConnections > 0" class="text-[10px] text-emerald-400/80 font-mono">({{ t.activeConnections }}连接)</span>
+                  </span>
+                  <span v-else class="badge border-rose-500/50 text-rose-300 bg-rose-950/40 cursor-help" :title="t.lastError || '套接字监听未就绪，请检查端口冲突或权限'">
+                    ● 监听失败: {{ t.lastError || '未就绪' }}
                   </span>
                 </td>
                 <td class="py-3 px-3 text-right whitespace-nowrap">
@@ -796,6 +858,18 @@ export default defineComponent({
                 <label class="block text-slate-400 mb-1">目标端口 <span class="text-rose-400">*</span></label>
                 <input v-model.number="tcpForm.forwardPort" type="number" min="1" max="65535" class="input font-mono" />
               </div>
+            </div>
+
+            <div class="flex items-center justify-between p-2.5 rounded bg-slate-900/60 border border-slate-800">
+              <div class="text-[11px] text-slate-400">
+                <span>预检目标服务是否在线并可达</span>
+                <div v-if="targetTestResult" class="font-mono mt-0.5" :class="targetTestResult.success ? 'text-emerald-400' : 'text-rose-400'">
+                  {{ targetTestResult.success ? '✔ ' : '✖ ' }}{{ targetTestResult.message }} ({{ targetTestResult.latencyMs }}ms)
+                </div>
+              </div>
+              <button type="button" class="btn btn-xs btn-outline shrink-0" :disabled="testingTarget" @click="testTargetConnection()">
+                {{ testingTarget ? '探测中...' : '测试目标连通性' }}
+              </button>
             </div>
 
             <div class="pt-1">

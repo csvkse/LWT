@@ -133,6 +133,7 @@ export const API = {
     websiteItem: (id) => `/Gateway/Websites/${id}`,
     tcpRoutes: '/Gateway/TcpRoutes',
     tcpRouteItem: (id) => `/Gateway/TcpRoutes/${id}`,
+    testTarget: '/Gateway/TcpRoutes/TestTarget',
   },
   easytier: {
     nodes: '/EasyTier/Nodes',
