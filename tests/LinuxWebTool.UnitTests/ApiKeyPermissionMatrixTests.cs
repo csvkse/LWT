@@ -36,18 +36,38 @@ public sealed class ApiKeyPermissionMatrixTests
     }
 
     [Theory]
-    [InlineData("terminal_create", true, false, false, false, false, true)]
-    [InlineData("terminal_create", false, false, false, false, false, false)]
-    [InlineData("schedule_list", false, true, false, false, false, true)]
-    [InlineData("file_read", false, false, true, false, false, true)]
-    [InlineData("transcode_submit", false, false, false, true, false, true)]
-    [InlineData("gateway_status", false, false, false, false, true, true)]
-    [InlineData("system_info", true, true, true, true, true, true)] // 基础工具不受业务模块开关限制
+    [InlineData("terminal_create", true, false, false, false, false, false, true)]
+    [InlineData("terminal_create", false, false, false, false, false, false, false)]
+    [InlineData("schedule_list", false, true, false, false, false, false, true)]
+    [InlineData("file_read", false, false, true, false, false, false, true)]
+    [InlineData("transcode_submit", false, false, false, true, false, false, true)]
+    [InlineData("gateway_status", false, false, false, false, true, false, true)]
+    [InlineData("remote_exec", false, false, false, false, false, false, false)]
+    [InlineData("remote_exec", false, false, false, false, false, true, true)]
+    [InlineData("remote_list_hosts", false, false, false, false, false, true, true)]
+    [InlineData("system_info", true, true, true, true, true, true, true)] // 基础工具不受业务模块开关限制
     public void IsMcpToolPermitted_EvaluatesToolPrefixes(
-        string tool, bool allowTerm, bool allowSched, bool allowFiles, bool allowTrans, bool allowGate, bool expected)
+        string tool, bool allowTerm, bool allowSched, bool allowFiles, bool allowTrans, bool allowGate, bool allowRemote, bool expected)
     {
         var result = ApiKeyPermissionMatrix.IsMcpToolPermitted(
-            tool, allowTerm, allowSched, allowFiles, allowTrans, allowGate);
+            tool, allowTerm, allowSched, allowFiles, allowTrans, allowGate, allowRemote);
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData(false, null, "host-1", false)]
+    [InlineData(true, null, "host-1", true)]
+    [InlineData(true, "*", "host-1", true)]
+    [InlineData(true, "host-1,host-2", "host-1", true)]
+    [InlineData(true, "host-1,host-2", "host-2", true)]
+    [InlineData(true, "host-1,host-2", "HOST-2", true)] // 大小写不敏感
+    [InlineData(true, "host-1,host-2", "host-3", false)]
+    [InlineData(true, "[\"host-1\", \"host-2\"]", "host-1", true)]
+    [InlineData(true, "[\"host-1\", \"host-2\"]", "host-3", false)]
+    public void CanAccessRemoteHost_EvaluatesCustomServerScopeAccurately(
+        bool allowRemote, string? allowedHostIds, string targetHostId, bool expected)
+    {
+        var result = ApiKeyPermissionMatrix.CanAccessRemoteHost(allowRemote, allowedHostIds, targetHostId);
         Assert.Equal(expected, result);
     }
 }

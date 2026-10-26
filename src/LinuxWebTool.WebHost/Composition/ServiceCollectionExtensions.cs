@@ -1,4 +1,8 @@
 using LinuxWebTool.WebHost.MinimalApi;
+using LinuxWebTool.Infrastructure.Features.RemoteHost.Security;
+using LinuxWebTool.Infrastructure.Features.RemoteHost.Adapters;
+using LinuxWebTool.WebHost.Features.Mcp.Engine;
+using LinuxWebTool.WebHost.Features.Mcp.Engine.Providers;
 using Yarp.ReverseProxy.Configuration;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -39,6 +43,10 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<ExecutionStore>();
         builder.Services.AddSingleton<OperationLogStore>();
         builder.Services.AddSingleton<BackupSyncStore>();
+        builder.Services.AddSingleton<RemoteHostStore>();
+        builder.Services.AddSingleton<HostCredentialProtector>();
+        builder.Services.AddSingleton<RemoteHostClientFactory>();
+        builder.Services.AddSingleton<RemoteTerminalSessionManager>();
         builder.Services.AddSingleton<IOperationLogger, OperationLogger>();
         var retentionOptions = new LogRetentionOptions
         {
@@ -146,7 +154,13 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<FrpTunnelManager>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<FrpTunnelManager>());
 
-        // MCP (Model Context Protocol) 核心引擎
+        // MCP (Model Context Protocol) 核心分发引擎与领域策略提供者
+        builder.Services.AddSingleton<IMcpToolProvider, TerminalMcpToolProvider>();
+        builder.Services.AddSingleton<IMcpToolProvider, ScheduleMcpToolProvider>();
+        builder.Services.AddSingleton<IMcpToolProvider, FileMcpToolProvider>();
+        builder.Services.AddSingleton<IMcpToolProvider, TranscodeMcpToolProvider>();
+        builder.Services.AddSingleton<IMcpToolProvider, GatewayMcpToolProvider>();
+        builder.Services.AddSingleton<IMcpToolProvider, RemoteHostMcpToolProvider>();
         builder.Services.AddSingleton<McpServerEngine>();
 
         // EasyTier 虚拟组网管理器与内核宿主

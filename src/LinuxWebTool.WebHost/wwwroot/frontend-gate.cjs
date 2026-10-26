@@ -17,6 +17,7 @@
  *  FE-TEMPLATE-TAG-BALANCE Vue 组件模板关键结构标签（div/table/thead/tbody/section/aside）必须严格开闭平衡
  *  FE-TERMINAL-SESSION-HEAL TerminalView 必须具备失效会话自动重置与新建降级机制，防止服务重启后前端卡死
  *  FE-EASYTIER-IP-MODE EasyTier 新建/编辑提交必须保证静态 IPv4 优先于 DHCP（组件行为测试）
+ *  FE-FILE-SIZE-LIMIT 单文件代码行数与单一职责门禁（views <= 2000 行，非 views <= 400 行）
  *
  * 基线：frontend-gate-baseline.json 冻结存量债务，只允许删除条目，不允许新增。
  */
@@ -270,6 +271,18 @@ for (const file of files) {
     if (path.basename(file) === 'TerminalView.js') {
       if (!content.includes('API.terminal.sessions') || !content.includes("runtime.sessionId = ''")) {
         add('FE-TERMINAL-SESSION-HEAL', file, 'TerminalView 必须具备失效会话自动重置与新建降级机制，防止服务重启后前端卡死');
+      }
+    }
+
+    // FE-FILE-SIZE-LIMIT：单文件代码行数与单一职责门禁
+    const lineCount = content.split(/\r?\n/).length;
+    if (rel.startsWith('views/')) {
+      if (lineCount > 2000) {
+        add('FE-FILE-SIZE-LIMIT', file, `视图组件行数 (${lineCount}) 超过上限 2000 行，请抽离子组件或 composable 逻辑`);
+      }
+    } else {
+      if (lineCount > 400) {
+        add('FE-FILE-SIZE-LIMIT', file, `非视图模块行数 (${lineCount}) 超过上限 400 行，请拆分为单一职责子模块`);
       }
     }
   }

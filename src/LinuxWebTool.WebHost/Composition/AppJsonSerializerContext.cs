@@ -244,6 +244,31 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(BackupSnapshot))]
 [JsonSerializable(typeof(List<BackupSnapshot>))]
 
+// RemoteHost Models
+[JsonSerializable(typeof(CreateRemoteHostRequest))]
+[JsonSerializable(typeof(UpdateRemoteHostRequest))]
+[JsonSerializable(typeof(RemoteHostItemResponse))]
+[JsonSerializable(typeof(List<RemoteHostItemResponse>))]
+[JsonSerializable(typeof(TestRemoteHostRequest))]
+[JsonSerializable(typeof(TestRemoteHostResponse))]
+[JsonSerializable(typeof(ProbeRemoteHostKeyRequest))]
+[JsonSerializable(typeof(ProbeRemoteHostKeyResponse))]
+[JsonSerializable(typeof(RemoteTerminalSessionRequest))]
+[JsonSerializable(typeof(RemoteTerminalSessionResponse))]
+[JsonSerializable(typeof(RemoteTerminalResizeRequest))]
+[JsonSerializable(typeof(RemoteCommandExecRequest))]
+[JsonSerializable(typeof(RemoteCommandExecResponse))]
+[JsonSerializable(typeof(RemoteFileEntry))]
+[JsonSerializable(typeof(List<RemoteFileEntry>))]
+[JsonSerializable(typeof(RemoteFileListResponse))]
+[JsonSerializable(typeof(RemoteFileContentResponse))]
+[JsonSerializable(typeof(SaveRemoteFileContentRequest))]
+[JsonSerializable(typeof(RemoteFileActionRequest))]
+[JsonSerializable(typeof(RemoteHostEntity))]
+[JsonSerializable(typeof(List<RemoteHostEntity>))]
+[JsonSerializable(typeof(IEnumerable<RemoteHostEntity>))]
+[JsonSerializable(typeof(IEnumerable<RemoteHostItemResponse>))]
+
 public partial class AppJsonSerializerContext
  : JsonSerializerContext
 {

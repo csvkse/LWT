@@ -161,5 +161,22 @@ export const API = {
     pruneExecute: (id) => `/BackupSync/Tasks/${id}/PruneExecute`,
     cronPreview: '/BackupSync/CronPreview',
   },
+  remoteHosts: {
+    list: '/RemoteHosts',
+    item: (id) => `/RemoteHosts/${id}`,
+    test: '/RemoteHosts/Test',
+    probeKey: '/RemoteHosts/ProbeKey',
+    terminalSession: (id) => `/RemoteHosts/${id}/Terminal/Session`,
+    closeTerminalSession: (id, sessionId) => `/RemoteHosts/${id}/Terminal/Session/${sessionId}`,
+    terminalExec: (id) => `/RemoteHosts/${id}/Terminal/Exec`,
+    files: (id) => `/RemoteHosts/${id}/Files`,
+    fileContent: (id) => `/RemoteHosts/${id}/Files/Content`,
+    fileAction: (id) => `/RemoteHosts/${id}/Files/Action`,
+    ws: (id, sessionId, token) => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const query = token ? `?token=${encodeURIComponent(token)}` : '';
+      return `${protocol}//${window.location.host}/api/remote-hosts/${encodeURIComponent(id)}/terminal/ws/${encodeURIComponent(sessionId)}${query}`;
+    },
+  },
 };
 

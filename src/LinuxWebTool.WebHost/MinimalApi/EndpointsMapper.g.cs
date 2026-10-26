@@ -18,6 +18,7 @@ using static LinuxWebTool.WebHost.Features.Schedule.Routes.SchedulesController;
 using static LinuxWebTool.WebHost.Features.Mount.Routes.SmbMountsController;
 using static LinuxWebTool.WebHost.Features.SystemStatus.Routes.SystemStatusController;
 using static LinuxWebTool.WebHost.Features.Transcode.Routes.TranscodeController;
+using LinuxWebTool.WebHost.Features.RemoteHost.Routes;
 
 namespace LinuxWebTool.WebHost.MinimalApi
 {
@@ -45,6 +46,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             services.AddScoped<GatewayController>();
             services.AddScoped<EasyTierController>();
             services.AddScoped<BackupSyncController>();
+            services.AddScoped<RemoteHostsController>();
         }
 
         public static void MapAutoControllers(this WebApplication app)
@@ -288,6 +290,23 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_BackupSyncController.MapGet("Tasks/{id:guid}/PrunePreview", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.PrunePreview(id); });
             group_BackupSyncController.MapPost("Tasks/{id:guid}/PruneExecute", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.PruneExecute(id); });
             group_BackupSyncController.MapPost("CronPreview", ([FromServices] BackupSyncController ctrl, HttpContext ctx, [FromBody] CronPreviewRequest request) => { ctrl.HttpContext = ctx; return ctrl.CronPreview(request); });
+
+            var group_RemoteHostsController = app.MapGroup("/api/RemoteHosts");
+            group_RemoteHostsController.RequireAuthorization();
+            group_RemoteHostsController.MapGet("", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.List(); });
+            group_RemoteHostsController.MapGet("{id}", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; return await ctrl.Get(id); });
+            group_RemoteHostsController.MapPost("", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, [FromBody] CreateRemoteHostRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Create(request); });
+            group_RemoteHostsController.MapPut("{id}", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, [FromBody] UpdateRemoteHostRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Update(id, request); });
+            group_RemoteHostsController.MapDelete("{id}", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; return await ctrl.Delete(id); });
+            group_RemoteHostsController.MapPost("Test", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, [FromBody] TestRemoteHostRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Test(request); });
+            group_RemoteHostsController.MapPost("ProbeKey", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, [FromBody] ProbeRemoteHostKeyRequest request) => { ctrl.HttpContext = ctx; return await ctrl.ProbeKey(request); });
+            group_RemoteHostsController.MapPost("{id}/Terminal/Session", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, [FromBody] RemoteTerminalSessionRequest request) => { ctrl.HttpContext = ctx; return await ctrl.CreateTerminalSession(id, request); });
+            group_RemoteHostsController.MapDelete("{id}/Terminal/Session/{sessionId}", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, string sessionId) => { ctrl.HttpContext = ctx; return await ctrl.CloseTerminalSession(id, sessionId); });
+            group_RemoteHostsController.MapPost("{id}/Terminal/Exec", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, [FromBody] RemoteCommandExecRequest request) => { ctrl.HttpContext = ctx; return await ctrl.ExecCommand(id, request); });
+            group_RemoteHostsController.MapGet("{id}/Files", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, [FromQuery] string? path) => { ctrl.HttpContext = ctx; return await ctrl.ListFiles(id, path); });
+            group_RemoteHostsController.MapGet("{id}/Files/Content", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, [FromQuery] string path) => { ctrl.HttpContext = ctx; return await ctrl.GetFileContent(id, path); });
+            group_RemoteHostsController.MapPut("{id}/Files/Content", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, [FromBody] SaveRemoteFileContentRequest request) => { ctrl.HttpContext = ctx; return await ctrl.SaveFileContent(id, request); });
+            group_RemoteHostsController.MapPost("{id}/Files/Action", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, [FromBody] RemoteFileActionRequest request) => { ctrl.HttpContext = ctx; return await ctrl.FileAction(id, request); });
         }
     }
 }

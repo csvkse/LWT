@@ -49,6 +49,7 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + MCP 端点
 | `LinuxArch023` | 生产项目根目录必须遵循物理架构规范白名单（仅允许 Features/、Composition/、Shared/ 等） | xUnit（物理目录扫描） |
 | `LinuxArch024` | 所有控制器必须在 ApiKeyMiddleware 中显式声明权限归属（拒绝或绑定模块，严禁默认漏控） | xUnit（控制器路由与中间件匹配断言） |
 | `LinuxArch025` | L4 端口转发服务必须支持双栈监听、真实运行时状态暴露与端口冲突自愈 | xUnit（套接字行为与契约验证） |
+| `LinuxArch026` | 单源文件代码行数与单一职责门禁（通用 <= 700 行，MCP <= 400 行，Contracts <= 300 行；存量 4 个适配器冻结硬顶基线防假绿） | xUnit（全源码扫描与行数基线硬顶断言） |
 | `FE-HTML-INLINE` | index.html 内联脚本（importmap 除外）/ 内联事件 | frontend-gate.cjs |
 | `FE-API-OWNERSHIP` | API 路径字符串出现在 config.js 之外 | frontend-gate.cjs |
 | `FE-NO-FETCH` | fetch() 出现在 api/client.js 之外 | frontend-gate.cjs |
@@ -62,6 +63,7 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + MCP 端点
 | `FE-TEMPLATE-VALUE-REF` | Vue 模板禁止访问 setup 暴露变量的 .value（模板自动解包，写 .value 为反模式） | frontend-gate.cjs |
 | `FE-TEMPLATE-TAG-BALANCE` | Vue 组件模板关键结构标签（div/table/thead/tbody/section/aside）必须严格开闭平衡 | frontend-gate.cjs |
 | `FE-TERMINAL-SESSION-HEAL` | TerminalView 必须具备失效会话自动重置与新建降级机制（防止服务重启或会话过期后前端卡死） | frontend-gate.cjs |
+| `FE-FILE-SIZE-LIMIT` | 前端单文件代码行数门禁（视图 <= 2000 行，非视图模块 <= 400 行） | frontend-gate.cjs |
 
 ## 约定要点
 
@@ -96,3 +98,14 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + MCP 端点
 - `LinuxArch022`：`EasyTierLifecycleSafetyTests` 使用真实节点仓储，保护并发启停串行边界、重复启动复用、启动前拒绝冲突、改名停止旧名称及停止失败禁止重启。
 - `FE-EASYTIER-REFRESH`：前端门禁加载真实 EasyTier/Vue 组件，模拟迟到请求与时钟；上一轮未完成时不得重复发起节点查询，失败后忙碌状态必须恢复并允许下一轮。查询必须指定超时。
 - 后端用例自动纳入既有架构/集成测试；前端用例直接由 `frontend-gate.cjs` 执行，缺失、失败或超时均返回非零退出码，不允许基线豁免。方案及边界见 `docs/easytier-multi-node-safety-plan.md`。
+
+### 单源文件代码行数与单一职责门禁（巨石文件防御）
+
+- `LinuxArch026`：严格防止上帝类（God Class）与巨型代码单文件回潮：
+  - **通用 C# 源文件**：上限 700 行（杜绝代码逻辑过度堆砌，强制采用策略模式、外观模式或扩展方法拆分）；
+  - **契约层（Contracts）**：上限 300 行（契约仅包含轻量 DTO 与接口，严禁混入重型逻辑）；
+  - **MCP 模块（Features/Mcp）**：上限 400 行（彻底杜绝 `McpServerEngine` 重新膨胀为千行巨石，强制遵循 `IMcpToolProvider` 领域提供者分拆规范）；
+  - **存量底层适配器白名单硬顶**：仅冻结 4 个历史高复杂度底层进程/硬件适配文件（`EasyTierNodeManager` <= 1450、`FrpTunnelInstance` <= 1100、`FfmpegArgsBuilder` <= 950、`SystemStatusProvider` <= 750）。存量只降不增，超标立毙；若文件重构降至 700 行以内，门禁会断言其必须从白名单剔除（防假绿）。
+- `FE-FILE-SIZE-LIMIT`：前端 ESM 单文件门禁：
+  - **视图组件（views/*.js）**：上限 2000 行（含内联响应式模板与弹窗定义）；
+  - **非视图模块（api/、components/、store/、utils/）**：上限 400 行（强制组件、工具库与状态管理遵循单一职责）。
