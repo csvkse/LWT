@@ -14,6 +14,8 @@ export default defineComponent({
     // 新建 / 编辑弹窗
     const showModal = ref(false);
     const isEdit = ref(false);
+    const isClone = ref(false);
+    const clonedFromName = ref('');
     const currentId = ref(null);
     const form = reactive({
       name: '',
@@ -70,6 +72,8 @@ export default defineComponent({
 
     function openCreate() {
       isEdit.value = false;
+      isClone.value = false;
+      clonedFromName.value = '';
       currentId.value = null;
       Object.assign(form, {
         name: '',
@@ -90,10 +94,35 @@ export default defineComponent({
 
     function openEdit(key) {
       isEdit.value = true;
+      isClone.value = false;
+      clonedFromName.value = '';
       currentId.value = key.id;
       const hostIds = parseHostIds(key.allowedHostIds);
       Object.assign(form, {
         name: key.name,
+        allowApi: key.allowApi,
+        allowMcp: key.allowMcp,
+        allowTerminal: key.allowTerminal,
+        allowSchedules: key.allowSchedules,
+        allowFiles: key.allowFiles,
+        allowTranscode: key.allowTranscode,
+        allowGateway: key.allowGateway,
+        allowRemoteHosts: Boolean(key.allowRemoteHosts),
+        hostScopeMode: (key.allowedHostIds && key.allowedHostIds !== '*') ? 'custom' : 'all',
+        selectedHostIds: hostIds,
+        expiresAt: key.expiresAt ? key.expiresAt.slice(0, 16) : '',
+      });
+      showModal.value = true;
+    }
+
+    function openClone(key) {
+      isEdit.value = false;
+      isClone.value = true;
+      clonedFromName.value = key.name;
+      currentId.value = key.id;
+      const hostIds = parseHostIds(key.allowedHostIds);
+      Object.assign(form, {
+        name: `${key.name} - 副本`,
         allowApi: key.allowApi,
         allowMcp: key.allowMcp,
         allowTerminal: key.allowTerminal,
@@ -209,6 +238,8 @@ export default defineComponent({
       loading,
       showModal,
       isEdit,
+      isClone,
+      clonedFromName,
       form,
       showSecretModal,
       createdKeyInfo,
@@ -217,6 +248,7 @@ export default defineComponent({
       load,
       openCreate,
       openEdit,
+      openClone,
       save,
       toggleKey,
       removeKey,
@@ -313,6 +345,7 @@ export default defineComponent({
                   <div class="flex items-center justify-end gap-1.5">
                     <button class="btn btn-xs" @click="openGuide(k)">集成</button>
                     <button class="btn btn-xs" @click="openEdit(k)">编辑</button>
+                    <button class="btn btn-xs text-cyan-400 hover:text-cyan-300" @click="openClone(k)" title="基于此密钥配置克隆新密钥">克隆</button>
                     <button class="btn btn-xs" :class="k.isEnabled ? 'text-amber-400' : 'text-emerald-400'" @click="toggleKey(k)">
                       {{ k.isEnabled ? '禁用' : '启用' }}
                     </button>
@@ -330,9 +363,14 @@ export default defineComponent({
         <div class="panel w-full max-w-lg p-5 flex flex-col gap-4 border-slate-700 max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
             <h3 class="font-semibold text-slate-100 text-base">
-              {{ isEdit ? '编辑 API Key 权限' : '新建 API Key' }}
+              {{ isEdit ? '编辑 API Key 权限' : (isClone ? '克隆 API Key (复制配置)' : '新建 API Key') }}
             </h3>
             <button class="text-slate-400 hover:text-slate-200" @click="showModal = false">✕</button>
+          </div>
+
+          <!-- 克隆提示横幅 -->
+          <div v-if="isClone" class="p-2.5 rounded bg-cyan-950/40 border border-cyan-800/40 text-cyan-300 text-xs flex items-center gap-2">
+            <span>📋 已自动载入原密钥「<strong class="text-cyan-200">{{ clonedFromName }}</strong>」的全部通道、权限矩阵及服务器授权范围，可直接保存生成新密钥。</span>
           </div>
 
           <div class="flex flex-col gap-3 text-xs">
@@ -423,7 +461,9 @@ export default defineComponent({
 
           <div class="flex items-center justify-end gap-2 border-t border-slate-700/60 pt-3">
             <button class="btn" @click="showModal = false">取消</button>
-            <button class="btn btn-primary" @click="save()">保存</button>
+            <button class="btn btn-primary" @click="save()">
+              {{ isClone ? '立即克隆并生成' : (isEdit ? '保存更新' : '保存') }}
+            </button>
           </div>
         </div>
       </div>
