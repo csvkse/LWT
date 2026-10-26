@@ -266,6 +266,7 @@ CREATE TABLE IF NOT EXISTS api_key (
   AllowFiles INTEGER NOT NULL DEFAULT 0,
   AllowTranscode INTEGER NOT NULL DEFAULT 0,
   AllowGateway INTEGER NOT NULL DEFAULT 0,
+  AllowedPaths TEXT,
   CreatedAt TEXT NOT NULL,
   LastUsedAt TEXT,
   ExpiresAt TEXT
@@ -335,7 +336,10 @@ CREATE TABLE IF NOT EXISTS gateway_website (
   RewriteBody INTEGER NOT NULL DEFAULT 1,
   RewriteCookie INTEGER NOT NULL DEFAULT 1,
   IsEnabled INTEGER NOT NULL DEFAULT 1,
-  UpdateTime TEXT NOT NULL
+  UpdateTime TEXT NOT NULL,
+  Alias TEXT,
+  AuthType TEXT NOT NULL DEFAULT 'None',
+  AuthSecret TEXT
 );
 CREATE TABLE IF NOT EXISTS gateway_tcp_route (
   Id TEXT PRIMARY KEY COLLATE NOCASE,
@@ -417,6 +421,10 @@ CREATE INDEX IF NOT EXISTS idx_backup_snapshot_task ON backup_snapshot(TaskId);
         EnsureColumnExists(db, "easytier_nodes", "MappedListenersJson", "TEXT NOT NULL DEFAULT '[]'");
         EnsureColumnExists(db, "easytier_nodes", "ProxyNetworkRulesJson", "TEXT NOT NULL DEFAULT '[]'");
         EnsureColumnExists(db, "easytier_nodes", "AdvancedConfigJson", "TEXT NOT NULL DEFAULT '{}'");
+        EnsureColumnExists(db, "gateway_website", "Alias", "TEXT");
+        EnsureColumnExists(db, "gateway_website", "AuthType", "TEXT NOT NULL DEFAULT 'None'");
+        EnsureColumnExists(db, "gateway_website", "AuthSecret", "TEXT");
+        EnsureColumnExists(db, "api_key", "AllowedPaths", "TEXT");
     }
 
     private static void EnsureColumnExists(SqliteConnection db, string table, string column, string definition)

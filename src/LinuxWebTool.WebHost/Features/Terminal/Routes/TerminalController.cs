@@ -1,3 +1,5 @@
+using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
+using LinuxWebTool.Infrastructure.Shared.Support;
 using LinuxWebTool.WebHost.Composition;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -58,6 +60,26 @@ public class TerminalController(IPtySessionManager pty, TerminalDependencyServic
             catch (Exception ex) when (ex is IOException or ArgumentException or NotSupportedException)
             {
                 return BadRequest(new MessageResponse("无法访问工作目录"));
+            }
+        }
+
+        var apiKey = HttpContext.Items["CurrentApiKey"] as ApiKeyEntity;
+        if (!string.IsNullOrWhiteSpace(apiKey?.AllowedPaths))
+        {
+            if (request.WorkingDirectory is null)
+            {
+                var roots = PathScopeGuard.GetAllowedRoots(apiKey.AllowedPaths);
+                if (roots.Count > 0)
+                {
+                    cwd = roots[0];
+                }
+            }
+            else
+            {
+                if (!PathScopeGuard.IsAllowed(cwd, apiKey.AllowedPaths, out var failureReason))
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(failureReason ?? "工作目录超出 API Key 授权范围"));
+                }
             }
         }
 

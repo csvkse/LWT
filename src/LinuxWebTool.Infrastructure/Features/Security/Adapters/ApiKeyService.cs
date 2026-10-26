@@ -37,6 +37,7 @@ public class ApiKeyService(ApiKeyStore store, ILogger<ApiKeyService> logger)
             AllowFiles = request.AllowFiles,
             AllowTranscode = request.AllowTranscode,
             AllowGateway = request.AllowGateway,
+            AllowedPaths = string.IsNullOrWhiteSpace(request.AllowedPaths) ? null : request.AllowedPaths.Trim(),
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = request.ExpiresAt
         };

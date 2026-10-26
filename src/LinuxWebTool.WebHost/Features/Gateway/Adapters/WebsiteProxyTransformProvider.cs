@@ -25,6 +25,67 @@ public sealed partial class WebsiteProxyTransformProvider : ITransformProvider
         _logger = logger;
     }
 
+    private bool ValidateWebsiteAuth(HttpContext http, WebsiteEntry entry)
+    {
+        if (string.Equals(entry.AuthType, "Basic", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(entry.AuthSecret))
+            {
+                return true;
+            }
+
+            var authHeader = http.Request.Headers.Authorization.ToString();
+            if (authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var encoded = authHeader["Basic ".Length..].Trim();
+                    var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
+                    if (string.Equals(decoded, entry.AuthSecret, StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+                catch { }
+            }
+
+            _logger.LogWarning("[WebsiteProxy] Basic Auth 认证失败 (站点: '{Alias}') 来自 {RemoteIp}", entry.Alias ?? entry.Authority, http.Connection.RemoteIpAddress);
+            http.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            http.Response.Headers["WWW-Authenticate"] = $"Basic realm=\"LWT Proxy: {entry.Alias ?? entry.Authority}\", charset=\"UTF-8\"";
+            return false;
+        }
+
+        if (string.Equals(entry.AuthType, "Gateway", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(entry.AuthType, "Jwt", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(entry.AuthType, "ApiKey", StringComparison.OrdinalIgnoreCase))
+        {
+            // A. 管理员 JWT 登录
+            var isAuthenticated = http.User?.Identity?.IsAuthenticated == true && http.User.FindFirst("TokenType")?.Value != "ApiKey";
+
+            // B. API Key 认证（由 ApiKeyMiddleware 校验并拥有 AllowGateway 权限）
+            if (!isAuthenticated && http.Items.TryGetValue("CurrentApiKey", out var keyObj) && keyObj is LinuxWebTool.Infrastructure.Shared.Persistence.Entities.ApiKeyEntity apiKey && apiKey.AllowGateway)
+            {
+                isAuthenticated = true;
+            }
+
+            // C. 检查 Web 会话 Cookie
+            if (!isAuthenticated && http.Request.Cookies.TryGetValue("lwt_token", out var cookieToken) && !string.IsNullOrWhiteSpace(cookieToken))
+            {
+                isAuthenticated = true;
+            }
+
+            if (!isAuthenticated)
+            {
+                _logger.LogWarning("[WebsiteProxy] 访问站点 '{Alias}' 需要网关登录或具备网关权限的 API Key，拒绝匿名请求来自 {RemoteIp}", entry.Alias ?? entry.Authority, http.Connection.RemoteIpAddress);
+                http.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                http.Response.Headers["WWW-Authenticate"] = "Bearer realm=\"LWT Gateway Proxy\"";
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public void ValidateRoute(TransformRouteValidationContext context) { }
     public void ValidateCluster(TransformClusterValidationContext context) { }
 
@@ -98,6 +159,7 @@ public sealed partial class WebsiteProxyTransformProvider : ITransformProvider
                     http.Response.StatusCode = StatusCodes.Status403Forbidden;
                     return ValueTask.CompletedTask;
                 }
+                if (!ValidateWebsiteAuth(http, entry)) return ValueTask.CompletedTask;
                 ApplyProxyRoute(ctx, entry, tail, $"/proxy/{entry.Authority}");
                 return ValueTask.CompletedTask;
             }
@@ -110,6 +172,7 @@ public sealed partial class WebsiteProxyTransformProvider : ITransformProvider
                     http.Response.StatusCode = StatusCodes.Status403Forbidden;
                     return ValueTask.CompletedTask;
                 }
+                if (!ValidateWebsiteAuth(http, entry)) return ValueTask.CompletedTask;
                 ApplyProxyRoute(ctx, entry, tail, $"/proxy/{entry.Alias}");
                 return ValueTask.CompletedTask;
             }
@@ -142,6 +205,7 @@ public sealed partial class WebsiteProxyTransformProvider : ITransformProvider
                     http.Response.StatusCode = StatusCodes.Status403Forbidden;
                     return ValueTask.CompletedTask;
                 }
+                if (!ValidateWebsiteAuth(http, entry)) return ValueTask.CompletedTask;
                 ApplyProxyRoute(ctx, entry, tail, $"/s/{entry.Alias}");
                 return ValueTask.CompletedTask;
             }
@@ -195,6 +259,7 @@ public sealed partial class WebsiteProxyTransformProvider : ITransformProvider
                 var prefix = sepLen == 2
                     ? $"/{entry.UpstreamScheme}:/{entry.Authority}"
                     : $"/{entry.UpstreamScheme}://{entry.Authority}";
+                if (!ValidateWebsiteAuth(http, entry)) return ValueTask.CompletedTask;
                 ApplyProxyRoute(ctx, entry, tail, prefix);
                 return ValueTask.CompletedTask;
             }
@@ -219,6 +284,11 @@ public sealed partial class WebsiteProxyTransformProvider : ITransformProvider
 
         ctx.ProxyRequest.Headers.Remove("Host");
         ctx.ProxyRequest.Headers.TryAddWithoutValidation("Host", entry.Authority);
+
+        if (string.Equals(entry.AuthType, "Basic", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.ProxyRequest.Headers.Remove("Authorization");
+        }
 
         if (entry.RewriteBody)
         {
@@ -386,11 +456,16 @@ public sealed class WebsiteAllowList
         {
             var target = e.TargetUrl.Trim();
             if (string.IsNullOrWhiteSpace(target)) continue;
-            var uri = Uri.TryCreate(target.Contains("://") ? target : "https://" + target, UriKind.Absolute, out var u) ? u : null;
+            var defaultScheme = target.EndsWith(":443", StringComparison.Ordinal) || target.Contains(":443/", StringComparison.Ordinal) ? "https://" : "http://";
+            var uri = Uri.TryCreate(target.Contains("://") ? target : defaultScheme + target, UriKind.Absolute, out var u) ? u : null;
             if (uri == null) continue;
             var authority = WebsiteProxyTransformProvider.NormalizeAuthority(uri.IsDefaultPort ? uri.Host : $"{uri.Host}:{uri.Port}");
             if (string.IsNullOrEmpty(authority)) continue;
             if (map.ContainsKey(authority)) continue;
+
+            var effectiveAlias = !string.IsNullOrWhiteSpace(e.Alias)
+                ? e.Alias.Trim().ToLowerInvariant()
+                : (!string.IsNullOrWhiteSpace(e.Name) ? e.Name.Trim().ToLowerInvariant() : null);
 
             var entry = new WebsiteEntry(
                 authority,
@@ -398,15 +473,23 @@ public sealed class WebsiteAllowList
                 e.RewriteBody,
                 e.RewriteCookie,
                 "Scheme,Prefix,Alias",
-                e.Name);
+                effectiveAlias,
+                string.IsNullOrWhiteSpace(e.AuthType) ? "None" : e.AuthType.Trim(),
+                e.AuthSecret);
 
             map[authority] = entry;
 
+            if (!string.IsNullOrWhiteSpace(effectiveAlias))
+            {
+                if (!aliasMap.ContainsKey(effectiveAlias))
+                    aliasMap[effectiveAlias] = entry;
+            }
+
             if (!string.IsNullOrWhiteSpace(e.Name))
             {
-                var cleanAlias = e.Name.Trim().ToLowerInvariant();
-                if (!aliasMap.ContainsKey(cleanAlias))
-                    aliasMap[cleanAlias] = entry;
+                var cleanName = e.Name.Trim().ToLowerInvariant();
+                if (!aliasMap.ContainsKey(cleanName))
+                    aliasMap[cleanName] = entry;
             }
         }
 
@@ -432,7 +515,9 @@ public sealed record WebsiteEntry(
     bool RewriteBody,
     bool RewriteCookies,
     string AllowedModes,
-    string? Alias)
+    string? Alias,
+    string AuthType = "None",
+    string? AuthSecret = null)
 {
     public string UpstreamScheme => UseHttps ? "https" : "http";
 

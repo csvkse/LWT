@@ -10,6 +10,7 @@ public sealed record CreateApiKeyRequest(
     bool AllowFiles = false,
     bool AllowTranscode = false,
     bool AllowGateway = false,
+    string? AllowedPaths = null,
     DateTime? ExpiresAt = null);
 
 /// <summary>更新 API Key 请求契约</summary>
@@ -23,6 +24,7 @@ public sealed record UpdateApiKeyRequest(
     bool AllowFiles,
     bool AllowTranscode,
     bool AllowGateway,
+    string? AllowedPaths = null,
     DateTime? ExpiresAt = null);
 
 /// <summary>API Key 创建响应契约（包含一次性明文 Key）</summary>
@@ -38,6 +40,7 @@ public sealed record ApiKeyCreatedResponse(
     bool AllowFiles,
     bool AllowTranscode,
     bool AllowGateway,
+    string? AllowedPaths,
     DateTime CreatedAt,
     DateTime? ExpiresAt);
 
@@ -54,6 +57,7 @@ public sealed record ApiKeyItemResponse(
     bool AllowFiles,
     bool AllowTranscode,
     bool AllowGateway,
+    string? AllowedPaths,
     DateTime CreatedAt,
     DateTime? LastUsedAt,
     DateTime? ExpiresAt);

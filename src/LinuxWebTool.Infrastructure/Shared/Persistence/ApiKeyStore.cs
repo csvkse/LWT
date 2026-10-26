@@ -27,8 +27,8 @@ public partial class ApiKeyStore(DbConnectionFactory factory)
     {
         using var db = factory.CreateConnection();
         const string sql = @"
-            INSERT INTO api_key (Id, Name, KeyPrefix, KeyHash, IsEnabled, AllowApi, AllowMcp, AllowTerminal, AllowSchedules, AllowFiles, AllowTranscode, AllowGateway, CreatedAt, LastUsedAt, ExpiresAt)
-            VALUES (@Id, @Name, @KeyPrefix, @KeyHash, @IsEnabled, @AllowApi, @AllowMcp, @AllowTerminal, @AllowSchedules, @AllowFiles, @AllowTranscode, @AllowGateway, @CreatedAt, @LastUsedAt, @ExpiresAt)";
+            INSERT INTO api_key (Id, Name, KeyPrefix, KeyHash, IsEnabled, AllowApi, AllowMcp, AllowTerminal, AllowSchedules, AllowFiles, AllowTranscode, AllowGateway, AllowedPaths, CreatedAt, LastUsedAt, ExpiresAt)
+            VALUES (@Id, @Name, @KeyPrefix, @KeyHash, @IsEnabled, @AllowApi, @AllowMcp, @AllowTerminal, @AllowSchedules, @AllowFiles, @AllowTranscode, @AllowGateway, @AllowedPaths, @CreatedAt, @LastUsedAt, @ExpiresAt)";
         await db.ExecuteAsync(sql, entity);
     }
 
@@ -39,7 +39,7 @@ public partial class ApiKeyStore(DbConnectionFactory factory)
             UPDATE api_key
             SET Name = @Name, IsEnabled = @IsEnabled, AllowApi = @AllowApi, AllowMcp = @AllowMcp,
                 AllowTerminal = @AllowTerminal, AllowSchedules = @AllowSchedules, AllowFiles = @AllowFiles,
-                AllowTranscode = @AllowTranscode, AllowGateway = @AllowGateway, ExpiresAt = @ExpiresAt
+                AllowTranscode = @AllowTranscode, AllowGateway = @AllowGateway, AllowedPaths = @AllowedPaths, ExpiresAt = @ExpiresAt
             WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, entity);
     }

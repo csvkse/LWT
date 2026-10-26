@@ -353,4 +353,87 @@ public sealed class ApiKeyFunctionalTests
         var apiResp = await invalidKeyClient.GetAsync("/api/Terminal/Support.js");
         Assert.Equal(HttpStatusCode.Unauthorized, apiResp.StatusCode);
     }
+
+    [Fact]
+    public async Task ApiKey_PathScope_Restricts_Files_And_Terminal_Access()
+    {
+        var adminClient = await TestServerFixture.CreateAdminClientAsync();
+
+        var scopeDir = Path.Combine(Path.GetTempPath(), $"lwt_scope_{Guid.NewGuid():N}").Replace('\\', '/');
+        var outsideDir = Path.Combine(Path.GetTempPath(), $"lwt_outside_{Guid.NewGuid():N}").Replace('\\', '/');
+        Directory.CreateDirectory(scopeDir);
+        Directory.CreateDirectory(outsideDir);
+
+        File.WriteAllText(Path.Combine(outsideDir, "secret.txt"), "forbidden content");
+
+        try
+        {
+            // 1. 创建限定路径范围的 API Key
+            var createReq = new CreateApiKeyRequest(
+                Name: "Scoped Path Key",
+                AllowApi: true,
+                AllowMcp: true,
+                AllowTerminal: true,
+                AllowSchedules: false,
+                AllowFiles: true,
+                AllowTranscode: false,
+                AllowGateway: false,
+                AllowedPaths: scopeDir);
+
+            var createJson = JsonSerializer.Serialize(createReq, AppJsonSerializerContext.Default.CreateApiKeyRequest);
+            var createResp = await adminClient.PostAsync("/api/ApiKeys", TestServerFixture.Json(createJson));
+            Assert.Equal(HttpStatusCode.OK, createResp.StatusCode);
+
+            using var doc = JsonDocument.Parse(await createResp.Content.ReadAsStringAsync());
+            var rawKey = doc.RootElement.GetProperty("rawKey").GetString()!;
+            var scopedClient = await TestServerFixture.CreateApiKeyClientAsync(rawKey);
+
+            // 2. 文件列表测试：访问授权工作区允许 (200)，访问范围外部拒绝 (403)
+            var okListResp = await scopedClient.GetAsync($"/api/Files?path={Uri.EscapeDataString(scopeDir)}");
+            Assert.Equal(HttpStatusCode.OK, okListResp.StatusCode);
+
+            var forbiddenListResp = await scopedClient.GetAsync($"/api/Files?path={Uri.EscapeDataString(outsideDir)}");
+            Assert.Equal(HttpStatusCode.Forbidden, forbiddenListResp.StatusCode);
+
+            // 3. 文件读写测试：写入工作区允许，写入范围外部拒绝
+            var writeOkReq = new
+            {
+                Path = $"{scopeDir}/test.txt",
+                Content = "authorized test file content"
+            };
+            var writeOkResp = await scopedClient.PostAsync("/api/Files/Content", TestServerFixture.Json(JsonSerializer.Serialize(writeOkReq)));
+            Assert.Equal(HttpStatusCode.OK, writeOkResp.StatusCode);
+
+            var writeForbiddenReq = new
+            {
+                Path = $"{outsideDir}/hack.txt",
+                Content = "malicious attempt"
+            };
+            var writeForbiddenResp = await scopedClient.PostAsync("/api/Files/Content", TestServerFixture.Json(JsonSerializer.Serialize(writeForbiddenReq)));
+            Assert.Equal(HttpStatusCode.Forbidden, writeForbiddenResp.StatusCode);
+
+            // 4. 读取外部文件拒绝 (403)
+            var readForbiddenResp = await scopedClient.GetAsync($"/api/Files/Content?path={Uri.EscapeDataString(outsideDir + "/secret.txt")}");
+            Assert.Equal(HttpStatusCode.Forbidden, readForbiddenResp.StatusCode);
+
+            // 5. 终端会话创建：指定外部路径拒绝 (403)
+            var termOutsideReq = new LinuxWebTool.Contracts.Features.Terminal.Contracts.TerminalSessionCreateRequest(
+                WorkingDirectory: outsideDir);
+            var termOutsideJson = JsonSerializer.Serialize(termOutsideReq, AppJsonSerializerContext.Default.TerminalSessionCreateRequest);
+            var termOutsideResp = await scopedClient.PostAsync("/api/Terminal/Sessions", TestServerFixture.Json(termOutsideJson));
+            Assert.Equal(HttpStatusCode.Forbidden, termOutsideResp.StatusCode);
+
+            // 6. 终端会话创建：指定工作区路径允许
+            var termInsideReq = new LinuxWebTool.Contracts.Features.Terminal.Contracts.TerminalSessionCreateRequest(
+                WorkingDirectory: scopeDir);
+            var termInsideJson = JsonSerializer.Serialize(termInsideReq, AppJsonSerializerContext.Default.TerminalSessionCreateRequest);
+            var termInsideResp = await scopedClient.PostAsync("/api/Terminal/Sessions", TestServerFixture.Json(termInsideJson));
+            Assert.Equal(HttpStatusCode.OK, termInsideResp.StatusCode);
+        }
+        finally
+        {
+            try { Directory.Delete(scopeDir, true); } catch { }
+            try { Directory.Delete(outsideDir, true); } catch { }
+        }
+    }
 }

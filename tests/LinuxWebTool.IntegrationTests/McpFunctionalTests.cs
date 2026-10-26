@@ -344,7 +344,8 @@ public sealed class McpFunctionalTests
         bool allowFiles,
         bool allowGateway,
         bool allowSchedules = false,
-        bool allowTranscode = false)
+        bool allowTranscode = false,
+        string? allowedPaths = null)
     {
         var adminClient = await TestServerFixture.CreateAdminClientAsync();
         var keyReq = new CreateApiKeyRequest(
@@ -355,7 +356,8 @@ public sealed class McpFunctionalTests
             AllowSchedules: allowSchedules,
             AllowFiles: allowFiles,
             AllowTranscode: allowTranscode,
-            AllowGateway: allowGateway);
+            AllowGateway: allowGateway,
+            AllowedPaths: allowedPaths);
 
         var keyJson = JsonSerializer.Serialize(keyReq, AppJsonSerializerContext.Default.CreateApiKeyRequest);
         var keyResp = await adminClient.PostAsync("/api/ApiKeys", TestServerFixture.Json(keyJson));
@@ -363,5 +365,103 @@ public sealed class McpFunctionalTests
         var rawKey = keyDoc.RootElement.GetProperty("rawKey").GetString()!;
 
         return await TestServerFixture.CreateApiKeyClientAsync(rawKey);
+    }
+
+    [Fact]
+    public async Task Mcp_ToolCall_PathScope_Restricts_File_And_Terminal_Operations()
+    {
+        var scopeDir = Path.Combine(Path.GetTempPath(), $"lwt_mcp_scope_{Guid.NewGuid():N}").Replace('\\', '/');
+        var outsideDir = Path.Combine(Path.GetTempPath(), $"lwt_mcp_outside_{Guid.NewGuid():N}").Replace('\\', '/');
+        Directory.CreateDirectory(scopeDir);
+        Directory.CreateDirectory(outsideDir);
+        File.WriteAllText(Path.Combine(outsideDir, "secret.txt"), "outside secret");
+
+        try
+        {
+            var mcpClient = await CreateMcpApiKeyClientAsync(
+                allowTerminal: true,
+                allowFiles: true,
+                allowGateway: false,
+                allowedPaths: scopeDir);
+
+            // 1. 读取范围外文件 -> 必须返回 isError: true 且包含 Access Denied
+            var readOutsideReq = new
+            {
+                jsonrpc = "2.0",
+                id = "read-out",
+                method = "tools/call",
+                @params = new
+                {
+                    name = "file_read_text",
+                    arguments = new { path = $"{outsideDir}/secret.txt" }
+                }
+            };
+            var readOutResp = await mcpClient.PostAsync("/mcp", TestServerFixture.Json(JsonSerializer.Serialize(readOutsideReq)));
+            using var readOutDoc = JsonDocument.Parse(await readOutResp.Content.ReadAsStringAsync());
+            var readOutResult = readOutDoc.RootElement.GetProperty("result");
+            Assert.True(readOutResult.GetProperty("isError").GetBoolean());
+            var readOutText = readOutResult.GetProperty("content").EnumerateArray().First().GetProperty("text").GetString()!;
+            Assert.Contains("Access Denied", readOutText);
+
+            // 2. 写入范围外文件 -> 拒绝
+            var writeOutsideReq = new
+            {
+                jsonrpc = "2.0",
+                id = "write-out",
+                method = "tools/call",
+                @params = new
+                {
+                    name = "file_write_text",
+                    arguments = new { path = $"{outsideDir}/hack.txt", content = "bad" }
+                }
+            };
+            var writeOutResp = await mcpClient.PostAsync("/mcp", TestServerFixture.Json(JsonSerializer.Serialize(writeOutsideReq)));
+            using var writeOutDoc = JsonDocument.Parse(await writeOutResp.Content.ReadAsStringAsync());
+            Assert.True(writeOutDoc.RootElement.GetProperty("result").GetProperty("isError").GetBoolean());
+
+            // 3. 写入范围内文件 -> 成功
+            var writeInsideReq = new
+            {
+                jsonrpc = "2.0",
+                id = "write-in",
+                method = "tools/call",
+                @params = new
+                {
+                    name = "file_write_text",
+                    arguments = new { path = $"{scopeDir}/ok.txt", content = "hello mcp inside" }
+                }
+            };
+            var writeInResp = await mcpClient.PostAsync("/mcp", TestServerFixture.Json(JsonSerializer.Serialize(writeInsideReq)));
+            using var writeInDoc = JsonDocument.Parse(await writeInResp.Content.ReadAsStringAsync());
+            Assert.False(writeInDoc.RootElement.GetProperty("result").GetProperty("isError").GetBoolean());
+            Assert.True(File.Exists(Path.Combine(scopeDir, "ok.txt")));
+
+            // 4. 执行命令并显式指定越界 working_directory -> 拒绝
+            var termOutReq = new
+            {
+                jsonrpc = "2.0",
+                id = "term-out",
+                method = "tools/call",
+                @params = new
+                {
+                    name = "terminal_execute_command",
+                    arguments = new
+                    {
+                        command = "echo test",
+                        working_directory = outsideDir
+                    }
+                }
+            };
+            var termOutResp = await mcpClient.PostAsync("/mcp", TestServerFixture.Json(JsonSerializer.Serialize(termOutReq)));
+            using var termOutDoc = JsonDocument.Parse(await termOutResp.Content.ReadAsStringAsync());
+            var termOutResult = termOutDoc.RootElement.GetProperty("result");
+            Assert.True(termOutResult.GetProperty("isError").GetBoolean());
+            Assert.Contains("Access Denied", termOutResult.GetProperty("content").EnumerateArray().First().GetProperty("text").GetString()!);
+        }
+        finally
+        {
+            try { Directory.Delete(scopeDir, true); } catch { }
+            try { Directory.Delete(outsideDir, true); } catch { }
+        }
     }
 }

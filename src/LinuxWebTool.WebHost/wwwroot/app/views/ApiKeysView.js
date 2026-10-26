@@ -320,7 +320,7 @@ export default defineComponent({
                 </label>
                 <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer">
                   <input type="checkbox" v-model="form.allowGateway" class="accent-indigo-500" />
-                  <span class="text-slate-200">家庭网关与代理</span>
+                  <span class="text-slate-200">家庭网关与代理 (含受保护网站代理直通)</span>
                 </label>
               </div>
             </div>

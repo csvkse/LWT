@@ -106,6 +106,39 @@ public sealed class GatewayUnitTests
         Assert.False(allowList.TryGet("evil.attacker.com", out _));
     }
 
+    [Fact]
+    public void WebsiteAllowList_Custom_Alias_And_Auth_Properties()
+    {
+        var allowList = new WebsiteAllowList();
+        var websites = new List<GatewayWebsiteEntity>
+        {
+            new()
+            {
+                Id = "w-cdp",
+                Name = "Chrome CDP",
+                Alias = "cdp",
+                TargetUrl = "http://127.0.0.1:16002",
+                RewriteBody = false,
+                RewriteCookie = false,
+                IsEnabled = true,
+                AuthType = "Basic",
+                AuthSecret = "admin:secret123"
+            }
+        };
+
+        allowList.Replace(websites);
+
+        Assert.True(allowList.TryGetByAlias("cdp", out var cdpEntry));
+        Assert.NotNull(cdpEntry);
+        Assert.Equal("127.0.0.1:16002", cdpEntry.Authority);
+        Assert.Equal("cdp", cdpEntry.Alias);
+        Assert.Equal("Basic", cdpEntry.AuthType);
+        Assert.Equal("admin:secret123", cdpEntry.AuthSecret);
+
+        // Name 作为备用别名小写也生效
+        Assert.True(allowList.TryGetByAlias("chrome cdp", out _));
+    }
+
     // === 3. HTML/CSS/Cookie 改写正则单元测试 ===
 
     [Fact]
