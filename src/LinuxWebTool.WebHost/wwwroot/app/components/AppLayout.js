@@ -19,6 +19,7 @@ const NAV_GROUPS = [
     key: 'ops',
     label: '运维控制',
     children: [
+      { path: '/remote-hosts', label: '远程主机', desc: '多协议远端服务器管理、终端与文件' },
       { path: '/terminal', label: 'Web 终端', desc: '网页交互式 PTY 终端会话' },
       { path: '/commands', label: '指令管理', desc: 'Linux 常用脚本库与执行' },
       { path: '/schedules', label: '定时任务', desc: 'Quartz Cron 周期调度' },

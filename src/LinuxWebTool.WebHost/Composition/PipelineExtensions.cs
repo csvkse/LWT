@@ -1,4 +1,5 @@
 using LinuxWebTool.WebHost.MinimalApi;
+using LinuxWebTool.WebHost.Features.RemoteHost.Endpoints;
 using Microsoft.Extensions.FileProviders;
 using System.Diagnostics;
 using System.Reflection;
@@ -87,6 +88,7 @@ public static class PipelineExtensions
         app.UseAntiforgery();
         app.MapAutoControllers();
         app.MapTerminalEndpoints();
+        app.MapRemoteTerminalEndpoints();
         app.MapMcpEndpoints();
         app.MapReverseProxy();
 

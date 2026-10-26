@@ -1,3 +1,4 @@
+using LinuxWebTool.Application.Features.Security;
 using System.Security.Claims;
 using LinuxWebTool.WebHost.Composition;
 using Microsoft.Extensions.Logging;
@@ -173,6 +174,24 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
             path.StartsWith("/s/", StringComparison.OrdinalIgnoreCase))
         {
             return entity.AllowGateway;
+        }
+
+        // 7. 远程主机管理与控制模块（支持自定义主机白名单 Resource Scoping）
+        if (path.StartsWith("/api/RemoteHosts", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!entity.AllowRemoteHosts) return false;
+
+            var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length >= 3 &&
+                !string.Equals(segments[2], "test", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(segments[2], "probekey", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(segments[2], "probe-key", StringComparison.OrdinalIgnoreCase))
+            {
+                var targetHostId = segments[2];
+                return ApiKeyPermissionMatrix.CanAccessRemoteHost(entity.AllowRemoteHosts, entity.AllowedHostIds, targetHostId);
+            }
+
+            return true;
         }
 
         // 7. 审计历史清空操作（DELETE /api/History）严禁 API Key 调用

@@ -267,11 +267,33 @@ CREATE TABLE IF NOT EXISTS api_key (
   AllowTranscode INTEGER NOT NULL DEFAULT 0,
   AllowGateway INTEGER NOT NULL DEFAULT 0,
   AllowedPaths TEXT,
+  AllowRemoteHosts INTEGER NOT NULL DEFAULT 0,
+  AllowedHostIds TEXT,
   CreatedAt TEXT NOT NULL,
   LastUsedAt TEXT,
   ExpiresAt TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_api_key_hash ON api_key(KeyHash);
+CREATE TABLE IF NOT EXISTS remote_host (
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
+  Name TEXT NOT NULL,
+  Host TEXT NOT NULL,
+  Port INTEGER NOT NULL DEFAULT 22,
+  Protocol TEXT NOT NULL DEFAULT 'ssh',
+  AuthType TEXT NOT NULL DEFAULT 'Password',
+  Username TEXT NOT NULL,
+  EncryptedCredential TEXT,
+  CredentialNonce TEXT,
+  CredentialTag TEXT,
+  HostKeyFingerprint TEXT,
+  Tags TEXT,
+  Remark TEXT,
+  SortOrder INTEGER NOT NULL DEFAULT 0,
+  CreatedAt TEXT NOT NULL,
+  UpdatedAt TEXT NOT NULL,
+  LastConnectedAt TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_remote_host_sort ON remote_host(SortOrder, CreatedAt);
 CREATE TABLE IF NOT EXISTS frp_tunnel_config (
   Id TEXT PRIMARY KEY COLLATE NOCASE,
   ServerUrl TEXT NOT NULL,
@@ -425,6 +447,8 @@ CREATE INDEX IF NOT EXISTS idx_backup_snapshot_task ON backup_snapshot(TaskId);
         EnsureColumnExists(db, "gateway_website", "AuthType", "TEXT NOT NULL DEFAULT 'None'");
         EnsureColumnExists(db, "gateway_website", "AuthSecret", "TEXT");
         EnsureColumnExists(db, "api_key", "AllowedPaths", "TEXT");
+        EnsureColumnExists(db, "api_key", "AllowRemoteHosts", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumnExists(db, "api_key", "AllowedHostIds", "TEXT");
     }
 
     private static void EnsureColumnExists(SqliteConnection db, string table, string column, string definition)

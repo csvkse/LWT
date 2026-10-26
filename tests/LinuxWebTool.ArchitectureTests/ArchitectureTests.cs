@@ -622,5 +622,97 @@ public class ArchitectureTests
             $"发现未在 ApiKeyMiddleware.cs 中显式声明权限控制的控制器：\n{string.Join("\n", missingControllers)}\n" +
             "所有控制器路由必须在 ApiKeyMiddleware.CheckModulePermission 中显式划定权限归属（拒绝或绑定模块权限），严禁依赖默认规则！");
     }
+
+    [Fact]
+    public void LinuxArch026_单源文件代码行数与单一职责门禁()
+    {
+        var srcDir = Path.Combine(RepoRoot, "src");
+        Assert.True(Directory.Exists(srcDir), "src 目录不存在");
+
+        const int StandardMaxLines = 700;
+        const int ContractsMaxLines = 300;
+        const int McpMaxLines = 400;
+
+        // 存量高复杂度底层适配器与构建器硬顶基线（严格冻结，只降不增）
+        // 任何非白名单文件超过 StandardMaxLines 将直接失败；白名单文件一旦重构缩减至 <= 700 行必须移除白名单（防假绿）
+        var legacyBaseline = new Dictionary<string, (int HardCap, string Reason)>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["src/LinuxWebTool.Infrastructure/Features/EasyTier/Adapters/EasyTierNodeManager.cs"] = (1450, "EasyTier 进程多节点生命周期编排与健康检查适配器"),
+            ["src/LinuxWebTool.Infrastructure/Features/Tunnel/Adapters/FrpTunnelInstance.cs"] = (1100, "FRP 进程启动与双向流转发适配器"),
+            ["src/LinuxWebTool.Infrastructure/Features/Transcode/Adapters/FfmpegArgsBuilder.cs"] = (950, "复杂 FFmpeg 编解码滤镜链参数构建器"),
+            ["src/LinuxWebTool.Infrastructure/Features/SystemInfo/Platform/SystemStatusProvider.cs"] = (750, "跨平台系统资源与硬件传感器采集提供者")
+        };
+
+        var scannedFiles = 0;
+        var violations = new List<string>();
+        var staleBaselines = new List<string>();
+
+        foreach (var file in Directory.EnumerateFiles(srcDir, "*.cs", SearchOption.AllDirectories))
+        {
+            var normalizedPath = file.Replace('\\', '/');
+            if (normalizedPath.Contains("/bin/") || normalizedPath.Contains("/obj/") || normalizedPath.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            scannedFiles++;
+            var lineCount = File.ReadLines(file).Count();
+            var relativePath = Path.GetRelativePath(RepoRoot, file).Replace('\\', '/');
+
+            if (legacyBaseline.TryGetValue(relativePath, out var baseline))
+            {
+                if (lineCount > baseline.HardCap)
+                {
+                    violations.Add($"[白名单硬顶超标] {relativePath} 当前 {lineCount} 行，超过存量硬顶上限 {baseline.HardCap} 行（原因：{baseline.Reason}）！");
+                }
+                else if (lineCount <= StandardMaxLines)
+                {
+                    staleBaselines.Add($"{relativePath} (当前仅 {lineCount} 行 <= {StandardMaxLines}，已健康，必须从白名单中移除以防假绿！)");
+                }
+                continue;
+            }
+
+            // 针对 Contracts 契约层做更严格的单文件限制（Contracts 应当精炼轻量，避免混入非必要实现）
+            if (relativePath.StartsWith("src/LinuxWebTool.Contracts/", StringComparison.OrdinalIgnoreCase))
+            {
+                if (lineCount > ContractsMaxLines)
+                {
+                    violations.Add($"[Contracts 契约超标] {relativePath} 当前 {lineCount} 行，超过契约层上限 {ContractsMaxLines} 行。契约应拆分为按领域聚合的轻量 DTO 与接口。");
+                }
+                continue;
+            }
+
+            // 针对 MCP 引擎和工具提供者做更严格的单文件限制（杜绝 McpServerEngine 膨胀复发）
+            if (relativePath.Contains("/Features/Mcp/", StringComparison.OrdinalIgnoreCase))
+            {
+                if (lineCount > McpMaxLines)
+                {
+                    violations.Add($"[MCP 模块超标] {relativePath} 当前 {lineCount} 行，超过 MCP 模块上限 {McpMaxLines} 行。请按功能拆分为独立的 IMcpToolProvider 实现类！");
+                }
+                continue;
+            }
+
+            // 通用代码文件上限（单文件原则上不得超过 700 行）
+            if (lineCount > StandardMaxLines)
+            {
+                violations.Add($"[通用单文件超标] {relativePath} 当前 {lineCount} 行，超过架构门禁上限 {StandardMaxLines} 行。请遵循单一职责原则（SRP），运用策略模式、提供者模式或外观模式拆分为子模块！");
+            }
+        }
+
+        Assert.True(scannedFiles > 50, $"扫描源文件数量过少（仅 {scannedFiles} 个），可能存在路径扫描异常（防假绿）");
+
+        if (staleBaselines.Count > 0)
+        {
+            Assert.Fail($"检测到已失效的巨石文件白名单条目（代码行数已降至安全阈值内，请及时清理白名单）：\n{string.Join("\n", staleBaselines)}");
+        }
+
+        Assert.True(violations.Count == 0,
+            $"架构门禁检测到 {violations.Count} 处代码文件行数超标（巨石文件防御）：\n{string.Join("\n", violations)}\n\n" +
+            "💡 解决方案指导：\n" +
+            "1. 检查是否存在单一职责原则（SRP）违背或上帝类（God Class）；\n" +
+            "2. 使用策略模式 (Strategy)、提供者模式 (Provider)、组合根或分部类/扩展方法拆分领域逻辑；\n" +
+            "3. 如同 McpServerEngine 拆分为 6 个 IMcpToolProvider 子类，将大单文件重构成轻量高内聚模块；\n" +
+            "4. 严禁随意扩充白名单或堆砌巨型单文件！");
+    }
 }
 

@@ -8,6 +8,7 @@ export default defineComponent({
   name: 'ApiKeysView',
   setup() {
     const keys = ref([]);
+    const availableHosts = ref([]);
     const loading = ref(false);
 
     // 新建 / 编辑弹窗
@@ -23,6 +24,9 @@ export default defineComponent({
       allowFiles: true,
       allowTranscode: false,
       allowGateway: false,
+      allowRemoteHosts: false,
+      hostScopeMode: 'all', // 'all' | 'custom'
+      selectedHostIds: [],
       expiresAt: '',
     });
 
@@ -37,12 +41,30 @@ export default defineComponent({
     const showGuideModal = ref(false);
     const guideKey = ref('');
 
+    function parseHostIds(allowedHostIds) {
+      if (!allowedHostIds || allowedHostIds === '*') return [];
+      try {
+        const parsed = JSON.parse(allowedHostIds);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        // 逗号分割容错
+        return allowedHostIds.split(',').map(s => s.trim()).filter(Boolean);
+      }
+      return [];
+    }
+
     async function load() {
       loading.value = true;
-      const res = await http(API.apiKeys.list, { method: 'GET' });
+      const [resKeys, resHosts] = await Promise.all([
+        http(API.apiKeys.list, { method: 'GET' }),
+        http(API.remoteHosts.list, { method: 'GET' }),
+      ]);
       loading.value = false;
-      if (res.ok) {
-        keys.value = res.data || [];
+      if (resKeys.ok) {
+        keys.value = resKeys.data || [];
+      }
+      if (resHosts.ok) {
+        availableHosts.value = resHosts.data || [];
       }
     }
 
@@ -58,6 +80,9 @@ export default defineComponent({
         allowFiles: true,
         allowTranscode: false,
         allowGateway: false,
+        allowRemoteHosts: false,
+        hostScopeMode: 'all',
+        selectedHostIds: [],
         expiresAt: '',
       });
       showModal.value = true;
@@ -66,6 +91,7 @@ export default defineComponent({
     function openEdit(key) {
       isEdit.value = true;
       currentId.value = key.id;
+      const hostIds = parseHostIds(key.allowedHostIds);
       Object.assign(form, {
         name: key.name,
         allowApi: key.allowApi,
@@ -75,6 +101,9 @@ export default defineComponent({
         allowFiles: key.allowFiles,
         allowTranscode: key.allowTranscode,
         allowGateway: key.allowGateway,
+        allowRemoteHosts: Boolean(key.allowRemoteHosts),
+        hostScopeMode: (key.allowedHostIds && key.allowedHostIds !== '*') ? 'custom' : 'all',
+        selectedHostIds: hostIds,
         expiresAt: key.expiresAt ? key.expiresAt.slice(0, 16) : '',
       });
       showModal.value = true;
@@ -82,6 +111,18 @@ export default defineComponent({
 
     async function save() {
       if (!form.name.trim()) return toast.error('请输入密钥名称');
+
+      let allowedHostIds = null;
+      if (form.allowRemoteHosts) {
+        if (form.hostScopeMode === 'custom') {
+          if (form.selectedHostIds.length === 0) {
+            return toast.error('请至少选择一台被授权的远程主机');
+          }
+          allowedHostIds = JSON.stringify(form.selectedHostIds);
+        } else {
+          allowedHostIds = '*';
+        }
+      }
 
       const payload = {
         name: form.name.trim(),
@@ -92,6 +133,8 @@ export default defineComponent({
         allowFiles: form.allowFiles,
         allowTranscode: form.allowTranscode,
         allowGateway: form.allowGateway,
+        allowRemoteHosts: form.allowRemoteHosts,
+        allowedHostIds: allowedHostIds,
         expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : null,
       };
 
@@ -148,6 +191,13 @@ export default defineComponent({
       showGuideModal.value = true;
     }
 
+    function getHostScopeLabel(key) {
+      if (!key.allowRemoteHosts) return '';
+      if (!key.allowedHostIds || key.allowedHostIds === '*') return '全部主机';
+      const ids = parseHostIds(key.allowedHostIds);
+      return `指定${ids.length}台`;
+    }
+
     const originUrl = window.location.origin;
 
     onMounted(load);
@@ -155,6 +205,7 @@ export default defineComponent({
     return {
       originUrl,
       keys,
+      availableHosts,
       loading,
       showModal,
       isEdit,
@@ -172,6 +223,7 @@ export default defineComponent({
       copyToClipboard,
       openGuide,
       formatTime,
+      getHostScopeLabel,
     };
   },
   template: `
@@ -218,44 +270,53 @@ export default defineComponent({
                 <th class="py-2.5 px-3 text-right whitespace-nowrap">操作</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-800/40">
-              <tr v-for="k in keys" :key="k.id" class="hover:bg-slate-800/20 transition-colors">
-                <td class="py-3 px-3 font-medium text-slate-200 whitespace-nowrap">{{ k.name }}</td>
-                <td class="py-3 px-3">
-                  <code class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 font-mono text-cyan-300">
+            <tbody class="divide-y divide-slate-800/60">
+              <tr v-for="k in keys" :key="k.id" class="hover:bg-slate-800/30 transition-colors">
+                <td class="py-2.5 px-3 font-medium text-slate-200">
+                  {{ k.name }}
+                </td>
+                <td class="py-2.5 px-3">
+                  <span class="font-mono text-cyan-300 bg-cyan-950/40 px-1.5 py-0.5 rounded border border-cyan-800/40">
                     {{ k.keyPrefix }}...
-                  </code>
-                </td>
-                <td class="py-3 px-3">
-                  <div class="flex flex-wrap gap-1">
-                    <span v-if="k.allowApi" class="badge border-cyan-500/50 text-cyan-400 bg-cyan-950/20">API</span>
-                    <span v-if="k.allowMcp" class="badge border-purple-500/50 text-purple-400 bg-purple-950/20">MCP</span>
-                    <span v-if="!k.allowApi && !k.allowMcp" class="badge border-rose-500/40 text-rose-400 bg-rose-950/20">无通道</span>
-                  </div>
-                </td>
-                <td class="py-3 px-3">
-                  <div class="flex flex-wrap gap-1">
-                    <span v-if="k.allowTerminal" class="badge border-emerald-500/40 text-emerald-400 bg-emerald-950/20">终端</span>
-                    <span v-if="k.allowSchedules" class="badge border-blue-500/40 text-blue-400 bg-blue-950/20">定时任务</span>
-                    <span v-if="k.allowFiles" class="badge border-amber-500/40 text-amber-400 bg-amber-950/20">文件/挂载</span>
-                    <span v-if="k.allowTranscode" class="badge border-rose-500/40 text-rose-400 bg-rose-950/20">转码</span>
-                    <span v-if="k.allowGateway" class="badge border-indigo-500/40 text-indigo-400 bg-indigo-950/20">网关</span>
-                  </div>
-                </td>
-                <td class="py-3 px-3">
-                  <span class="badge cursor-pointer"
-                        :class="k.isEnabled ? 'border-emerald-500/50 text-emerald-300 bg-emerald-950/30' : 'border-slate-600 text-slate-400 bg-slate-900'"
-                        @click="toggleKey(k)">
-                    {{ k.isEnabled ? '● 已启用' : '○ 已禁用' }}
                   </span>
                 </td>
-                <td class="py-3 px-3 text-slate-400">{{ k.lastUsedAt ? formatTime(k.lastUsedAt) : '从未' }}</td>
-                <td class="py-3 px-3 text-slate-400 whitespace-nowrap">{{ k.expiresAt ? formatTime(k.expiresAt) : '永久有效' }}</td>
-                <td class="py-3 px-3 text-right whitespace-nowrap">
+                <td class="py-2.5 px-3">
+                  <div class="flex items-center gap-1.5">
+                    <span v-if="k.allowApi" class="badge border-cyan-500/40 text-cyan-300 bg-cyan-950/30">API</span>
+                    <span v-if="k.allowMcp" class="badge border-purple-500/40 text-purple-300 bg-purple-950/30">MCP</span>
+                  </div>
+                </td>
+                <td class="py-2.5 px-3">
+                  <div class="flex flex-wrap items-center gap-1">
+                    <span v-if="k.allowTerminal" class="badge border-emerald-500/40 text-emerald-300 bg-emerald-950/30">终端</span>
+                    <span v-if="k.allowSchedules" class="badge border-blue-500/40 text-blue-300 bg-blue-950/30">调度</span>
+                    <span v-if="k.allowFiles" class="badge border-amber-500/40 text-amber-300 bg-amber-950/30">文件</span>
+                    <span v-if="k.allowTranscode" class="badge border-rose-500/40 text-rose-300 bg-rose-950/30">转码</span>
+                    <span v-if="k.allowGateway" class="badge border-indigo-500/40 text-indigo-300 bg-indigo-950/30">网关</span>
+                    <span v-if="k.allowRemoteHosts" class="badge border-teal-500/40 text-teal-300 bg-teal-950/30">
+                      主机 ({{ getHostScopeLabel(k) }})
+                    </span>
+                  </div>
+                </td>
+                <td class="py-2.5 px-3">
+                  <span :class="k.isEnabled ? 'text-emerald-400' : 'text-slate-500'">
+                    ● {{ k.isEnabled ? '正常' : '已禁用' }}
+                  </span>
+                </td>
+                <td class="py-2.5 px-3 text-slate-400">
+                  {{ k.lastUsedAt ? formatTime(k.lastUsedAt) : '从未使用' }}
+                </td>
+                <td class="py-2.5 px-3 text-slate-400">
+                  {{ k.expiresAt ? formatTime(k.expiresAt) : '永久有效' }}
+                </td>
+                <td class="py-2.5 px-3 text-right">
                   <div class="flex items-center justify-end gap-1.5">
-                    <button class="btn btn-xs" @click="openGuide(k)">用法</button>
+                    <button class="btn btn-xs" @click="openGuide(k)">集成</button>
                     <button class="btn btn-xs" @click="openEdit(k)">编辑</button>
-                    <button class="btn btn-xs btn-danger" @click="removeKey(k)">删除</button>
+                    <button class="btn btn-xs" :class="k.isEnabled ? 'text-amber-400' : 'text-emerald-400'" @click="toggleKey(k)">
+                      {{ k.isEnabled ? '禁用' : '启用' }}
+                    </button>
+                    <button class="btn btn-xs text-rose-400 hover:text-rose-300" @click="removeKey(k)">删除</button>
                   </div>
                 </td>
               </tr>
@@ -264,9 +325,9 @@ export default defineComponent({
         </div>
       </div>
 
-      <!-- 新建/编辑 API Key 模态框 -->
+      <!-- 新建 / 编辑弹窗 -->
       <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="panel w-full max-w-lg p-5 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+        <div class="panel w-full max-w-lg p-5 flex flex-col gap-4 border-slate-700 max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
             <h3 class="font-semibold text-slate-100 text-base">
               {{ isEdit ? '编辑 API Key 权限' : '新建 API Key' }}
@@ -304,7 +365,7 @@ export default defineComponent({
               <div class="grid grid-cols-2 gap-2">
                 <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer">
                   <input type="checkbox" v-model="form.allowTerminal" class="accent-emerald-500" />
-                  <span class="text-slate-200">终端指令与会话</span>
+                  <span class="text-slate-200">本地终端指令与会话</span>
                 </label>
                 <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer">
                   <input type="checkbox" v-model="form.allowSchedules" class="accent-blue-500" />
@@ -312,7 +373,7 @@ export default defineComponent({
                 </label>
                 <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer">
                   <input type="checkbox" v-model="form.allowFiles" class="accent-amber-500" />
-                  <span class="text-slate-200">文件与存储挂载</span>
+                  <span class="text-slate-200">本地文件与存储挂载</span>
                 </label>
                 <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer">
                   <input type="checkbox" v-model="form.allowTranscode" class="accent-rose-500" />
@@ -320,8 +381,42 @@ export default defineComponent({
                 </label>
                 <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer">
                   <input type="checkbox" v-model="form.allowGateway" class="accent-indigo-500" />
-                  <span class="text-slate-200">家庭网关与代理 (含受保护网站代理直通)</span>
+                  <span class="text-slate-200">家庭网关与代理</span>
                 </label>
+                <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer">
+                  <input type="checkbox" v-model="form.allowRemoteHosts" class="accent-teal-500" />
+                  <span class="text-slate-200">远程主机管理与控制</span>
+                </label>
+              </div>
+
+              <!-- 远程主机自定义范围选择面板 (Resource Scoping) -->
+              <div v-if="form.allowRemoteHosts" class="mt-2.5 p-3 bg-slate-950/60 rounded border border-teal-500/30 flex flex-col gap-2.5">
+                <div class="flex items-center justify-between">
+                  <span class="font-medium text-teal-300">服务器授权范围</span>
+                  <div class="flex items-center gap-3">
+                    <label class="flex items-center gap-1.5 cursor-pointer">
+                      <input type="radio" value="all" v-model="form.hostScopeMode" class="accent-teal-500" />
+                      <span class="text-slate-300">允许全部远程主机</span>
+                    </label>
+                    <label class="flex items-center gap-1.5 cursor-pointer">
+                      <input type="radio" value="custom" v-model="form.hostScopeMode" class="accent-teal-500" />
+                      <span class="text-slate-300">仅允许指定服务器</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div v-if="form.hostScopeMode === 'custom'" class="flex flex-col gap-2 mt-1">
+                  <div v-if="availableHosts.length === 0" class="text-xs text-slate-500 py-1">
+                    系统中暂无注册的远程主机，请先在「运维控制 -> 远程主机」中添加。
+                  </div>
+                  <div v-else class="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto pr-1">
+                    <label v-for="h in availableHosts" :key="h.id" class="flex items-center gap-2 p-1.5 rounded bg-slate-900 border border-slate-800 hover:border-slate-700 cursor-pointer text-xs">
+                      <input type="checkbox" :value="h.id" v-model="form.selectedHostIds" class="accent-teal-500" />
+                      <span class="truncate text-slate-200 font-mono">{{ h.name }}</span>
+                      <span class="text-slate-500 text-[10px]">({{ h.host }})</span>
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -361,26 +456,29 @@ export default defineComponent({
         </div>
       </div>
 
-      <!-- 集成指引弹窗 -->
+      <!-- 客户端集成指引弹窗 -->
       <div v-if="showGuideModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="panel w-full max-w-xl p-5 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+        <div class="panel w-full max-w-2xl p-5 flex flex-col gap-4 border-slate-700 max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
-            <h3 class="font-semibold text-slate-100 text-base">客户端与 MCP 集成指引</h3>
+            <h3 class="font-semibold text-slate-100 text-base flex items-center gap-2">
+              客户端接入配置指引
+            </h3>
             <button class="text-slate-400 hover:text-slate-200" @click="showGuideModal = false">✕</button>
           </div>
 
-          <div class="flex flex-col gap-3 text-xs">
+          <div class="flex flex-col gap-4 text-xs leading-relaxed text-slate-300">
             <div>
-              <span class="font-medium text-slate-300 block mb-1">1. REST API 调用鉴权方式：</span>
-              <pre class="p-2.5 rounded bg-slate-950 border border-slate-800 text-slate-300 font-mono text-[11px] overflow-x-auto">curl -H "X-Api-Key: {{ guideKey }}" \
-     {{ originUrl }}/api/Overview</pre>
+              <h4 class="font-semibold text-cyan-300 mb-1">1. REST API 调用鉴权</h4>
+              <p class="text-slate-400 mb-2">在请求 Header 中附加 <code class="text-slate-200 font-mono">X-Api-Key</code> 或 <code class="text-slate-200 font-mono">Authorization: Bearer &lt;key&gt;</code>：</p>
+              <pre class="bg-slate-950 p-2.5 rounded border border-slate-800 font-mono text-[11px] text-slate-300 overflow-x-auto">curl -H "X-Api-Key: {{ guideKey }}" {{ originUrl }}/api/RemoteHosts</pre>
             </div>
 
             <div>
-              <span class="font-medium text-slate-300 block mb-1">2. Claude Desktop / Cursor / Windsurf MCP 配置 (SSE 模式)：</span>
-              <pre class="p-2.5 rounded bg-slate-950 border border-slate-800 text-slate-300 font-mono text-[11px] overflow-x-auto">{
+              <h4 class="font-semibold text-purple-300 mb-1">2. AI MCP Server 集成 (Cursor / Claude Desktop)</h4>
+              <p class="text-slate-400 mb-2">在客户端配置中，指定 SSE 握手端点与请求头 Header：</p>
+              <pre class="bg-slate-950 p-2.5 rounded border border-slate-800 font-mono text-[11px] text-purple-300 overflow-x-auto">{
   "mcpServers": {
-    "linux-web-tool": {
+    "linuxwebtool": {
       "url": "{{ originUrl }}/mcp/sse",
       "headers": {
         "X-Api-Key": "{{ guideKey }}"
@@ -391,7 +489,7 @@ export default defineComponent({
             </div>
           </div>
 
-          <div class="flex justify-end pt-2">
+          <div class="flex justify-end pt-2 border-t border-slate-700/60">
             <button class="btn" @click="showGuideModal = false">关闭</button>
           </div>
         </div>

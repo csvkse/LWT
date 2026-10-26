@@ -15,7 +15,9 @@ public class ApiKeyEntity
     public bool AllowFiles { get; set; } = false;
     public bool AllowTranscode { get; set; } = false;
     public bool AllowGateway { get; set; } = false;
+    public bool AllowRemoteHosts { get; set; } = false;
     public string? AllowedPaths { get; set; }
+    public string? AllowedHostIds { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastUsedAt { get; set; }
     public DateTime? ExpiresAt { get; set; }

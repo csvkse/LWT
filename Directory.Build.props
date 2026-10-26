@@ -21,5 +21,6 @@
     <Using Include="LinuxWebTool.Contracts.Features.Terminal.Contracts" />
     <Using Include="LinuxWebTool.Contracts.Features.Transcode.Contracts" />
     <Using Include="LinuxWebTool.Contracts.Features.Shell.Contracts" />
+    <Using Include="LinuxWebTool.Contracts.Features.RemoteHost.Contracts" />
   </ItemGroup>
 </Project>

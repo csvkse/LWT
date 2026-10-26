@@ -5,6 +5,7 @@ const routes = [
   { path: '/login', name: 'login', component: () => import('../views/LoginView.js'), meta: { public: true } },
   { path: '/', name: 'dashboard', component: () => import('../views/DashboardView.js') },
   { path: '/commands', name: 'commands', component: () => import('../views/CommandsView.js') },
+  { path: '/remote-hosts', name: 'remote-hosts', component: () => import('../views/RemoteHostsView.js') },
   { path: '/terminal', name: 'terminal', component: () => import('../views/TerminalView.js') },
   { path: '/schedules', name: 'schedules', component: () => import('../views/SchedulesView.js') },
   { path: '/system', name: 'system', component: () => import('../views/SystemStatusView.js') },
