@@ -1,6 +1,8 @@
 using System.Text;
 using System.IO.Compression;
 using Directory = System.IO.Directory;
+using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
+using LinuxWebTool.Infrastructure.Shared.Support;
 namespace LinuxWebTool.WebHost.Features.Files.Routes;
 
 /// <summary>
@@ -20,6 +22,7 @@ public class FilesController(
 {
     /// <summary>文本查看 / 编辑上限（2MB），超限提示下载而不是误读大文件。</summary>
     private const long MaxTextBytes = 2 * 1024 * 1024;
+    private ApiKeyEntity? CurrentApiKey => HttpContext?.Items["CurrentApiKey"] as ApiKeyEntity;
 
     // ---------- 目录列表 ----------
 
@@ -28,6 +31,30 @@ public class FilesController(
     public async Task<IResult> List([FromQuery] string path)
     {
         if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
+
+        var apiKey = CurrentApiKey;
+        if (!string.IsNullOrWhiteSpace(apiKey?.AllowedPaths))
+        {
+            if (normalized == "/")
+            {
+                var roots = PathScopeGuard.GetAllowedRoots(apiKey.AllowedPaths);
+                var rootEntries = roots.Select(r => new FileEntryResponse(
+                    Name: Name(r),
+                    Path: r,
+                    IsDirectory: true,
+                    Size: 0,
+                    Modified: Directory.Exists(r) ? Directory.GetLastWriteTime(r) : DateTime.UtcNow,
+                    Extension: "",
+                    IsTextual: false
+                )).ToList();
+                return Ok(new FileListResponse("/", null, "工作空间", true, rootEntries, true));
+            }
+
+            if (!PathScopeGuard.IsAllowed(normalized, apiKey.AllowedPaths, out var failureReason))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(failureReason ?? "无权限访问该路径"));
+            }
+        }
         var smbRoot = OperatingSystem.IsLinux() ? mountHealth.GetSmbMountRoot(normalized) : null;
         // The first request can arrive before the scheduler has registered startup configurations.
         if (OperatingSystem.IsLinux() && smbRoot is null)
@@ -107,6 +134,10 @@ public class FilesController(
     public async Task<IResult> ReadContent([FromQuery] string path)
     {
         if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
+        if (!PathScopeGuard.IsAllowed(normalized, CurrentApiKey?.AllowedPaths, out var scopeErr))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
+        }
         if (!System.IO.File.Exists(normalized))
         {
             return NotFound(new MessageResponse($"文件不存在：{normalized}"));
@@ -138,6 +169,10 @@ public class FilesController(
     public async Task<IResult> WriteContent([FromBody] SaveTextRequest request)
     {
         if (!TryNormalize(request.Path, out var normalized, out var failure)) return failure!;
+        if (!PathScopeGuard.IsAllowed(normalized, CurrentApiKey?.AllowedPaths, out var scopeErr))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
+        }
         if (IsProtected(normalized))
         {
             return BadRequest(new MessageResponse("程序数据目录禁止写入"));
@@ -164,6 +199,10 @@ public class FilesController(
     public async Task<IResult> Mkdir([FromBody] PathRequest request)
     {
         if (!TryNormalize(request.Path, out var normalized, out var failure)) return failure!;
+        if (!PathScopeGuard.IsAllowed(normalized, CurrentApiKey?.AllowedPaths, out var scopeErr))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
+        }
         if (IsProtected(normalized))
         {
             return BadRequest(new MessageResponse("程序数据目录禁止写入"));
@@ -191,6 +230,14 @@ public class FilesController(
     {
         if (!TryNormalize(request.From, out var from, out var failure)) return failure!;
         if (!TryNormalize(request.To, out var to, out failure)) return failure!;
+        if (!PathScopeGuard.IsAllowed(from, CurrentApiKey?.AllowedPaths, out var scopeErrFrom))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErrFrom!));
+        }
+        if (!PathScopeGuard.IsAllowed(to, CurrentApiKey?.AllowedPaths, out var scopeErrTo))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErrTo!));
+        }
         if (FileBrowserPath.IsRoot(from) || FileBrowserPath.IsRoot(to))
         {
             return BadRequest(new MessageResponse("不能对根目录进行操作"));
@@ -223,6 +270,10 @@ public class FilesController(
     public async Task<IResult> Delete([FromQuery] string path, [FromQuery] bool recursive = false)
     {
         if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
+        if (!PathScopeGuard.IsAllowed(normalized, CurrentApiKey?.AllowedPaths, out var scopeErr))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
+        }
         if (FileBrowserPath.IsRoot(normalized))
         {
             return BadRequest(new MessageResponse("不能删除根目录"));
@@ -257,6 +308,10 @@ public class FilesController(
     public async Task<IResult> Upload([FromQuery] string path, IFormFile? file)
     {
         if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
+        if (!PathScopeGuard.IsAllowed(normalized, CurrentApiKey?.AllowedPaths, out var scopeErr))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
+        }
         if (!Directory.Exists(normalized))
         {
             return BadRequest(new MessageResponse($"目录不存在：{normalized}"));
@@ -289,6 +344,10 @@ public class FilesController(
     public async Task<IResult> Download([FromQuery] string path)
     {
         if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
+        if (!PathScopeGuard.IsAllowed(normalized, CurrentApiKey?.AllowedPaths, out var scopeErr))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
+        }
         if (FileBrowserPath.IsRoot(normalized))
         {
             return BadRequest(new MessageResponse("不能下载根目录"));

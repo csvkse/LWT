@@ -105,8 +105,8 @@ public partial class GatewayStore(DbConnectionFactory factory)
         using var db = factory.CreateConnection();
         entity.UpdateTime = DateTime.UtcNow;
         const string sql = @"
-            INSERT INTO gateway_website (Id, Name, TargetUrl, RewriteBody, RewriteCookie, IsEnabled, UpdateTime)
-            VALUES (@Id, @Name, @TargetUrl, @RewriteBody, @RewriteCookie, @IsEnabled, @UpdateTime)";
+            INSERT INTO gateway_website (Id, Name, TargetUrl, RewriteBody, RewriteCookie, IsEnabled, UpdateTime, Alias, AuthType, AuthSecret)
+            VALUES (@Id, @Name, @TargetUrl, @RewriteBody, @RewriteCookie, @IsEnabled, @UpdateTime, @Alias, @AuthType, @AuthSecret)";
         await db.ExecuteAsync(sql, entity);
     }
 
@@ -117,7 +117,7 @@ public partial class GatewayStore(DbConnectionFactory factory)
         const string sql = @"
             UPDATE gateway_website
             SET Name = @Name, TargetUrl = @TargetUrl, RewriteBody = @RewriteBody, RewriteCookie = @RewriteCookie,
-                IsEnabled = @IsEnabled, UpdateTime = @UpdateTime
+                IsEnabled = @IsEnabled, UpdateTime = @UpdateTime, Alias = @Alias, AuthType = @AuthType, AuthSecret = @AuthSecret
             WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, entity);
     }

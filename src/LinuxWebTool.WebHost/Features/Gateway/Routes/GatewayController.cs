@@ -167,7 +167,8 @@ public class GatewayController(
     public async Task<IResult> GetWebsites()
     {
         var list = (await store.GetAllWebsitesAsync()).Select(w => new GatewayWebsiteItem(
-            w.Id, w.Name, w.TargetUrl, w.RewriteBody, w.RewriteCookie, w.IsEnabled, w.UpdateTime
+            w.Id, w.Name, w.TargetUrl, w.RewriteBody, w.RewriteCookie, w.IsEnabled, w.UpdateTime,
+            w.Alias, w.AuthType, w.AuthSecret
         )).ToList();
         return Ok(list);
     }
@@ -185,7 +186,10 @@ public class GatewayController(
             TargetUrl = request.TargetUrl.Trim(),
             RewriteBody = request.RewriteBody,
             RewriteCookie = request.RewriteCookie,
-            IsEnabled = request.IsEnabled
+            IsEnabled = request.IsEnabled,
+            Alias = string.IsNullOrWhiteSpace(request.Alias) ? null : request.Alias.Trim().ToLowerInvariant(),
+            AuthType = string.IsNullOrWhiteSpace(request.AuthType) ? "None" : request.AuthType.Trim(),
+            AuthSecret = string.IsNullOrWhiteSpace(request.AuthSecret) ? null : request.AuthSecret.Trim()
         };
         await store.InsertWebsiteAsync(entity);
         proxyConfigProvider.Reload();
@@ -207,6 +211,9 @@ public class GatewayController(
         entity.RewriteBody = request.RewriteBody;
         entity.RewriteCookie = request.RewriteCookie;
         entity.IsEnabled = request.IsEnabled;
+        entity.Alias = string.IsNullOrWhiteSpace(request.Alias) ? null : request.Alias.Trim().ToLowerInvariant();
+        entity.AuthType = string.IsNullOrWhiteSpace(request.AuthType) ? "None" : request.AuthType.Trim();
+        entity.AuthSecret = string.IsNullOrWhiteSpace(request.AuthSecret) ? null : request.AuthSecret.Trim();
 
         await store.UpdateWebsiteAsync(entity);
         proxyConfigProvider.Reload();

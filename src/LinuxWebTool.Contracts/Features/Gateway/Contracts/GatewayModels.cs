@@ -48,7 +48,10 @@ public sealed record GatewayWebsiteItem(
     bool RewriteBody,
     bool RewriteCookie,
     bool IsEnabled,
-    DateTime UpdateTime);
+    DateTime UpdateTime,
+    string? Alias = null,
+    string AuthType = "None",
+    string? AuthSecret = null);
 
 /// <summary>保存网站代理请求</summary>
 public sealed record SaveGatewayWebsiteRequest(
@@ -56,7 +59,10 @@ public sealed record SaveGatewayWebsiteRequest(
     string TargetUrl,
     bool RewriteBody,
     bool RewriteCookie,
-    bool IsEnabled);
+    bool IsEnabled,
+    string? Alias = null,
+    string AuthType = "None",
+    string? AuthSecret = null);
 
 /// <summary>四层 TCP/UDP 转发规则契约</summary>
 public sealed record GatewayTcpRouteItem(

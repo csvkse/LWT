@@ -17,10 +17,14 @@ export default defineComponent({
     const currentWebsiteId = ref(null);
     const websiteForm = reactive({
       name: '',
+      alias: '',
       targetUrl: '',
       rewriteBody: true,
       rewriteCookie: true,
       isEnabled: true,
+      authType: 'None',
+      authUsername: '',
+      authPassword: '',
     });
 
     // L7 路由
@@ -95,15 +99,24 @@ export default defineComponent({
     }
 
     // === 网站代理操作 ===
+    function buildShortLink(w) {
+      const alias = w.alias || (w.name ? w.name.trim().toLowerCase() : '');
+      return alias ? `${window.location.origin}/s/${alias}/` : '';
+    }
+
     function openCreateWebsite() {
       isEditWebsite.value = false;
       currentWebsiteId.value = null;
       Object.assign(websiteForm, {
         name: '',
+        alias: '',
         targetUrl: 'http://192.168.1.1:80',
         rewriteBody: true,
         rewriteCookie: true,
         isEnabled: true,
+        authType: 'None',
+        authUsername: '',
+        authPassword: '',
       });
       showWebsiteModal.value = true;
     }
@@ -111,12 +124,22 @@ export default defineComponent({
     function openEditWebsite(w) {
       isEditWebsite.value = true;
       currentWebsiteId.value = w.id;
+      let u = '', p = '';
+      if (w.authSecret && w.authSecret.includes(':')) {
+        const parts = w.authSecret.split(':');
+        u = parts[0];
+        p = parts.slice(1).join(':');
+      }
       Object.assign(websiteForm, {
         name: w.name,
+        alias: w.alias || '',
         targetUrl: w.targetUrl,
         rewriteBody: w.rewriteBody,
         rewriteCookie: w.rewriteCookie,
         isEnabled: w.isEnabled,
+        authType: w.authType || 'None',
+        authUsername: u,
+        authPassword: p,
       });
       showWebsiteModal.value = true;
     }
@@ -125,12 +148,28 @@ export default defineComponent({
       if (!websiteForm.name.trim()) return toast.error('请输入站点名称');
       if (!websiteForm.targetUrl.trim()) return toast.error('请输入目标地址');
 
+      let cleanTarget = websiteForm.targetUrl.trim();
+      if (!/^https?:\/\//i.test(cleanTarget)) {
+        cleanTarget = 'http://' + cleanTarget;
+      }
+
+      let secret = null;
+      if (websiteForm.authType === 'Basic') {
+        const u = websiteForm.authUsername.trim();
+        const p = websiteForm.authPassword.trim();
+        if (!u || !p) return toast.error('Basic Auth 请输入用户名和密码');
+        secret = `${u}:${p}`;
+      }
+
       const body = {
         name: websiteForm.name.trim(),
-        targetUrl: websiteForm.targetUrl.trim(),
+        targetUrl: cleanTarget,
         rewriteBody: websiteForm.rewriteBody,
         rewriteCookie: websiteForm.rewriteCookie,
         isEnabled: websiteForm.isEnabled,
+        alias: websiteForm.alias.trim() ? websiteForm.alias.trim().toLowerCase() : null,
+        authType: websiteForm.authType,
+        authSecret: secret,
       };
 
       const res = isEditWebsite.value
@@ -343,6 +382,14 @@ export default defineComponent({
       if (!tcpForm.listenPort || !tcpForm.forwardPort) return toast.error('端口无效');
       if (!tcpForm.forwardHost.trim()) return toast.error('请输入目标地址');
 
+      const isLoopbackSelfConflict = Number(tcpForm.listenPort) === Number(tcpForm.forwardPort) &&
+        (tcpForm.forwardHost.trim() === '127.0.0.1' || tcpForm.forwardHost.trim().toLowerCase() === 'localhost' || tcpForm.forwardHost.trim() === '0.0.0.0');
+      if (isLoopbackSelfConflict) {
+        if (!confirm(`警告：本地监听端口与目标端口相同 (均为 ${tcpForm.listenPort})。\n在 --net=host 模式下，网关与宿主机共享网络协议栈，若目标服务正在本机运行，网关监听同一端口将发生冲突 (Address in use) 导致监听失败。\n\n建议将本地监听端口改为不同端口（例如 ${Number(tcpForm.listenPort) + 1}）。确定仍要保存吗？`)) {
+          return;
+        }
+      }
+
       const body = {
         name: tcpForm.name.trim(),
         protocol: tcpForm.protocol,
@@ -423,7 +470,7 @@ export default defineComponent({
       testingTarget,
       targetTestResult,
       testTargetConnection,
-      buildProxyLink,
+      buildProxyLink, buildShortLink,
       formatTime,
     };
   },
@@ -489,32 +536,48 @@ export default defineComponent({
           <table class="w-full text-left text-xs border-collapse min-w-[50rem]">
             <thead>
               <tr class="border-b border-slate-700/50 text-slate-400 font-medium">
-                <th class="py-2.5 px-3 whitespace-nowrap">名称</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">名称与短链</th>
                 <th class="py-2.5 px-3 whitespace-nowrap">内网目标地址</th>
-                <th class="py-2.5 px-3 whitespace-nowrap">网关直通入口</th>
-                <th class="py-2.5 px-3 whitespace-nowrap">改写策略</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">直通入口</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">安全与改写策略</th>
                 <th class="py-2.5 px-3 whitespace-nowrap">状态</th>
                 <th class="py-2.5 px-3 text-right whitespace-nowrap">操作</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-800/40">
               <tr v-for="w in websites" :key="w.id" class="hover:bg-slate-800/20 transition-colors">
-                <td class="py-3 px-3 font-medium text-slate-200 whitespace-nowrap">{{ w.name }}</td>
+                <td class="py-3 px-3 font-medium text-slate-200 whitespace-nowrap">
+                  <div class="flex flex-col">
+                    <span>{{ w.name }}</span>
+                    <span v-if="w.alias" class="text-[10px] text-cyan-400/80 font-mono">/s/{{ w.alias }}/</span>
+                  </div>
+                </td>
                 <td class="py-3 px-3">
                   <code class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 font-mono text-slate-300">
                     {{ w.targetUrl }}
                   </code>
                 </td>
-                <td class="py-3 px-3 max-w-[16rem]">
-                  <a :href="buildProxyLink(w.targetUrl)" target="_blank"
-                     :title="buildProxyLink(w.targetUrl)"
-                     class="text-cyan-400 hover:underline font-mono inline-flex items-center gap-1 min-w-0 max-w-full">
-                    <span class="truncate">{{ buildProxyLink(w.targetUrl) }}</span>
-                    <span class="shrink-0 text-[10px]">↗</span>
-                  </a>
+                <td class="py-3 px-3 max-w-[18rem]">
+                  <div class="flex flex-col gap-0.5 min-w-0">
+                    <a v-if="buildShortLink(w)" :href="buildShortLink(w)" target="_blank"
+                       :title="buildShortLink(w)"
+                       class="text-cyan-400 hover:underline font-mono font-medium inline-flex items-center gap-1 min-w-0 max-w-full">
+                      <span class="truncate">{{ buildShortLink(w) }}</span>
+                      <span class="shrink-0 text-[10px]">↗</span>
+                    </a>
+                    <a :href="buildProxyLink(w.targetUrl)" target="_blank"
+                       :title="buildProxyLink(w.targetUrl)"
+                       class="text-slate-400 hover:text-slate-300 font-mono text-[10px] inline-flex items-center gap-1 min-w-0 max-w-full">
+                      <span class="truncate">{{ buildProxyLink(w.targetUrl) }}</span>
+                      <span class="shrink-0 text-[9px]">↗</span>
+                    </a>
+                  </div>
                 </td>
                 <td class="py-3 px-3 whitespace-nowrap">
-                  <div class="flex gap-1">
+                  <div class="flex flex-wrap gap-1">
+                    <span v-if="w.authType === 'Basic'" class="badge border-amber-500/40 text-amber-300 bg-amber-950/30">Basic认证</span>
+                    <span v-else-if="w.authType === 'Gateway'" class="badge border-indigo-500/40 text-indigo-300 bg-indigo-950/30">网关保护/ApiKey</span>
+                    <span v-else class="badge border-slate-700/60 text-slate-400 bg-slate-900/40">公开</span>
                     <span v-if="w.rewriteBody" class="badge border-cyan-500/40 text-cyan-400 bg-cyan-950/20">HTML改写</span>
                     <span v-if="w.rewriteCookie" class="badge border-purple-500/40 text-purple-400 bg-purple-950/20">Cookie隔离</span>
                   </div>
@@ -691,14 +754,43 @@ export default defineComponent({
           </div>
 
           <div class="flex flex-col gap-3 text-xs">
-            <div>
-              <label class="block text-slate-400 mb-1">站点名称 <span class="text-rose-400">*</span></label>
-              <input v-model="websiteForm.name" class="input" placeholder="例如：OpenWrt主路由 / 群晖NAS" />
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-slate-400 mb-1">站点名称 <span class="text-rose-400">*</span></label>
+                <input v-model="websiteForm.name" class="input" placeholder="例如：CDP / NAS" />
+              </div>
+              <div>
+                <label class="block text-slate-400 mb-1">短链别名 (Alias)</label>
+                <input v-model="websiteForm.alias" class="input font-mono" placeholder="留空默认使用名称小写" />
+              </div>
             </div>
 
             <div>
               <label class="block text-slate-400 mb-1">内网目标地址 (含端口) <span class="text-rose-400">*</span></label>
               <input v-model="websiteForm.targetUrl" class="input font-mono" placeholder="http://192.168.1.1:80" />
+            </div>
+
+            <div class="pt-1">
+              <label class="block text-slate-400 mb-1">访问安全认证</label>
+              <select v-model="websiteForm.authType" class="input">
+                <option value="None">公开访问 (无需认证)</option>
+                <option value="Basic">HTTP Basic Auth (用户名与密码保护)</option>
+                <option value="Gateway">网关安全保护 (支持控制台登录会话或具备网关权限的 API Key)</option>
+              </select>
+              <span v-if="websiteForm.authType === 'Gateway'" class="text-[10px] text-indigo-400/90 mt-1 block">
+                可通过已登录控制台会话访问，或在自动化脚本请求中携带具备「家庭网关与代理」权限的 API Key（支持请求头 X-Api-Key / Bearer，或 URL 参数 ?apiKey=...）
+              </span>
+            </div>
+
+            <div v-if="websiteForm.authType === 'Basic'" class="grid grid-cols-2 gap-2 p-2.5 rounded bg-amber-950/20 border border-amber-600/30">
+              <div>
+                <label class="block text-amber-300 mb-1 text-[11px]">用户名 <span class="text-rose-400">*</span></label>
+                <input v-model="websiteForm.authUsername" class="input font-mono" placeholder="admin" />
+              </div>
+              <div>
+                <label class="block text-amber-300 mb-1 text-[11px]">密码 <span class="text-rose-400">*</span></label>
+                <input v-model="websiteForm.authPassword" type="password" class="input font-mono" placeholder="••••••" />
+              </div>
             </div>
 
             <div class="grid grid-cols-2 gap-2 pt-2">
@@ -870,6 +962,11 @@ export default defineComponent({
               <button type="button" class="btn btn-xs btn-outline shrink-0" :disabled="testingTarget" @click="testTargetConnection()">
                 {{ testingTarget ? '探测中...' : '测试目标连通性' }}
               </button>
+            </div>
+
+            <div v-if="Number(tcpForm.listenPort) === Number(tcpForm.forwardPort) && (tcpForm.forwardHost.trim() === '127.0.0.1' || tcpForm.forwardHost.trim().toLowerCase() === 'localhost')"
+                 class="p-2.5 rounded bg-amber-950/30 border border-amber-600/40 text-[11px] text-amber-200 leading-relaxed">
+              ⚠️ <strong>端口自冲突提示</strong>：监听端口与目标端口相同 (均为 {{ tcpForm.listenPort }})。在 <code>--net=host</code> 模式下，网关与宿主机共享端口空间，若目标服务正在本机运行，网关监听同一端口将发生冲突 (Address in use)。建议将本地监听端口修改为其他端口（如 {{ (Number(tcpForm.listenPort) || 10000) + 1 }}）。
             </div>
 
             <div class="pt-1">

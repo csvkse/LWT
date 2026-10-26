@@ -206,13 +206,23 @@ internal sealed class UdpListenerContext : IDisposable
         try
         {
             socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Dgram, ProtocolType.Udp);
+            if (!OperatingSystem.IsWindows())
+            {
+                socket.ExclusiveAddressUse = false;
+                socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            }
             socket.DualMode = true;
             socket.Bind(new IPEndPoint(IPAddress.IPv6Any, port));
             boundAddr = "[::]";
         }
-        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressFamilyNotSupported || ex.SocketErrorCode == SocketError.ProtocolNotSupported)
+        catch (SocketException ex) when (ex.SocketErrorCode != SocketError.AddressAlreadyInUse)
         {
             socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            if (!OperatingSystem.IsWindows())
+            {
+                socket.ExclusiveAddressUse = false;
+                socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            }
             socket.Bind(new IPEndPoint(IPAddress.Any, port));
             boundAddr = "0.0.0.0";
         }

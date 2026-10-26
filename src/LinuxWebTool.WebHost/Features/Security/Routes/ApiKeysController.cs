@@ -26,6 +26,7 @@ public class ApiKeysController(
             k.AllowFiles,
             k.AllowTranscode,
             k.AllowGateway,
+            k.AllowedPaths,
             k.CreatedAt,
             k.LastUsedAt,
             k.ExpiresAt
@@ -56,6 +57,7 @@ public class ApiKeysController(
             entity.AllowFiles,
             entity.AllowTranscode,
             entity.AllowGateway,
+            entity.AllowedPaths,
             entity.CreatedAt,
             entity.ExpiresAt);
 
@@ -80,6 +82,7 @@ public class ApiKeysController(
         entity.AllowFiles = request.AllowFiles;
         entity.AllowTranscode = request.AllowTranscode;
         entity.AllowGateway = request.AllowGateway;
+        entity.AllowedPaths = string.IsNullOrWhiteSpace(request.AllowedPaths) ? null : request.AllowedPaths.Trim();
         entity.ExpiresAt = request.ExpiresAt;
 
         await store.UpdateAsync(entity);

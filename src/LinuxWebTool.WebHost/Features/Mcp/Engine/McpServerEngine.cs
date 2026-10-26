@@ -1,3 +1,4 @@
+using LinuxWebTool.Infrastructure.Shared.Support;
 using System.Text;
 using System.Text.Json;
 using LinuxWebTool.WebHost.Composition;
@@ -403,6 +404,19 @@ public sealed class McpServerEngine(
                 var timeout = args.TryGetProperty("timeout_seconds", out var tP) ? tP.GetInt32() : 60;
                 timeout = Math.Clamp(timeout, 1, 300);
 
+                if (!string.IsNullOrWhiteSpace(callerKey?.AllowedPaths))
+                {
+                    if (!string.IsNullOrWhiteSpace(cwd))
+                    {
+                        if (!PathScopeGuard.IsAllowed(cwd, callerKey.AllowedPaths, out var cwdErr))
+                            return ToolErrorResponse(request.Id, $"Access Denied: {cwdErr}");
+                    }
+                    else
+                    {
+                        cwd = PathScopeGuard.GetAllowedRoots(callerKey.AllowedPaths).FirstOrDefault();
+                    }
+                }
+
                 var shellReq = new ShellRequest
                 {
                     CommandText = command,
@@ -448,6 +462,35 @@ public sealed class McpServerEngine(
                     writer.WriteEndArray();
                 }
                 return ToolSuccessResponse(request.Id, Encoding.UTF8.GetString(ms.ToArray()));
+            }
+
+            case "terminal_create_session":
+            {
+                var exe = args.TryGetProperty("executable", out var eP) ? eP.GetString() : null;
+                var cwd = args.TryGetProperty("working_directory", out var cwdP) ? cwdP.GetString() : null;
+                if (!string.IsNullOrWhiteSpace(callerKey?.AllowedPaths))
+                {
+                    if (!string.IsNullOrWhiteSpace(cwd))
+                    {
+                        if (!PathScopeGuard.IsAllowed(cwd, callerKey.AllowedPaths, out var cwdErr))
+                            return ToolErrorResponse(request.Id, $"Access Denied: {cwdErr}");
+                    }
+                    else
+                    {
+                        cwd = PathScopeGuard.GetAllowedRoots(callerKey.AllowedPaths).FirstOrDefault();
+                    }
+                }
+                var options = new PtyStartOptions(Executable: exe, WorkingDirectory: cwd);
+                var session = await ptySessionManager.CreateSessionAsync(options, httpContext.RequestAborted);
+                await operationLogger.LogAsync("MCP新建终端", "终端", session.SessionId, cwd ?? "default", clientIp: clientIp);
+                return ToolSuccessResponse(request.Id, $"{{\"session_id\":\"{session.SessionId}\", \"process_id\":{session.ProcessId}, \"working_dir\":\"{cwd}\"}}");
+            }
+
+            case "terminal_close_session":
+            {
+                var sessionId = args.GetProperty("session_id").GetString()!;
+                var closed = await ptySessionManager.CloseSessionAsync(sessionId, httpContext.RequestAborted);
+                return ToolSuccessResponse(request.Id, $"{{\"closed\":{closed.ToString().ToLower()}}}");
             }
 
             // === 定时任务工具 ===
@@ -506,6 +549,8 @@ public sealed class McpServerEngine(
             case "file_list_directory":
             {
                 var dirPath = args.GetProperty("path").GetString()!;
+                if (!PathScopeGuard.IsAllowed(dirPath, callerKey?.AllowedPaths, out var pathErr))
+                    return ToolErrorResponse(request.Id, $"Access Denied: {pathErr}");
                 if (!Directory.Exists(dirPath)) return ToolErrorResponse(request.Id, $"Directory not found: {dirPath}");
 
                 using var ms = new MemoryStream();
@@ -544,6 +589,8 @@ public sealed class McpServerEngine(
             case "file_read_text":
             {
                 var filePath = args.GetProperty("path").GetString()!;
+                if (!PathScopeGuard.IsAllowed(filePath, callerKey?.AllowedPaths, out var pathErr))
+                    return ToolErrorResponse(request.Id, $"Access Denied: {pathErr}");
                 if (!File.Exists(filePath)) return ToolErrorResponse(request.Id, $"File not found: {filePath}");
                 if (IsProtectedFile(filePath)) return ToolErrorResponse(request.Id, "Access denied: protected system file");
 
@@ -570,6 +617,8 @@ public sealed class McpServerEngine(
                 var filePath = args.GetProperty("path").GetString()!;
                 var content = args.GetProperty("content").GetString() ?? string.Empty;
                 var overwrite = !args.TryGetProperty("overwrite", out var owP) || owP.GetBoolean();
+                if (!PathScopeGuard.IsAllowed(filePath, callerKey?.AllowedPaths, out var pathErr))
+                    return ToolErrorResponse(request.Id, $"Access Denied: {pathErr}");
                 if (IsProtectedFile(filePath)) return ToolErrorResponse(request.Id, "Access denied: protected system file");
                 if (File.Exists(filePath) && !overwrite) return ToolErrorResponse(request.Id, "File already exists and overwrite is false");
 
@@ -578,6 +627,30 @@ public sealed class McpServerEngine(
                 await File.WriteAllTextAsync(filePath, content, httpContext.RequestAborted);
                 await operationLogger.LogAsync("MCP写文件", "文件管理", Path.GetFileName(filePath), filePath, clientIp: clientIp);
                 return ToolSuccessResponse(request.Id, $"{{\"success\":true, \"path\":\"{filePath.Replace('\\', '/')}\", \"bytes\":{content.Length}}}");
+            }
+
+            case "file_create_directory":
+            {
+                var dirPath = args.GetProperty("path").GetString()!;
+                if (!PathScopeGuard.IsAllowed(dirPath, callerKey?.AllowedPaths, out var pathErr))
+                    return ToolErrorResponse(request.Id, $"Access Denied: {pathErr}");
+                if (IsProtectedFile(dirPath)) return ToolErrorResponse(request.Id, "Access denied: protected system file");
+                if (!Directory.Exists(dirPath)) Directory.CreateDirectory(dirPath);
+                await operationLogger.LogAsync("MCP建目录", "文件管理", Path.GetFileName(dirPath), dirPath, clientIp: clientIp);
+                return ToolSuccessResponse(request.Id, $"{{\"success\":true, \"path\":\"{dirPath.Replace('\\', '/')}\"}}");
+            }
+
+            case "file_delete":
+            {
+                var filePath = args.GetProperty("path").GetString()!;
+                if (!PathScopeGuard.IsAllowed(filePath, callerKey?.AllowedPaths, out var pathErr))
+                    return ToolErrorResponse(request.Id, $"Access Denied: {pathErr}");
+                if (IsProtectedFile(filePath)) return ToolErrorResponse(request.Id, "Access denied: protected system file");
+                if (File.Exists(filePath)) File.Delete(filePath);
+                else if (Directory.Exists(filePath)) Directory.Delete(filePath, recursive: true);
+                else return ToolErrorResponse(request.Id, $"Target not found: {filePath}");
+                await operationLogger.LogAsync("MCP删除", "文件管理", Path.GetFileName(filePath), filePath, clientIp: clientIp);
+                return ToolSuccessResponse(request.Id, $"{{\"success\":true, \"path\":\"{filePath.Replace('\\', '/')}\"}}");
             }
 
             case "file_get_storage_status":

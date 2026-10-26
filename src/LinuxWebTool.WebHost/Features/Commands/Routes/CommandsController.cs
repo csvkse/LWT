@@ -1,3 +1,5 @@
+using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
+using LinuxWebTool.Infrastructure.Shared.Support;
 namespace LinuxWebTool.WebHost.Features.Commands.Routes;
 
 /// <summary>指令功能：保存 Linux 指令的增删改查、执行、快速执行与执行历史。</summary>
@@ -127,10 +129,18 @@ public class CommandsController(
             return BadRequest(new MessageResponse("指令内容不能为空"));
         }
 
+        var apiKey = HttpContext.Items["CurrentApiKey"] as ApiKeyEntity;
+        string? cwd = null;
+        if (!string.IsNullOrWhiteSpace(apiKey?.AllowedPaths))
+        {
+            cwd = PathScopeGuard.GetAllowedRoots(apiKey.AllowedPaths).FirstOrDefault();
+        }
+
         var response = await ExecuteAndRecordCoreAsync(
             shellRequest: new ShellRequest
             {
                 CommandText = request.CommandText.Trim(),
+                WorkingDirectory = cwd,
                 TimeoutSeconds = request.TimeoutSeconds,
             },
             source: ExecutionSource.Quick,

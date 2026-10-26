@@ -430,5 +430,139 @@ public sealed class GatewayFunctionalTests
             }
         }
     }
+
+    [Fact]
+    public async Task Gateway_Website_Proxy_Basic_Auth_And_Custom_Alias()
+    {
+        var client = await TestServerFixture.CreateAdminClientAsync();
+
+        // 1. 注册受 Basic Auth 保护且具有自定义短别名的站点
+        var createReq = new SaveGatewayWebsiteRequest(
+            Name: "Protected CDP",
+            TargetUrl: "http://127.0.0.1:49999",
+            RewriteBody: false,
+            RewriteCookie: false,
+            IsEnabled: true,
+            Alias: "my-cdp",
+            AuthType: "Basic",
+            AuthSecret: "admin:cdpPass123");
+
+        var createJson = JsonSerializer.Serialize(createReq, AppJsonSerializerContext.Default.SaveGatewayWebsiteRequest);
+        var createResp = await client.PostAsync("/api/Gateway/Websites", TestServerFixture.Json(createJson));
+        Assert.Equal(HttpStatusCode.OK, createResp.StatusCode);
+
+        try
+        {
+            // 2. 匿名请求访问该短链：应返回 401 Unauthorized 且带有 WWW-Authenticate 标头
+            var anonResp = await client.GetAsync("/s/my-cdp/");
+            Assert.Equal(HttpStatusCode.Unauthorized, anonResp.StatusCode);
+            Assert.True(anonResp.Headers.Contains("WWW-Authenticate"));
+
+            // 3. 错误凭据：返回 401
+            var wrongReq = new HttpRequestMessage(HttpMethod.Get, "/s/my-cdp/");
+            var wrongBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("admin:wrongpass"));
+            wrongReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", wrongBase64);
+            var wrongResp = await client.SendAsync(wrongReq);
+            Assert.Equal(HttpStatusCode.Unauthorized, wrongResp.StatusCode);
+
+            // 4. 正确凭据：通过认证放行（因 127.0.0.1:49999 未运行实际服务，下游返回 502/503，说明已通过认证进入 YARP 转发层）
+            var okReq = new HttpRequestMessage(HttpMethod.Get, "/s/my-cdp/json");
+            var okBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("admin:cdpPass123"));
+            okReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", okBase64);
+            var okResp = await client.SendAsync(okReq);
+            Assert.NotEqual(HttpStatusCode.Unauthorized, okResp.StatusCode);
+            Assert.NotEqual(HttpStatusCode.Forbidden, okResp.StatusCode);
+        }
+        finally
+        {
+            var listResp = await client.GetAsync("/api/Gateway/Websites");
+            if (listResp.IsSuccessStatusCode)
+            {
+                var list = JsonSerializer.Deserialize<List<GatewayWebsiteItem>>(await listResp.Content.ReadAsStringAsync(), AppJsonSerializerContext.Default.Options);
+                var testItem = list?.FirstOrDefault(w => w.Alias == "my-cdp");
+                if (testItem != null)
+                {
+                    await client.DeleteAsync($"/api/Gateway/Websites/{testItem.Id}");
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Gateway_Website_Proxy_ApiKey_Authentication_And_Permission_Matrix()
+    {
+        var adminClient = await TestServerFixture.CreateAdminClientAsync();
+        var anonClient = await TestServerFixture.CreateAnonymousClientAsync();
+
+        // 1. 创建受网关保护的站点
+        var createWebReq = new SaveGatewayWebsiteRequest(
+            Name: "Gateway Protected Site",
+            TargetUrl: "http://127.0.0.1:49998",
+            RewriteBody: false,
+            RewriteCookie: false,
+            IsEnabled: true,
+            Alias: "gw-site",
+            AuthType: "Gateway");
+
+        var createWebResp = await adminClient.PostAsync("/api/Gateway/Websites", TestServerFixture.Json(JsonSerializer.Serialize(createWebReq, AppJsonSerializerContext.Default.SaveGatewayWebsiteRequest)));
+        Assert.Equal(HttpStatusCode.OK, createWebResp.StatusCode);
+
+        // 2. 创建一个带 AllowGateway = false 的 ApiKey
+        var noGwKeyReq = new LinuxWebTool.Contracts.Features.Security.Contracts.CreateApiKeyRequest(
+            Name: "No Gateway Key",
+            AllowApi: true,
+            AllowMcp: false,
+            AllowGateway: false);
+        var noGwKeyResp = await adminClient.PostAsync("/api/ApiKeys", TestServerFixture.Json(JsonSerializer.Serialize(noGwKeyReq, AppJsonSerializerContext.Default.CreateApiKeyRequest)));
+        var noGwKeyObj = JsonSerializer.Deserialize<LinuxWebTool.Contracts.Features.Security.Contracts.ApiKeyCreatedResponse>(await noGwKeyResp.Content.ReadAsStringAsync(), AppJsonSerializerContext.Default.Options)!;
+
+        // 3. 创建一个带 AllowGateway = true 的 ApiKey
+        var gwKeyReq = new LinuxWebTool.Contracts.Features.Security.Contracts.CreateApiKeyRequest(
+            Name: "Gateway Allowed Key",
+            AllowApi: true,
+            AllowMcp: false,
+            AllowGateway: true);
+        var gwKeyResp = await adminClient.PostAsync("/api/ApiKeys", TestServerFixture.Json(JsonSerializer.Serialize(gwKeyReq, AppJsonSerializerContext.Default.CreateApiKeyRequest)));
+        var gwKeyObj = JsonSerializer.Deserialize<LinuxWebTool.Contracts.Features.Security.Contracts.ApiKeyCreatedResponse>(await gwKeyResp.Content.ReadAsStringAsync(), AppJsonSerializerContext.Default.Options)!;
+
+        try
+        {
+            // A. 匿名客户端访问：必须返回 401 Unauthorized
+            var anonResp = await anonClient.GetAsync("/s/gw-site/");
+            Assert.Equal(HttpStatusCode.Unauthorized, anonResp.StatusCode);
+
+            // B. 携带无网关权限的 ApiKey：必须返回 403 Forbidden
+            var noGwResp = await anonClient.GetAsync($"/s/gw-site/?apiKey={noGwKeyObj.RawKey}");
+            Assert.Equal(HttpStatusCode.Forbidden, noGwResp.StatusCode);
+
+            // C. 携带具备网关权限的 ApiKey (通过 URL query ?apiKey=)：鉴权放行（进入下游代理层，返回 502/503 非 401/403）
+            var okQueryResp = await anonClient.GetAsync($"/s/gw-site/json?apiKey={gwKeyObj.RawKey}");
+            Assert.NotEqual(HttpStatusCode.Unauthorized, okQueryResp.StatusCode);
+            Assert.NotEqual(HttpStatusCode.Forbidden, okQueryResp.StatusCode);
+
+            // D. 携带具备网关权限的 ApiKey (通过请求头 X-Api-Key)：鉴权放行
+            var headerReq = new HttpRequestMessage(HttpMethod.Get, "/s/gw-site/version");
+            headerReq.Headers.Add("X-Api-Key", gwKeyObj.RawKey);
+            var okHeaderResp = await anonClient.SendAsync(headerReq);
+            Assert.NotEqual(HttpStatusCode.Unauthorized, okHeaderResp.StatusCode);
+            Assert.NotEqual(HttpStatusCode.Forbidden, okHeaderResp.StatusCode);
+        }
+        finally
+        {
+            await adminClient.DeleteAsync($"/api/ApiKeys/{noGwKeyObj.Id}");
+            await adminClient.DeleteAsync($"/api/ApiKeys/{gwKeyObj.Id}");
+
+            var listResp = await adminClient.GetAsync("/api/Gateway/Websites");
+            if (listResp.IsSuccessStatusCode)
+            {
+                var list = JsonSerializer.Deserialize<List<GatewayWebsiteItem>>(await listResp.Content.ReadAsStringAsync(), AppJsonSerializerContext.Default.Options);
+                var testItem = list?.FirstOrDefault(w => w.Alias == "gw-site");
+                if (testItem != null)
+                {
+                    await adminClient.DeleteAsync($"/api/Gateway/Websites/{testItem.Id}");
+                }
+            }
+        }
+    }
 }
 

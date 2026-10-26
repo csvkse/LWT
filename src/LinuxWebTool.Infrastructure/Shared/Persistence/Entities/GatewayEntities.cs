@@ -36,6 +36,9 @@ public class GatewayWebsiteEntity
     public bool RewriteCookie { get; set; } = true;
     public bool IsEnabled { get; set; } = true;
     public DateTime UpdateTime { get; set; } = DateTime.UtcNow;
+    public string? Alias { get; set; }
+    public string AuthType { get; set; } = "None";
+    public string? AuthSecret { get; set; }
 }
 
 /// <summary>四层 TCP/UDP 转发持久化实体</summary>

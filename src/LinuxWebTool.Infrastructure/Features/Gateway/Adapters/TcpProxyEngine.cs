@@ -143,6 +143,33 @@ public sealed class TcpProxyEngine(GatewayStore store, ILogger<TcpProxyEngine> l
         catch (Exception ex)
         {
             try { listener.Stop(); } catch { }
+
+            // 若双栈 [::] 监听启动失败且原因不是端口已被占用（例如宿主内核关闭 IPv6 或环境不支持），尝试安全降级至纯 IPv4 0.0.0.0
+            if (boundAddress == "[::]" && !(ex is SocketException sockEx && sockEx.SocketErrorCode == SocketError.AddressAlreadyInUse))
+            {
+                try
+                {
+                    var fallbackListener = new TcpListener(IPAddress.Any, port);
+                    if (!OperatingSystem.IsWindows())
+                    {
+                        fallbackListener.ExclusiveAddressUse = false;
+                        fallbackListener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                    }
+                    fallbackListener.Start();
+                    boundAddress = "0.0.0.0";
+                    var ctx = new TcpListenerContext(fallbackListener, route.ForwardHost, route.ForwardPort, boundAddress, cts);
+                    _listeners[port] = ctx;
+                    _statusMap[port] = new L4RuntimeState(true, null, 0, boundAddress);
+                    _ = Task.Run(() => AcceptLoopAsync(ctx, cts.Token), cts.Token);
+                    logger.LogInformation("[Gateway TCP] 端口 {Port} (降级绑定 {Bound}) 转发至 {Host}:{ForwardPort} 已就绪", port, boundAddress, route.ForwardHost, route.ForwardPort);
+                    return;
+                }
+                catch (Exception fallbackEx)
+                {
+                    logger.LogDebug(fallbackEx, "[Gateway TCP] 端口 {Port} 纯 IPv4 降级监听亦失败", port);
+                }
+            }
+
             var err = $"启动监听失败: {ex.Message}";
             _statusMap[port] = new L4RuntimeState(false, err, 0, boundAddress);
             logger.LogError(ex, "[Gateway TCP] 端口 {Port} 启动监听失败 ({Error})", port, ex.Message);
@@ -155,6 +182,11 @@ public sealed class TcpProxyEngine(GatewayStore store, ILogger<TcpProxyEngine> l
         {
             // 优先创建 IPv6 Dual-Stack 监听器，同时接收 IPv4 (IPv4-mapped) 和 IPv6 连接
             var listener = TcpListener.Create(port);
+            if (!OperatingSystem.IsWindows())
+            {
+                listener.ExclusiveAddressUse = false;
+                listener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            }
             return (listener, "[::]", null);
         }
         catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressFamilyNotSupported || ex.SocketErrorCode == SocketError.ProtocolNotSupported)
@@ -163,6 +195,11 @@ public sealed class TcpProxyEngine(GatewayStore store, ILogger<TcpProxyEngine> l
             try
             {
                 var listener = new TcpListener(IPAddress.Any, port);
+                if (!OperatingSystem.IsWindows())
+                {
+                    listener.ExclusiveAddressUse = false;
+                    listener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                }
                 return (listener, "0.0.0.0", null);
             }
             catch (Exception fallbackEx)
