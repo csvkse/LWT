@@ -13,7 +13,8 @@ public sealed record CreateApiKeyRequest(
     bool AllowRemoteHosts = false,
     string? AllowedPaths = null,
     string? AllowedHostIds = null,
-    DateTime? ExpiresAt = null);
+    DateTime? ExpiresAt = null,
+    IReadOnlyList<string>? AllowedTools = null);
 
 /// <summary>更新 API Key 请求契约</summary>
 public sealed record UpdateApiKeyRequest(
@@ -29,7 +30,8 @@ public sealed record UpdateApiKeyRequest(
     bool AllowRemoteHosts = false,
     string? AllowedPaths = null,
     string? AllowedHostIds = null,
-    DateTime? ExpiresAt = null);
+    DateTime? ExpiresAt = null,
+    IReadOnlyList<string>? AllowedTools = null);
 
 /// <summary>克隆 API Key 请求契约</summary>
 public sealed record CloneApiKeyRequest(
@@ -53,7 +55,8 @@ public sealed record ApiKeyCreatedResponse(
     string? AllowedPaths,
     string? AllowedHostIds,
     DateTime CreatedAt,
-    DateTime? ExpiresAt);
+    DateTime? ExpiresAt,
+    IReadOnlyList<string>? AllowedTools = null);
 
 /// <summary>API Key 列表项响应契约（脱敏）</summary>
 public sealed record ApiKeyItemResponse(
@@ -73,4 +76,5 @@ public sealed record ApiKeyItemResponse(
     string? AllowedHostIds,
     DateTime CreatedAt,
     DateTime? LastUsedAt,
-    DateTime? ExpiresAt);
+    DateTime? ExpiresAt,
+    IReadOnlyList<string>? AllowedTools = null);

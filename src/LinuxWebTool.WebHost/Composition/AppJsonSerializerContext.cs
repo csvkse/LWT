@@ -200,6 +200,10 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(McpToolsListResult))]
 [JsonSerializable(typeof(List<McpToolDefinition>))]
 [JsonSerializable(typeof(List<McpToolContent>))]
+[JsonSerializable(typeof(McpToolCatalogItem))]
+[JsonSerializable(typeof(List<McpToolCatalogItem>))]
+[JsonSerializable(typeof(McpCategoryCatalog))]
+[JsonSerializable(typeof(List<McpCategoryCatalog>))]
 
 // EasyTier Models
 [JsonSerializable(typeof(EasyTierNodeConfigDto))]

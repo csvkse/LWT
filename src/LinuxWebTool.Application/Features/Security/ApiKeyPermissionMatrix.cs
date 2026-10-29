@@ -94,9 +94,11 @@ public static class ApiKeyPermissionMatrix
         bool allowGateway,
         bool allowRemoteHosts = false)
     {
-        if (toolName.StartsWith("terminal_", StringComparison.OrdinalIgnoreCase))
+        if (toolName.StartsWith("terminal_", StringComparison.OrdinalIgnoreCase) ||
+            toolName.StartsWith("command_", StringComparison.OrdinalIgnoreCase))
             return allowTerminal;
-        if (toolName.StartsWith("schedule_", StringComparison.OrdinalIgnoreCase))
+        if (toolName.StartsWith("schedule_", StringComparison.OrdinalIgnoreCase) ||
+            toolName.StartsWith("workflow_", StringComparison.OrdinalIgnoreCase))
             return allowSchedules;
         if (toolName.StartsWith("file_", StringComparison.OrdinalIgnoreCase))
             return allowFiles;
@@ -109,5 +111,89 @@ public static class ApiKeyPermissionMatrix
 
         // 通用健康探测与基础信息工具默认允许
         return true;
+    }
+
+    /// <summary>
+    /// 解析允许的 MCP 工具名集合（null 或包含 "*" 表示全部允许）
+    /// </summary>
+    public static HashSet<string>? ParseAllowedTools(string? allowedTools)
+    {
+        if (string.IsNullOrWhiteSpace(allowedTools) || allowedTools.Trim() == "*")
+        {
+            return null;
+        }
+
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var tokens = allowedTools.Split(new[] { ',', ';', ' ', '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var token in tokens)
+        {
+            var cleaned = token.Trim().Trim('"', '[', ']', '\'', ',');
+            if (!string.IsNullOrEmpty(cleaned))
+            {
+                set.Add(cleaned);
+            }
+        }
+        return set;
+    }
+
+    /// <summary>
+    /// 校验指定工具名称是否被允许（支持集合查找或原始串，null 或 "*" 表示全部允许）
+    /// </summary>
+    public static bool IsToolAllowed(string? allowedTools, string toolName)
+    {
+        if (string.IsNullOrWhiteSpace(allowedTools) || allowedTools.Trim() == "*")
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(toolName)) return false;
+
+        var set = ParseAllowedTools(allowedTools);
+        return set == null || set.Contains(toolName.Trim());
+    }
+
+    /// <summary>
+    /// 校验指定工具名称是否在解析后的工具集合中
+    /// </summary>
+    public static bool IsToolAllowed(IReadOnlySet<string>? allowedToolSet, string toolName)
+    {
+        if (allowedToolSet == null || allowedToolSet.Count == 0 || allowedToolSet.Contains("*"))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(toolName)) return false;
+
+        return allowedToolSet.Contains(toolName.Trim());
+    }
+
+    /// <summary>
+    /// 二级细粒度工具权限判定（Level 1 模块开关 + Level 2 具体工具勾选）
+    /// </summary>
+    public static bool IsToolPermitted(
+        bool allowTerminal,
+        bool allowSchedules,
+        bool allowFiles,
+        bool allowTranscode,
+        bool allowGateway,
+        bool allowRemoteHosts,
+        string? allowedTools,
+        string toolName,
+        string moduleName)
+    {
+        var moduleAllowed = moduleName.ToLowerInvariant() switch
+        {
+            "commands" or "terminal" => allowTerminal,
+            "workflows" or "schedules" => allowSchedules,
+            "files" or "file" => allowFiles,
+            "transcode" => allowTranscode,
+            "gateway" => allowGateway,
+            "remote_hosts" or "remote" or "remotehosts" => allowRemoteHosts,
+            _ => true
+        };
+
+        if (!moduleAllowed) return false;
+
+        return IsToolAllowed(allowedTools, toolName);
     }
 }

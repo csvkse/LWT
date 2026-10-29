@@ -18,6 +18,7 @@ public class ApiKeyEntity
     public bool AllowRemoteHosts { get; set; } = false;
     public string? AllowedPaths { get; set; }
     public string? AllowedHostIds { get; set; }
+    public string? AllowedTools { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastUsedAt { get; set; }
     public DateTime? ExpiresAt { get; set; }

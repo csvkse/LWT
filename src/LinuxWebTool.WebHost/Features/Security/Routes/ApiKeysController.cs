@@ -31,7 +31,8 @@ public class ApiKeysController(
             k.AllowedHostIds,
             k.CreatedAt,
             k.LastUsedAt,
-            k.ExpiresAt
+            k.ExpiresAt,
+            ApiKeyService.ParseToolsList(k.AllowedTools)
         )).ToList();
         return Ok(dtos);
     }
@@ -63,7 +64,8 @@ public class ApiKeysController(
             entity.AllowedPaths,
             entity.AllowedHostIds,
             entity.CreatedAt,
-            entity.ExpiresAt);
+            entity.ExpiresAt,
+            ApiKeyService.ParseToolsList(entity.AllowedTools));
 
         return Ok(response);
     }
@@ -89,6 +91,7 @@ public class ApiKeysController(
         entity.AllowRemoteHosts = request.AllowRemoteHosts;
         entity.AllowedPaths = string.IsNullOrWhiteSpace(request.AllowedPaths) ? null : request.AllowedPaths.Trim();
         entity.AllowedHostIds = string.IsNullOrWhiteSpace(request.AllowedHostIds) ? null : request.AllowedHostIds.Trim();
+        entity.AllowedTools = request.AllowedTools != null && request.AllowedTools.Count > 0 ? string.Join(",", request.AllowedTools) : null;
         entity.ExpiresAt = request.ExpiresAt;
 
         await store.UpdateAsync(entity);
@@ -156,7 +159,8 @@ public class ApiKeysController(
             source.AllowRemoteHosts,
             source.AllowedPaths,
             source.AllowedHostIds,
-            request?.ExpiresAt ?? source.ExpiresAt);
+            request?.ExpiresAt ?? source.ExpiresAt,
+            ApiKeyService.ParseToolsList(source.AllowedTools));
 
         var (rawKey, entity) = await service.CreateAsync(createReq);
         await operationLogger.LogAsync("克隆 API Key", "安全凭据", entity.Name, $"克隆自={source.Name}, 前缀={entity.KeyPrefix}", clientIp: HttpContext.GetClientIp());
@@ -177,8 +181,15 @@ public class ApiKeysController(
             entity.AllowedPaths,
             entity.AllowedHostIds,
             entity.CreatedAt,
-            entity.ExpiresAt);
+            entity.ExpiresAt,
+            ApiKeyService.ParseToolsList(entity.AllowedTools));
 
         return Ok(response);
+    }
+
+    [HttpGet("McpCatalog")]
+    public IResult GetMcpCatalog([FromServices] Mcp.Engine.McpServerEngine mcpEngine)
+    {
+        return Ok(mcpEngine.GetCatalog());
     }
 }
