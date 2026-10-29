@@ -232,17 +232,60 @@ fi
 
     public async Task<Stream> OpenReadStreamAsync(string path, CancellationToken cancellationToken = default)
     {
-        var text = await ReadTextAsync(path, cancellationToken);
-        var bytes = Encoding.UTF8.GetBytes(text);
-        return new MemoryStream(bytes);
+        return await Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var safePath = EscapeBashArg(path);
+            var script = $@"
+P={safePath}
+if [ -d ""$P"" ]; then
+  D=$(dirname ""$P"")
+  B=$(basename ""$P"")
+  tar -czf - -C ""$D"" ""$B"" 2>/dev/null | base64
+else
+  base64 -w 0 ""$P"" 2>/dev/null || base64 ""$P"" 2>/dev/null
+fi
+";
+            using var cmd = _client.CreateCommand($"/bin/sh -c '{EscapeSingleQuoteScript(script)}'");
+            cmd.CommandTimeout = TimeSpan.FromSeconds(60);
+            var result = cmd.Execute();
+
+            var clean = AnsiOutputSanitizer.Sanitize(result)
+                .Replace("\r", string.Empty)
+                .Replace("\n", string.Empty)
+                .Trim();
+
+            if (string.IsNullOrEmpty(clean))
+            {
+                return (Stream)new MemoryStream();
+            }
+
+            var bytes = Convert.FromBase64String(clean);
+            return (Stream)new MemoryStream(bytes);
+        }, cancellationToken);
     }
 
     public async Task WriteFileStreamAsync(string path, Stream content, CancellationToken cancellationToken = default)
     {
         using var ms = new MemoryStream();
         await content.CopyToAsync(ms, cancellationToken);
-        var text = Encoding.UTF8.GetString(ms.ToArray());
-        await WriteTextAsync(path, text, cancellationToken);
+        var b64 = Convert.ToBase64String(ms.ToArray());
+
+        await Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var safePath = EscapeBashArg(path);
+            var safeB64 = EscapeBashArg(b64);
+            var script = "printf \"%s\" \"$2\" | base64 -d > \"$1\"";
+            using var cmd = _client.CreateCommand($"/bin/sh -c '{EscapeSingleQuoteScript(script)}' _ {safePath} {safeB64}");
+            cmd.CommandTimeout = TimeSpan.FromSeconds(60);
+            cmd.Execute();
+
+            if (cmd.ExitStatus != 0)
+            {
+                throw new InvalidOperationException($"写入文件失败: {cmd.Error}");
+            }
+        }, cancellationToken);
     }
 
     public async Task CreateDirectoryAsync(string path, CancellationToken cancellationToken = default)
@@ -291,6 +334,23 @@ fi
             if (cmd.ExitStatus != 0)
             {
                 throw new InvalidOperationException($"重命名失败: {cmd.Error}");
+            }
+        }, cancellationToken);
+    }
+
+    public async Task CopyAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken = default)
+    {
+        await Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var safeSource = EscapeBashArg(sourcePath);
+            var safeDest = EscapeBashArg(destinationPath);
+            using var cmd = _client.CreateCommand($"/bin/sh -c 'cp -r \"$1\" \"$2\"' _ {safeSource} {safeDest}");
+            cmd.CommandTimeout = TimeSpan.FromSeconds(30);
+            cmd.Execute();
+            if (cmd.ExitStatus != 0)
+            {
+                throw new InvalidOperationException($"复制失败: {cmd.Error}");
             }
         }, cancellationToken);
     }

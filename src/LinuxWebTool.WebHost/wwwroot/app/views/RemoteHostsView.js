@@ -142,6 +142,23 @@ export default defineComponent({
     const renameSourceName = ref('');
     const renameDestName = ref('');
 
+    // 文件上传
+    const fileUploadInput = ref(null);
+
+    // 复制弹窗
+    const showCopyModal = ref(false);
+    const copySourcePath = ref('');
+    const copySourceName = ref('');
+    const copyDestPath = ref('');
+    const copySaving = ref(false);
+
+    // 移动弹窗
+    const showMoveModal = ref(false);
+    const moveSourcePath = ref('');
+    const moveSourceName = ref('');
+    const moveDestPath = ref('');
+    const moveSaving = ref(false);
+
     // 复制到剪贴板
     function copyText(text) {
       if (!text) return;
@@ -882,6 +899,130 @@ export default defineComponent({
       });
     }
 
+    // 文件上传
+    function triggerFileUpload() {
+      fileUploadInput.value?.click();
+    }
+
+    async function onFileSelected(e) {
+      const file = e.target.files?.[0];
+      if (!file || !filesHost.value) return;
+      const formData = new FormData();
+      formData.append('file', file);
+      const uploadUrl = API.remoteHosts.fileUpload(filesHost.value.id, currentPath.value || '/');
+      filesLoading.value = true;
+      try {
+        const res = await http(uploadUrl, {
+          method: 'POST',
+          body: formData,
+        });
+        if (res.ok) {
+          toast.success(`文件「${file.name}」上传成功`);
+          await loadFiles(currentPath.value);
+        } else {
+          toast.error(res.message || '上传失败');
+        }
+      } catch (err) {
+        toast.error(err?.message || '上传请求异常');
+      } finally {
+        filesLoading.value = false;
+        e.target.value = '';
+      }
+    }
+
+    // 文件与目录打包下载
+    function downloadEntry(entry) {
+      if (!filesHost.value) return;
+      const url = API.remoteHosts.fileDownload(filesHost.value.id, entry.path);
+      const token = auth.token;
+      const fullUrl = `/api${url}` + (url.includes('?') ? '&' : '?') + (token ? `token=${encodeURIComponent(token)}` : '');
+      const link = document.createElement('a');
+      link.href = fullUrl;
+      link.download = entry.isDirectory ? `${entry.name}.tar.gz` : entry.name;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.info(`已发起下载: ${entry.name}`);
+    }
+
+    // 复制弹窗与操作
+    function openCopyDialog(entry) {
+      copySourcePath.value = entry.path;
+      copySourceName.value = entry.name;
+      copyDestPath.value = entry.path.endsWith('/') ? entry.path.slice(0, -1) + '_copy' : entry.path + '_copy';
+      showCopyModal.value = true;
+    }
+
+    async function saveCopy() {
+      const dest = copyDestPath.value.trim();
+      if (!dest) {
+        toast.error('请输入复制目标路径');
+        return;
+      }
+      copySaving.value = true;
+      try {
+        const res = await http(API.remoteHosts.fileAction(filesHost.value.id), {
+          method: 'POST',
+          body: {
+            action: 'copy',
+            path: copySourcePath.value,
+            destination: dest,
+          },
+          timeoutMs: 30000,
+        });
+        if (res.ok) {
+          toast.success('复制成功');
+          showCopyModal.value = false;
+          await loadFiles(currentPath.value);
+        } else {
+          toast.error(res.message || '复制失败');
+        }
+      } catch (err) {
+        toast.error(err?.message || '复制操作请求异常');
+      } finally {
+        copySaving.value = false;
+      }
+    }
+
+    // 移动弹窗与操作
+    function openMoveDialog(entry) {
+      moveSourcePath.value = entry.path;
+      moveSourceName.value = entry.name;
+      moveDestPath.value = entry.path;
+      showMoveModal.value = true;
+    }
+
+    async function saveMove() {
+      const dest = moveDestPath.value.trim();
+      if (!dest || dest === moveSourcePath.value) {
+        showMoveModal.value = false;
+        return;
+      }
+      moveSaving.value = true;
+      try {
+        const res = await http(API.remoteHosts.fileAction(filesHost.value.id), {
+          method: 'POST',
+          body: {
+            action: 'move',
+            path: moveSourcePath.value,
+            destination: dest,
+          },
+          timeoutMs: 30000,
+        });
+        if (res.ok) {
+          toast.success('移动成功');
+          showMoveModal.value = false;
+          await loadFiles(currentPath.value);
+        } else {
+          toast.error(res.message || '移动失败');
+        }
+      } catch (err) {
+        toast.error(err?.message || '移动操作请求异常');
+      } finally {
+        moveSaving.value = false;
+      }
+    }
+
     // 生命周期
     onMounted(() => {
       loadHosts();
@@ -988,6 +1129,28 @@ export default defineComponent({
       openRenameDialog,
       saveRename,
       deleteEntry,
+
+      // 上传与下载
+      fileUploadInput,
+      triggerFileUpload,
+      onFileSelected,
+      downloadEntry,
+
+      // 复制与移动
+      showCopyModal,
+      copySourcePath,
+      copySourceName,
+      copyDestPath,
+      copySaving,
+      openCopyDialog,
+      saveCopy,
+      showMoveModal,
+      moveSourcePath,
+      moveSourceName,
+      moveDestPath,
+      moveSaving,
+      openMoveDialog,
+      saveMove,
     };
   },
   template: `
@@ -1640,6 +1803,22 @@ export default defineComponent({
                 </button>
               </div>
 
+              <input
+                ref="fileUploadInput"
+                type="file"
+                class="hidden"
+                @change="onFileSelected"
+              />
+              <button
+                class="btn btn-secondary text-xs py-1 px-2.5 flex items-center gap-1"
+                :disabled="filesLoading"
+                title="上传文件到当前目录"
+                @click="triggerFileUpload()"
+              >
+                <span>↑</span>
+                <span>上传</span>
+              </button>
+
               <button class="btn btn-secondary text-xs py-1 px-2.5" @click="openMkdirDialog()">
                 ＋ 新建文件夹
               </button>
@@ -1719,18 +1898,42 @@ export default defineComponent({
                       <button
                         v-if="!entry.isDirectory"
                         class="text-cyan-400 hover:text-cyan-300 cursor-pointer"
+                        title="查看与编辑文件内容"
                         @click="openFileEditor(entry)"
                       >
                         编辑
                       </button>
                       <button
+                        class="text-emerald-400 hover:text-emerald-300 cursor-pointer"
+                        :title="entry.isDirectory ? '打包为 tar.gz 下载' : '下载文件'"
+                        @click="downloadEntry(entry)"
+                      >
+                        下载
+                      </button>
+                      <button
+                        class="text-amber-400 hover:text-amber-300 cursor-pointer"
+                        title="复制副本或复制到指定路径"
+                        @click="openCopyDialog(entry)"
+                      >
+                        复制
+                      </button>
+                      <button
+                        class="text-indigo-400 hover:text-indigo-300 cursor-pointer"
+                        title="移动到新路径或新目录"
+                        @click="openMoveDialog(entry)"
+                      >
+                        移动
+                      </button>
+                      <button
                         class="text-slate-400 hover:text-slate-200 cursor-pointer"
+                        title="重命名"
                         @click="openRenameDialog(entry)"
                       >
                         重命名
                       </button>
                       <button
                         class="text-rose-400 hover:text-rose-300 cursor-pointer"
+                        title="删除"
                         @click="deleteEntry(entry)"
                       >
                         删除
@@ -1827,6 +2030,56 @@ export default defineComponent({
           <div class="flex items-center justify-end gap-2">
             <button class="btn btn-secondary text-xs" @click="showRenameModal = false">取消</button>
             <button class="btn btn-primary text-xs" @click="saveRename()">确认</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== 弹窗 8: 复制文件或目录 ==================== -->
+      <div v-if="showCopyModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div class="panel w-full max-w-sm p-5 flex flex-col gap-4 border-slate-700">
+          <h3 class="font-semibold text-slate-100 text-sm">复制文件 / 目录</h3>
+          <div>
+            <label class="block text-slate-400 text-xs mb-1">源文件: <span class="font-mono text-slate-200">{{ copySourceName }}</span></label>
+            <label class="block text-slate-300 text-xs mb-1 font-medium mt-2">目标路径 / 副本名称</label>
+            <input
+              v-model="copyDestPath"
+              type="text"
+              class="input text-xs font-mono"
+              placeholder="请输入完整目标路径"
+              @keyup.enter="saveCopy()"
+            />
+          </div>
+          <div class="flex items-center justify-end gap-2">
+            <button class="btn btn-secondary text-xs" @click="showCopyModal = false">取消</button>
+            <button class="btn btn-primary text-xs" :disabled="copySaving" @click="saveCopy()">
+              <span v-if="copySaving" class="animate-spin mr-1">↻</span>
+              <span>确认复制</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== 弹窗 9: 移动文件或目录 ==================== -->
+      <div v-if="showMoveModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div class="panel w-full max-w-sm p-5 flex flex-col gap-4 border-slate-700">
+          <h3 class="font-semibold text-slate-100 text-sm">移动文件 / 目录</h3>
+          <div>
+            <label class="block text-slate-400 text-xs mb-1">源文件: <span class="font-mono text-slate-200">{{ moveSourceName }}</span></label>
+            <label class="block text-slate-300 text-xs mb-1 font-medium mt-2">目标目录 / 新完整路径</label>
+            <input
+              v-model="moveDestPath"
+              type="text"
+              class="input text-xs font-mono"
+              placeholder="请输入目标完整路径"
+              @keyup.enter="saveMove()"
+            />
+          </div>
+          <div class="flex items-center justify-end gap-2">
+            <button class="btn btn-secondary text-xs" @click="showMoveModal = false">取消</button>
+            <button class="btn btn-primary text-xs" :disabled="moveSaving" @click="saveMove()">
+              <span v-if="moveSaving" class="animate-spin mr-1">↻</span>
+              <span>确认移动</span>
+            </button>
           </div>
         </div>
       </div>

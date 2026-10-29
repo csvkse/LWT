@@ -15,9 +15,14 @@ public sealed class ResilientRemoteFileSystem : IRemoteFileSystem
 {
     private static readonly ConcurrentDictionary<string, DateTimeOffset> DegradedSftpHosts = new(StringComparer.OrdinalIgnoreCase);
 
+    public static bool IsHostSftpDegraded(string hostId)
+    {
+        return DegradedSftpHosts.TryGetValue(hostId, out var until) && DateTimeOffset.UtcNow < until;
+    }
+
     private readonly string _hostId;
     private readonly SshClient _sshClient;
-    private readonly SftpClient _sftpClient;
+    private readonly SftpClient? _sftpClient;
     private readonly ILogger? _logger;
     private IRemoteFileSystem? _activeFs;
     private bool _disposed;
@@ -25,7 +30,7 @@ public sealed class ResilientRemoteFileSystem : IRemoteFileSystem
     public ResilientRemoteFileSystem(
         string hostId,
         SshClient sshClient,
-        SftpClient sftpClient,
+        SftpClient? sftpClient = null,
         ILogger? logger = null)
     {
         _hostId = hostId;
@@ -38,22 +43,20 @@ public sealed class ResilientRemoteFileSystem : IRemoteFileSystem
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        // 1. 检查是否为已知 SFTP 降级主机（有效期 10 分钟）
-        if (DegradedSftpHosts.TryGetValue(_hostId, out var degradedUntil))
+        // 1. 若外部已明确指定无 SFTP 或处于 SFTP 降级窗口期（有效期 10 分钟）
+        if (_sftpClient == null || (DegradedSftpHosts.TryGetValue(_hostId, out var degradedUntil) && DateTimeOffset.UtcNow < degradedUntil))
         {
-            if (DateTimeOffset.UtcNow < degradedUntil)
-            {
-                _logger?.LogInformation("远程主机 {HostId} 处于 SFTP 降级窗口期，直接启用 SSH Exec 文件系统引擎", _hostId);
-                _activeFs = new SshExecRemoteFileSystem(_sshClient, ownsClient: false, _logger);
-                return;
-            }
-            DegradedSftpHosts.TryRemove(_hostId, out _);
+            _logger?.LogInformation("远程主机 {HostId} 处于 SFTP 降级窗口期，直接启用 SSH Exec 文件系统引擎", _hostId);
+            _activeFs = new SshExecRemoteFileSystem(_sshClient, ownsClient: false, _logger);
+            return;
         }
 
-        // 2. 快速探测 SFTP 子系统连通性（3 秒保护）
+        DegradedSftpHosts.TryRemove(_hostId, out _);
+
+        // 2. 快速探测 SFTP 子系统连通性（1.0 秒保护，杜绝死等）
         try
         {
-            using var probeCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            using var probeCts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, probeCts.Token);
 
             await Task.Run(() => _sftpClient.Connect(), linkedCts.Token);
@@ -78,8 +81,8 @@ public sealed class ResilientRemoteFileSystem : IRemoteFileSystem
         DegradedSftpHosts[_hostId] = DateTimeOffset.UtcNow.AddMinutes(10);
         try
         {
-            if (_sftpClient.IsConnected) _sftpClient.Disconnect();
-            _sftpClient.Dispose();
+            if (_sftpClient?.IsConnected == true) _sftpClient.Disconnect();
+            _sftpClient?.Dispose();
         }
         catch { }
     }
@@ -166,6 +169,15 @@ public sealed class ResilientRemoteFileSystem : IRemoteFileSystem
         }, cancellationToken);
     }
 
+    public Task CopyAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken = default)
+    {
+        return ExecuteWithFallbackAsync(async fs =>
+        {
+            await fs.CopyAsync(sourcePath, destinationPath, cancellationToken);
+            return true;
+        }, cancellationToken);
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
@@ -178,8 +190,8 @@ public sealed class ResilientRemoteFileSystem : IRemoteFileSystem
 
         try
         {
-            if (_sftpClient.IsConnected) _sftpClient.Disconnect();
-            _sftpClient.Dispose();
+            if (_sftpClient?.IsConnected == true) _sftpClient.Disconnect();
+            _sftpClient?.Dispose();
         }
         catch { }
 

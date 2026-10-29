@@ -774,5 +774,49 @@ public class ArchitectureTests
         Assert.Contains("133", sanitizerContent);
         Assert.Contains("stripAnsi", feContent);
     }
+
+    [Fact]
+    public void LinuxArch029_远程主机文件管理器必须具备连接池会话复用与复制移动能力()
+    {
+        var adaptersDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure", "Features", "RemoteHost", "Adapters");
+        var sessionPoolFile = Path.Combine(adaptersDir, "RemoteFileSystemSessionPool.cs");
+        var controllerFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "RemoteHost", "Routes", "RemoteHostsController.cs");
+        var contractsFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.Contracts", "Features", "RemoteHost", "Contracts", "RemoteFileContracts.cs");
+        var mapperFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "MinimalApi", "EndpointsMapper.g.cs");
+        var feViewFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "wwwroot", "app", "views", "RemoteHostsView.js");
+
+        Assert.True(File.Exists(sessionPoolFile), "RemoteFileSystemSessionPool.cs 不存在");
+        Assert.True(File.Exists(controllerFile), "RemoteHostsController.cs 不存在");
+        Assert.True(File.Exists(contractsFile), "RemoteFileContracts.cs 不存在");
+        Assert.True(File.Exists(mapperFile), "EndpointsMapper.g.cs 不存在");
+        Assert.True(File.Exists(feViewFile), "RemoteHostsView.js 不存在");
+
+        var poolContent = File.ReadAllText(sessionPoolFile);
+        var controllerContent = File.ReadAllText(controllerFile);
+        var contractsContent = File.ReadAllText(contractsFile);
+        var mapperContent = File.ReadAllText(mapperFile);
+        var feContent = File.ReadAllText(feViewFile);
+
+        // 1. 连接池与会话复用验证
+        Assert.Contains("GetOrCreateAsync", poolContent);
+        Assert.Contains("Invalidate", poolContent);
+        Assert.Contains("RemoteFileSystemSessionPool", controllerContent);
+        Assert.Contains("sessionPool.GetOrCreateAsync", controllerContent);
+
+        // 2. 复制与移动能力验证
+        Assert.Contains("CopyAsync", contractsContent);
+        Assert.Contains("copy", controllerContent);
+        Assert.Contains("move", controllerContent);
+
+        // 3. 上传与下载 MinimalApi AOT 端点映射验证
+        Assert.Contains("/Files/Upload", mapperContent);
+        Assert.Contains("/Files/Download", mapperContent);
+
+        // 4. 前端交互功能完整性验证
+        Assert.Contains("triggerFileUpload", feContent);
+        Assert.Contains("downloadEntry", feContent);
+        Assert.Contains("openCopyDialog", feContent);
+        Assert.Contains("openMoveDialog", feContent);
+    }
 }
 

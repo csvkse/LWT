@@ -272,4 +272,20 @@ d|4096|1698567890|750|var
         var result = SshExecRemoteFileSystem.FormatPermissions(type, octal);
         Assert.Equal(expected, result);
     }
+
+    [Fact]
+    public void ResilientRemoteFileSystem_DegradeDetection_ReflectsStatus()
+    {
+        var hostId = Guid.NewGuid().ToString("N");
+        Assert.False(ResilientRemoteFileSystem.IsHostSftpDegraded(hostId));
+    }
+
+    [Fact]
+    public async Task RemoteFileSystemSessionPool_Invalidation_SucceedsWithoutError()
+    {
+        await using var pool = new RemoteFileSystemSessionPool(NullLogger<RemoteFileSystemSessionPool>.Instance);
+        var hostId = Guid.NewGuid().ToString("N");
+        // 验证无效化未缓存的主机安全静默返回
+        pool.Invalidate(hostId);
+    }
 }
