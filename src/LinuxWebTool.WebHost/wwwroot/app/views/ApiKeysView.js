@@ -2,7 +2,7 @@ import { computed, defineComponent, onMounted, reactive, ref } from 'vue';
 import { http } from '../api/client.js';
 import { API } from '../config.js';
 import { toast } from '../store/toast.js';
-import { formatTime } from '../utils/format.js';
+import { copyText, formatTime } from '../utils/format.js';
 
 export default defineComponent({
   name: 'ApiKeysView',
@@ -472,15 +472,61 @@ export default defineComponent({
       }
     }
 
-    function copyToClipboard(text) {
-      navigator.clipboard.writeText(text).then(() => {
+    // 过期时间快速设置
+    function setExpiryPreset(days) {
+      if (days === 0 || days === null) {
+        form.expiresAt = '';
+        toast.info('已设置为永久有效');
+        return;
+      }
+
+      const date = new Date();
+      date.setDate(date.getDate() + days);
+
+      const pad = (n) => String(n).padStart(2, '0');
+      const year = date.getFullYear();
+      const month = pad(date.getMonth() + 1);
+      const day = pad(date.getDate());
+      const hours = pad(date.getHours());
+      const minutes = pad(date.getMinutes());
+
+      form.expiresAt = `${year}-${month}-${day}T${hours}:${minutes}`;
+      const label = days >= 365 ? '1 年' : `${days} 天`;
+      toast.success(`已设置过期时间为 ${label}后 (${year}-${month}-${day})`);
+    }
+
+    async function copyToClipboard(text) {
+      if (!text) return;
+      const success = await copyText(text);
+      if (success) {
         toast.success('已复制到剪贴板');
-      });
+      } else {
+        toast.error('自动复制失败，请手动选中文本复制');
+      }
     }
 
     function openGuide(key) {
       guideKey.value = key ? key.keyPrefix + '...' : 'lwt_live_your_key_here';
       showGuideModal.value = true;
+    }
+
+    function copyCurlCommand() {
+      const cmd = `curl -H "X-Api-Key: ${guideKey.value}" ${originUrl}/api/RemoteHosts`;
+      copyToClipboard(cmd);
+    }
+
+    function copyMcpConfig() {
+      const config = JSON.stringify({
+        mcpServers: {
+          linuxwebtool: {
+            url: `${originUrl}/mcp/sse`,
+            headers: {
+              'X-Api-Key': guideKey.value,
+            },
+          },
+        },
+      }, null, 2);
+      copyToClipboard(config);
     }
 
     function getHostScopeLabel(key) {
@@ -530,10 +576,13 @@ export default defineComponent({
       selectStandardOps,
       selectReadOnly,
       clearAll,
+      setExpiryPreset,
       save,
       toggleKey,
       removeKey,
       copyToClipboard,
+      copyCurlCommand,
+      copyMcpConfig,
       openGuide,
       formatTime,
       getHostScopeLabel,
@@ -675,8 +724,17 @@ export default defineComponent({
               </div>
 
               <div>
-                <label class="block text-slate-400 mb-1">过期时间（留空表示永久有效）</label>
-                <input v-model="form.expiresAt" type="datetime-local" class="input" />
+                <div class="flex items-center justify-between mb-1">
+                  <label class="text-slate-400">过期时间（留空表示永久有效）</label>
+                  <div class="flex items-center gap-1 text-[10px]">
+                    <button type="button" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors" @click="setExpiryPreset(7)">+7天</button>
+                    <button type="button" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors" @click="setExpiryPreset(30)">+30天</button>
+                    <button type="button" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors" @click="setExpiryPreset(90)">+90天</button>
+                    <button type="button" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors" @click="setExpiryPreset(365)">+1年</button>
+                    <button type="button" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-cyan-400 transition-colors" @click="setExpiryPreset(0)">永久</button>
+                  </div>
+                </div>
+                <input v-model="form.expiresAt" type="datetime-local" class="input w-full" />
               </div>
             </div>
 
@@ -886,7 +944,7 @@ export default defineComponent({
           <div class="flex flex-col gap-1">
             <span class="text-xs text-slate-400 font-medium">密钥名称: {{ createdKeyInfo.name }}</span>
             <div class="flex items-center gap-2 mt-1">
-              <input :value="createdKeyInfo.rawKey" readonly class="input font-mono text-cyan-300 select-all" />
+              <input :value="createdKeyInfo.rawKey" readonly class="input font-mono text-cyan-300 select-all cursor-pointer" @click="$event.target.select()" />
               <button class="btn btn-primary" @click="copyToClipboard(createdKeyInfo.rawKey)">复制</button>
             </div>
           </div>
@@ -909,13 +967,19 @@ export default defineComponent({
 
           <div class="flex flex-col gap-4 text-xs leading-relaxed text-slate-300">
             <div>
-              <h4 class="font-semibold text-cyan-300 mb-1">1. REST API 调用鉴权</h4>
+              <div class="flex items-center justify-between mb-1">
+                <h4 class="font-semibold text-cyan-300">1. REST API 调用鉴权</h4>
+                <button class="btn btn-xs hover:border-cyan-500/50 text-cyan-400" @click="copyCurlCommand()">复制命令</button>
+              </div>
               <p class="text-slate-400 mb-2">在请求 Header 中附加 <code class="text-slate-200 font-mono">X-Api-Key</code> 或 <code class="text-slate-200 font-mono">Authorization: Bearer &lt;key&gt;</code>：</p>
               <pre class="bg-slate-950 p-2.5 rounded border border-slate-800 font-mono text-[11px] text-slate-300 overflow-x-auto">curl -H "X-Api-Key: {{ guideKey }}" {{ originUrl }}/api/RemoteHosts</pre>
             </div>
 
             <div>
-              <h4 class="font-semibold text-purple-300 mb-1">2. AI MCP Server 集成 (Cursor / Claude Desktop)</h4>
+              <div class="flex items-center justify-between mb-1">
+                <h4 class="font-semibold text-purple-300">2. AI MCP Server 集成 (Cursor / Claude Desktop)</h4>
+                <button class="btn btn-xs hover:border-purple-500/50 text-purple-400" @click="copyMcpConfig()">复制配置</button>
+              </div>
               <p class="text-slate-400 mb-2">在客户端配置中，指定 SSE 握手端点与请求头 Header：</p>
               <pre class="bg-slate-950 p-2.5 rounded border border-slate-800 font-mono text-[11px] text-purple-300 overflow-x-auto">{
   "mcpServers": {
