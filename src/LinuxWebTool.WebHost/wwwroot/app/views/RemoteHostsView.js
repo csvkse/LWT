@@ -258,6 +258,7 @@ export default defineComponent({
         const res = await http(API.remoteHosts.test, {
           method: 'POST',
           body: {
+            id: isEdit.value ? editingId.value : undefined,
             host: form.host.trim(),
             port: Number(form.port) || 22,
             protocol: form.protocol,
@@ -266,6 +267,7 @@ export default defineComponent({
             credential: form.credential || undefined,
             passphrase: form.passphrase || undefined,
           },
+          timeoutMs: 15000,
         });
         if (res.ok && res.data?.success) {
           formTestResult.value = { success: true, latencyMs: res.data.latencyMs };
@@ -341,15 +343,17 @@ export default defineComponent({
     async function testHostInline(host) {
       testingMap[host.id] = true;
       try {
-        const res = await http(API.remoteHosts.test, {
+        const res = await http(API.remoteHosts.testHost ? API.remoteHosts.testHost(host.id) : API.remoteHosts.test, {
           method: 'POST',
           body: {
+            id: host.id,
             host: host.host,
             port: host.port,
             protocol: host.protocol,
             authType: host.authType,
             username: host.username,
           },
+          timeoutMs: 15000,
         });
         if (res.ok && res.data?.success) {
           latenciesMap[host.id] = { success: true, latencyMs: res.data.latencyMs };
@@ -646,6 +650,7 @@ export default defineComponent({
         const res = await http(API.remoteHosts.files(filesHost.value.id), {
           method: 'GET',
           params: { path: target },
+          timeoutMs: 20000,
         });
         if (res.ok && res.data) {
           currentPath.value = res.data.currentPath || target;
@@ -712,6 +717,7 @@ export default defineComponent({
         const res = await http(API.remoteHosts.fileContent(filesHost.value.id), {
           method: 'GET',
           params: { path: entry.path },
+          timeoutMs: 30000,
         });
         if (res.ok && res.data) {
           editorContent.value = res.data.content ?? '';
@@ -742,6 +748,7 @@ export default defineComponent({
             path: editorPath.value,
             content: editorContent.value,
           },
+          timeoutMs: 30000,
         });
         if (res.ok) {
           toast.success('文件保存成功');
@@ -777,6 +784,7 @@ export default defineComponent({
             action: 'mkdir',
             path: dirPath,
           },
+          timeoutMs: 30000,
         });
         if (res.ok) {
           toast.success('文件夹创建成功');
@@ -815,6 +823,7 @@ export default defineComponent({
             path: renameSourcePath.value,
             destination: destPath,
           },
+          timeoutMs: 30000,
         });
         if (res.ok) {
           toast.success('重命名成功');
@@ -844,6 +853,7 @@ export default defineComponent({
                 path: entry.path,
                 recursive: entry.isDirectory,
               },
+              timeoutMs: 30000,
             });
             if (res.ok) {
               toast.success('删除成功');
@@ -1635,9 +1645,18 @@ export default defineComponent({
 
           <!-- 文件列表区域 -->
           <div class="flex-1 overflow-y-auto p-4 bg-slate-900/30">
-            <div v-if="filesLoading && fileEntries.length === 0" class="flex items-center justify-center h-48 text-slate-400 text-xs">
-              <span class="animate-spin text-lg mr-2">↻</span>
-              <span>正在读取远程目录...</span>
+            <div v-if="filesLoading && fileEntries.length === 0" class="flex flex-col items-center justify-center h-48 text-slate-400 text-xs gap-3">
+              <div class="flex items-center gap-2">
+                <span class="animate-spin text-lg text-cyan-400">↻</span>
+                <span>正在读取远程目录 ({{ currentPath || '/' }})...</span>
+              </div>
+              <button
+                type="button"
+                class="px-2.5 py-1 text-xs text-rose-400 hover:text-rose-300 border border-rose-800/50 rounded bg-rose-950/20 hover:bg-rose-900/30 transition-colors"
+                @click="filesLoading = false; filesError = '已手动取消目录读取等待'"
+              >
+                取消等待
+              </button>
             </div>
 
             <div v-else-if="fileEntries.length === 0" class="flex flex-col items-center justify-center h-48 text-slate-500 text-xs gap-2">
