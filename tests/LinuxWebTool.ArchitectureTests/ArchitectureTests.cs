@@ -735,5 +735,44 @@ public class ArchitectureTests
         Assert.Contains("OperationTimeout", adapterContent);
         Assert.Contains("KeepAliveInterval", adapterContent);
     }
+
+    [Fact]
+    public void LinuxArch028_远程主机必须具备SFTP与SSHExec双轨文件系统降级与终端转义净化能力()
+    {
+        var adaptersDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure", "Features", "RemoteHost", "Adapters");
+        var resilientFsFile = Path.Combine(adaptersDir, "ResilientRemoteFileSystem.cs");
+        var execFsFile = Path.Combine(adaptersDir, "SshExecRemoteFileSystem.cs");
+        var sanitizerFile = Path.Combine(adaptersDir, "AnsiOutputSanitizer.cs");
+        var adapterFile = Path.Combine(adaptersDir, "SshHostAdapter.cs");
+        var feViewFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "wwwroot", "app", "views", "RemoteHostsView.js");
+
+        Assert.True(File.Exists(resilientFsFile), "ResilientRemoteFileSystem.cs 不存在");
+        Assert.True(File.Exists(execFsFile), "SshExecRemoteFileSystem.cs 不存在");
+        Assert.True(File.Exists(sanitizerFile), "AnsiOutputSanitizer.cs 不存在");
+        Assert.True(File.Exists(adapterFile), "SshHostAdapter.cs 不存在");
+        Assert.True(File.Exists(feViewFile), "RemoteHostsView.js 不存在");
+
+        var resilientContent = File.ReadAllText(resilientFsFile);
+        var execFsContent = File.ReadAllText(execFsFile);
+        var sanitizerContent = File.ReadAllText(sanitizerFile);
+        var adapterContent = File.ReadAllText(adapterFile);
+        var feContent = File.ReadAllText(feViewFile);
+
+        // 1. 双轨文件系统验证
+        Assert.Contains("IRemoteFileSystem", resilientContent);
+        Assert.Contains("SshExecRemoteFileSystem", resilientContent);
+        Assert.Contains("SftpClient", resilientContent);
+        Assert.Contains("IRemoteFileSystem", execFsContent);
+        Assert.Contains("ParseDirectoryOutput", execFsContent);
+
+        // 2. 宿主适配器联动验证
+        Assert.Contains("ResilientRemoteFileSystem", adapterContent);
+        Assert.Contains("AnsiOutputSanitizer.Sanitize", adapterContent);
+
+        // 3. 终端转义与 OSC 133 净化验证
+        Assert.Contains("Sanitize", sanitizerContent);
+        Assert.Contains("133", sanitizerContent);
+        Assert.Contains("stripAnsi", feContent);
+    }
 }
 

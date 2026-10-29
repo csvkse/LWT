@@ -587,6 +587,16 @@ export default defineComponent({
       execHost.value = null;
     }
 
+    function stripAnsi(text) {
+      if (!text) return '';
+      return String(text)
+        .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)/g, '')
+        .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+        .replace(/\]133;[A-Za-z0-9;=._-]*/g, '')
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+        .trim();
+    }
+
     function applyExecPreset(cmd) {
       execCommand.value = cmd;
     }
@@ -607,7 +617,11 @@ export default defineComponent({
           },
         });
         if (res.ok && res.data) {
-          execResult.value = res.data;
+          execResult.value = {
+            ...res.data,
+            output: stripAnsi(res.data.output),
+            errorOutput: stripAnsi(res.data.errorOutput || res.data.error || ''),
+          };
           if (res.data.exitCode === 0) {
             toast.success('指令执行完成 (耗时 ' + res.data.durationMs + ' ms)');
           } else {
@@ -1559,9 +1573,9 @@ export default defineComponent({
               </div>
 
               <!-- STDERR 输出 -->
-              <div v-if="execResult.error" class="flex flex-col gap-1">
+              <div v-if="execResult.errorOutput || execResult.error" class="flex flex-col gap-1">
                 <span class="text-rose-400 text-[11px]">标准错误 (STDERR):</span>
-                <pre class="bg-rose-950/20 text-rose-300 font-mono text-xs p-3 rounded border border-rose-900/40 max-h-40 overflow-y-auto whitespace-pre-wrap">{{ execResult.error }}</pre>
+                <pre class="bg-rose-950/20 text-rose-300 font-mono text-xs p-3 rounded border border-rose-900/40 max-h-40 overflow-y-auto whitespace-pre-wrap">{{ execResult.errorOutput || execResult.error }}</pre>
               </div>
             </div>
           </div>
