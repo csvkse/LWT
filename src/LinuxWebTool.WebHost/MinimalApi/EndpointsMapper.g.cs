@@ -310,6 +310,8 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_RemoteHostsController.MapGet("{id}/Files/Content", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, [FromQuery] string path) => { ctrl.HttpContext = ctx; return await ctrl.GetFileContent(id, path); });
             group_RemoteHostsController.MapPut("{id}/Files/Content", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, [FromBody] SaveRemoteFileContentRequest request) => { ctrl.HttpContext = ctx; return await ctrl.SaveFileContent(id, request); });
             group_RemoteHostsController.MapPost("{id}/Files/Action", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, [FromBody] RemoteFileActionRequest request) => { ctrl.HttpContext = ctx; return await ctrl.FileAction(id, request); });
+            group_RemoteHostsController.MapPost("{id}/Files/Upload", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, [FromQuery] string path, IFormFile? file) => { ctrl.HttpContext = ctx; return await ctrl.UploadFile(id, path, file); }).DisableAntiforgery();
+            group_RemoteHostsController.MapGet("{id}/Files/Download", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, [FromQuery] string path) => { ctrl.HttpContext = ctx; return await ctrl.DownloadFile(id, path); });
         }
     }
 }

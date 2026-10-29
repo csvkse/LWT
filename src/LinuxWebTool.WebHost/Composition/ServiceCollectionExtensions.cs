@@ -47,6 +47,7 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<HostCredentialProtector>();
         builder.Services.AddSingleton<RemoteHostClientFactory>();
         builder.Services.AddSingleton<RemoteTerminalSessionManager>();
+        builder.Services.AddSingleton<RemoteFileSystemSessionPool>();
         builder.Services.AddSingleton<IOperationLogger, OperationLogger>();
         var retentionOptions = new LogRetentionOptions
         {

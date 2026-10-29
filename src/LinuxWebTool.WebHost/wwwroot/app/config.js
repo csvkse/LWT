@@ -175,6 +175,8 @@ export const API = {
     files: (id) => `/RemoteHosts/${id}/Files`,
     fileContent: (id) => `/RemoteHosts/${id}/Files/Content`,
     fileAction: (id) => `/RemoteHosts/${id}/Files/Action`,
+    fileUpload: (id, path) => `/RemoteHosts/${id}/Files/Upload?path=${encodeURIComponent(path || '/')}`,
+    fileDownload: (id, path) => `/RemoteHosts/${id}/Files/Download?path=${encodeURIComponent(path)}`,
     ws: (id, sessionId, token) => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const query = token ? `?token=${encodeURIComponent(token)}` : '';

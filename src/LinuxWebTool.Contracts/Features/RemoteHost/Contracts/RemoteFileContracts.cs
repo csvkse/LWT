@@ -46,4 +46,5 @@ public interface IRemoteFileSystem : IAsyncDisposable
     Task CreateDirectoryAsync(string path, CancellationToken cancellationToken = default);
     Task DeleteAsync(string path, bool recursive, CancellationToken cancellationToken = default);
     Task RenameAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken = default);
+    Task CopyAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken = default);
 }

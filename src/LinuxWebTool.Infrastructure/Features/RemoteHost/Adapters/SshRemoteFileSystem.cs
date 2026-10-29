@@ -134,6 +134,60 @@ public sealed class SshRemoteFileSystem : IRemoteFileSystem
         }, cancellationToken);
     }
 
+    public async Task CopyAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken = default)
+    {
+        await Task.Run(async () =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_sftp.Exists(sourcePath))
+            {
+                var attrs = _sftp.GetAttributes(sourcePath);
+                if (attrs.IsDirectory)
+                {
+                    await CopyDirectoryRecursiveAsync(sourcePath, destinationPath, cancellationToken);
+                }
+                else
+                {
+                    await using var inStream = _sftp.OpenRead(sourcePath);
+                    await using var outStream = _sftp.Open(destinationPath, FileMode.Create, FileAccess.Write);
+                    await inStream.CopyToAsync(outStream, cancellationToken);
+                }
+            }
+            else
+            {
+                throw new FileNotFoundException($"源文件或目录不存在: {sourcePath}");
+            }
+        }, cancellationToken);
+    }
+
+    private async Task CopyDirectoryRecursiveAsync(string sourceDir, string destDir, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_sftp.Exists(destDir))
+        {
+            _sftp.CreateDirectory(destDir);
+        }
+
+        var items = _sftp.ListDirectory(sourceDir);
+        foreach (var item in items)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (item.Name is "." or "..") continue;
+
+            var subDest = destDir.EndsWith('/') ? $"{destDir}{item.Name}" : $"{destDir}/{item.Name}";
+            if (item.IsDirectory)
+            {
+                await CopyDirectoryRecursiveAsync(item.FullName, subDest, cancellationToken);
+            }
+            else
+            {
+                await using var inStream = _sftp.OpenRead(item.FullName);
+                await using var outStream = _sftp.Open(subDest, FileMode.Create, FileAccess.Write);
+                await inStream.CopyToAsync(outStream, cancellationToken);
+            }
+        }
+    }
+
     private void DeleteDirectoryRecursive(string path, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

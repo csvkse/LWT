@@ -126,11 +126,15 @@ public sealed class SshHostAdapter : IRemoteHostAdapter
         };
         await Task.Run(() => sshClient.Connect(), cancellationToken);
 
-        var sftpClient = new SftpClient(connInfo)
+        SftpClient? sftpClient = null;
+        if (!ResilientRemoteFileSystem.IsHostSftpDegraded(HostId))
         {
-            OperationTimeout = TimeSpan.FromSeconds(5),
-            KeepAliveInterval = TimeSpan.FromSeconds(20)
-        };
+            sftpClient = new SftpClient(connInfo)
+            {
+                OperationTimeout = TimeSpan.FromSeconds(5),
+                KeepAliveInterval = TimeSpan.FromSeconds(20)
+            };
+        }
 
         var resilientFs = new ResilientRemoteFileSystem(HostId, sshClient, sftpClient, _logger);
         await resilientFs.InitializeAsync(cancellationToken);

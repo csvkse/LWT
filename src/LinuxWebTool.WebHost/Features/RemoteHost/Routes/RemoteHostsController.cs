@@ -20,6 +20,7 @@ public sealed class RemoteHostsController(
     HostCredentialProtector protector,
     RemoteHostClientFactory factory,
     RemoteTerminalSessionManager terminalSessions,
+    RemoteFileSystemSessionPool sessionPool,
     SshHostKeyProbe hostKeyProbe,
     IOperationLogger operationLogger,
     ILogger<RemoteHostsController> logger) : MinimalApi.ControllerBase
@@ -421,8 +422,7 @@ public sealed class RemoteHostsController(
 
         try
         {
-            await using var adapter = factory.CreateAdapter(entity);
-            await using var fs = await adapter.OpenFileSystemAsync(cts.Token);
+            var fs = await sessionPool.GetOrCreateAsync(entity, factory, cts.Token);
 
             var targetPath = string.IsNullOrWhiteSpace(path) || path == "~"
                 ? fs.WorkingDirectory
@@ -438,11 +438,13 @@ public sealed class RemoteHostsController(
         }
         catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
         {
+            sessionPool.Invalidate(id);
             logger.LogWarning("读取远程文件列表超时: {HostId}, Path={Path}", id, path);
             return StatusCode(504, new MessageResponse("读取远程目录超时，远端 SFTP 响应过慢或连接已断开"));
         }
         catch (Exception ex)
         {
+            sessionPool.Invalidate(id);
             logger.LogError(ex, "读取远程文件列表失败: {HostId}, Path={Path}", id, path);
             return StatusCode(500, new MessageResponse($"读取远程目录失败: {ex.Message}"));
         }
@@ -461,8 +463,7 @@ public sealed class RemoteHostsController(
 
         try
         {
-            await using var adapter = factory.CreateAdapter(entity);
-            await using var fs = await adapter.OpenFileSystemAsync(cts.Token);
+            var fs = await sessionPool.GetOrCreateAsync(entity, factory, cts.Token);
             var content = await fs.ReadTextAsync(path.Trim(), cts.Token);
 
             return Ok(new RemoteFileContentResponse(
@@ -473,11 +474,13 @@ public sealed class RemoteHostsController(
         }
         catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
         {
+            sessionPool.Invalidate(id);
             logger.LogWarning("读取远程文件内容超时: {HostId}, Path={Path}", id, path);
             return StatusCode(504, new MessageResponse("读取远程文件超时，远端响应过慢"));
         }
         catch (Exception ex)
         {
+            sessionPool.Invalidate(id);
             logger.LogError(ex, "读取远程文件内容失败: {HostId}, Path={Path}", id, path);
             return StatusCode(500, new MessageResponse($"读取远程文件失败: {ex.Message}"));
         }
@@ -496,8 +499,7 @@ public sealed class RemoteHostsController(
 
         try
         {
-            await using var adapter = factory.CreateAdapter(entity);
-            await using var fs = await adapter.OpenFileSystemAsync(cts.Token);
+            var fs = await sessionPool.GetOrCreateAsync(entity, factory, cts.Token);
             await fs.WriteTextAsync(request.Path.Trim(), request.Content ?? string.Empty, cts.Token);
             await operationLogger.LogAsync("编辑远程文件", "远程运维", entity.Name, request.Path, clientIp: HttpContext.GetClientIp());
 
@@ -505,11 +507,13 @@ public sealed class RemoteHostsController(
         }
         catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
         {
+            sessionPool.Invalidate(id);
             logger.LogWarning("保存远程文件内容超时: {HostId}, Path={Path}", id, request.Path);
             return StatusCode(504, new MessageResponse("保存远程文件超时，远端响应过慢"));
         }
         catch (Exception ex)
         {
+            sessionPool.Invalidate(id);
             logger.LogError(ex, "保存远程文件内容失败: {HostId}, Path={Path}", id, request.Path);
             return StatusCode(500, new MessageResponse($"保存远程文件失败: {ex.Message}"));
         }
@@ -528,8 +532,7 @@ public sealed class RemoteHostsController(
 
         try
         {
-            await using var adapter = factory.CreateAdapter(entity);
-            await using var fs = await adapter.OpenFileSystemAsync(cts.Token);
+            var fs = await sessionPool.GetOrCreateAsync(entity, factory, cts.Token);
 
             switch (request.Action?.ToLowerInvariant())
             {
@@ -552,19 +555,112 @@ public sealed class RemoteHostsController(
                     await operationLogger.LogAsync("重命名远程文件", "远程运维", entity.Name, $"{request.Path} -> {request.Destination}", clientIp: HttpContext.GetClientIp());
                     return Ok(new MessageResponse("重命名成功"));
 
+                case "copy":
+                    if (string.IsNullOrWhiteSpace(request.Destination))
+                    {
+                        return BadRequest(new MessageResponse("目标路径不能为空"));
+                    }
+                    await fs.CopyAsync(request.Path.Trim(), request.Destination.Trim(), cts.Token);
+                    await operationLogger.LogAsync("复制远程文件", "远程运维", entity.Name, $"{request.Path} -> {request.Destination}", clientIp: HttpContext.GetClientIp());
+                    return Ok(new MessageResponse("复制成功"));
+
+                case "move":
+                    if (string.IsNullOrWhiteSpace(request.Destination))
+                    {
+                        return BadRequest(new MessageResponse("目标路径不能为空"));
+                    }
+                    await fs.RenameAsync(request.Path.Trim(), request.Destination.Trim(), cts.Token);
+                    await operationLogger.LogAsync("移动远程文件", "远程运维", entity.Name, $"{request.Path} -> {request.Destination}", clientIp: HttpContext.GetClientIp());
+                    return Ok(new MessageResponse("移动成功"));
+
                 default:
                     return BadRequest(new MessageResponse($"未知的文件动作: {request.Action}"));
             }
         }
         catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
         {
+            sessionPool.Invalidate(id);
             logger.LogWarning("远程文件操作超时: {HostId}, Action={Action}, Path={Path}", id, request.Action, request.Path);
             return StatusCode(504, new MessageResponse("远程文件操作超时，远端响应过慢"));
         }
         catch (Exception ex)
         {
+            sessionPool.Invalidate(id);
             logger.LogError(ex, "远程文件操作失败: {HostId}, Action={Action}, Path={Path}", id, request.Action, request.Path);
             return StatusCode(500, new MessageResponse($"文件操作失败: {ex.Message}"));
+        }
+    }
+
+    [HttpPost("{id}/Files/Upload")]
+    public async Task<IResult> UploadFile(string id, [FromQuery] string path, IFormFile? file)
+    {
+        var entity = await store.GetByIdAsync(id);
+        if (entity is null) return NotFound(new MessageResponse("远程主机不存在"));
+
+        if (file is null || file.Length == 0) return BadRequest(new MessageResponse("未选择上传文件"));
+        var fileName = Path.GetFileName(file.FileName);
+        if (string.IsNullOrWhiteSpace(fileName)) return BadRequest(new MessageResponse("文件名无效"));
+
+        var targetDir = string.IsNullOrWhiteSpace(path) ? "/" : path.Trim();
+        var targetPath = targetDir.EndsWith('/') ? $"{targetDir}{fileName}" : $"{targetDir}/{fileName}";
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+        cts.CancelAfter(TimeSpan.FromSeconds(60));
+
+        try
+        {
+            var fs = await sessionPool.GetOrCreateAsync(entity, factory, cts.Token);
+            await using var stream = file.OpenReadStream();
+            await fs.WriteFileStreamAsync(targetPath, stream, cts.Token);
+            await operationLogger.LogAsync("上传远程文件", "远程运维", entity.Name, targetPath, clientIp: HttpContext.GetClientIp());
+            return Ok(new MessageResponse("上传成功"));
+        }
+        catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            sessionPool.Invalidate(id);
+            logger.LogWarning("上传远程文件超时: {HostId}, Path={Path}", id, targetPath);
+            return StatusCode(504, new MessageResponse("上传远程文件超时，远端响应过慢"));
+        }
+        catch (Exception ex)
+        {
+            sessionPool.Invalidate(id);
+            logger.LogError(ex, "上传远程文件失败: {HostId}, Path={Path}", id, targetPath);
+            return StatusCode(500, new MessageResponse($"上传文件失败: {ex.Message}"));
+        }
+    }
+
+    [HttpGet("{id}/Files/Download")]
+    public async Task<IResult> DownloadFile(string id, [FromQuery] string path)
+    {
+        var entity = await store.GetByIdAsync(id);
+        if (entity is null) return NotFound(new MessageResponse("远程主机不存在"));
+
+        if (string.IsNullOrWhiteSpace(path)) return BadRequest(new MessageResponse("文件路径不能为空"));
+        var cleanPath = path.Trim();
+        var fileName = Path.GetFileName(cleanPath.TrimEnd('/'));
+        if (string.IsNullOrWhiteSpace(fileName)) fileName = "remote_download";
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+        cts.CancelAfter(TimeSpan.FromSeconds(60));
+
+        try
+        {
+            var fs = await sessionPool.GetOrCreateAsync(entity, factory, cts.Token);
+            var stream = await fs.OpenReadStreamAsync(cleanPath, cts.Token);
+            await operationLogger.LogAsync("下载远程文件", "远程运维", entity.Name, cleanPath, clientIp: HttpContext.GetClientIp());
+            return Results.File(stream, "application/octet-stream", fileName);
+        }
+        catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            sessionPool.Invalidate(id);
+            logger.LogWarning("下载远程文件超时: {HostId}, Path={Path}", id, cleanPath);
+            return StatusCode(504, new MessageResponse("下载远程文件超时，远端响应过慢"));
+        }
+        catch (Exception ex)
+        {
+            sessionPool.Invalidate(id);
+            logger.LogError(ex, "下载远程文件失败: {HostId}, Path={Path}", id, cleanPath);
+            return StatusCode(500, new MessageResponse($"下载文件失败: {ex.Message}"));
         }
     }
 }
