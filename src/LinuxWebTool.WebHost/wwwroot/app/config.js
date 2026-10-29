@@ -167,6 +167,7 @@ export const API = {
     list: '/RemoteHosts',
     item: (id) => `/RemoteHosts/${id}`,
     test: '/RemoteHosts/Test',
+    testHost: (id) => `/RemoteHosts/${id}/Test`,
     probeKey: '/RemoteHosts/ProbeKey',
     terminalSession: (id) => `/RemoteHosts/${id}/Terminal/Session`,
     closeTerminalSession: (id, sessionId) => `/RemoteHosts/${id}/Terminal/Session/${sessionId}`,

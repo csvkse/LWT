@@ -76,7 +76,10 @@ public sealed class SshHostAdapter : IRemoteHostAdapter
         if (_mainClient?.IsConnected == true) return;
 
         var connInfo = CreateConnectionInfo();
-        _mainClient = new SshClient(connInfo);
+        _mainClient = new SshClient(connInfo)
+        {
+            KeepAliveInterval = TimeSpan.FromSeconds(20)
+        };
         await Task.Run(() => _mainClient.Connect(), cancellationToken);
     }
 
@@ -101,7 +104,10 @@ public sealed class SshHostAdapter : IRemoteHostAdapter
     public async Task<IRemoteTerminalSession> OpenTerminalAsync(int columns, int rows, CancellationToken cancellationToken = default)
     {
         var connInfo = CreateConnectionInfo();
-        var client = new SshClient(connInfo);
+        var client = new SshClient(connInfo)
+        {
+            KeepAliveInterval = TimeSpan.FromSeconds(20)
+        };
         await Task.Run(() => client.Connect(), cancellationToken);
 
         var terminalModes = new Dictionary<TerminalModes, uint>();
@@ -114,7 +120,11 @@ public sealed class SshHostAdapter : IRemoteHostAdapter
     public async Task<IRemoteFileSystem> OpenFileSystemAsync(CancellationToken cancellationToken = default)
     {
         var connInfo = CreateConnectionInfo();
-        var sftp = new SftpClient(connInfo);
+        var sftp = new SftpClient(connInfo)
+        {
+            OperationTimeout = TimeSpan.FromSeconds(15),
+            KeepAliveInterval = TimeSpan.FromSeconds(20)
+        };
         await Task.Run(() => sftp.Connect(), cancellationToken);
         return new SshRemoteFileSystem(sftp);
     }

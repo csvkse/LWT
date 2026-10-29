@@ -161,6 +161,28 @@ public sealed class RemoteHostsController(
             entity.CredentialNonce = nonce;
             entity.CredentialTag = tag;
         }
+        else if (request.Passphrase is not null && !string.IsNullOrEmpty(entity.EncryptedCredential))
+        {
+            // 用户仅修改/维护 Passphrase，未重新上传私钥
+            var raw = protector.Decrypt(entity.EncryptedCredential, entity.CredentialNonce, entity.CredentialTag);
+            if (raw != null)
+            {
+                var existingKey = raw;
+                if (raw.Contains("\n---PASSPHRASE---\n", StringComparison.Ordinal))
+                {
+                    existingKey = raw.Split("\n---PASSPHRASE---\n", 2, StringSplitOptions.None)[0];
+                }
+
+                var combined = string.IsNullOrEmpty(request.Passphrase)
+                    ? existingKey
+                    : $"{existingKey}\n---PASSPHRASE---\n{request.Passphrase}";
+
+                var (cipher, nonce, tag) = protector.Encrypt(combined);
+                entity.EncryptedCredential = cipher;
+                entity.CredentialNonce = nonce;
+                entity.CredentialTag = tag;
+            }
+        }
 
         await store.UpdateAsync(entity);
         await operationLogger.LogAsync("更新远程主机", "远程运维", entity.Name, $"{entity.Host}:{entity.Port}", clientIp: HttpContext.GetClientIp());
@@ -183,7 +205,44 @@ public sealed class RemoteHostsController(
     [HttpPost("Test")]
     public async Task<IResult> Test([FromBody] TestRemoteHostRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Host))
+        var targetHost = request.Host?.Trim();
+        var targetPort = request.Port is < 1 or > 65535 ? 22 : request.Port;
+        var targetProtocol = string.IsNullOrWhiteSpace(request.Protocol) ? "ssh" : request.Protocol.Trim().ToLowerInvariant();
+        var targetAuthType = string.IsNullOrWhiteSpace(request.AuthType) ? "Password" : request.AuthType.Trim();
+        var targetUsername = string.IsNullOrWhiteSpace(request.Username) ? "root" : request.Username.Trim();
+        var targetCredential = request.Credential;
+        var targetPassphrase = request.Passphrase;
+
+        // 若未提供临时凭据且指定了现有主机 ID，从数据库中提取并解密已保存凭据
+        if (!string.IsNullOrWhiteSpace(request.Id) && string.IsNullOrEmpty(targetCredential))
+        {
+            var existing = await store.GetByIdAsync(request.Id);
+            if (existing != null)
+            {
+                if (string.IsNullOrWhiteSpace(targetHost)) targetHost = existing.Host;
+                if (request.Port <= 0) targetPort = existing.Port;
+                if (string.IsNullOrWhiteSpace(request.Protocol)) targetProtocol = existing.Protocol;
+                if (string.IsNullOrWhiteSpace(request.AuthType)) targetAuthType = existing.AuthType;
+                if (string.IsNullOrWhiteSpace(request.Username)) targetUsername = existing.Username;
+
+                var raw = protector.Decrypt(existing.EncryptedCredential, existing.CredentialNonce, existing.CredentialTag);
+                if (raw != null)
+                {
+                    if (raw.Contains("\n---PASSPHRASE---\n", StringComparison.Ordinal))
+                    {
+                        var parts = raw.Split("\n---PASSPHRASE---\n", 2, StringSplitOptions.None);
+                        targetCredential = parts[0];
+                        targetPassphrase = targetPassphrase ?? parts[1];
+                    }
+                    else
+                    {
+                        targetCredential = raw;
+                    }
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(targetHost))
         {
             return BadRequest(new MessageResponse("主机地址不能为空"));
         }
@@ -192,20 +251,68 @@ public sealed class RemoteHostsController(
         try
         {
             await using var adapter = factory.CreateTransientAdapter(
-                host: request.Host.Trim(),
-                port: request.Port is < 1 or > 65535 ? 22 : request.Port,
-                protocol: request.Protocol,
-                authType: request.AuthType,
-                username: string.IsNullOrWhiteSpace(request.Username) ? "root" : request.Username.Trim(),
-                credential: request.Credential,
-                passphrase: request.Passphrase
+                host: targetHost,
+                port: targetPort,
+                protocol: targetProtocol,
+                authType: targetAuthType,
+                username: targetUsername,
+                credential: targetCredential,
+                passphrase: targetPassphrase
             );
 
-            var ok = await adapter.TestConnectionAsync(HttpContext.RequestAborted);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            var ok = await adapter.TestConnectionAsync(cts.Token);
             sw.Stop();
 
             if (ok)
             {
+                if (!string.IsNullOrWhiteSpace(request.Id))
+                {
+                    await store.TouchConnectedAsync(request.Id);
+                }
+
+                return Ok(new TestRemoteHostResponse(
+                    Success: true,
+                    LatencyMs: (int)sw.ElapsedMilliseconds
+                ));
+            }
+
+            return Ok(new TestRemoteHostResponse(
+                Success: false,
+                ErrorMessage: "连接或身份认证失败，请检查主机、端口与凭据"
+            ));
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return Ok(new TestRemoteHostResponse(
+                Success: false,
+                ErrorMessage: ex.Message
+            ));
+        }
+    }
+
+    [HttpPost("{id}/Test")]
+    public async Task<IResult> TestById(string id)
+    {
+        var entity = await store.GetByIdAsync(id);
+        if (entity is null) return NotFound(new MessageResponse("远程主机不存在"));
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            await using var adapter = factory.CreateAdapter(entity);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            var ok = await adapter.TestConnectionAsync(cts.Token);
+            sw.Stop();
+
+            if (ok)
+            {
+                await store.TouchConnectedAsync(id);
                 return Ok(new TestRemoteHostResponse(
                     Success: true,
                     LatencyMs: (int)sw.ElapsedMilliseconds
@@ -309,12 +416,19 @@ public sealed class RemoteHostsController(
         var entity = await store.GetByIdAsync(id);
         if (entity is null) return NotFound(new MessageResponse("远程主机不存在"));
 
-        var targetPath = string.IsNullOrWhiteSpace(path) ? "/" : path.Trim();
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+        cts.CancelAfter(TimeSpan.FromSeconds(20));
+
         try
         {
             await using var adapter = factory.CreateAdapter(entity);
-            await using var fs = await adapter.OpenFileSystemAsync(HttpContext.RequestAborted);
-            var entries = await fs.ListDirectoryAsync(targetPath, HttpContext.RequestAborted);
+            await using var fs = await adapter.OpenFileSystemAsync(cts.Token);
+
+            var targetPath = string.IsNullOrWhiteSpace(path) || path == "~"
+                ? fs.WorkingDirectory
+                : path.Trim();
+
+            var entries = await fs.ListDirectoryAsync(targetPath, cts.Token);
             await store.TouchConnectedAsync(id);
 
             return Ok(new RemoteFileListResponse(
@@ -322,9 +436,14 @@ public sealed class RemoteHostsController(
                 Entries: entries
             ));
         }
+        catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            logger.LogWarning("读取远程文件列表超时: {HostId}, Path={Path}", id, path);
+            return StatusCode(504, new MessageResponse("读取远程目录超时，远端 SFTP 响应过慢或连接已断开"));
+        }
         catch (Exception ex)
         {
-            logger.LogError(ex, "读取远程文件列表失败: {HostId}, Path={Path}", id, targetPath);
+            logger.LogError(ex, "读取远程文件列表失败: {HostId}, Path={Path}", id, path);
             return StatusCode(500, new MessageResponse($"读取远程目录失败: {ex.Message}"));
         }
     }
@@ -337,17 +456,25 @@ public sealed class RemoteHostsController(
 
         if (string.IsNullOrWhiteSpace(path)) return BadRequest(new MessageResponse("文件路径不能为空"));
 
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+        cts.CancelAfter(TimeSpan.FromSeconds(30));
+
         try
         {
             await using var adapter = factory.CreateAdapter(entity);
-            await using var fs = await adapter.OpenFileSystemAsync(HttpContext.RequestAborted);
-            var content = await fs.ReadTextAsync(path.Trim(), HttpContext.RequestAborted);
+            await using var fs = await adapter.OpenFileSystemAsync(cts.Token);
+            var content = await fs.ReadTextAsync(path.Trim(), cts.Token);
 
             return Ok(new RemoteFileContentResponse(
                 Path: path.Trim(),
                 Content: content,
                 Size: content.Length
             ));
+        }
+        catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            logger.LogWarning("读取远程文件内容超时: {HostId}, Path={Path}", id, path);
+            return StatusCode(504, new MessageResponse("读取远程文件超时，远端响应过慢"));
         }
         catch (Exception ex)
         {
@@ -364,14 +491,22 @@ public sealed class RemoteHostsController(
 
         if (string.IsNullOrWhiteSpace(request.Path)) return BadRequest(new MessageResponse("文件路径不能为空"));
 
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+        cts.CancelAfter(TimeSpan.FromSeconds(30));
+
         try
         {
             await using var adapter = factory.CreateAdapter(entity);
-            await using var fs = await adapter.OpenFileSystemAsync(HttpContext.RequestAborted);
-            await fs.WriteTextAsync(request.Path.Trim(), request.Content ?? string.Empty, HttpContext.RequestAborted);
+            await using var fs = await adapter.OpenFileSystemAsync(cts.Token);
+            await fs.WriteTextAsync(request.Path.Trim(), request.Content ?? string.Empty, cts.Token);
             await operationLogger.LogAsync("编辑远程文件", "远程运维", entity.Name, request.Path, clientIp: HttpContext.GetClientIp());
 
             return Ok(new MessageResponse("保存成功"));
+        }
+        catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            logger.LogWarning("保存远程文件内容超时: {HostId}, Path={Path}", id, request.Path);
+            return StatusCode(504, new MessageResponse("保存远程文件超时，远端响应过慢"));
         }
         catch (Exception ex)
         {
@@ -388,20 +523,23 @@ public sealed class RemoteHostsController(
 
         if (string.IsNullOrWhiteSpace(request.Path)) return BadRequest(new MessageResponse("路径不能为空"));
 
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+        cts.CancelAfter(TimeSpan.FromSeconds(30));
+
         try
         {
             await using var adapter = factory.CreateAdapter(entity);
-            await using var fs = await adapter.OpenFileSystemAsync(HttpContext.RequestAborted);
+            await using var fs = await adapter.OpenFileSystemAsync(cts.Token);
 
             switch (request.Action?.ToLowerInvariant())
             {
                 case "mkdir":
-                    await fs.CreateDirectoryAsync(request.Path.Trim(), HttpContext.RequestAborted);
+                    await fs.CreateDirectoryAsync(request.Path.Trim(), cts.Token);
                     await operationLogger.LogAsync("新建远程目录", "远程运维", entity.Name, request.Path, clientIp: HttpContext.GetClientIp());
                     return Ok(new MessageResponse("创建目录成功"));
 
                 case "delete":
-                    await fs.DeleteAsync(request.Path.Trim(), request.Recursive, HttpContext.RequestAborted);
+                    await fs.DeleteAsync(request.Path.Trim(), request.Recursive, cts.Token);
                     await operationLogger.LogAsync("删除远程文件", "远程运维", entity.Name, request.Path, clientIp: HttpContext.GetClientIp());
                     return Ok(new MessageResponse("删除成功"));
 
@@ -410,13 +548,18 @@ public sealed class RemoteHostsController(
                     {
                         return BadRequest(new MessageResponse("目标路径不能为空"));
                     }
-                    await fs.RenameAsync(request.Path.Trim(), request.Destination.Trim(), HttpContext.RequestAborted);
+                    await fs.RenameAsync(request.Path.Trim(), request.Destination.Trim(), cts.Token);
                     await operationLogger.LogAsync("重命名远程文件", "远程运维", entity.Name, $"{request.Path} -> {request.Destination}", clientIp: HttpContext.GetClientIp());
                     return Ok(new MessageResponse("重命名成功"));
 
                 default:
                     return BadRequest(new MessageResponse($"未知的文件动作: {request.Action}"));
             }
+        }
+        catch (OperationCanceledException) when (!HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            logger.LogWarning("远程文件操作超时: {HostId}, Action={Action}, Path={Path}", id, request.Action, request.Path);
+            return StatusCode(504, new MessageResponse("远程文件操作超时，远端响应过慢"));
         }
         catch (Exception ex)
         {

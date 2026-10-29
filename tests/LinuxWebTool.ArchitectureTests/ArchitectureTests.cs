@@ -714,5 +714,26 @@ public class ArchitectureTests
             "3. 如同 McpServerEngine 拆分为 6 个 IMcpToolProvider 子类，将大单文件重构成轻量高内聚模块；\n" +
             "4. 严禁随意扩充白名单或堆砌巨型单文件！");
     }
+
+    [Fact]
+    public void LinuxArch027_远程主机SFTP与连通性接口必须具备超时与取消机制()
+    {
+        var controllerFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "RemoteHost", "Routes", "RemoteHostsController.cs");
+        Assert.True(File.Exists(controllerFile), "RemoteHostsController.cs 不存在");
+        var controllerContent = File.ReadAllText(controllerFile);
+
+        // 验证关键远程网络调用必须具备 CancelAfter 显式超时保护（防止 SFTP/网络无限挂死）
+        Assert.Contains("CancelAfter", controllerContent);
+        Assert.Contains("TestById", controllerContent);
+        Assert.Contains("OperationCanceledException", controllerContent);
+
+        // 验证 SshHostAdapter.cs 中的 SftpClient 必须显式配置 OperationTimeout，杜绝 SSH.NET 默认 InfiniteTimeSpan 隐患
+        var adapterFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure", "Features", "RemoteHost", "Adapters", "SshHostAdapter.cs");
+        Assert.True(File.Exists(adapterFile), "SshHostAdapter.cs 不存在");
+        var adapterContent = File.ReadAllText(adapterFile);
+
+        Assert.Contains("OperationTimeout", adapterContent);
+        Assert.Contains("KeepAliveInterval", adapterContent);
+    }
 }
 

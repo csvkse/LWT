@@ -54,13 +54,14 @@ public sealed record RemoteHostItemResponse(
 
 /// <summary>测试远程连接请求契约</summary>
 public sealed record TestRemoteHostRequest(
-    [property: JsonPropertyName("host")] string Host,
+    [property: JsonPropertyName("host")] string? Host = null,
     [property: JsonPropertyName("port")] int Port = 22,
     [property: JsonPropertyName("protocol")] string Protocol = "ssh",
     [property: JsonPropertyName("authType")] string AuthType = "Password",
     [property: JsonPropertyName("username")] string Username = "root",
     [property: JsonPropertyName("credential")] string? Credential = null,
-    [property: JsonPropertyName("passphrase")] string? Passphrase = null);
+    [property: JsonPropertyName("passphrase")] string? Passphrase = null,
+    [property: JsonPropertyName("id")] string? Id = null);
 
 /// <summary>测试远程连接响应契约</summary>
 public sealed record TestRemoteHostResponse(

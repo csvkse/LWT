@@ -37,6 +37,7 @@ public sealed record RemoteFileActionRequest(
 /// <summary>远程文件系统抽象契约</summary>
 public interface IRemoteFileSystem : IAsyncDisposable
 {
+    string WorkingDirectory => "/";
     Task<IReadOnlyList<RemoteFileEntry>> ListDirectoryAsync(string path, CancellationToken cancellationToken = default);
     Task<Stream> OpenReadStreamAsync(string path, CancellationToken cancellationToken = default);
     Task WriteFileStreamAsync(string path, Stream content, CancellationToken cancellationToken = default);

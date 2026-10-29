@@ -16,33 +16,51 @@ public sealed class SshRemoteFileSystem : IRemoteFileSystem
         _sftp = sftp;
     }
 
-    public Task<IReadOnlyList<RemoteFileEntry>> ListDirectoryAsync(string path, CancellationToken cancellationToken = default)
+    public string WorkingDirectory => _sftp.WorkingDirectory ?? "/";
+
+    public async Task<IReadOnlyList<RemoteFileEntry>> ListDirectoryAsync(string path, CancellationToken cancellationToken = default)
     {
         var targetPath = string.IsNullOrWhiteSpace(path) ? "/" : path.Trim();
-        var files = _sftp.ListDirectory(targetPath);
-        var entries = new List<RemoteFileEntry>();
 
-        foreach (var file in files)
+        return await Task.Run(() =>
         {
-            if (file.Name is "." or "..") continue;
+            cancellationToken.ThrowIfCancellationRequested();
+            var files = _sftp.ListDirectory(targetPath);
+            var entries = new List<RemoteFileEntry>();
 
-            entries.Add(new RemoteFileEntry(
-                Name: file.Name,
-                Path: file.FullName,
-                Size: file.Length,
-                IsDirectory: file.IsDirectory,
-                LastModified: file.LastWriteTimeUtc,
-                Permissions: GetPermissionsString(file)
-            ));
-        }
+            foreach (var file in files)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (file.Name is "." or "..") continue;
 
-        // 排序：目录优先，名称字母序
-        var sorted = entries
-            .OrderByDescending(e => e.IsDirectory)
-            .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+                long size = 0;
+                try { size = file.Length; } catch { }
 
-        return Task.FromResult<IReadOnlyList<RemoteFileEntry>>(sorted);
+                DateTimeOffset? lastModified = null;
+                try { lastModified = file.LastWriteTimeUtc; } catch { }
+
+                bool isDir = false;
+                try { isDir = file.IsDirectory; } catch { }
+
+                string perms;
+                try { perms = GetPermissionsString(file); } catch { perms = isDir ? "drwxr-xr-x" : "-rw-r--r--"; }
+
+                entries.Add(new RemoteFileEntry(
+                    Name: file.Name,
+                    Path: file.FullName,
+                    Size: size,
+                    IsDirectory: isDir,
+                    LastModified: lastModified,
+                    Permissions: perms
+                ));
+            }
+
+            // 排序：目录优先，名称字母序
+            return (IReadOnlyList<RemoteFileEntry>)entries
+                .OrderByDescending(e => e.IsDirectory)
+                .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }, cancellationToken);
     }
 
     public Task<Stream> OpenReadStreamAsync(string path, CancellationToken cancellationToken = default)
@@ -73,49 +91,60 @@ public sealed class SshRemoteFileSystem : IRemoteFileSystem
 
     public Task CreateDirectoryAsync(string path, CancellationToken cancellationToken = default)
     {
-        _sftp.CreateDirectory(path);
-        return Task.CompletedTask;
+        return Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _sftp.CreateDirectory(path);
+        }, cancellationToken);
     }
 
     public Task DeleteAsync(string path, bool recursive, CancellationToken cancellationToken = default)
     {
-        if (_sftp.Exists(path))
+        return Task.Run(() =>
         {
-            var attrs = _sftp.GetAttributes(path);
-            if (attrs.IsDirectory)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_sftp.Exists(path))
             {
-                if (recursive)
+                var attrs = _sftp.GetAttributes(path);
+                if (attrs.IsDirectory)
                 {
-                    DeleteDirectoryRecursive(path);
+                    if (recursive)
+                    {
+                        DeleteDirectoryRecursive(path, cancellationToken);
+                    }
+                    else
+                    {
+                        _sftp.DeleteDirectory(path);
+                    }
                 }
                 else
                 {
-                    _sftp.DeleteDirectory(path);
+                    _sftp.DeleteFile(path);
                 }
             }
-            else
-            {
-                _sftp.DeleteFile(path);
-            }
-        }
-        return Task.CompletedTask;
+        }, cancellationToken);
     }
 
     public Task RenameAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken = default)
     {
-        _sftp.RenameFile(sourcePath, destinationPath);
-        return Task.CompletedTask;
+        return Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _sftp.RenameFile(sourcePath, destinationPath);
+        }, cancellationToken);
     }
 
-    private void DeleteDirectoryRecursive(string path)
+    private void DeleteDirectoryRecursive(string path, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var items = _sftp.ListDirectory(path);
         foreach (var item in items)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (item.Name is "." or "..") continue;
             if (item.IsDirectory)
             {
-                DeleteDirectoryRecursive(item.FullName);
+                DeleteDirectoryRecursive(item.FullName, cancellationToken);
             }
             else
             {
@@ -129,8 +158,9 @@ public sealed class SshRemoteFileSystem : IRemoteFileSystem
     {
         try
         {
+            var isDir = file.IsDirectory;
             var sb = new StringBuilder(10);
-            sb.Append(file.IsDirectory ? 'd' : '-');
+            sb.Append(isDir ? 'd' : '-');
             sb.Append(file.OwnerCanRead ? 'r' : '-');
             sb.Append(file.OwnerCanWrite ? 'w' : '-');
             sb.Append(file.OwnerCanExecute ? 'x' : '-');
@@ -144,7 +174,7 @@ public sealed class SshRemoteFileSystem : IRemoteFileSystem
         }
         catch
         {
-            return file.IsDirectory ? "drwxr-xr-x" : "-rw-r--r--";
+            return "-rw-r--r--";
         }
     }
 
