@@ -52,7 +52,7 @@ public sealed class McpServerEngine
         _toolToProviderMap = dict.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
     }
 
-    public IReadOnlyList<McpCategoryCatalog> GetCatalog() => McpCatalogRegistry.GetCatalog();
+    public List<McpCategoryCatalog> GetCatalog() => McpCatalogRegistry.GetCatalog();
 
     public async Task<McpRpcResponse> HandleRequestAsync(McpRpcRequest request, ApiKeyEntity? callerKey, HttpContext httpContext)
     {

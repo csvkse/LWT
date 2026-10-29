@@ -52,4 +52,7 @@ public sealed record McpCategoryCatalog(
     string Key,
     string Name,
     string Description,
-    IReadOnlyList<McpToolCatalogItem> Tools);
+    List<McpToolCatalogItem> Tools,
+    string ModuleCode = "",
+    bool SupportsApi = true,
+    bool SupportsMcp = true);
