@@ -1,4 +1,4 @@
-import { defineComponent, onMounted, reactive, ref } from 'vue';
+import { computed, defineComponent, onMounted, reactive, ref } from 'vue';
 import { http } from '../api/client.js';
 import { API } from '../config.js';
 import { toast } from '../store/toast.js';
@@ -14,6 +14,10 @@ export default defineComponent({
 
     // 折叠状态字典：{ [categoryKey]: boolean } (true 为折叠收起)
     const collapsedCategories = reactive({});
+
+    // 树状权限搜索与协议过滤
+    const scopeSearchKeyword = ref('');
+    const scopeProtocolFilter = ref('all'); // 'all' | 'api' | 'mcp'
 
     // 新建 / 编辑弹窗
     const showModal = ref(false);
@@ -72,6 +76,217 @@ export default defineComponent({
       return names;
     }
 
+    function getModuleFlag(cat) {
+      const code = (cat.moduleCode || cat.key || '').toLowerCase();
+      if (code === 'terminal' || code === 'commands') return 'allowTerminal';
+      if (code === 'schedules' || code === 'workflows') return 'allowSchedules';
+      if (code === 'files' || code === 'file') return 'allowFiles';
+      if (code === 'transcode') return 'allowTranscode';
+      if (code === 'gateway') return 'allowGateway';
+      if (code === 'remote_hosts' || code === 'remote') return 'allowRemoteHosts';
+      return null;
+    }
+
+    // 树状权限搜索与协议过滤计算属性
+    const filteredCategories = computed(() => {
+      const kw = scopeSearchKeyword.value.trim().toLowerCase();
+      const proto = scopeProtocolFilter.value; // 'all' | 'api' | 'mcp'
+
+      function matchesProto(cat) {
+        if (proto === 'api') return !!cat.supportsApi;
+        if (proto === 'mcp') return !!cat.supportsMcp;
+        return true;
+      }
+
+      function matchesKeyword(cat) {
+        if (!kw) return true;
+        if (cat.name && cat.name.toLowerCase().includes(kw)) return true;
+        if (cat.key && cat.key.toLowerCase().includes(kw)) return true;
+        if (cat.description && cat.description.toLowerCase().includes(kw)) return true;
+        if (cat.moduleCode && cat.moduleCode.toLowerCase().includes(kw)) return true;
+        if (cat.tools && cat.tools.some(t => t.name.toLowerCase().includes(kw) || (t.description && t.description.toLowerCase().includes(kw)))) {
+          return true;
+        }
+        return false;
+      }
+
+      return (mcpCatalog.value || [])
+        .map(cat => {
+          const catMatchesKw = matchesKeyword(cat);
+          const catMatchesProto = matchesProto(cat);
+
+          const matchedTools = (cat.tools || []).filter(t => {
+            if (proto === 'api') return false; // API 模式只展示模块级
+            if (!kw) return true;
+            return t.name.toLowerCase().includes(kw) || (t.description && t.description.toLowerCase().includes(kw));
+          });
+
+          if (proto === 'api') {
+            if (!cat.supportsApi) return null;
+            if (!catMatchesKw) return null;
+            return { ...cat, tools: [] };
+          }
+
+          const showCat = catMatchesProto && (catMatchesKw || matchedTools.length > 0);
+          if (!showCat) return null;
+
+          return {
+            ...cat,
+            tools: matchedTools,
+          };
+        })
+        .filter(Boolean);
+    });
+
+    // 分类折叠切换
+    function isCategoryCollapsed(catKey) {
+      return !!collapsedCategories[catKey];
+    }
+
+    function toggleCategoryCollapse(catKey) {
+      collapsedCategories[catKey] = !collapsedCategories[catKey];
+    }
+
+    function toggleExpandAll() {
+      const anyCollapsed = (mcpCatalog.value || []).some(c => collapsedCategories[c.key]);
+      for (const c of mcpCatalog.value || []) {
+        collapsedCategories[c.key] = !anyCollapsed;
+      }
+    }
+
+    // 目录三态勾选判定与级联联动
+    function isCategoryFullyChecked(cat) {
+      const flag = getModuleFlag(cat);
+      if (flag && !form[flag]) return false;
+      if (!cat.tools || cat.tools.length === 0) return !!(flag ? form[flag] : true);
+      return cat.tools.every(t => form.allowedTools.includes(t.name));
+    }
+
+    function isCategoryIndeterminate(cat) {
+      const fullyChecked = isCategoryFullyChecked(cat);
+      if (fullyChecked) return false;
+      const flag = getModuleFlag(cat);
+      const isFlagTrue = flag ? !!form[flag] : false;
+      const selectedCount = getCategorySelectedCount(cat);
+      if (selectedCount > 0 && (!cat.tools || selectedCount < cat.tools.length)) return true;
+      if (isFlagTrue && selectedCount === 0 && cat.tools && cat.tools.length > 0) return true;
+      return false;
+    }
+
+    function getCategorySelectedCount(cat) {
+      if (!cat.tools) return 0;
+      return cat.tools.filter(t => form.allowedTools.includes(t.name)).length;
+    }
+
+    function toggleCategoryNode(cat) {
+      const flag = getModuleFlag(cat);
+      const allChecked = isCategoryFullyChecked(cat);
+      const catToolNames = cat.tools ? cat.tools.map(t => t.name) : [];
+
+      if (allChecked) {
+        // 取消全选该分类下的工具
+        form.allowedTools = form.allowedTools.filter(n => !catToolNames.includes(n));
+        if (flag) {
+          const siblingCats = (mcpCatalog.value || []).filter(c => c.key !== cat.key && getModuleFlag(c) === flag);
+          const siblingHasTools = siblingCats.some(c => (c.tools || []).some(t => form.allowedTools.includes(t.name)));
+          if (!siblingHasTools) {
+            form[flag] = false;
+          }
+        }
+      } else {
+        // 全选该分类
+        if (flag) form[flag] = true;
+        const set = new Set([...form.allowedTools, ...catToolNames]);
+        form.allowedTools = Array.from(set);
+        form.mcpFilterMode = 'custom';
+      }
+    }
+
+    function isToolChecked(toolName) {
+      return form.allowedTools.includes(toolName);
+    }
+
+    function toggleToolNode(cat, toolName) {
+      const flag = getModuleFlag(cat);
+      const idx = form.allowedTools.indexOf(toolName);
+      if (idx >= 0) {
+        form.allowedTools.splice(idx, 1);
+      } else {
+        form.allowedTools.push(toolName);
+        if (flag) form[flag] = true;
+      }
+      form.mcpFilterMode = 'custom';
+    }
+
+    // 快捷策略预设 (策略模式 Strategy Pattern)
+    function selectAll() {
+      form.allowTerminal = true;
+      form.allowSchedules = true;
+      form.allowFiles = true;
+      form.allowTranscode = true;
+      form.allowGateway = true;
+      form.allowRemoteHosts = true;
+      form.allowedTools = getAllCatalogToolNames();
+      form.mcpFilterMode = 'all';
+      toast.success('已应用「全量允许」策略');
+    }
+
+    function selectStandardOps() {
+      form.allowTerminal = true;
+      form.allowSchedules = true;
+      form.allowFiles = true;
+      form.allowTranscode = true;
+      form.allowGateway = true;
+      form.allowRemoteHosts = true;
+      const names = [];
+      for (const cat of mcpCatalog.value) {
+        if (cat.tools) {
+          for (const t of cat.tools) {
+            if (t.riskLevel !== 'Dangerous') {
+              names.push(t.name);
+            }
+          }
+        }
+      }
+      form.allowedTools = names;
+      form.mcpFilterMode = 'custom';
+      toast.success('已应用「标准运维」安全策略 (已自动排除高危与破坏性工具)');
+    }
+
+    function selectReadOnly() {
+      form.allowTerminal = true;
+      form.allowSchedules = true;
+      form.allowFiles = true;
+      form.allowTranscode = true;
+      form.allowGateway = true;
+      form.allowRemoteHosts = true;
+      const names = [];
+      for (const cat of mcpCatalog.value) {
+        if (cat.tools) {
+          for (const t of cat.tools) {
+            if (t.riskLevel === 'Read') {
+              names.push(t.name);
+            }
+          }
+        }
+      }
+      form.allowedTools = names;
+      form.mcpFilterMode = 'custom';
+      toast.success('已应用「只读探测」安全策略 (仅允许只读查询工具)');
+    }
+
+    function clearAll() {
+      form.allowTerminal = false;
+      form.allowSchedules = false;
+      form.allowFiles = false;
+      form.allowTranscode = false;
+      form.allowGateway = false;
+      form.allowRemoteHosts = false;
+      form.allowedTools = [];
+      form.mcpFilterMode = 'custom';
+      toast.info('已清空全部业务模块与工具选择');
+    }
+
     async function load() {
       loading.value = true;
       const [resKeys, resHosts, resCatalog] = await Promise.all([
@@ -96,6 +311,8 @@ export default defineComponent({
       isClone.value = false;
       clonedFromName.value = '';
       currentId.value = null;
+      scopeSearchKeyword.value = '';
+      scopeProtocolFilter.value = 'all';
       Object.assign(form, {
         name: '',
         allowApi: true,
@@ -120,6 +337,8 @@ export default defineComponent({
       isClone.value = false;
       clonedFromName.value = '';
       currentId.value = key.id;
+      scopeSearchKeyword.value = '';
+      scopeProtocolFilter.value = 'all';
       const hostIds = parseHostIds(key.allowedHostIds);
       const hasCustomTools = key.allowedTools && Array.isArray(key.allowedTools) && key.allowedTools.length > 0;
       Object.assign(form, {
@@ -146,6 +365,8 @@ export default defineComponent({
       isClone.value = true;
       clonedFromName.value = key.name;
       currentId.value = key.id;
+      scopeSearchKeyword.value = '';
+      scopeProtocolFilter.value = 'all';
       const hostIds = parseHostIds(key.allowedHostIds);
       const hasCustomTools = key.allowedTools && Array.isArray(key.allowedTools) && key.allowedTools.length > 0;
       Object.assign(form, {
@@ -167,89 +388,6 @@ export default defineComponent({
       showModal.value = true;
     }
 
-    // 分类折叠切换
-    function toggleCategoryCollapse(catKey) {
-      collapsedCategories[catKey] = !collapsedCategories[catKey];
-    }
-
-    // 目录三态勾选判定
-    function isCategoryAllSelected(cat) {
-      if (!cat.tools || cat.tools.length === 0) return false;
-      return cat.tools.every(t => form.allowedTools.includes(t.name));
-    }
-
-    function isCategorySomeSelected(cat) {
-      if (!cat.tools || cat.tools.length === 0) return false;
-      const count = cat.tools.filter(t => form.allowedTools.includes(t.name)).length;
-      return count > 0 && count < cat.tools.length;
-    }
-
-    function getCategorySelectedCount(cat) {
-      if (!cat.tools) return 0;
-      return cat.tools.filter(t => form.allowedTools.includes(t.name)).length;
-    }
-
-    function toggleCategorySelection(cat) {
-      const allSelected = isCategoryAllSelected(cat);
-      const catToolNames = cat.tools ? cat.tools.map(t => t.name) : [];
-      if (allSelected) {
-        form.allowedTools = form.allowedTools.filter(n => !catToolNames.includes(n));
-      } else {
-        const set = new Set([...form.allowedTools, ...catToolNames]);
-        form.allowedTools = Array.from(set);
-      }
-    }
-
-    function isToolSelected(toolName) {
-      return form.allowedTools.includes(toolName);
-    }
-
-    function toggleToolSelection(toolName) {
-      const idx = form.allowedTools.indexOf(toolName);
-      if (idx >= 0) {
-        form.allowedTools.splice(idx, 1);
-      } else {
-        form.allowedTools.push(toolName);
-      }
-    }
-
-    // 快捷策略预设
-    function selectAllTools() {
-      form.allowedTools = getAllCatalogToolNames();
-    }
-
-    function selectStandardOps() {
-      const names = [];
-      for (const cat of mcpCatalog.value) {
-        if (cat.tools) {
-          for (const t of cat.tools) {
-            if (t.riskLevel !== 'Dangerous') {
-              names.push(t.name);
-            }
-          }
-        }
-      }
-      form.allowedTools = names;
-    }
-
-    function selectReadOnly() {
-      const names = [];
-      for (const cat of mcpCatalog.value) {
-        if (cat.tools) {
-          for (const t of cat.tools) {
-            if (t.riskLevel === 'Read') {
-              names.push(t.name);
-            }
-          }
-        }
-      }
-      form.allowedTools = names;
-    }
-
-    function clearAllTools() {
-      form.allowedTools = [];
-    }
-
     async function save() {
       if (!form.name.trim()) return toast.error('请输入密钥名称');
 
@@ -269,7 +407,7 @@ export default defineComponent({
       if (form.allowMcp) {
         if (form.mcpFilterMode === 'custom') {
           if (form.allowedTools.length === 0) {
-            return toast.error('请至少勾选一个被授权的 MCP 工具，或切换为允许全部');
+            return toast.error('请至少勾选一个被授权的 MCP 工具，或应用全量允许策略');
           }
           allowedTools = form.allowedTools;
         } else {
@@ -363,6 +501,9 @@ export default defineComponent({
       mcpCatalog,
       loading,
       collapsedCategories,
+      scopeSearchKeyword,
+      scopeProtocolFilter,
+      filteredCategories,
       showModal,
       isEdit,
       isClone,
@@ -376,17 +517,19 @@ export default defineComponent({
       openCreate,
       openEdit,
       openClone,
+      isCategoryCollapsed,
       toggleCategoryCollapse,
-      isCategoryAllSelected,
-      isCategorySomeSelected,
+      toggleExpandAll,
+      isCategoryFullyChecked,
+      isCategoryIndeterminate,
       getCategorySelectedCount,
-      toggleCategorySelection,
-      isToolSelected,
-      toggleToolSelection,
-      selectAllTools,
+      toggleCategoryNode,
+      isToolChecked,
+      toggleToolNode,
+      selectAll,
       selectStandardOps,
       selectReadOnly,
-      clearAllTools,
+      clearAll,
       save,
       toggleKey,
       removeKey,
@@ -510,10 +653,11 @@ export default defineComponent({
 
       <!-- 新建 / 编辑弹窗 -->
       <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="panel w-full max-w-2xl p-5 flex flex-col gap-4 border-slate-700 max-h-[92vh] overflow-y-auto">
+        <div class="panel w-full max-w-3xl p-5 flex flex-col gap-4 border-slate-700 max-h-[92vh] overflow-y-auto">
           <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
-            <h3 class="font-semibold text-slate-100 text-base">
-              {{ isEdit ? '编辑 API Key 权限' : (isClone ? '克隆 API Key (复制配置)' : '新建 API Key') }}
+            <h3 class="font-semibold text-slate-100 text-base flex items-center gap-2">
+              <span>{{ isEdit ? '编辑 API Key 权限' : (isClone ? '克隆 API Key (复制配置)' : '新建 API Key') }}</span>
+              <span class="text-xs font-normal text-slate-400 font-mono">Unified Permission Matrix</span>
             </h3>
             <button class="text-slate-400 hover:text-slate-200" @click="showModal = false">✕</button>
           </div>
@@ -524,175 +668,190 @@ export default defineComponent({
           </div>
 
           <div class="flex flex-col gap-3 text-xs">
-            <div>
-              <label class="block text-slate-400 mb-1">密钥名称 <span class="text-rose-400">*</span></label>
-              <input v-model="form.name" class="input" placeholder="例如：Claude MCP 本地助手 / 外部运维监控" />
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-slate-400 mb-1">密钥名称 <span class="text-rose-400">*</span></label>
+                <input v-model="form.name" class="input" placeholder="例如：Claude MCP 本地助手 / 外部运维监控" />
+              </div>
+
+              <div>
+                <label class="block text-slate-400 mb-1">过期时间（留空表示永久有效）</label>
+                <input v-model="form.expiresAt" type="datetime-local" class="input" />
+              </div>
             </div>
 
-            <div>
-              <label class="block text-slate-400 mb-1">过期时间（留空表示永久有效）</label>
-              <input v-model="form.expiresAt" type="datetime-local" class="input" />
-            </div>
-
+            <!-- 协议通道权限 -->
             <div class="border-t border-slate-800/80 pt-3">
               <label class="block font-medium text-slate-300 mb-2">协议通道权限 (Channel Scope)</label>
               <div class="grid grid-cols-2 gap-2">
                 <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer">
                   <input type="checkbox" v-model="form.allowApi" class="accent-cyan-500" />
-                  <span class="text-slate-200">允许 REST API 访问</span>
+                  <div>
+                    <span class="text-slate-200 font-medium">允许 REST API 访问</span>
+                    <span class="text-slate-500 text-[11px] block">标准 HTTP JSON API 接口调用</span>
+                  </div>
                 </label>
                 <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer">
                   <input type="checkbox" v-model="form.allowMcp" class="accent-purple-500" />
-                  <span class="text-slate-200">允许 MCP 协议访问</span>
+                  <div>
+                    <span class="text-slate-200 font-medium">允许 MCP 协议访问</span>
+                    <span class="text-slate-500 text-[11px] block">用于 Claude / Cursor / AI Agent 工具调用</span>
+                  </div>
                 </label>
               </div>
             </div>
 
-            <div class="border-t border-slate-800/80 pt-3">
-              <label class="block font-medium text-slate-300 mb-2">业务模块授权 (Module Matrix)</label>
-              <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer">
-                  <input type="checkbox" v-model="form.allowTerminal" class="accent-emerald-500" />
-                  <span class="text-slate-200">指令库与终端</span>
-                </label>
-                <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer">
-                  <input type="checkbox" v-model="form.allowSchedules" class="accent-blue-500" />
-                  <span class="text-slate-200">工作流与定时调度</span>
-                </label>
-                <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer">
-                  <input type="checkbox" v-model="form.allowFiles" class="accent-amber-500" />
-                  <span class="text-slate-200">文件与存储挂载</span>
-                </label>
-                <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer">
-                  <input type="checkbox" v-model="form.allowTranscode" class="accent-rose-500" />
-                  <span class="text-slate-200">FFmpeg 媒体转码</span>
-                </label>
-                <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer">
-                  <input type="checkbox" v-model="form.allowGateway" class="accent-indigo-500" />
-                  <span class="text-slate-200">家庭网关与代理</span>
-                </label>
-                <label class="flex items-center gap-2 p-2 rounded bg-slate-900/60 border border-slate-800 cursor-pointer">
-                  <input type="checkbox" v-model="form.allowRemoteHosts" class="accent-teal-500" />
-                  <span class="text-slate-200">远程主机管理</span>
-                </label>
-              </div>
-
-              <!-- 远程主机自定义范围选择面板 (Resource Scoping) -->
-              <div v-if="form.allowRemoteHosts" class="mt-2.5 p-3 bg-slate-950/60 rounded border border-teal-500/30 flex flex-col gap-2.5">
-                <div class="flex items-center justify-between">
-                  <span class="font-medium text-teal-300">服务器授权范围</span>
-                  <div class="flex items-center gap-3">
-                    <label class="flex items-center gap-1.5 cursor-pointer">
-                      <input type="radio" value="all" v-model="form.hostScopeMode" class="accent-teal-500" />
-                      <span class="text-slate-300">允许全部远程主机</span>
-                    </label>
-                    <label class="flex items-center gap-1.5 cursor-pointer">
-                      <input type="radio" value="custom" v-model="form.hostScopeMode" class="accent-teal-500" />
-                      <span class="text-slate-300">仅允许指定服务器</span>
-                    </label>
-                  </div>
-                </div>
-
-                <div v-if="form.hostScopeMode === 'custom'" class="flex flex-col gap-2 mt-1">
-                  <div v-if="availableHosts.length === 0" class="text-xs text-slate-500 py-1">
-                    系统中暂无注册的远程主机，请先在「运维控制 -> 远程主机」中添加。
-                  </div>
-                  <div v-else class="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto pr-1">
-                    <label v-for="h in availableHosts" :key="h.id" class="flex items-center gap-2 p-1.5 rounded bg-slate-900 border border-slate-800 hover:border-slate-700 cursor-pointer text-xs">
-                      <input type="checkbox" :value="h.id" v-model="form.selectedHostIds" class="accent-teal-500" />
-                      <span class="truncate text-slate-200 font-mono">{{ h.name }}</span>
-                      <span class="text-slate-500 text-[10px]">({{ h.host }})</span>
-                    </label>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- MCP 二级细粒度工具授权树状结构 (Two-Level Tree Granular Scoping) -->
-            <div v-if="form.allowMcp" class="border-t border-slate-800/80 pt-3">
-              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
+            <!-- 统一业务模块与 MCP 二级工具树状列表 (Unified Permission Tree) -->
+            <div class="border-t border-slate-800/80 pt-3 flex flex-col gap-2.5">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
-                  <label class="block font-medium text-purple-300">
-                    MCP 二级工具树状独立勾选 (Tool-Level Granular Control)
+                  <label class="block font-medium text-slate-200 text-sm">
+                    业务权限与 MCP 工具树状矩阵 (Unified Permission Tree)
                   </label>
                   <p class="text-[11px] text-slate-400 mt-0.5">
-                    仅向 AI Agent 暴露勾选的工具，减少 Token 上下文消耗并杜绝越权幻觉。
+                    采用分级树状模型统一管理各业务模块准入与二级具体工具暴露，支持按协议过滤、关键词检索及快捷安全策略。
                   </p>
                 </div>
-                <div class="flex items-center gap-3">
-                  <label class="flex items-center gap-1.5 cursor-pointer">
-                    <input type="radio" value="all" v-model="form.mcpFilterMode" class="accent-purple-500" />
-                    <span class="text-slate-300">全量允许</span>
-                  </label>
-                  <label class="flex items-center gap-1.5 cursor-pointer">
-                    <input type="radio" value="custom" v-model="form.mcpFilterMode" class="accent-purple-500" />
-                    <span class="text-purple-300 font-medium">独立勾选细粒度</span>
-                  </label>
+                <div class="flex items-center gap-2">
+                  <button type="button" class="btn btn-xs hover:border-cyan-500/50" @click="selectAll()">全选全部</button>
+                  <button type="button" class="btn btn-xs hover:border-sky-500/50 text-sky-400" @click="selectStandardOps()">标准运维(排除高危)</button>
+                  <button type="button" class="btn btn-xs hover:border-emerald-500/50 text-emerald-400" @click="selectReadOnly()">只读探测</button>
+                  <button type="button" class="btn btn-xs hover:border-slate-600 text-slate-400" @click="clearAll()">清空</button>
+                  <button type="button" class="btn btn-xs text-slate-400" @click="toggleExpandAll()">全部展开/折叠</button>
                 </div>
               </div>
 
-              <!-- 细粒度工具勾选面板 -->
-              <div v-if="form.mcpFilterMode === 'custom'" class="flex flex-col gap-2.5 p-3 rounded-lg bg-slate-950/70 border border-purple-500/30">
-                <!-- 快捷策略栏 -->
-                <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800/60">
-                  <span class="text-[11px] text-slate-400">
-                    已选 <strong class="text-purple-300">{{ form.allowedTools.length }}</strong> 项工具
-                  </span>
-                  <div class="flex items-center gap-1.5">
-                    <button type="button" class="btn btn-xs hover:border-purple-500/50" @click="selectAllTools()">全选全部</button>
-                    <button type="button" class="btn btn-xs hover:border-sky-500/50 text-sky-400" @click="selectStandardOps()">标准运维(排除高危)</button>
-                    <button type="button" class="btn btn-xs hover:border-emerald-500/50 text-emerald-400" @click="selectReadOnly()">只读探测</button>
-                    <button type="button" class="btn btn-xs hover:border-slate-600 text-slate-400" @click="clearAllTools()">清空</button>
-                  </div>
+              <!-- 树状搜索与协议过滤器栏 -->
+              <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-2 rounded-lg bg-slate-950/70 border border-slate-800">
+                <div class="flex-1 relative">
+                  <input v-model="scopeSearchKeyword"
+                         placeholder="搜索模块名称、#code、MCP 工具名或功能描述..."
+                         class="input text-xs w-full pl-8" />
+                  <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs">🔍</span>
+                </div>
+                <div class="flex items-center gap-1 shrink-0 bg-slate-900 p-0.5 rounded border border-slate-800 text-[11px]">
+                  <button type="button"
+                          class="px-2 py-1 rounded transition-colors"
+                          :class="scopeProtocolFilter === 'all' ? 'bg-cyan-950/80 text-cyan-300 font-medium border border-cyan-800/50' : 'text-slate-400 hover:text-slate-200'"
+                          @click="scopeProtocolFilter = 'all'">
+                    全部
+                  </button>
+                  <button type="button"
+                          class="px-2 py-1 rounded transition-colors"
+                          :class="scopeProtocolFilter === 'api' ? 'bg-cyan-950/80 text-cyan-300 font-medium border border-cyan-800/50' : 'text-slate-400 hover:text-slate-200'"
+                          @click="scopeProtocolFilter = 'api'">
+                    仅 REST API
+                  </button>
+                  <button type="button"
+                          class="px-2 py-1 rounded transition-colors"
+                          :class="scopeProtocolFilter === 'mcp' ? 'bg-purple-950/80 text-purple-300 font-medium border border-purple-800/50' : 'text-slate-400 hover:text-slate-200'"
+                          @click="scopeProtocolFilter = 'mcp'">
+                    仅 MCP 工具
+                  </button>
+                </div>
+              </div>
+
+              <!-- 树状节点滚动容器 -->
+              <div class="rounded-lg bg-slate-950/70 border border-slate-800/80 p-2.5 max-h-96 overflow-y-auto space-y-2.5">
+                <div v-if="filteredCategories.length === 0" class="text-center py-8 text-slate-500 text-xs font-mono">
+                  未找到匹配的业务模块或 MCP 工具节点
                 </div>
 
-                <!-- 领域分类折叠卡片列表 -->
-                <div class="flex flex-col gap-2 max-h-72 overflow-y-auto pr-1">
-                  <div v-for="cat in mcpCatalog" :key="cat.key" class="rounded border border-slate-800 bg-slate-900/50 overflow-hidden">
-                    <!-- 分类卡片标题头 (可折叠 + 一级全选三态) -->
-                    <div class="flex items-center justify-between px-3 py-2 bg-slate-800/40 hover:bg-slate-800/60 cursor-pointer select-none"
-                         @click="toggleCategoryCollapse(cat.key)">
-                      <div class="flex items-center gap-2" @click.stop>
-                        <input type="checkbox"
-                               :checked="isCategoryAllSelected(cat)"
-                               :indeterminate="isCategorySomeSelected(cat)"
-                               @change="toggleCategorySelection(cat)"
-                               class="accent-purple-500" />
-                        <span class="font-medium text-slate-200">{{ cat.name }}</span>
-                        <span class="text-[10px] text-slate-500">
-                          ({{ getCategorySelectedCount(cat) }} / {{ cat.tools ? cat.tools.length : 0 }})
-                        </span>
-                      </div>
-                      <div class="flex items-center gap-2 text-slate-400 text-xs">
-                        <span class="text-[10px] text-slate-400 hidden sm:inline">{{ cat.description }}</span>
-                        <span>{{ collapsedCategories[cat.key] ? '▶' : '▼' }}</span>
+                <!-- 顶级分类卡片节点 -->
+                <div v-for="cat in filteredCategories" :key="cat.key"
+                     class="rounded-lg border border-slate-800 bg-slate-900/60 overflow-hidden">
+                  <!-- 分类卡片标题头 (折叠切换 + 三态勾选) -->
+                  <div class="flex items-start justify-between gap-2 p-2.5 bg-slate-800/40 hover:bg-slate-800/60 transition-colors select-none">
+                    <div class="flex items-start gap-2 flex-1">
+                      <!-- 折叠展开按钮 -->
+                      <button type="button" @click="toggleCategoryCollapse(cat.key)"
+                              class="text-slate-400 hover:text-cyan-400 text-xs mt-0.5 select-none w-4 text-center shrink-0">
+                        {{ isCategoryCollapsed(cat.key) ? '▶' : '▼' }}
+                      </button>
+
+                      <!-- 分类根节点 Checkbox (三态) -->
+                      <input type="checkbox"
+                             :checked="isCategoryFullyChecked(cat)"
+                             :indeterminate="isCategoryIndeterminate(cat)"
+                             @change="toggleCategoryNode(cat)"
+                             class="mt-0.5 accent-cyan-500 cursor-pointer shrink-0" />
+
+                      <div class="flex-1 cursor-pointer" @click="toggleCategoryCollapse(cat.key)">
+                        <div class="font-medium text-slate-200 flex items-center gap-2 flex-wrap">
+                          <span>{{ cat.name }}</span>
+                          <span class="text-[10px] font-mono text-cyan-400 bg-cyan-950/40 px-1.5 py-0.2 rounded border border-cyan-800/40">#{{ cat.key }}</span>
+                          <span v-if="cat.moduleCode" class="text-[10px] font-mono text-slate-400 bg-slate-800 px-1.5 py-0.2 rounded">🏷️ {{ cat.moduleCode }}</span>
+                        </div>
+                        <div class="text-[11px] text-slate-400 mt-0.5 leading-relaxed">{{ cat.description }}</div>
                       </div>
                     </div>
 
-                    <!-- 二级具体工具列表 (展开后展示) -->
-                    <div v-show="!collapsedCategories[cat.key]" class="p-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-950/40">
-                      <div v-for="t in cat.tools" :key="t.name"
-                           @click="toggleToolSelection(t.name)"
-                           class="flex items-start gap-2 p-2 rounded border transition-colors cursor-pointer select-none text-xs"
-                           :class="isToolSelected(t.name) ? 'bg-purple-950/20 border-purple-500/40' : 'bg-slate-900/40 border-slate-800/70 hover:border-slate-700'">
-                        <input type="checkbox"
-                               :checked="isToolSelected(t.name)"
-                               @change.stop="toggleToolSelection(t.name)"
-                               class="accent-purple-500 mt-0.5" />
-                        <div class="flex flex-col gap-0.5 flex-1 min-w-0">
-                          <div class="flex items-center justify-between gap-1.5">
-                            <span class="font-mono font-medium text-purple-200 truncate">{{ t.name }}</span>
-                            <span class="badge whitespace-nowrap text-[10px] py-0 px-1"
-                                  :class="{
-                                    'border-emerald-500/40 text-emerald-300 bg-emerald-950/30': t.riskLevel === 'Read',
-                                    'border-sky-500/40 text-sky-300 bg-sky-950/30': t.riskLevel === 'Execute',
-                                    'border-amber-500/40 text-amber-300 bg-amber-950/30': t.riskLevel === 'Dangerous'
-                                  }">
-                              {{ t.riskLevel === 'Read' ? '只读' : (t.riskLevel === 'Execute' ? '执行' : '高危') }}
-                            </span>
-                          </div>
-                          <p class="text-[11px] text-slate-400 line-clamp-1">{{ t.description }}</p>
+                    <!-- 协议类型徽标与选中计数 -->
+                    <div class="flex items-center gap-1.5 shrink-0">
+                      <span v-if="cat.supportsApi" class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-cyan-950/40 text-cyan-300 border border-cyan-800/40">API</span>
+                      <span v-if="cat.supportsMcp" class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-950/40 text-purple-300 border border-purple-800/40">MCP</span>
+                      <span v-if="cat.tools && cat.tools.length > 0" class="text-[10px] font-mono text-slate-400 bg-slate-800/70 px-1.5 py-0.5 rounded ml-1">
+                        {{ getCategorySelectedCount(cat) }} / {{ cat.tools.length }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- 远程主机专用范围配置嵌入项 -->
+                  <div v-if="cat.key === 'remote_hosts' && !isCategoryCollapsed(cat.key)"
+                       class="px-3 py-2 bg-teal-950/20 border-t border-teal-800/30 flex flex-col gap-2">
+                    <div class="flex items-center justify-between">
+                      <span class="font-medium text-teal-300 text-xs">🌐 远程主机范围约束 (Resource Scope)</span>
+                      <div class="flex items-center gap-3 text-xs">
+                        <label class="flex items-center gap-1.5 cursor-pointer">
+                          <input type="radio" value="all" v-model="form.hostScopeMode" class="accent-teal-500" />
+                          <span class="text-slate-300">允许全部远程主机</span>
+                        </label>
+                        <label class="flex items-center gap-1.5 cursor-pointer">
+                          <input type="radio" value="custom" v-model="form.hostScopeMode" class="accent-teal-500" />
+                          <span class="text-slate-300">仅允许指定服务器</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div v-if="form.hostScopeMode === 'custom'" class="flex flex-col gap-1.5">
+                      <div v-if="availableHosts.length === 0" class="text-[11px] text-slate-500 py-1">
+                        系统中暂无已配置的远程主机。
+                      </div>
+                      <div v-else class="grid grid-cols-2 gap-1.5 max-h-32 overflow-y-auto pr-1">
+                        <label v-for="h in availableHosts" :key="h.id"
+                               class="flex items-center gap-2 p-1.5 rounded bg-slate-900 border border-slate-800 hover:border-slate-700 cursor-pointer text-[11px]">
+                          <input type="checkbox" :value="h.id" v-model="form.selectedHostIds" class="accent-teal-500" />
+                          <span class="truncate text-slate-200 font-mono">{{ h.name }}</span>
+                          <span class="text-slate-500 text-[10px]">({{ h.host }})</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 二级 MCP 叶子工具列表 (展开后展示) -->
+                  <div v-if="!isCategoryCollapsed(cat.key) && cat.tools && cat.tools.length > 0"
+                       class="p-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-950/40 border-t border-slate-800/50">
+                    <div v-for="t in cat.tools" :key="t.name"
+                         @click="toggleToolNode(cat, t.name)"
+                         class="flex items-start gap-2 p-2 rounded border transition-colors cursor-pointer select-none text-xs"
+                         :class="isToolChecked(t.name) ? 'bg-purple-950/20 border-purple-500/40' : 'bg-slate-900/40 border-slate-800/70 hover:border-slate-700'">
+                      <input type="checkbox"
+                             :checked="isToolChecked(t.name)"
+                             @change.stop="toggleToolNode(cat, t.name)"
+                             class="accent-purple-500 mt-0.5 cursor-pointer" />
+                      <div class="flex flex-col gap-0.5 flex-1 min-w-0">
+                        <div class="flex items-center justify-between gap-1.5">
+                          <span class="font-mono font-medium text-purple-200 truncate">{{ t.name }}</span>
+                          <span class="badge whitespace-nowrap text-[10px] py-0 px-1"
+                                :class="{
+                                  'border-emerald-500/40 text-emerald-300 bg-emerald-950/30': t.riskLevel === 'Read',
+                                  'border-sky-500/40 text-sky-300 bg-sky-950/30': t.riskLevel === 'Execute',
+                                  'border-amber-500/40 text-amber-300 bg-amber-950/30': t.riskLevel === 'Dangerous'
+                                }">
+                            {{ t.riskLevel === 'Read' ? '只读' : (t.riskLevel === 'Execute' ? '执行' : '高危') }}
+                          </span>
                         </div>
+                        <p class="text-[11px] text-slate-400 line-clamp-1">{{ t.description }}</p>
                       </div>
                     </div>
                   </div>

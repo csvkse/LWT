@@ -68,6 +68,26 @@ public sealed class McpTwoLevelTreeAndDispatchUnitTests : IDisposable
     }
 
     [Fact]
+    public void McpCatalogRegistry_NativeAot_SerializesWithoutInternalCompilerTypeFailure()
+    {
+        var catalog = McpCatalogRegistry.GetCatalog();
+        Assert.IsType<List<McpCategoryCatalog>>(catalog);
+
+        // 验证使用 AppJsonSerializerContext 序列化成功（零 <>z__ReadOnlyArray 异常）
+        var json = JsonSerializer.Serialize(catalog, LinuxWebTool.WebHost.Composition.AppJsonSerializerContext.Default.ListMcpCategoryCatalog);
+        Assert.False(string.IsNullOrWhiteSpace(json));
+        Assert.Contains("\"commands\"", json);
+        Assert.Contains("\"command_list\"", json);
+        Assert.Contains("moduleCode", json, StringComparison.OrdinalIgnoreCase);
+
+        // 验证反序列化恢复
+        var restored = JsonSerializer.Deserialize(json, LinuxWebTool.WebHost.Composition.AppJsonSerializerContext.Default.ListMcpCategoryCatalog);
+        Assert.NotNull(restored);
+        Assert.Equal(8, restored.Count);
+        Assert.All(restored, c => Assert.IsType<List<McpToolCatalogItem>>(c.Tools));
+    }
+
+    [Fact]
     public async Task McpServerEngine_ToolsList_FiltersByLevel1AndLevel2()
     {
         var cmdStore = new CommandStore(_factory);
