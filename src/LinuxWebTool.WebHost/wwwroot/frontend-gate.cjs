@@ -6,6 +6,7 @@
  *  FE-HTML-INLINE     index.html 禁止内联脚本（importmap 除外）与 on* 内联事件
  *  FE-API-OWNERSHIP   API 路径字符串只允许出现在 config.js
  *  FE-NO-FETCH        fetch() 只允许出现在 api/client.js
+ *  FE-NO-RAW-DOWNLOAD 禁止在业务组件中创建 <a> 标签绕过认证下载，统一使用 api/client.js 的 httpDownload
  *  FE-STORAGE         localStorage / sessionStorage 只允许出现在 api/client.js 与 store/auth.js
  *  FE-IMPORT-BOUNDARY 跨层 import 限制（store→views 禁止、api→views/components 禁止、views 互引禁止）
  *  FE-TEMPLATE-REF    模板事件绑定必须使用内联调用（method()），避免运行时编译提升裸标识符导致 handler 丢失
@@ -172,6 +173,10 @@ for (const file of files) {
     // FE-NO-FETCH
     if (!rel.endsWith('client.js') && /\bfetch\s*\(/.test(content)) {
       add('FE-NO-FETCH', file, 'fetch() 只允许在 api/client.js 中调用');
+    }
+    // FE-NO-RAW-DOWNLOAD: 文件下载禁止在业务视图中直接创建 <a> 标签绕过认证，必须统一使用 api/client.js 的 httpDownload
+    if (rel !== 'api/client.js' && rel !== 'utils/format.js' && /document\.createElement\s*\(\s*['"]a['"]\s*\)/.test(content) && /\.(download|href)\b/.test(content)) {
+      add('FE-NO-RAW-DOWNLOAD', file, '禁止在业务组件中直接创建 <a> 标签进行文件下载绕过认证体系，必须统一调用 api/client.js 的 httpDownload(...)');
     }
     // FE-STORAGE
     if (!['client.js', 'auth.js'].includes(path.basename(rel)) && /\blocalStorage\b|\bsessionStorage\b/.test(content)) {

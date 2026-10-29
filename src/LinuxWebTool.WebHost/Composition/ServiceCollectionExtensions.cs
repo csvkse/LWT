@@ -140,6 +140,22 @@ public static class ServiceCollectionExtensions
                 options.TokenValidationParameters = jwtIssuer.BuildValidationParameters();
                 options.Events = new JwtBearerEvents
                 {
+                    OnMessageReceived = context =>
+                    {
+                        if (string.IsNullOrEmpty(context.Token))
+                        {
+                            var token = context.Request.Query["token"].ToString();
+                            if (string.IsNullOrEmpty(token))
+                            {
+                                token = context.Request.Query["access_token"].ToString();
+                            }
+                            if (!string.IsNullOrEmpty(token))
+                            {
+                                context.Token = token;
+                            }
+                        }
+                        return Task.CompletedTask;
+                    },
                     OnTokenValidated = context =>
                     {
                         var adminCred = context.HttpContext.RequestServices.GetRequiredService<AdminCredentialService>();
