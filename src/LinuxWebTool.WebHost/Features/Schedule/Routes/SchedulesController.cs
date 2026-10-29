@@ -1,4 +1,8 @@
+using LinuxWebTool.Contracts.Features.Commands.Contracts;
+using LinuxWebTool.Infrastructure.Shared.Persistence;
+using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 using Quartz;
+
 namespace LinuxWebTool.WebHost.Features.Schedule.Routes;
 
 /// <summary>定时任务：CRUD、启停、立即执行、执行记录；增删改实时同步 Quartz 内存调度。</summary>
@@ -8,6 +12,7 @@ namespace LinuxWebTool.WebHost.Features.Schedule.Routes;
 public class SchedulesController(
     ScheduleStore scheduleStore,
     CommandStore commandStore,
+    WorkflowStore workflowStore,
     GroupStore groupStore,
     ExecutionStore executionStore,
     IScheduleManager scheduleManager,
@@ -18,11 +23,40 @@ public class SchedulesController(
     {
         var tasks = await scheduleStore.GetAllAsync();
         var commands = (await commandStore.GetAllAsync()).ToDictionary(c => c.Id);
+        var workflows = (await workflowStore.GetAllAsync()).ToDictionary(w => w.Id);
         var groupNames = (await groupStore.GetByTypeAsync(GroupBizType.Schedule)).ToDictionary(g => g.Id, g => g.Name);
         var items = tasks.Select(t =>
         {
-            commands.TryGetValue(t.CommandId, out var command);
-            return new ScheduleItemResponse(t.Id, t.Name, t.CommandId, command?.Name ?? "(指令已删除)", command?.CommandText ?? string.Empty, command?.ScriptType ?? 0, t.CronExpression, t.Enabled, t.GroupId, t.GroupId.HasValue && groupNames.TryGetValue(t.GroupId.Value, out var name) ? name : null, t.IsPinned, t.SortOrder, t.TimeoutSeconds, t.Arguments, t.LastRunTime, t.NextRunTime, t.CreateTime, t.UpdateTime);
+            string commandName = "(指令已删除)";
+            string commandText = string.Empty;
+            int scriptType = 0;
+
+            if (t.TargetBizType == (int)TargetBizType.Workflow && !string.IsNullOrWhiteSpace(t.WorkflowId) && Guid.TryParse(t.WorkflowId, out var wfGuid))
+            {
+                if (workflows.TryGetValue(wfGuid, out var wf))
+                {
+                    commandName = $"[工作流] {wf.Name}";
+                    commandText = wf.Description ?? string.Empty;
+                }
+                else
+                {
+                    commandName = "(工作流已删除)";
+                }
+            }
+            else if (commands.TryGetValue(t.CommandId, out var command))
+            {
+                commandName = command.Name;
+                commandText = command.CommandText;
+                scriptType = command.ScriptType;
+            }
+
+            return new ScheduleItemResponse(
+                t.Id, t.Name, t.CommandId, commandName, commandText, scriptType, 
+                t.CronExpression, t.Enabled, t.GroupId, 
+                t.GroupId.HasValue && groupNames.TryGetValue(t.GroupId.Value, out var name) ? name : null, 
+                t.IsPinned, t.SortOrder, t.TimeoutSeconds, t.Arguments, 
+                t.LastRunTime, t.NextRunTime, t.CreateTime, t.UpdateTime,
+                t.TargetHostMode, t.TargetHostId, t.TargetHostIds, t.FailurePolicy, t.TargetBizType, t.WorkflowId);
         });
         return Ok(items.ToList());
     }
@@ -46,6 +80,12 @@ public class SchedulesController(
             IsPinned = request.IsPinned,
             TimeoutSeconds = request.TimeoutSeconds,
             Arguments = string.IsNullOrWhiteSpace(request.Arguments) ? null : request.Arguments.Trim(),
+            TargetHostMode = (int)request.TargetHostMode,
+            TargetHostId = string.IsNullOrWhiteSpace(request.TargetHostId) ? null : request.TargetHostId.Trim(),
+            TargetHostIds = string.IsNullOrWhiteSpace(request.TargetHostIds) ? null : request.TargetHostIds.Trim(),
+            FailurePolicy = (int)request.FailurePolicy,
+            TargetBizType = (int)request.TargetBizType,
+            WorkflowId = string.IsNullOrWhiteSpace(request.WorkflowId) ? null : request.WorkflowId.Trim()
         };
         await scheduleStore.InsertAsync(task);
         task.NextRunTime = await SyncScheduleAsync(task);
@@ -76,6 +116,13 @@ public class SchedulesController(
         task.IsPinned = request.IsPinned;
         task.TimeoutSeconds = request.TimeoutSeconds;
         task.Arguments = string.IsNullOrWhiteSpace(request.Arguments) ? null : request.Arguments.Trim();
+        task.TargetHostMode = (int)request.TargetHostMode;
+        task.TargetHostId = string.IsNullOrWhiteSpace(request.TargetHostId) ? null : request.TargetHostId.Trim();
+        task.TargetHostIds = string.IsNullOrWhiteSpace(request.TargetHostIds) ? null : request.TargetHostIds.Trim();
+        task.FailurePolicy = (int)request.FailurePolicy;
+        task.TargetBizType = (int)request.TargetBizType;
+        task.WorkflowId = string.IsNullOrWhiteSpace(request.WorkflowId) ? null : request.WorkflowId.Trim();
+
         await scheduleStore.UpdateAsync(task);
         task.NextRunTime = await SyncScheduleAsync(task);
         await operationLogger.LogAsync("修改定时任务", "定时任务", task.Name, task.CronExpression, clientIp: HttpContext.GetClientIp());
@@ -152,10 +199,22 @@ public class SchedulesController(
         {
             return (false, "任务名称不能超过 100 个字符", string.Empty);
         }
-        if (await commandStore.GetByIdAsync(request.CommandId) is null)
+
+        if (request.TargetBizType == TargetBizType.Workflow)
         {
-            return (false, "引用的指令不存在", string.Empty);
+            if (string.IsNullOrWhiteSpace(request.WorkflowId) || !Guid.TryParse(request.WorkflowId, out var wfId) || await workflowStore.GetByIdAsync(wfId) is null)
+            {
+                return (false, "引用的工作流不存在", string.Empty);
+            }
         }
+        else
+        {
+            if (await commandStore.GetByIdAsync(request.CommandId) is null)
+            {
+                return (false, "引用的指令不存在", string.Empty);
+            }
+        }
+
         if (!CronHelper.TryNormalize(request.CronExpression, out var cron, out var cronError))
         {
             return (false, cronError, string.Empty);
@@ -191,7 +250,7 @@ public class SchedulesController(
         }
         catch (InvalidOperationException)
         {
-            throw; // 无效 Cron：控制器层已校验，防御性保留
+            throw;
         }
     }
 }

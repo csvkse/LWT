@@ -14,19 +14,24 @@ export default defineComponent({
     const total = ref(0);
     const loading = ref(false);
     const taskId = ref(route.query.taskId || '');
+    const workflowId = ref(route.query.workflowId || '');
+    const batchId = ref(route.query.batchId || '');
     const detail = ref(null);
     const query = reactive({ page: 1, pageSize: 20, source: '', status: '', keyword: '' });
 
     async function load() {
       loading.value = true;
       try {
-        const result = await http(API.history.list, { method: 'GET',
+        const result = await http(API.history.list, {
+          method: 'GET',
           params: {
             page: query.page,
             pageSize: query.pageSize,
             source: query.source,
             status: query.status,
             taskId: taskId.value || undefined,
+            workflowId: workflowId.value || undefined,
+            batchId: batchId.value || undefined,
             keyword: query.keyword || undefined,
           },
         });
@@ -49,11 +54,23 @@ export default defineComponent({
       search();
     }
 
+    function clearWorkflowFilter() {
+      workflowId.value = '';
+      search();
+    }
+
+    function clearBatchFilter() {
+      batchId.value = '';
+      search();
+    }
+
     function clearFilters() {
       query.source = '';
       query.status = '';
       query.keyword = '';
       taskId.value = '';
+      workflowId.value = '';
+      batchId.value = '';
       search();
     }
 
@@ -112,7 +129,7 @@ export default defineComponent({
     onMounted(load);
 
     return {
-      items, total, loading, query, taskId, detail, load, search, clearTaskFilter, clearFilters, clearAll, clearOld,
+      items, total, loading, query, taskId, workflowId, batchId, detail, load, search, clearTaskFilter, clearWorkflowFilter, clearBatchFilter, clearFilters, clearAll, clearOld,
       copyDetail, goPage, totalPages,
       SOURCE_OPTIONS, STATUS_OPTIONS, formatTime, formatDuration, sourceMeta, statusMeta,
     };
@@ -132,6 +149,12 @@ export default defineComponent({
         <span v-if="taskId" class="badge border-violet-500/50 text-violet-300">
           任务 {{ taskId.slice(0, 8) }}… <button class="ml-1 hover:text-rose-300" @click="clearTaskFilter()">✕</button>
         </span>
+        <span v-if="workflowId" class="badge border-purple-500/50 text-purple-300">
+          工作流 {{ workflowId.slice(0, 8) }}… <button class="ml-1 hover:text-rose-300" @click="clearWorkflowFilter()">✕</button>
+        </span>
+        <span v-if="batchId" class="badge border-indigo-500/50 text-indigo-300">
+          批次 {{ batchId.slice(0, 10) }}… <button class="ml-1 hover:text-rose-300" @click="clearBatchFilter()">✕</button>
+        </span>
         <div class="ml-auto flex gap-2">
           <button class="btn btn-xs btn-danger" @click="clearOld()">清理 7 天前</button>
           <button class="btn btn-xs btn-danger" @click="clearAll()">清空全部</button>
@@ -139,11 +162,12 @@ export default defineComponent({
       </div>
 
       <div class="panel overflow-x-auto">
-        <table class="data-table min-w-[56rem]">
+        <table class="data-table min-w-[62rem]">
           <thead>
             <tr>
               <th class="whitespace-nowrap">时间</th>
               <th class="whitespace-nowrap">来源</th>
+              <th class="whitespace-nowrap">执行目标</th>
               <th class="whitespace-nowrap">名称</th>
               <th class="whitespace-nowrap">指令</th>
               <th class="whitespace-nowrap">状态</th>
@@ -153,13 +177,21 @@ export default defineComponent({
             </tr>
           </thead>
           <tbody>
-            <tr v-if="!items.length && !loading"><td colspan="8" class="text-slate-600 py-8 text-center">没有执行记录</td></tr>
+            <tr v-if="!items.length && !loading"><td colspan="9" class="text-slate-600 py-8 text-center">没有执行记录</td></tr>
             <tr v-for="item in items" :key="item.id" class="cursor-pointer" @click="detail = item">
               <td class="whitespace-nowrap text-slate-400 text-xs">{{ formatTime(item.startTime) }}</td>
               <td><span class="badge" :class="sourceMeta(item.source).class">{{ sourceMeta(item.source).label }}</span></td>
+              <td class="whitespace-nowrap text-xs">
+                <span v-if="item.targetType === 1" class="badge border-cyan-500/50 text-cyan-300" :title="'远端主机 ID: ' + (item.targetHostId || '')">🌐 {{ item.targetHostName || item.targetHostId || '远端主机' }}</span>
+                <span v-else class="badge border-slate-600/50 text-slate-400">🖥️ 本地</span>
+              </td>
               <td class="text-slate-200 font-medium">{{ item.commandName }}</td>
               <td class="max-w-[16rem] truncate font-mono text-xs text-cyan-300/70" :title="item.commandText">{{ item.commandText }}</td>
-              <td><span class="badge" :class="statusMeta(item.status).class">{{ statusMeta(item.status).label }}</span></td>
+              <td>
+                <span class="badge" :class="statusMeta(item.status).class" :title="item.skipReason || (item.status === 4 ? item.errorOutput : '')">
+                  {{ statusMeta(item.status).label }}
+                </span>
+              </td>
               <td class="text-slate-400 font-mono">{{ item.exitCode ?? '—' }}</td>
               <td class="whitespace-nowrap text-slate-400 font-mono text-xs">{{ formatDuration(item.durationMs) }}</td>
               <td class="text-slate-500 text-xs">{{ item.triggerBy }}</td>
@@ -182,9 +214,16 @@ export default defineComponent({
           <div class="flex items-center gap-2 mb-3 flex-wrap">
             <h3 class="font-display text-base text-neon-soft truncate min-w-0 max-w-xs" :title="detail.commandName">{{ detail.commandName }}</h3>
             <span class="badge shrink-0" :class="sourceMeta(detail.source).class">{{ sourceMeta(detail.source).label }}</span>
+            <span v-if="detail.targetType === 1" class="badge shrink-0 border-cyan-500/50 text-cyan-300">🌐 {{ detail.targetHostName || detail.targetHostId || '远端主机' }}</span>
+            <span v-else class="badge shrink-0 border-slate-600/50 text-slate-400">🖥️ 本地</span>
+            <span v-if="detail.batchId" class="badge shrink-0 border-indigo-500/50 text-indigo-300">批次: {{ detail.batchId.slice(0, 10) }}… (步 {{ detail.stepOrder }})</span>
+            <span v-if="detail.workflowId" class="badge shrink-0 border-purple-500/50 text-purple-300">工作流: {{ detail.workflowId.slice(0, 8) }}…</span>
             <span class="badge shrink-0" :class="statusMeta(detail.status).class">{{ statusMeta(detail.status).label }}</span>
             <span class="text-xs text-slate-500 shrink-0">{{ formatTime(detail.startTime) }} · exit {{ detail.exitCode ?? '—' }} · {{ formatDuration(detail.durationMs) }} · by {{ detail.triggerBy }}</span>
             <button class="btn btn-xs ml-auto shrink-0" @click="detail = null">✕</button>
+          </div>
+          <div v-if="detail.skipReason" class="border border-amber-500/50 bg-amber-950/30 text-amber-200 text-xs rounded-lg p-2.5 mb-3 font-mono">
+            ⚠️ 任务跳过原因：{{ detail.skipReason }}
           </div>
           <div class="font-mono text-xs text-slate-400 border border-cyber-line rounded-lg px-3 py-2 mb-3 break-all">{{ detail.commandText }}</div>
           <div class="output-block max-h-72 overflow-y-auto whitespace-pre-wrap break-all">{{ detail.output || '(无标准输出)' }}</div>

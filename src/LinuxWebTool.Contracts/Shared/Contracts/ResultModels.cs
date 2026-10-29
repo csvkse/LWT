@@ -1,3 +1,5 @@
+using LinuxWebTool.Contracts.Features.Commands.Contracts;
+
 namespace LinuxWebTool.Contracts.Shared.Contracts;
 
 public sealed record LoginResult(string Token, DateTime ExpiresAt, string UserName);
@@ -9,11 +11,23 @@ public sealed record ExecuteResult
     public bool Success { get; init; }
     public int? ExitCode { get; init; }
     public string StandardOutput { get; init; } = string.Empty;
+    public string Output
+    {
+        get => StandardOutput;
+        init => StandardOutput = value;
+    }
     public string ErrorOutput { get; init; } = string.Empty;
     public long DurationMs { get; init; }
     public bool TimedOut { get; init; }
     public bool Truncated { get; init; }
+    public string? CommandName { get; init; }
     public ExecutionStatus Status { get; init; }
+    public int TargetType { get; init; }
+    public string? TargetHostId { get; init; }
+    public string? TargetHostName { get; init; }
+    public string? BatchId { get; init; }
+    public int StepOrder { get; init; }
+    public string? SkipReason { get; init; }
     public DateTime StartTime { get; init; }
     public DateTime EndTime { get; init; }
 }
@@ -41,13 +55,22 @@ public sealed record OverviewResult
 public sealed record ExecutionRecordBrief
 {
     public Guid Id { get; init; }
-    public DateTime StartTime { get; init; }
     public ExecutionSource Source { get; init; }
+    public Guid? CommandId { get; init; }
+    public Guid? ScheduleTaskId { get; init; }
     public string CommandName { get; init; } = string.Empty;
     public string CommandText { get; init; } = string.Empty;
     public ExecutionStatus Status { get; init; }
     public int? ExitCode { get; init; }
     public long DurationMs { get; init; }
+    public bool TimedOut { get; init; }
+    public DateTime StartTime { get; init; }
+    public int TargetType { get; init; }
+    public string? TargetHostId { get; init; }
+    public string? TargetHostName { get; init; }
+    public string? BatchId { get; init; }
+    public int StepOrder { get; init; }
+    public string? SkipReason { get; init; }
 }
 
 public sealed record ScheduleBrief

@@ -57,6 +57,7 @@ export const STATUS_META = {
   1: { label: '失败', class: 'border-rose-500/50 text-rose-300' },
   2: { label: '超时', class: 'border-orange-500/50 text-orange-300' },
   3: { label: '取消', class: 'border-slate-500/50 text-slate-400' },
+  4: { label: '已跳过', class: 'border-amber-500/50 text-amber-300' },
 };
 
 export const SOURCE_OPTIONS = [
@@ -93,6 +94,7 @@ export const STATUS_OPTIONS = [
   { value: 1, label: '失败' },
   { value: 2, label: '超时' },
   { value: 3, label: '取消' },
+  { value: 4, label: '已跳过' },
 ];
 
 export function sourceMeta(source) {

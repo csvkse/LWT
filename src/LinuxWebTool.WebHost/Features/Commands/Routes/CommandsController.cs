@@ -1,8 +1,13 @@
+using LinuxWebTool.Contracts.Features.Commands.Contracts;
+using LinuxWebTool.Contracts.Shared.Contracts;
+using LinuxWebTool.Infrastructure.Features.Scheduling.Adapters;
+using LinuxWebTool.Infrastructure.Shared.Persistence;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 using LinuxWebTool.Infrastructure.Shared.Support;
+
 namespace LinuxWebTool.WebHost.Features.Commands.Routes;
 
-/// <summary>指令功能：保存 Linux 指令的增删改查、执行、快速执行与执行历史。</summary>
+/// <summary>指令功能：保存 Linux 指令的增删改查、执行、快速执行、批量编排执行与执行历史。</summary>
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
@@ -10,7 +15,7 @@ public class CommandsController(
     CommandStore commandStore,
     GroupStore groupStore,
     ExecutionStore executionStore,
-    IShellExecutor shellExecutor,
+    IUnifiedExecutionEngine executionEngine,
     IOperationLogger operationLogger) : MinimalApi.ControllerBase
 {
     [HttpGet]
@@ -34,7 +39,8 @@ public class CommandsController(
         var items = query.Select(c => new CommandItemResponse(
             c.Id, c.Name, c.CommandText, c.ScriptType, c.Description, c.GroupId,
             c.GroupId.HasValue && groupNames.TryGetValue(c.GroupId.Value, out var name) ? name : null,
-            c.IsPinned, c.SortOrder, c.TimeoutSeconds, c.LastExecTime, c.CreateTime, c.UpdateTime));
+            c.IsPinned, c.SortOrder, c.TimeoutSeconds, c.LastExecTime, c.CreateTime, c.UpdateTime,
+            c.DefaultTargetHostId));
         return Ok(items.ToList());
     }
 
@@ -56,6 +62,7 @@ public class CommandsController(
             GroupId = request.GroupId,
             IsPinned = request.IsPinned,
             TimeoutSeconds = request.TimeoutSeconds,
+            DefaultTargetHostId = string.IsNullOrWhiteSpace(request.DefaultTargetHostId) ? null : request.DefaultTargetHostId.Trim()
         };
         await commandStore.InsertAsync(command);
         await operationLogger.LogAsync(ScriptTypeLabel(request.ScriptType, "新增"), "指令", command.Name, Summarize(request), clientIp: HttpContext.GetClientIp());
@@ -84,6 +91,7 @@ public class CommandsController(
         command.GroupId = request.GroupId;
         command.IsPinned = request.IsPinned;
         command.TimeoutSeconds = request.TimeoutSeconds;
+        command.DefaultTargetHostId = string.IsNullOrWhiteSpace(request.DefaultTargetHostId) ? null : request.DefaultTargetHostId.Trim();
         await commandStore.UpdateAsync(command);
         await operationLogger.LogAsync(ScriptTypeLabel(request.ScriptType, "修改"), "指令", command.Name, Summarize(request), clientIp: HttpContext.GetClientIp());
         return Ok(command);
@@ -103,7 +111,7 @@ public class CommandsController(
         return Ok(new MessageResponse("已删除（历史执行记录保留）"));
     }
 
-    /// <summary>执行已保存的指令并记录调用历史；脚本类型可携带位置参数。</summary>
+    /// <summary>执行已保存的指令并记录调用历史；支持指定目标主机与位置参数。</summary>
     [HttpPost("{id:guid}/Execute")]
     public async Task<IResult> Execute(Guid id, [FromBody] ExecuteCommandRequest? request = null)
     {
@@ -113,14 +121,55 @@ public class CommandsController(
             return NotFound(new MessageResponse("指令不存在"));
         }
 
-        var response = await ExecuteAndRecordAsync(
-            command: command,
-            arguments: request?.Arguments);
-        await commandStore.UpdateLastExecTimeAsync(command.Id);
+        var targetHostId = !string.IsNullOrWhiteSpace(request?.TargetHostId)
+            ? request.TargetHostId
+            : command.DefaultTargetHostId;
+
+        var target = !string.IsNullOrWhiteSpace(targetHostId)
+            ? ExecutionTarget.Remote(targetHostId)
+            : ExecutionTarget.Local;
+
+        var triggerBy = User.Identity?.Name ?? "admin";
+        var context = new CommandExecutionContext(
+            CommandText: command.CommandText,
+            ScriptType: (ScriptType)command.ScriptType,
+            Arguments: request?.Arguments,
+            TimeoutSeconds: command.TimeoutSeconds is null or <= 0 ? 60 : command.TimeoutSeconds.Value,
+            Target: target,
+            TriggerBy: triggerBy,
+            CommandId: command.Id
+        );
+
+        var result = await executionEngine.ExecuteCommandAsync(context, command.Name, HttpContext.RequestAborted);
+
+        var actionLabel = request?.Arguments is { Length: > 0 } ? "执行脚本" : "执行指令";
+        await operationLogger.LogAsync(
+            actionLabel,
+            "指令", command.Name, Summarize((ScriptType)command.ScriptType, command.CommandText, request?.Arguments),
+            success: result.Status == ExecutionStatus.Success,
+            clientIp: HttpContext.GetClientIp());
+
+        var response = new ExecuteResult
+        {
+            Success = result.Status == ExecutionStatus.Success,
+            ExitCode = result.ExitCode,
+            StandardOutput = result.Output,
+            ErrorOutput = result.ErrorOutput,
+            DurationMs = result.DurationMs,
+            TimedOut = result.TimedOut,
+            Truncated = result.Truncated,
+            Status = result.Status,
+            StartTime = result.StartTime,
+            EndTime = result.EndTime,
+            TargetType = (int)target.TargetType,
+            TargetHostId = target.HostId,
+            SkipReason = result.SkipReason
+        };
+
         return Ok(response);
     }
 
-    /// <summary>快速执行临时指令（不保存，仅记录调用历史；仅命令行模式）。</summary>
+    /// <summary>快速执行临时指令（不保存，支持指定本地或远程主机）。</summary>
     [HttpPost("QuickExecute")]
     public async Task<IResult> QuickExecute([FromBody] QuickExecuteRequest request)
     {
@@ -129,25 +178,69 @@ public class CommandsController(
             return BadRequest(new MessageResponse("指令内容不能为空"));
         }
 
-        var apiKey = HttpContext.Items["CurrentApiKey"] as ApiKeyEntity;
-        string? cwd = null;
-        if (!string.IsNullOrWhiteSpace(apiKey?.AllowedPaths))
+        var target = !string.IsNullOrWhiteSpace(request.TargetHostId)
+            ? ExecutionTarget.Remote(request.TargetHostId)
+            : ExecutionTarget.Local;
+
+        var triggerBy = User.Identity?.Name ?? "admin";
+        var context = new CommandExecutionContext(
+            CommandText: request.CommandText.Trim(),
+            ScriptType: ScriptType.Command,
+            Arguments: null,
+            TimeoutSeconds: request.TimeoutSeconds is null or <= 0 ? 60 : request.TimeoutSeconds.Value,
+            Target: target,
+            TriggerBy: triggerBy
+        );
+
+        var result = await executionEngine.ExecuteCommandAsync(context, "(快速)", HttpContext.RequestAborted);
+
+        await operationLogger.LogAsync(
+            "快速执行指令",
+            "指令", "(快速)", request.CommandText.Trim(),
+            success: result.Status == ExecutionStatus.Success,
+            clientIp: HttpContext.GetClientIp());
+
+        var response = new ExecuteResult
         {
-            cwd = PathScopeGuard.GetAllowedRoots(apiKey.AllowedPaths).FirstOrDefault();
+            Success = result.Status == ExecutionStatus.Success,
+            ExitCode = result.ExitCode,
+            StandardOutput = result.Output,
+            ErrorOutput = result.ErrorOutput,
+            DurationMs = result.DurationMs,
+            TimedOut = result.TimedOut,
+            Truncated = result.Truncated,
+            Status = result.Status,
+            StartTime = result.StartTime,
+            EndTime = result.EndTime,
+            TargetType = (int)target.TargetType,
+            TargetHostId = target.HostId,
+            SkipReason = result.SkipReason
+        };
+
+        return Ok(response);
+    }
+
+    /// <summary>批量多指令顺序或并发编排执行。</summary>
+    [HttpPost("BatchExecute")]
+    public async Task<IResult> BatchExecute([FromBody] BatchExecutionRequest request)
+    {
+        if (request.Commands is null || request.Commands.Count == 0)
+        {
+            return BadRequest(new MessageResponse("执行命令列表不能为空"));
         }
 
-        var response = await ExecuteAndRecordCoreAsync(
-            shellRequest: new ShellRequest
-            {
-                CommandText = request.CommandText.Trim(),
-                WorkingDirectory = cwd,
-                TimeoutSeconds = request.TimeoutSeconds,
-            },
-            source: ExecutionSource.Quick,
-            commandId: null,
-            commandName: "(快速)",
-            commandText: request.CommandText.Trim());
-        return Ok(response);
+        var triggerBy = User.Identity?.Name ?? "admin";
+        var batchResponse = await executionEngine.ExecuteBatchAsync(request, triggerBy, HttpContext.RequestAborted);
+
+        await operationLogger.LogAsync(
+            "批量执行指令",
+            "指令",
+            $"批量任务 ({request.Commands.Count} 条命令)",
+            $"模式: {request.ExecutionMode}, 状态: {batchResponse.OverallStatus}, 耗时: {batchResponse.DurationMs}ms",
+            success: batchResponse.OverallStatus == ExecutionStatus.Success,
+            clientIp: HttpContext.GetClientIp());
+
+        return Ok(batchResponse);
     }
 
     /// <summary>单条指令的执行历史。</summary>
@@ -197,104 +290,9 @@ public class CommandsController(
         return (true, string.Empty);
     }
 
-    private async Task<ExecuteResult> ExecuteAndRecordAsync(LinuxCommand command, string? arguments)
-    {
-        var isScript = command.ScriptType == (int)ScriptType.BashScript;
-        var shellRequest = isScript
-            ? new ShellRequest
-            {
-                ScriptText = command.CommandText,
-                ScriptArguments = arguments,
-                TimeoutSeconds = command.TimeoutSeconds,
-            }
-            : new ShellRequest
-            {
-                CommandText = command.CommandText,
-                TimeoutSeconds = command.TimeoutSeconds,
-            };
-
-        return await ExecuteAndRecordCoreAsync(
-            shellRequest,
-            ExecutionSource.Manual,
-            command.Id,
-            command.Name,
-            command.CommandText,
-            arguments);
-    }
-
-    private async Task<ExecuteResult> ExecuteAndRecordCoreAsync(
-        ShellRequest shellRequest,
-        ExecutionSource source,
-        Guid? commandId,
-        string commandName,
-        string commandText,
-        string? arguments = null)
-    {
-        ShellResult result;
-        try
-        {
-            result = await shellExecutor.ExecuteAsync(shellRequest);
-        }
-        catch (OperationCanceledException)
-        {
-            result = new ShellResult
-            {
-                Cancelled = true,
-                StartTime = DateTime.Now,
-                EndTime = DateTime.Now,
-            };
-        }
-
-        var recordId = await executionStore.InsertAsync(new ExecutionRecord
-        {
-            Source = (int)source,
-            CommandId = commandId,
-            CommandName = commandName,
-            CommandText = commandText,
-            Status = (int)result.Status,
-            ExitCode = result.ExitCode,
-            Output = result.StandardOutput,
-            ErrorOutput = result.ErrorOutput,
-            DurationMs = result.DurationMs,
-            TimedOut = result.TimedOut,
-            Truncated = result.Truncated,
-            TriggerBy = User.Identity?.Name ?? "admin",
-            StartTime = result.StartTime,
-            EndTime = result.EndTime,
-        });
-
-        var actionLabel = source == ExecutionSource.Quick
-            ? "快速执行指令"
-            : (arguments is { Length: > 0 } ? "执行脚本" : "执行指令");
-        await operationLogger.LogAsync(
-            actionLabel,
-            "指令", commandName, Summarize(ScriptTypeOf(shellRequest), commandText, arguments),
-            success: result.Status == ExecutionStatus.Success,
-            clientIp: HttpContext.GetClientIp());
-
-        return new ExecuteResult
-        {
-            RecordId = recordId,
-            Success = result.Status == ExecutionStatus.Success,
-            ExitCode = result.ExitCode,
-            StandardOutput = result.StandardOutput,
-            ErrorOutput = result.ErrorOutput,
-            DurationMs = result.DurationMs,
-            TimedOut = result.TimedOut,
-            Truncated = result.Truncated,
-            Status = result.Status,
-            StartTime = result.StartTime,
-            EndTime = result.EndTime,
-        };
-    }
-
-    private static ScriptType ScriptTypeOf(ShellRequest request) =>
-        string.IsNullOrEmpty(request.ScriptText) ? ScriptType.Command : ScriptType.BashScript;
-
     private static string ScriptTypeLabel(ScriptType type, string action) =>
         type == ScriptType.BashScript ? action + "脚本" : action + "指令";
 
-    /// <summary>操作日志详情：脚本正文只留摘要，避免长文本刷屏。</summary>
     private static string Summarize(SaveCommandRequest request) =>
         Summarize(request.ScriptType, request.CommandText, null);
 

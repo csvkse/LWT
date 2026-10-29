@@ -56,7 +56,13 @@ CREATE TABLE IF NOT EXISTS execution_record (
   Truncated INTEGER,
   TriggerBy TEXT,
   StartTime TEXT,
-  EndTime TEXT
+  EndTime TEXT,
+  TargetType INTEGER NOT NULL DEFAULT 0,
+  TargetHostId TEXT COLLATE NOCASE,
+  TargetHostName TEXT,
+  BatchId TEXT COLLATE NOCASE,
+  StepOrder INTEGER NOT NULL DEFAULT 0,
+  WorkflowId TEXT COLLATE NOCASE
 );
 CREATE TABLE IF NOT EXISTS linux_command (
   Id TEXT PRIMARY KEY COLLATE NOCASE,
@@ -70,7 +76,8 @@ CREATE TABLE IF NOT EXISTS linux_command (
   TimeoutSeconds INTEGER,
   LastExecTime TEXT,
   CreateTime TEXT,
-  UpdateTime TEXT
+  UpdateTime TEXT,
+  DefaultTargetHostId TEXT COLLATE NOCASE
 );
 CREATE TABLE IF NOT EXISTS operation_log (
   Id TEXT PRIMARY KEY COLLATE NOCASE,
@@ -96,7 +103,29 @@ CREATE TABLE IF NOT EXISTS schedule_task (
   LastRunTime TEXT,
   NextRunTime TEXT,
   CreateTime TEXT,
-  UpdateTime TEXT
+  UpdateTime TEXT,
+  TargetHostMode INTEGER NOT NULL DEFAULT 0,
+  TargetHostId TEXT COLLATE NOCASE,
+  TargetHostIds TEXT,
+  FailurePolicy INTEGER NOT NULL DEFAULT 0,
+  TargetBizType INTEGER NOT NULL DEFAULT 0,
+  WorkflowId TEXT COLLATE NOCASE
+);
+CREATE TABLE IF NOT EXISTS workflows (
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
+  Name TEXT NOT NULL,
+  Description TEXT,
+  ExecutionMode INTEGER NOT NULL DEFAULT 0,
+  FailurePolicy INTEGER NOT NULL DEFAULT 0,
+  DefaultTargetHostId TEXT COLLATE NOCASE,
+  DefinitionJson TEXT NOT NULL,
+  Enabled INTEGER NOT NULL DEFAULT 1,
+  GroupId TEXT COLLATE NOCASE,
+  IsPinned INTEGER NOT NULL DEFAULT 0,
+  SortOrder INTEGER NOT NULL DEFAULT 0,
+  LastRunTime TEXT,
+  CreateTime TEXT NOT NULL,
+  UpdateTime TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS smb_mount (
   Id TEXT PRIMARY KEY COLLATE NOCASE,
@@ -453,6 +482,19 @@ CREATE INDEX IF NOT EXISTS idx_backup_snapshot_task ON backup_snapshot(TaskId);
         EnsureColumnExists(db, "api_key", "AllowedHostIds", "TEXT");
         EnsureColumnExists(db, "backup_sync_task", "ConsecutiveFailures", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumnExists(db, "backup_sync_task", "AutoPausedReason", "TEXT");
+        EnsureColumnExists(db, "linux_command", "DefaultTargetHostId", "TEXT COLLATE NOCASE");
+        EnsureColumnExists(db, "schedule_task", "TargetHostMode", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumnExists(db, "schedule_task", "TargetHostId", "TEXT COLLATE NOCASE");
+        EnsureColumnExists(db, "schedule_task", "TargetHostIds", "TEXT");
+        EnsureColumnExists(db, "schedule_task", "FailurePolicy", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumnExists(db, "schedule_task", "TargetBizType", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumnExists(db, "schedule_task", "WorkflowId", "TEXT COLLATE NOCASE");
+        EnsureColumnExists(db, "execution_record", "TargetType", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumnExists(db, "execution_record", "TargetHostId", "TEXT COLLATE NOCASE");
+        EnsureColumnExists(db, "execution_record", "TargetHostName", "TEXT");
+        EnsureColumnExists(db, "execution_record", "BatchId", "TEXT COLLATE NOCASE");
+        EnsureColumnExists(db, "execution_record", "StepOrder", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumnExists(db, "execution_record", "WorkflowId", "TEXT COLLATE NOCASE");
     }
 
     private static void EnsureColumnExists(SqliteConnection db, string table, string column, string definition)

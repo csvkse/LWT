@@ -1,6 +1,6 @@
 namespace LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 
-/// <summary>宸蹭繚瀛樼殑 Linux 鎸囦护銆?/summary>
+/// <summary>已保存的 Linux 指令。</summary>
 public class LinuxCommand
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -9,7 +9,7 @@ public class LinuxCommand
 
     public string CommandText { get; set; } = string.Empty;
 
-    /// <summary>0=鍛戒护琛?1=Bash 鑴氭湰锛圕ommandText 涓鸿剼鏈鏂囷紝SQLite TEXT 浜插拰鏃犻暱搴﹂檺鍒讹級銆?/summary>
+    /// <summary>0=命令行 1=Bash 脚本（CommandText 为脚本正文，SQLite TEXT 亲和无长度限制）。</summary>
     public int ScriptType { get; set; }
 
     public string? Description { get; set; }
@@ -20,8 +20,11 @@ public class LinuxCommand
 
     public int SortOrder { get; set; }
 
-    /// <summary>鎵ц瓒呮椂绉掓暟锛涗负绌烘椂浣跨敤 Shell 榛樿鍊笺€?/summary>
+    /// <summary>执行超时秒数；为空时使用 Shell 默认值。</summary>
     public int? TimeoutSeconds { get; set; }
+
+    /// <summary>推荐执行目标主机 Id（偏好建议，空表示本地服务器）。</summary>
+    public string? DefaultTargetHostId { get; set; }
 
     public DateTime? LastExecTime { get; set; }
 
@@ -29,4 +32,3 @@ public class LinuxCommand
 
     public DateTime UpdateTime { get; set; } = DateTime.Now;
 }
-

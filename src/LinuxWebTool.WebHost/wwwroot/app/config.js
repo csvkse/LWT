@@ -18,6 +18,7 @@ export const API = {
     item: (id) => `/Commands/${id}`,
     execute: (id) => `/Commands/${id}/Execute`,
     quick: '/Commands/QuickExecute',
+    batchExecute: '/Commands/BatchExecute',
     history: (id) => `/Commands/${id}/History`,
   },
   groups: {
@@ -162,6 +163,13 @@ export const API = {
     prunePreview: (id) => `/BackupSync/Tasks/${id}/PrunePreview`,
     pruneExecute: (id) => `/BackupSync/Tasks/${id}/PruneExecute`,
     cronPreview: '/BackupSync/CronPreview',
+  },
+  workflows: {
+    list: '/Workflows',
+    item: (id) => `/Workflows/${id}`,
+    toggle: (id) => `/Workflows/${id}/Toggle`,
+    run: (id) => `/Workflows/${id}/Run`,
+    history: (id) => `/Workflows/${id}/History`,
   },
   remoteHosts: {
     list: '/RemoteHosts',

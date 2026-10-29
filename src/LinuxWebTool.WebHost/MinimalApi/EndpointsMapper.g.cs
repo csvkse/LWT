@@ -19,6 +19,8 @@ using static LinuxWebTool.WebHost.Features.Mount.Routes.SmbMountsController;
 using static LinuxWebTool.WebHost.Features.SystemStatus.Routes.SystemStatusController;
 using static LinuxWebTool.WebHost.Features.Transcode.Routes.TranscodeController;
 using LinuxWebTool.WebHost.Features.RemoteHost.Routes;
+using LinuxWebTool.WebHost.Features.Workflows.Routes;
+using LinuxWebTool.Contracts.Features.Workflows.Contracts;
 
 namespace LinuxWebTool.WebHost.MinimalApi
 {
@@ -47,6 +49,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             services.AddScoped<EasyTierController>();
             services.AddScoped<BackupSyncController>();
             services.AddScoped<RemoteHostsController>();
+            services.AddScoped<WorkflowsController>();
         }
 
         public static void MapAutoControllers(this WebApplication app)
@@ -76,6 +79,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             });
             group_CommandsController.MapPost("QuickExecute", async ([FromServices] CommandsController ctrl, HttpContext ctx, [FromBody] QuickExecuteRequest request) => { ctrl.HttpContext = ctx; return await ctrl.QuickExecute(request); });
             group_CommandsController.MapGet("{id:guid}/History", async ([FromServices] CommandsController ctrl, HttpContext ctx, Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20) => { ctrl.HttpContext = ctx; return await ctrl.History(id, page, pageSize); });
+            group_CommandsController.MapPost("BatchExecute", async ([FromServices] CommandsController ctrl, HttpContext ctx, [FromBody] BatchExecutionRequest request) => { ctrl.HttpContext = ctx; return await ctrl.BatchExecute(request); });
 
             var group_FilesController = app.MapGroup("/api/Files");
             group_FilesController.RequireAuthorization();
@@ -312,6 +316,26 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_RemoteHostsController.MapPost("{id}/Files/Action", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, [FromBody] RemoteFileActionRequest request) => { ctrl.HttpContext = ctx; return await ctrl.FileAction(id, request); });
             group_RemoteHostsController.MapPost("{id}/Files/Upload", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, [FromQuery] string path, IFormFile? file) => { ctrl.HttpContext = ctx; return await ctrl.UploadFile(id, path, file); }).DisableAntiforgery();
             group_RemoteHostsController.MapGet("{id}/Files/Download", async ([FromServices] RemoteHostsController ctrl, HttpContext ctx, string id, [FromQuery] string path) => { ctrl.HttpContext = ctx; return await ctrl.DownloadFile(id, path); });
+
+            var group_WorkflowsController = app.MapGroup("/api/Workflows");
+            group_WorkflowsController.RequireAuthorization();
+            group_WorkflowsController.MapGet("", async ([FromServices] WorkflowsController ctrl, HttpContext ctx, [FromQuery] Guid? groupId, [FromQuery] string? keyword) => { ctrl.HttpContext = ctx; return await ctrl.GetAll(groupId, keyword); });
+            group_WorkflowsController.MapGet("{id:guid}", async ([FromServices] WorkflowsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.GetById(id); });
+            group_WorkflowsController.MapPost("", async ([FromServices] WorkflowsController ctrl, HttpContext ctx, [FromBody] SaveWorkflowRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Create(request); });
+            group_WorkflowsController.MapPut("{id:guid}", async ([FromServices] WorkflowsController ctrl, HttpContext ctx, Guid id, [FromBody] SaveWorkflowRequest request) => { ctrl.HttpContext = ctx; return await ctrl.Update(id, request); });
+            group_WorkflowsController.MapDelete("{id:guid}", async ([FromServices] WorkflowsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Delete(id); });
+            group_WorkflowsController.MapPost("{id:guid}/Toggle", async ([FromServices] WorkflowsController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.Toggle(id); });
+            group_WorkflowsController.MapPost("{id:guid}/Run", async ([FromServices] WorkflowsController ctrl, HttpContext ctx, Guid id) =>
+            {
+                ctrl.HttpContext = ctx;
+                RunWorkflowRequest? request = null;
+                if (ctx.Request.HasJsonContentType() && ctx.Request.ContentLength is not (null or 0))
+                {
+                    request = await ctx.Request.ReadFromJsonAsync<RunWorkflowRequest>(LinuxWebTool.WebHost.Composition.AppJsonSerializerContext.Default.RunWorkflowRequest);
+                }
+                return await ctrl.Run(id, request);
+            });
+            group_WorkflowsController.MapGet("{id:guid}/History", async ([FromServices] WorkflowsController ctrl, HttpContext ctx, Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20) => { ctrl.HttpContext = ctx; return await ctrl.History(id, page, pageSize); });
         }
     }
 }

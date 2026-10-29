@@ -32,8 +32,13 @@ public partial class ScheduleStore(DbConnectionFactory factory)
         task.UpdateTime = DateTime.Now;
         using var db = factory.CreateConnection();
         var sql = @"
-INSERT INTO schedule_task (Id, Name, CommandId, CronExpression, Enabled, GroupId, IsPinned, SortOrder, TimeoutSeconds, Arguments, LastRunTime, NextRunTime, CreateTime, UpdateTime) 
-VALUES (@Id, @Name, @CommandId, @CronExpression, @Enabled, @GroupId, @IsPinned, @SortOrder, @TimeoutSeconds, @Arguments, @LastRunTime, @NextRunTime, @CreateTime, @UpdateTime)";
+INSERT INTO schedule_task (
+    Id, Name, CommandId, CronExpression, Enabled, GroupId, IsPinned, SortOrder, TimeoutSeconds, Arguments, 
+    LastRunTime, NextRunTime, CreateTime, UpdateTime, TargetHostMode, TargetHostId, TargetHostIds, FailurePolicy, TargetBizType, WorkflowId
+) VALUES (
+    @Id, @Name, @CommandId, @CronExpression, @Enabled, @GroupId, @IsPinned, @SortOrder, @TimeoutSeconds, @Arguments, 
+    @LastRunTime, @NextRunTime, @CreateTime, @UpdateTime, @TargetHostMode, @TargetHostId, @TargetHostIds, @FailurePolicy, @TargetBizType, @WorkflowId
+)";
         await db.ExecuteAsync(sql, task);
     }
 
@@ -45,7 +50,9 @@ VALUES (@Id, @Name, @CommandId, @CronExpression, @Enabled, @GroupId, @IsPinned, 
 UPDATE schedule_task SET 
     Name = @Name, CommandId = @CommandId, CronExpression = @CronExpression, Enabled = @Enabled, 
     GroupId = @GroupId, IsPinned = @IsPinned, SortOrder = @SortOrder, TimeoutSeconds = @TimeoutSeconds, 
-    Arguments = @Arguments, LastRunTime = @LastRunTime, NextRunTime = @NextRunTime, UpdateTime = @UpdateTime
+    Arguments = @Arguments, LastRunTime = @LastRunTime, NextRunTime = @NextRunTime, UpdateTime = @UpdateTime,
+    TargetHostMode = @TargetHostMode, TargetHostId = @TargetHostId, TargetHostIds = @TargetHostIds,
+    FailurePolicy = @FailurePolicy, TargetBizType = @TargetBizType, WorkflowId = @WorkflowId
 WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, task);
     }

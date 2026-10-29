@@ -12,7 +12,7 @@ public record UserInfoResponse(string userName);
 public record FileContentResponse(string path, string name, long size, string content);
 public record LogContentResponse(string name, int tail, string content);
 public record ChangeCredentialResponse(string message, bool requireRelogin);
-public record CommandItemResponse(Guid Id, string Name, string CommandText, int ScriptType, string? Description, Guid? GroupId, string? GroupName, bool IsPinned, int SortOrder, int? TimeoutSeconds, DateTime? LastExecTime, DateTime CreateTime, DateTime UpdateTime);
+public record CommandItemResponse(Guid Id, string Name, string CommandText, int ScriptType, string? Description, Guid? GroupId, string? GroupName, bool IsPinned, int SortOrder, int? TimeoutSeconds, DateTime? LastExecTime, DateTime CreateTime, DateTime UpdateTime, string? DefaultTargetHostId = null);
 public record GroupItemResponse(Guid Id, string Name, int SortOrder, DateTime CreateTime, int UsageCount);
 public record ReadFileErrorResponse(string message, bool tooLarge, bool binary);
 public record CreateFileResponse(string message, string path);
@@ -68,7 +68,7 @@ public record PresetItemResponse(Guid Id, string Name, string Container, string?
 public record WatchRuleItemResponse(Guid Id, string Name, string WatchPath, string? FilePatterns, Guid? PresetId, int OutputMode, bool Recursive, int Mode, int PollSeconds, bool Enabled, bool UseHardwareAccel, string? HardwareBackend, DateTime? LastScanTime);
 public record FileEntryResponse(string Name, string Path, bool IsDirectory, long Size, DateTime Modified, string Extension, bool IsTextual);
 public record FileListResponse(string Path, string? Parent, string Name, bool IsRoot, List<FileEntryResponse> Entries, bool IsVirtualRoot = false);
-public record ScheduleItemResponse(Guid Id, string Name, Guid CommandId, string CommandName, string CommandText, int ScriptType, string CronExpression, bool Enabled, Guid? GroupId, string? GroupName, bool IsPinned, int SortOrder, int? TimeoutSeconds, string? Arguments, DateTime? LastRunTime, DateTime? NextRunTime, DateTime CreateTime, DateTime UpdateTime);
+public record ScheduleItemResponse(Guid Id, string Name, Guid CommandId, string CommandName, string CommandText, int ScriptType, string CronExpression, bool Enabled, Guid? GroupId, string? GroupName, bool IsPinned, int SortOrder, int? TimeoutSeconds, string? Arguments, DateTime? LastRunTime, DateTime? NextRunTime, DateTime CreateTime, DateTime UpdateTime, int TargetHostMode = 0, string? TargetHostId = null, string? TargetHostIds = null, int FailurePolicy = 0, int TargetBizType = 0, string? WorkflowId = null);
 public record LogFileItemResponse(string Name, long LengthBytes, DateTime LastWriteTime);
 
 public record EnqueueResponse(string message, int count, Guid? jobId = null);

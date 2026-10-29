@@ -10,8 +10,15 @@ public partial class ExecutionStore(DbConnectionFactory factory)
         using var db = factory.CreateConnection();
         record.Id = Guid.NewGuid();
         var sql = @"
-            INSERT INTO execution_record (Id, Source, CommandId, ScheduleTaskId, CommandName, CommandText, Status, ExitCode, Output, ErrorOutput, DurationMs, TimedOut, Truncated, TriggerBy, StartTime, EndTime)
-            VALUES (@Id, @Source, @CommandId, @ScheduleTaskId, @CommandName, @CommandText, @Status, @ExitCode, @Output, @ErrorOutput, @DurationMs, @TimedOut, @Truncated, @TriggerBy, @StartTime, @EndTime)";
+            INSERT INTO execution_record (
+                Id, Source, CommandId, ScheduleTaskId, CommandName, CommandText, Status, ExitCode, 
+                Output, ErrorOutput, DurationMs, TimedOut, Truncated, TriggerBy, StartTime, EndTime,
+                TargetType, TargetHostId, TargetHostName, BatchId, StepOrder, WorkflowId
+            ) VALUES (
+                @Id, @Source, @CommandId, @ScheduleTaskId, @CommandName, @CommandText, @Status, @ExitCode, 
+                @Output, @ErrorOutput, @DurationMs, @TimedOut, @Truncated, @TriggerBy, @StartTime, @EndTime,
+                @TargetType, @TargetHostId, @TargetHostName, @BatchId, @StepOrder, @WorkflowId
+            )";
         await db.ExecuteAsync(sql, record);
         return record.Id;
     }
@@ -37,9 +44,20 @@ public partial class ExecutionStore(DbConnectionFactory factory)
             Status = status,
             CommandId = query.CommandId,
             ScheduleTaskId = query.ScheduleTaskId,
+            TargetHostId = query.TargetHostId,
+            BatchId = query.BatchId,
+            WorkflowId = query.WorkflowId,
             Keyword = keyword,
         };
-        const string whereClause = "WHERE (@Source IS NULL OR Source = @Source) AND (@Status IS NULL OR Status = @Status) AND (@CommandId IS NULL OR CommandId = @CommandId COLLATE NOCASE) AND (@ScheduleTaskId IS NULL OR ScheduleTaskId = @ScheduleTaskId COLLATE NOCASE) AND (@Keyword IS NULL OR CommandName LIKE @Keyword OR CommandText LIKE @Keyword)";
+        const string whereClause = @"WHERE (@Source IS NULL OR Source = @Source) 
+            AND (@Status IS NULL OR Status = @Status) 
+            AND (@CommandId IS NULL OR CommandId = @CommandId COLLATE NOCASE) 
+            AND (@ScheduleTaskId IS NULL OR ScheduleTaskId = @ScheduleTaskId COLLATE NOCASE) 
+            AND (@TargetHostId IS NULL OR TargetHostId = @TargetHostId COLLATE NOCASE)
+            AND (@BatchId IS NULL OR BatchId = @BatchId COLLATE NOCASE)
+            AND (@WorkflowId IS NULL OR WorkflowId = @WorkflowId COLLATE NOCASE)
+            AND (@Keyword IS NULL OR CommandName LIKE @Keyword OR CommandText LIKE @Keyword)";
+        
         var total = await db.QueryFirstOrDefaultAsync<int>($"SELECT COUNT(*) FROM execution_record {whereClause}", parameters);
         var offset = (page - 1) * pageSize;
         var records = await db.QueryAsync<ExecutionRecord>($"SELECT * FROM execution_record {whereClause} ORDER BY StartTime DESC LIMIT @PageSize OFFSET @Offset", new
@@ -48,6 +66,9 @@ public partial class ExecutionStore(DbConnectionFactory factory)
             parameters.Status,
             parameters.CommandId,
             parameters.ScheduleTaskId,
+            parameters.TargetHostId,
+            parameters.BatchId,
+            parameters.WorkflowId,
             parameters.Keyword,
             PageSize = pageSize,
             Offset = offset,
@@ -60,6 +81,14 @@ public partial class ExecutionStore(DbConnectionFactory factory)
             Page = page,
             PageSize = pageSize,
         };
+    }
+
+    public async Task<IEnumerable<ExecutionRecord>> GetByBatchIdAsync(string batchId)
+    {
+        using var db = factory.CreateConnection();
+        return await db.QueryAsync<ExecutionRecord>(
+            "SELECT * FROM execution_record WHERE BatchId = @BatchId COLLATE NOCASE ORDER BY StepOrder ASC, StartTime ASC", 
+            new { BatchId = batchId });
     }
 
     public async Task<IEnumerable<ExecutionRecord>> GetRecentAsync(int count)
