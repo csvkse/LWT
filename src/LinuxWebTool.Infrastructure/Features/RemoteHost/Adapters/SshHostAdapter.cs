@@ -120,13 +120,21 @@ public sealed class SshHostAdapter : IRemoteHostAdapter
     public async Task<IRemoteFileSystem> OpenFileSystemAsync(CancellationToken cancellationToken = default)
     {
         var connInfo = CreateConnectionInfo();
-        var sftp = new SftpClient(connInfo)
+        var sshClient = new SshClient(connInfo)
         {
-            OperationTimeout = TimeSpan.FromSeconds(15),
             KeepAliveInterval = TimeSpan.FromSeconds(20)
         };
-        await Task.Run(() => sftp.Connect(), cancellationToken);
-        return new SshRemoteFileSystem(sftp);
+        await Task.Run(() => sshClient.Connect(), cancellationToken);
+
+        var sftpClient = new SftpClient(connInfo)
+        {
+            OperationTimeout = TimeSpan.FromSeconds(5),
+            KeepAliveInterval = TimeSpan.FromSeconds(20)
+        };
+
+        var resilientFs = new ResilientRemoteFileSystem(HostId, sshClient, sftpClient, _logger);
+        await resilientFs.InitializeAsync(cancellationToken);
+        return resilientFs;
     }
 
     public async Task<RemoteCommandExecResponse> ExecuteCommandAsync(string command, TimeSpan timeout, CancellationToken cancellationToken = default)
@@ -142,10 +150,13 @@ public sealed class SshHostAdapter : IRemoteHostAdapter
         await Task.Run(() => cmd.Execute(), cancellationToken);
         sw.Stop();
 
+        var cleanOutput = AnsiOutputSanitizer.Sanitize(cmd.Result);
+        var cleanError = AnsiOutputSanitizer.Sanitize(cmd.Error);
+
         return new RemoteCommandExecResponse(
             ExitCode: cmd.ExitStatus ?? -1,
-            Output: cmd.Result ?? string.Empty,
-            ErrorOutput: cmd.Error ?? string.Empty,
+            Output: cleanOutput,
+            ErrorOutput: cleanError,
             DurationMs: sw.ElapsedMilliseconds
         );
     }

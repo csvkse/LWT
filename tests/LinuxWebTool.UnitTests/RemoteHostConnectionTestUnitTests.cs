@@ -212,4 +212,64 @@ public sealed class RemoteHostConnectionTestUnitTests : IDisposable
         // 显式传入的凭据必须优先于数据库保存的凭据
         Assert.Equal(overrideKey, resolvedCredential);
     }
+
+    [Fact]
+    public void AnsiOutputSanitizer_Strips_Osc133_And_Csi_Sequences()
+    {
+        // 场景 1：完全复现用户截图中的 OSC 133 语义标记与转义字符
+        const string rawOscInput = "\x1b]133;C\x07\x1b]133;CLinux R7 6.1.0-10-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.38-1 (2023-07-14) x86_64 GNU/Linux\x1b]133;D;0\x07";
+        var sanitized = AnsiOutputSanitizer.Sanitize(rawOscInput);
+        Assert.Equal("Linux R7 6.1.0-10-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.38-1 (2023-07-14) x86_64 GNU/Linux", sanitized);
+
+        // 场景 2：ESC 字节被剥离或显示为豆腐块后的残留 ]133;C
+        const string nakedOscInput = "]133;C]133;CLinux R7 6.1.0-10-amd64 x86_64 GNU/Linux";
+        var sanitizedNaked = AnsiOutputSanitizer.Sanitize(nakedOscInput);
+        Assert.Equal("Linux R7 6.1.0-10-amd64 x86_64 GNU/Linux", sanitizedNaked);
+
+        // 场景 3：ANSI 颜色码与控制序列
+        const string ansiColorInput = "\x1b[32mActive: active (running)\x1b[0m since Wed 2026-10-28; 1h ago";
+        var sanitizedColor = AnsiOutputSanitizer.Sanitize(ansiColorInput);
+        Assert.Equal("Active: active (running) since Wed 2026-10-28; 1h ago", sanitizedColor);
+    }
+
+    [Fact]
+    public void SshExecRemoteFileSystem_Parses_FindOutput_Correctly()
+    {
+        var rawOutput = @"
+d|4096|1698567890|755|etc
+f|1024|1698567890|644|hosts
+l|12|1698567890|777|vmlinuz
+d|4096|1698567890|750|var
+";
+        var entries = SshExecRemoteFileSystem.ParseDirectoryOutput(rawOutput, "/");
+
+        Assert.Equal(4, entries.Count);
+        // 验证目录排在前面
+        Assert.True(entries[0].IsDirectory);
+        Assert.True(entries[1].IsDirectory);
+        Assert.False(entries[2].IsDirectory);
+
+        var etc = entries.First(e => e.Name == "etc");
+        Assert.True(etc.IsDirectory);
+        Assert.Equal("/etc", etc.Path);
+        Assert.Equal("drwxr-xr-x", etc.Permissions);
+
+        var hosts = entries.First(e => e.Name == "hosts");
+        Assert.False(hosts.IsDirectory);
+        Assert.Equal("/hosts", hosts.Path);
+        Assert.Equal(1024, hosts.Size);
+        Assert.Equal("-rw-r--r--", hosts.Permissions);
+    }
+
+    [Theory]
+    [InlineData("d", "755", "drwxr-xr-x")]
+    [InlineData("f", "644", "-rw-r--r--")]
+    [InlineData("f", "777", "-rwxrwxrwx")]
+    [InlineData("d", "700", "drwx------")]
+    [InlineData("f", "0600", "-rw-------")]
+    public void SshExecRemoteFileSystem_FormatPermissions_ComputesExpectedString(string type, string octal, string expected)
+    {
+        var result = SshExecRemoteFileSystem.FormatPermissions(type, octal);
+        Assert.Equal(expected, result);
+    }
 }
