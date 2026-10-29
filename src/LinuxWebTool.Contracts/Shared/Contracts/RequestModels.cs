@@ -1,3 +1,5 @@
+using LinuxWebTool.Contracts.Features.Commands.Contracts;
+
 namespace LinuxWebTool.Contracts.Shared.Contracts;
 
 public sealed record LoginRequest(string UserName, string Password);
@@ -10,60 +12,96 @@ public sealed record ChangeCredentialRequest
     public string? NewPassword { get; init; }
 }
 
-public sealed record SaveCommandRequest
-{
-    public required string Name { get; init; }
-    public required string CommandText { get; init; }
-    /// <summary>内容类型：0=命令行 1=Bash 脚本（CommandText 为脚本正文）。</summary>
-    public ScriptType ScriptType { get; init; }
-    public string? Description { get; init; }
-    public Guid? GroupId { get; init; }
-    public bool IsPinned { get; init; }
-    public int? TimeoutSeconds { get; init; }
-}
+public sealed record SaveCommandRequest(
+    string Name,
+    string CommandText,
+    ScriptType ScriptType,
+    string? Description,
+    Guid? GroupId,
+    bool IsPinned,
+    int? TimeoutSeconds,
+    string? DefaultTargetHostId = null);
 
-/// <summary>执行已保存指令的请求体（可携带脚本位置参数）。</summary>
-public sealed record ExecuteCommandRequest
-{
-    /// <summary>位置参数原始串（引号感知拆分为 $1 $2...），如：nginx restart。</summary>
-    public string? Arguments { get; init; }
-}
+public sealed record ExecuteCommandRequest(string? Arguments = null, string? TargetHostId = null);
+public sealed record QuickExecuteRequest(string CommandText, int? TimeoutSeconds = null, string? TargetHostId = null);
 
-public sealed record QuickExecuteRequest
-{
-    public required string CommandText { get; init; }
-    public int? TimeoutSeconds { get; init; }
-}
+public sealed record SaveScheduleRequest(
+    string Name,
+    Guid CommandId,
+    string CronExpression,
+    bool Enabled,
+    Guid? GroupId,
+    bool IsPinned,
+    int? TimeoutSeconds,
+    string? Arguments,
+    TargetHostMode TargetHostMode = TargetHostMode.Local,
+    string? TargetHostId = null,
+    string? TargetHostIds = null,
+    FailurePolicy FailurePolicy = FailurePolicy.FailFast,
+    TargetBizType TargetBizType = TargetBizType.Command,
+    string? WorkflowId = null);
 
-public sealed record SaveScheduleRequest
-{
-    public required string Name { get; init; }
-    public required Guid CommandId { get; init; }
-    public required string CronExpression { get; init; }
-    public bool Enabled { get; init; } = true;
-    public Guid? GroupId { get; init; }
-    public bool IsPinned { get; init; }
-    public int? TimeoutSeconds { get; init; }
-    /// <summary>脚本位置参数原始串（仅脚本类型生效，调度执行时作为 $1 $2... 传入）。</summary>
-    public string? Arguments { get; init; }
-}
-
-public sealed record SaveGroupRequest
-{
-    public required string Name { get; init; }
-    public GroupBizType BizType { get; init; }
-    public int SortOrder { get; init; }
-}
+public sealed record SaveGroupRequest(string Name, GroupBizType BizType, int SortOrder);
 
 public sealed record ExecuteHistoryQuery
 {
-    public int? Page { get; init; } = 1;
-    public int? PageSize { get; init; } = 20;
-    public ExecutionSource? Source { get; init; }
-    public ExecutionStatus? Status { get; init; }
+    public int? Source { get; init; }
+    public int? Status { get; init; }
     public Guid? CommandId { get; init; }
     public Guid? ScheduleTaskId { get; init; }
+    public string? TargetHostId { get; init; }
+    public string? BatchId { get; init; }
+    public string? WorkflowId { get; init; }
     public string? Keyword { get; init; }
+    public int? Page { get; init; } = 1;
+    public int? PageSize { get; init; } = 20;
+}
+
+public sealed record BatchExecutionItem(
+    Guid? CommandId,
+    string CommandText,
+    int ScriptType,
+    string? Arguments,
+    int TimeoutSeconds,
+    string? TargetHostId,
+    string? Name = null);
+
+/// <summary>多指令批量执行请求。</summary>
+public sealed record BatchExecutionRequest
+{
+    public IReadOnlyList<Guid> CommandIds { get; init; } = [];
+    public IReadOnlyList<BatchExecutionItem> Commands { get; init; } = [];
+    /// <summary>统一目标主机 Id（为 null 表示本地）。</summary>
+    public string? TargetHostId { get; init; }
+    /// <summary>是否尊重各指令自身的推荐目标主机。</summary>
+    public bool RespectIndividualHost { get; init; }
+    /// <summary>执行模式：Sequential(串行), Parallel(并行)。</summary>
+    public ExecutionMode ExecutionMode { get; init; } = ExecutionMode.Sequential;
+    /// <summary>失败策略：FailFast(遇错即停), Continue(容错继续)。</summary>
+    public FailurePolicy FailurePolicy { get; init; } = FailurePolicy.FailFast;
+    /// <summary>最大并行度。</summary>
+    public int MaxConcurrency { get; init; } = 5;
+    /// <summary>全局超时秒数（可选）。</summary>
+    public int? TimeoutSeconds { get; init; }
+}
+
+/// <summary>多指令批量执行响应。</summary>
+public sealed record BatchExecutionResponse
+{
+    public string BatchId { get; init; } = string.Empty;
+    public ExecutionStatus OverallStatus { get; init; }
+    public long DurationMs { get; init; }
+    public IReadOnlyList<ExecuteResult> Results { get; init; } = [];
+
+    public BatchExecutionResponse() { }
+
+    public BatchExecutionResponse(string batchId, IReadOnlyList<ExecuteResult> results, ExecutionStatus overallStatus, long durationMs)
+    {
+        BatchId = batchId;
+        Results = results;
+        OverallStatus = overallStatus;
+        DurationMs = durationMs;
+    }
 }
 
 public sealed record OperationLogQuery

@@ -145,8 +145,9 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
             return entity.AllowTerminal;
         }
 
-        // 3. 定时调度模块
-        if (path.StartsWith("/api/Schedules", StringComparison.OrdinalIgnoreCase))
+        // 3. 定时调度与工作流模块
+        if (path.StartsWith("/api/Schedules", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/api/Workflows", StringComparison.OrdinalIgnoreCase))
         {
             return entity.AllowSchedules;
         }

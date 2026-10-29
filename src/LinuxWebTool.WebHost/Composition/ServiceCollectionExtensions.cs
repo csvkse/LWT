@@ -1,3 +1,5 @@
+using LinuxWebTool.Infrastructure.Features.Scheduling.Adapters;
+using LinuxWebTool.Infrastructure.Features.Workflows.Adapters;
 using LinuxWebTool.WebHost.MinimalApi;
 using LinuxWebTool.Infrastructure.Features.RemoteHost.Security;
 using LinuxWebTool.Infrastructure.Features.RemoteHost.Adapters;
@@ -40,6 +42,7 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<CommandStore>();
         builder.Services.AddSingleton<GroupStore>();
         builder.Services.AddSingleton<ScheduleStore>();
+        builder.Services.AddSingleton<WorkflowStore>();
         builder.Services.AddSingleton<ExecutionStore>();
         builder.Services.AddSingleton<OperationLogStore>();
         builder.Services.AddSingleton<BackupSyncStore>();
@@ -92,6 +95,17 @@ public static class ServiceCollectionExtensions
         var shellOptions = configuration.GetSection(ShellOptions.SectionName).Get<ShellOptions>() ?? new ShellOptions();
         builder.Services.AddSingleton(shellOptions);
         builder.Services.AddSingleton<IShellExecutor, ShellExecutor>();
+
+        // 统一执行引擎与工作流活动
+        builder.Services.AddHttpClient();
+        builder.Services.AddSingleton<HostCircuitBreaker>();
+        builder.Services.AddSingleton<LocalCommandExecutionStrategy>();
+        builder.Services.AddSingleton<RemoteSshCommandExecutionStrategy>();
+        builder.Services.AddSingleton<ExecutionStrategyResolver>();
+        builder.Services.AddSingleton<IWorkflowActivity, ShellCommandActivity>();
+        builder.Services.AddSingleton<IWorkflowActivity, HttpWebhookActivity>();
+        builder.Services.AddSingleton<ActivityRegistry>();
+        builder.Services.AddSingleton<IUnifiedExecutionEngine, UnifiedExecutionEngine>();
 
         // 终端 PTY 引擎与会话管理
         builder.Services.AddSingleton<IPtyEngine, LinuxWebTool.Infrastructure.Features.Terminal.Platform.CrossPlatformPtyEngine>();

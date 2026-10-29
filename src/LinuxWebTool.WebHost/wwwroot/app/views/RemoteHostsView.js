@@ -1168,7 +1168,6 @@ export default defineComponent({
             支持 SSH 凭据与公钥认证、Web PTY 终端交互、非交互式自动化运维与 SFTP 远端文件管理
           </p>
         </div>
-
         <div class="flex items-center gap-3">
           <button class="btn btn-secondary text-xs" :disabled="loading" @click="loadHosts()">
             <span v-if="loading" class="animate-spin">↻</span>
@@ -1181,7 +1180,6 @@ export default defineComponent({
           </button>
         </div>
       </div>
-
       <!-- 搜索与协议筛选栏 -->
       <div class="panel p-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
         <div class="flex items-center gap-2 w-full sm:w-auto">
@@ -1194,7 +1192,6 @@ export default defineComponent({
             <option value="agent" disabled>LWT Agent (规划中)</option>
           </select>
         </div>
-
         <div class="w-full sm:w-80">
           <input
             v-model="searchQuery"
@@ -1204,7 +1201,6 @@ export default defineComponent({
           />
         </div>
       </div>
-
       <!-- 主机资产列表为空状态 -->
       <div v-if="!loading && filteredHosts.length === 0" class="panel p-12 text-center text-slate-400 flex flex-col items-center gap-3">
         <div class="text-4xl text-slate-600">🖥</div>
@@ -1212,14 +1208,12 @@ export default defineComponent({
         <p class="text-xs text-slate-500">点击右上角「添加远程主机」，配置您的第一台 Linux 或网络服务器</p>
         <button class="btn btn-primary text-xs mt-2" @click="openAddModal()">立即添加</button>
       </div>
-
       <!-- 主机资产卡片网格 -->
       <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <div
           v-for="host in filteredHosts"
           :key="host.id"
-          class="panel p-4 flex flex-col justify-between gap-4 border-slate-700/80 hover:border-cyan-500/50 transition-colors"
-        >
+          class="panel p-4 flex flex-col justify-between gap-4 border-slate-700/80 hover:border-cyan-500/50 transition-colors">
           <!-- 卡片头部: 状态指示灯、名称与协议标签 -->
           <div class="flex flex-col gap-2">
             <div class="flex items-center justify-between">
@@ -1241,7 +1235,6 @@ export default defineComponent({
                 </span>
               </div>
             </div>
-
             <!-- 网络地址与登录用户 -->
             <div class="flex items-center justify-between text-xs text-slate-400 bg-slate-900/50 px-2.5 py-1.5 rounded border border-slate-800">
               <div class="flex items-center gap-1 font-mono text-slate-300 truncate">
@@ -1253,55 +1246,44 @@ export default defineComponent({
               <button
                 class="text-[11px] text-cyan-400 hover:text-cyan-300 ml-2 shrink-0 cursor-pointer"
                 title="复制主机地址"
-                @click="copyText(host.host)"
-              >
+                @click="copyText(host.host)">
                 复制
               </button>
             </div>
-
             <!-- 属性元数据: 认证方式、指纹、标签与延迟 -->
             <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
               <span class="badge border-slate-700 text-slate-300">
                 {{ host.authType === 'PrivateKey' ? '🔑 密钥认证' : '🔒 密码认证' }}
               </span>
-
               <span
                 v-if="latenciesMap[host.id]?.success"
-                class="badge border-emerald-500/40 text-emerald-300 bg-emerald-950/30"
-              >
+                class="badge border-emerald-500/40 text-emerald-300 bg-emerald-950/30">
                 ⚡ {{ latenciesMap[host.id].latencyMs }} ms
               </span>
               <span
                 v-else-if="latenciesMap[host.id]?.error"
                 class="badge border-rose-500/40 text-rose-300 bg-rose-950/30 truncate max-w-[120px]"
-                :title="latenciesMap[host.id].error"
-              >
+                :title="latenciesMap[host.id].error">
                 ⚠ 连接异常
               </span>
-
               <span
                 v-if="host.hostKeyFingerprint"
                 class="badge border-indigo-500/40 text-indigo-300 bg-indigo-950/30 font-mono text-[10px]"
-                :title="host.hostKeyFingerprint"
-              >
+                :title="host.hostKeyFingerprint">
                 ✓ 指纹已存
               </span>
-
               <span
                 v-if="host.tags"
                 v-for="tag in host.tags.split(',').filter(Boolean)"
                 :key="tag"
-                class="badge border-cyan-800/60 text-cyan-400/90 text-[10px]"
-              >
+                class="badge border-cyan-800/60 text-cyan-400/90 text-[10px]">
                 #{{ tag.trim() }}
               </span>
             </div>
-
             <p v-if="host.remark" class="text-xs text-slate-400/80 line-clamp-2 mt-0.5">
               {{ host.remark }}
             </p>
           </div>
-
           <!-- 卡片底部操作栏 -->
           <div class="flex flex-col gap-2 pt-2 border-t border-slate-800/80">
             <!-- 核心功能入口: 终端 / 指令 / 文件 -->
@@ -1309,54 +1291,44 @@ export default defineComponent({
               <button
                 class="btn btn-secondary text-xs py-1.5 px-2 flex items-center justify-center gap-1 border-cyan-500/40 hover:bg-cyan-950/40 text-cyan-300"
                 title="开启交互式 Web 终端"
-                @click="openTerminal(host)"
-              >
+                @click="openTerminal(host)">
                 <span>💻</span>
                 <span>终端</span>
               </button>
-
               <button
                 class="btn btn-secondary text-xs py-1.5 px-2 flex items-center justify-center gap-1 hover:text-slate-100"
                 title="非交互式远程运行 Shell 指令"
-                @click="openExecModal(host)"
-              >
+                @click="openExecModal(host)">
                 <span>⚡</span>
                 <span>指令</span>
               </button>
-
               <button
                 class="btn btn-secondary text-xs py-1.5 px-2 flex items-center justify-center gap-1 hover:text-slate-100"
                 title="浏览 SFTP 远程文件系统"
-                @click="openFilesModal(host)"
-              >
+                @click="openFilesModal(host)">
                 <span>📁</span>
                 <span>文件</span>
               </button>
             </div>
-
             <!-- 次要操作: 测速 / 编辑 / 删除 -->
             <div class="flex items-center justify-between text-xs text-slate-400">
               <button
                 class="hover:text-cyan-300 flex items-center gap-1 cursor-pointer"
                 :disabled="testingMap[host.id]"
-                @click="testHostInline(host)"
-              >
+                @click="testHostInline(host)">
                 <span v-if="testingMap[host.id]" class="animate-spin text-cyan-400">↻</span>
                 <span v-else>⚡</span>
                 <span>测试连接</span>
               </button>
-
               <div class="flex items-center gap-3">
                 <button
                   class="hover:text-slate-200 cursor-pointer"
-                  @click="openEditModal(host)"
-                >
+                  @click="openEditModal(host)">
                   编辑
                 </button>
                 <button
                   class="hover:text-rose-400 cursor-pointer"
-                  @click="deleteHost(host)"
-                >
+                  @click="deleteHost(host)">
                   删除
                 </button>
               </div>
@@ -1364,7 +1336,6 @@ export default defineComponent({
           </div>
         </div>
       </div>
-
       <!-- ==================== 弹窗 1: 添加 / 编辑远程主机 ==================== -->
       <div v-if="showEditModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="panel w-full max-w-xl p-5 flex flex-col gap-4 border-slate-700 max-h-[90vh] overflow-y-auto">
@@ -1375,7 +1346,6 @@ export default defineComponent({
             </h3>
             <button class="text-slate-400 hover:text-slate-200 text-lg" @click="showEditModal = false">×</button>
           </div>
-
           <form class="flex flex-col gap-4 text-xs" @submit.prevent="saveHost()">
             <!-- 主机名与协议 -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1389,7 +1359,6 @@ export default defineComponent({
                   placeholder="例如: 生产网关 / 备份机器"
                 />
               </div>
-
               <div>
                 <label class="block text-slate-300 mb-1 font-medium">连接协议</label>
                 <select v-model="form.protocol" class="input">
@@ -1397,14 +1366,12 @@ export default defineComponent({
                     v-for="opt in PROTOCOL_OPTIONS"
                     :key="opt.value"
                     :value="opt.value"
-                    :disabled="!opt.available"
-                  >
+                    :disabled="!opt.available">
                     {{ opt.label }}
                   </option>
                 </select>
               </div>
             </div>
-
             <!-- 主机 IP 地址与端口 -->
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div class="sm:col-span-2">
@@ -1417,7 +1384,6 @@ export default defineComponent({
                   placeholder="192.168.1.100 或 server.internal"
                 />
               </div>
-
               <div>
                 <label class="block text-slate-300 mb-1 font-medium">端口号</label>
                 <input
@@ -1430,7 +1396,6 @@ export default defineComponent({
                 />
               </div>
             </div>
-
             <!-- 登录凭据配置: 用户名与认证类型 -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -1443,7 +1408,6 @@ export default defineComponent({
                   placeholder="root"
                 />
               </div>
-
               <div>
                 <label class="block text-slate-300 mb-1 font-medium">认证方式</label>
                 <select v-model="form.authType" class="input">
@@ -1452,7 +1416,6 @@ export default defineComponent({
                 </select>
               </div>
             </div>
-
             <!-- 凭据输入区 (根据认证方式切换) -->
             <div v-if="form.authType === 'Password'" class="flex flex-col gap-1">
               <div class="flex items-center justify-between">
@@ -1460,8 +1423,7 @@ export default defineComponent({
                 <button
                   type="button"
                   class="text-cyan-400 hover:text-cyan-300 text-[11px]"
-                  @click="showPassword = !showPassword"
-                >
+                  @click="showPassword = !showPassword">
                   {{ showPassword ? '隐藏密码' : '显示密码' }}
                 </button>
               </div>
@@ -1473,7 +1435,6 @@ export default defineComponent({
                 placeholder="请输入服务器远程密码"
               />
             </div>
-
             <div v-else class="flex flex-col gap-3">
               <div>
                 <label class="block text-slate-300 mb-1 font-medium">SSH 私钥内容 {{ isEdit ? '(留空保留原有私钥)' : '*' }}</label>
@@ -1485,7 +1446,6 @@ export default defineComponent({
                   placeholder="-----BEGIN OPENSSH PRIVATE KEY----- 或 -----BEGIN RSA PRIVATE KEY-----"
                 ></textarea>
               </div>
-
               <div>
                 <label class="block text-slate-300 mb-1 font-medium">私钥口令 Passphrase (若私钥加密请输入)</label>
                 <input
@@ -1496,7 +1456,6 @@ export default defineComponent({
                 />
               </div>
             </div>
-
             <!-- 主机公钥指纹 (可选，带探测按钮) -->
             <div>
               <div class="flex items-center justify-between mb-1">
@@ -1505,8 +1464,7 @@ export default defineComponent({
                   type="button"
                   class="text-cyan-400 hover:text-cyan-300 text-[11px] flex items-center gap-1 cursor-pointer"
                   :disabled="probingKey"
-                  @click="probeFingerprint()"
-                >
+                  @click="probeFingerprint()">
                   <span v-if="probingKey" class="animate-spin">↻</span>
                   <span>探测指纹</span>
                 </button>
@@ -1518,7 +1476,6 @@ export default defineComponent({
                 placeholder="SHA256:4x9j... (支持一键探测自动填充)"
               />
             </div>
-
             <!-- 标签与备注 -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -1530,7 +1487,6 @@ export default defineComponent({
                   placeholder="例如: prod, web, k8s"
                 />
               </div>
-
               <div>
                 <label class="block text-slate-300 mb-1 font-medium">排序权重</label>
                 <input
@@ -1541,7 +1497,6 @@ export default defineComponent({
                 />
               </div>
             </div>
-
             <div>
               <label class="block text-slate-300 mb-1 font-medium">备注说明</label>
               <input
@@ -1551,38 +1506,32 @@ export default defineComponent({
                 placeholder="例如: 机房 3 号机架物理机"
               />
             </div>
-
             <!-- 连通性测试结果提示区 -->
             <div v-if="formTestResult" class="p-2.5 rounded text-xs border" :class="formTestResult.success ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-300' : 'bg-rose-950/30 border-rose-500/40 text-rose-300'">
               <span v-if="formTestResult.success">✓ 测试连通正常，响应延迟: {{ formTestResult.latencyMs }} ms</span>
               <span v-else>✕ 测试连接失败: {{ formTestResult.error }}</span>
             </div>
-
             <!-- 操作按钮 -->
             <div class="flex items-center justify-between pt-3 border-t border-slate-700/60 mt-1">
               <button
                 type="button"
                 class="btn btn-secondary text-xs flex items-center gap-1"
                 :disabled="testingForm"
-                @click="testFormConnection()"
-              >
+                @click="testFormConnection()">
                 <span v-if="testingForm" class="animate-spin">↻</span>
                 <span v-else>⚡</span>
                 <span>测试连接</span>
               </button>
-
               <div class="flex items-center gap-2">
                 <button
                   type="button"
                   class="btn btn-secondary text-xs"
-                  @click="showEditModal = false"
-                >
+                  @click="showEditModal = false">
                   取消
                 </button>
                 <button
                   type="submit"
-                  class="btn btn-primary text-xs"
-                >
+                  class="btn btn-primary text-xs">
                   保存配置
                 </button>
               </div>
@@ -1590,7 +1539,6 @@ export default defineComponent({
           </form>
         </div>
       </div>
-
       <!-- ==================== 弹窗 2: 交互式 Web 终端 ==================== -->
       <div v-if="showTerminalModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-2 sm:p-4">
         <div class="panel w-full max-w-5xl h-[85vh] flex flex-col border-cyan-500/40 shadow-2xl overflow-hidden">
@@ -1609,28 +1557,23 @@ export default defineComponent({
                   'border-emerald-500/50 text-emerald-300 bg-emerald-950/30': terminalStatus === 'connected',
                   'border-amber-500/50 text-amber-300 bg-amber-950/30': terminalStatus === 'disconnected',
                   'border-rose-500/50 text-rose-300 bg-rose-950/30': terminalStatus === 'error',
-                }"
-              >
+                }">
                 {{ terminalStatus === 'connected' ? '● 会话就绪' : terminalStatus === 'connecting' ? '○ 连接中' : terminalStatus === 'disconnected' ? '已断开' : '错误' }}
               </span>
             </div>
-
             <div class="flex items-center gap-2">
               <button
                 class="btn btn-secondary text-xs py-1 px-2 text-cyan-300 border-cyan-500/30 hover:bg-cyan-950/30"
-                @click="reconnectTerminal()"
-              >
+                @click="reconnectTerminal()">
                 重新连接
               </button>
               <button
                 class="text-slate-400 hover:text-slate-100 text-lg px-2 cursor-pointer"
-                @click="closeTerminalModal()"
-              >
+                @click="closeTerminalModal()">
                 ×
               </button>
             </div>
           </div>
-
           <!-- 快捷命令工具条 -->
           <div class="flex items-center gap-2 px-3 py-1.5 bg-slate-950/80 border-b border-slate-800/80 overflow-x-auto shrink-0 text-xs">
             <span class="text-slate-500 text-[11px] shrink-0">快捷指令:</span>
@@ -1638,19 +1581,16 @@ export default defineComponent({
               v-for="cmd in QUICK_COMMANDS"
               :key="cmd.label"
               class="btn btn-secondary text-[11px] py-0.5 px-2 text-slate-300 hover:text-cyan-300 hover:border-cyan-500/50"
-              @click="sendQuickCmd(cmd.cmd)"
-            >
+              @click="sendQuickCmd(cmd.cmd)">
               {{ cmd.label }}
             </button>
           </div>
-
           <!-- xterm 挂载容器 -->
           <div class="flex-1 bg-[#0c0c0c] p-2 overflow-hidden relative">
             <div ref="terminalContainer" class="w-full h-full"></div>
           </div>
         </div>
       </div>
-
       <!-- ==================== 弹窗 3: 远程指令非交互式执行 ==================== -->
       <div v-if="showExecModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="panel w-full max-w-2xl p-5 flex flex-col gap-4 border-slate-700 max-h-[90vh] overflow-y-auto">
@@ -1661,7 +1601,6 @@ export default defineComponent({
             </div>
             <button class="text-slate-400 hover:text-slate-200 text-lg" @click="closeExecModal()">×</button>
           </div>
-
           <div class="flex flex-col gap-3 text-xs">
             <!-- 预置快捷指令 -->
             <div class="flex flex-wrap items-center gap-1.5">
@@ -1670,12 +1609,10 @@ export default defineComponent({
                 v-for="preset in EXEC_PRESETS"
                 :key="preset.label"
                 class="badge border-slate-700 hover:border-cyan-500/60 text-slate-300 hover:text-cyan-300 cursor-pointer"
-                @click="applyExecPreset(preset.cmd)"
-              >
+                @click="applyExecPreset(preset.cmd)">
                 {{ preset.label }}
               </button>
             </div>
-
             <!-- 指令输入框 -->
             <div>
               <label class="block text-slate-300 mb-1 font-medium">Shell 指令 *</label>
@@ -1686,7 +1623,6 @@ export default defineComponent({
                 placeholder="例如: docker ps -a 或 systemctl status nginx"
               ></textarea>
             </div>
-
             <!-- 超时设置与执行按钮 -->
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
@@ -1700,18 +1636,15 @@ export default defineComponent({
                 />
                 <span class="text-slate-500">秒</span>
               </div>
-
               <button
                 class="btn btn-primary text-xs flex items-center gap-1 px-4"
                 :disabled="executing"
-                @click="runExecCommand()"
-              >
+                @click="runExecCommand()">
                 <span v-if="executing" class="animate-spin">↻</span>
                 <span v-else>▶</span>
                 <span>{{ executing ? '正在远端执行...' : '立即执行' }}</span>
               </button>
             </div>
-
             <!-- 执行结果展示区 -->
             <div v-if="execResult" class="flex flex-col gap-2 mt-2">
               <div class="flex items-center justify-between text-xs px-2 py-1 bg-slate-900 rounded border border-slate-800">
@@ -1719,8 +1652,7 @@ export default defineComponent({
                   <span>退出码:</span>
                   <span
                     class="font-mono font-bold"
-                    :class="execResult.exitCode === 0 ? 'text-emerald-400' : 'text-rose-400'"
-                  >
+                    :class="execResult.exitCode === 0 ? 'text-emerald-400' : 'text-rose-400'">
                     {{ execResult.exitCode }}
                   </span>
                 </div>
@@ -1728,13 +1660,11 @@ export default defineComponent({
                   执行耗时: <span class="text-cyan-300 font-mono">{{ execResult.durationMs }} ms</span>
                 </div>
               </div>
-
               <!-- STDOUT 输出 -->
               <div v-if="execResult.output" class="flex flex-col gap-1">
                 <span class="text-slate-400 text-[11px]">标准输出 (STDOUT):</span>
                 <pre class="bg-black/80 text-slate-200 font-mono text-xs p-3 rounded border border-slate-800 max-h-60 overflow-y-auto whitespace-pre-wrap">{{ execResult.output }}</pre>
               </div>
-
               <!-- STDERR 输出 -->
               <div v-if="execResult.errorOutput || execResult.error" class="flex flex-col gap-1">
                 <span class="text-rose-400 text-[11px]">标准错误 (STDERR):</span>
@@ -1744,7 +1674,6 @@ export default defineComponent({
           </div>
         </div>
       </div>
-
       <!-- ==================== 弹窗 4: SFTP 远端文件浏览器 ==================== -->
       <div v-if="showFilesModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-2 sm:p-4">
         <div class="panel w-full max-w-5xl h-[85vh] flex flex-col border-slate-700 shadow-2xl overflow-hidden">
@@ -1758,7 +1687,6 @@ export default defineComponent({
             </div>
             <button class="text-slate-400 hover:text-slate-100 text-lg px-2 cursor-pointer" @click="closeFilesModal()">×</button>
           </div>
-
           <!-- 导航路径栏与快捷操作 -->
           <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 px-4 py-2 bg-slate-950/60 border-b border-slate-800/80 text-xs shrink-0">
             <!-- 面包屑与快速路径跳转 -->
@@ -1767,24 +1695,20 @@ export default defineComponent({
                 class="btn btn-secondary text-xs py-1 px-2 shrink-0"
                 :disabled="currentPath === '/'"
                 title="返回上一级"
-                @click="goUpDir()"
-              >
+                @click="goUpDir()">
                 ↑ 上一级
               </button>
-
               <div class="flex items-center gap-1 overflow-x-auto py-0.5">
                 <button
                   v-for="(seg, idx) in breadcrumbSegments"
                   :key="seg.path"
                   class="hover:text-cyan-300 text-slate-300 shrink-0 cursor-pointer"
-                  @click="loadFiles(seg.path)"
-                >
+                  @click="loadFiles(seg.path)">
                   <span v-if="idx > 0" class="text-slate-600 mr-1">/</span>
                   <span>{{ seg.name }}</span>
                 </button>
               </div>
             </div>
-
             <!-- 动作按钮: 路径直接前往 / 新建文件夹 / 刷新 -->
             <div class="flex items-center gap-2 shrink-0">
               <div class="flex items-center">
@@ -1797,45 +1721,38 @@ export default defineComponent({
                 />
                 <button
                   class="btn btn-secondary text-xs py-1 px-2.5 rounded-l-none border-l-0"
-                  @click="jumpToPath()"
-                >
+                  @click="jumpToPath()">
                   前往
                 </button>
               </div>
-
               <input
                 ref="fileUploadInput"
                 type="file"
                 class="hidden"
-                @change="onFileSelected"
+                @change="onFileSelected($event)"
               />
               <button
                 class="btn btn-secondary text-xs py-1 px-2.5 flex items-center gap-1"
                 :disabled="filesLoading"
                 title="上传文件到当前目录"
-                @click="triggerFileUpload()"
-              >
+                @click="triggerFileUpload()">
                 <span>↑</span>
                 <span>上传</span>
               </button>
-
               <button class="btn btn-secondary text-xs py-1 px-2.5" @click="openMkdirDialog()">
                 ＋ 新建文件夹
               </button>
-
               <button class="btn btn-secondary text-xs py-1 px-2" :disabled="filesLoading" @click="loadFiles(currentPath)">
                 <span v-if="filesLoading" class="animate-spin">↻</span>
                 <span v-else>↻</span>
               </button>
             </div>
           </div>
-
           <!-- 错误提示 -->
           <div v-if="filesError" class="p-3 bg-rose-950/30 border-b border-rose-900/40 text-rose-300 text-xs flex items-center justify-between shrink-0">
             <span>⚠ {{ filesError }}</span>
             <button class="text-rose-400 hover:text-rose-200 underline" @click="loadFiles('/')">返回根目录</button>
           </div>
-
           <!-- 文件列表区域 -->
           <div class="flex-1 overflow-y-auto p-4 bg-slate-900/30">
             <div v-if="filesLoading && fileEntries.length === 0" class="flex flex-col items-center justify-center h-48 text-slate-400 text-xs gap-3">
@@ -1846,17 +1763,14 @@ export default defineComponent({
               <button
                 type="button"
                 class="px-2.5 py-1 text-xs text-rose-400 hover:text-rose-300 border border-rose-800/50 rounded bg-rose-950/20 hover:bg-rose-900/30 transition-colors"
-                @click="filesLoading = false; filesError = '已手动取消目录读取等待'"
-              >
+                @click="filesLoading = false; filesError = '已手动取消目录读取等待'">
                 取消等待
               </button>
             </div>
-
             <div v-else-if="fileEntries.length === 0" class="flex flex-col items-center justify-center h-48 text-slate-500 text-xs gap-2">
               <span class="text-3xl">📂</span>
               <span>当前目录为空</span>
             </div>
-
             <table v-else class="data-table">
               <thead>
                 <tr>
@@ -1872,70 +1786,59 @@ export default defineComponent({
                   v-for="entry in fileEntries"
                   :key="entry.path"
                   class="hover:bg-cyan-950/20 cursor-pointer"
-                  @click="navigateToFile(entry)"
-                >
+                  @click="navigateToFile(entry)">
                   <td class="font-medium text-slate-200">
                     <div class="flex items-center gap-2">
                       <span class="text-sm shrink-0">{{ entry.isDirectory ? '📁' : '📄' }}</span>
                       <span class="truncate hover:text-cyan-300" :title="entry.name">{{ entry.name }}</span>
                     </div>
                   </td>
-
                   <td class="font-mono text-slate-400 text-xs">
                     {{ entry.permissions || '—' }}
                   </td>
-
                   <td class="font-mono text-slate-400 text-xs">
                     {{ entry.isDirectory ? '—' : formatBytes(entry.size) }}
                   </td>
-
                   <td class="text-slate-400 text-xs">
                     {{ formatTime(entry.lastModified) }}
                   </td>
-
                   <td class="text-right" @click.stop="">
                     <div class="flex items-center justify-end gap-2 text-xs">
                       <button
                         v-if="!entry.isDirectory"
                         class="text-cyan-400 hover:text-cyan-300 cursor-pointer"
                         title="查看与编辑文件内容"
-                        @click="openFileEditor(entry)"
-                      >
+                        @click="openFileEditor(entry)">
                         编辑
                       </button>
                       <button
                         class="text-emerald-400 hover:text-emerald-300 cursor-pointer"
                         :title="entry.isDirectory ? '打包为 tar.gz 下载' : '下载文件'"
-                        @click="downloadEntry(entry)"
-                      >
+                        @click="downloadEntry(entry)">
                         下载
                       </button>
                       <button
                         class="text-amber-400 hover:text-amber-300 cursor-pointer"
                         title="复制副本或复制到指定路径"
-                        @click="openCopyDialog(entry)"
-                      >
+                        @click="openCopyDialog(entry)">
                         复制
                       </button>
                       <button
                         class="text-indigo-400 hover:text-indigo-300 cursor-pointer"
                         title="移动到新路径或新目录"
-                        @click="openMoveDialog(entry)"
-                      >
+                        @click="openMoveDialog(entry)">
                         移动
                       </button>
                       <button
                         class="text-slate-400 hover:text-slate-200 cursor-pointer"
                         title="重命名"
-                        @click="openRenameDialog(entry)"
-                      >
+                        @click="openRenameDialog(entry)">
                         重命名
                       </button>
                       <button
                         class="text-rose-400 hover:text-rose-300 cursor-pointer"
                         title="删除"
-                        @click="deleteEntry(entry)"
-                      >
+                        @click="deleteEntry(entry)">
                         删除
                       </button>
                     </div>
@@ -1946,7 +1849,6 @@ export default defineComponent({
           </div>
         </div>
       </div>
-
       <!-- ==================== 弹窗 5: 远端文本文件在线编辑 ==================== -->
       <div v-if="showEditorModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
         <div class="panel w-full max-w-4xl h-[85vh] flex flex-col border-cyan-500/40 shadow-2xl overflow-hidden">
@@ -1958,7 +1860,6 @@ export default defineComponent({
             </div>
             <button class="text-slate-400 hover:text-slate-100 text-lg px-2 cursor-pointer" @click="closeFileEditor()">×</button>
           </div>
-
           <div class="flex-1 bg-black/90 p-3 overflow-hidden flex flex-col">
             <div v-if="editorLoading" class="flex items-center justify-center h-full text-slate-400 text-xs">
               <span class="animate-spin text-lg mr-2">↻</span>
@@ -1971,7 +1872,6 @@ export default defineComponent({
               placeholder="文件为空"
             ></textarea>
           </div>
-
           <div class="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-t border-slate-800 shrink-0">
             <span class="text-xs text-slate-400">
               字符数: {{ editorContent.length }} · UTF-8
@@ -1981,8 +1881,7 @@ export default defineComponent({
               <button
                 class="btn btn-primary text-xs flex items-center gap-1"
                 :disabled="editorSaving"
-                @click="saveFileEditor()"
-              >
+                @click="saveFileEditor()">
                 <span v-if="editorSaving" class="animate-spin">↻</span>
                 <span v-else>💾</span>
                 <span>{{ editorSaving ? '保存中...' : '保存更改' }}</span>
@@ -1991,7 +1890,6 @@ export default defineComponent({
           </div>
         </div>
       </div>
-
       <!-- ==================== 弹窗 6: 新建文件夹 ==================== -->
       <div v-if="showMkdirModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="panel w-full max-w-sm p-5 flex flex-col gap-4 border-slate-700">
@@ -2012,7 +1910,6 @@ export default defineComponent({
           </div>
         </div>
       </div>
-
       <!-- ==================== 弹窗 7: 重命名 ==================== -->
       <div v-if="showRenameModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="panel w-full max-w-sm p-5 flex flex-col gap-4 border-slate-700">
@@ -2033,7 +1930,6 @@ export default defineComponent({
           </div>
         </div>
       </div>
-
       <!-- ==================== 弹窗 8: 复制文件或目录 ==================== -->
       <div v-if="showCopyModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="panel w-full max-w-sm p-5 flex flex-col gap-4 border-slate-700">
@@ -2058,7 +1954,6 @@ export default defineComponent({
           </div>
         </div>
       </div>
-
       <!-- ==================== 弹窗 9: 移动文件或目录 ==================== -->
       <div v-if="showMoveModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="panel w-full max-w-sm p-5 flex flex-col gap-4 border-slate-700">

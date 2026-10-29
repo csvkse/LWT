@@ -22,6 +22,7 @@ const NAV_GROUPS = [
       { path: '/remote-hosts', label: '远程主机', desc: '多协议远端服务器管理、终端与文件' },
       { path: '/terminal', label: 'Web 终端', desc: '网页交互式 PTY 终端会话' },
       { path: '/commands', label: '指令管理', desc: 'Linux 常用脚本库与执行' },
+      { path: '/workflows', label: '工作流编排', desc: '串并行流水线与多活动编排' },
       { path: '/schedules', label: '定时任务', desc: 'Quartz Cron 周期调度' },
       { path: '/system', label: '系统监控', desc: 'CPU / 内存 / 磁盘 / 进程' },
     ],

@@ -1,3 +1,5 @@
+using LinuxWebTool.Contracts.Features.Workflows.Contracts;
+using LinuxWebTool.Contracts.Features.Commands.Contracts;
 using System.Text.Json.Serialization;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 using LinuxWebTool.Infrastructure.Shared.Persistence;
@@ -248,6 +250,32 @@ namespace LinuxWebTool.WebHost.Composition;
 // RemoteHost Models
 [JsonSerializable(typeof(CreateRemoteHostRequest))]
 [JsonSerializable(typeof(UpdateRemoteHostRequest))]
+// Workflow and Batch Execution Models
+[JsonSerializable(typeof(BatchExecutionRequest))]
+[JsonSerializable(typeof(BatchExecutionItem))]
+[JsonSerializable(typeof(List<BatchExecutionItem>))]
+[JsonSerializable(typeof(BatchExecutionResponse))]
+[JsonSerializable(typeof(WorkflowDefinition))]
+[JsonSerializable(typeof(WorkflowStage))]
+[JsonSerializable(typeof(List<WorkflowStage>))]
+[JsonSerializable(typeof(WorkflowStep))]
+[JsonSerializable(typeof(List<WorkflowStep>))]
+[JsonSerializable(typeof(SaveWorkflowRequest))]
+[JsonSerializable(typeof(WorkflowItemResponse))]
+[JsonSerializable(typeof(List<WorkflowItemResponse>))]
+[JsonSerializable(typeof(ToggleWorkflowResponse))]
+[JsonSerializable(typeof(RunWorkflowRequest))]
+[JsonSerializable(typeof(WorkflowEntity))]
+[JsonSerializable(typeof(List<WorkflowEntity>))]
+[JsonSerializable(typeof(StandardExecutionResult))]
+[JsonSerializable(typeof(ExecutionTarget))]
+[JsonSerializable(typeof(CommandExecutionContext))]
+[JsonSerializable(typeof(ExecuteResult))]
+[JsonSerializable(typeof(List<ExecuteResult>))]
+[JsonSerializable(typeof(ExecutionRecord))]
+[JsonSerializable(typeof(List<ExecutionRecord>))]
+[JsonSerializable(typeof(PagedResult<ExecutionRecord>))]
+[JsonSerializable(typeof(ExecuteHistoryQuery))]
 [JsonSerializable(typeof(RemoteHostItemResponse))]
 [JsonSerializable(typeof(List<RemoteHostItemResponse>))]
 [JsonSerializable(typeof(TestRemoteHostRequest))]
