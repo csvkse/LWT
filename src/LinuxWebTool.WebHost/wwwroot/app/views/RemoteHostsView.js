@@ -1,7 +1,7 @@
 import { defineComponent, ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { Terminal } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { http } from '../api/client.js';
+import { http, httpDownload } from '../api/client.js';
 import { API } from '../config.js';
 import { auth } from '../store/auth.js';
 import { openConfirm } from '../store/modal.js';
@@ -930,19 +930,19 @@ export default defineComponent({
       }
     }
 
-    // 文件与目录打包下载
-    function downloadEntry(entry) {
-      if (!filesHost.value) return;
+    // 文件下载
+    async function downloadEntry(entry) {
+      if (!filesHost.value || !entry?.path) return;
+      if (entry.isDirectory) {
+        toast.warning('暂不支持直接下载整个远程目录，请在远程主机压缩后再下载');
+        return;
+      }
+      toast.info(`正在下载: ${entry.name}...`);
       const url = API.remoteHosts.fileDownload(filesHost.value.id, entry.path);
-      const token = auth.token;
-      const fullUrl = `/api${url}` + (url.includes('?') ? '&' : '?') + (token ? `token=${encodeURIComponent(token)}` : '');
-      const link = document.createElement('a');
-      link.href = fullUrl;
-      link.download = entry.isDirectory ? `${entry.name}.tar.gz` : entry.name;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      toast.info(`已发起下载: ${entry.name}`);
+      const res = await httpDownload(url);
+      if (res && res.ok) {
+        toast.success(`下载完成: ${res.filename || entry.name}`);
+      }
     }
 
     // 复制弹窗与操作
@@ -1813,7 +1813,7 @@ export default defineComponent({
                       </button>
                       <button
                         class="text-emerald-400 hover:text-emerald-300 cursor-pointer"
-                        :title="entry.isDirectory ? '打包为 tar.gz 下载' : '下载文件'"
+                        :title="entry.isDirectory ? '暂不支持直接下载目录，请先压缩' : '下载文件'"
                         @click="downloadEntry(entry)">
                         下载
                       </button>
