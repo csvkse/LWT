@@ -113,6 +113,7 @@ export const API = {
     delete: (id) => `/ApiKeys/${id}`,
     toggle: (id) => `/ApiKeys/${id}/Toggle`,
     clone: (id) => `/ApiKeys/${id}/Clone`,
+    mcpCatalog: '/ApiKeys/McpCatalog',
   },
   frp: {
     lines: '/FrpTunnel/Lines',

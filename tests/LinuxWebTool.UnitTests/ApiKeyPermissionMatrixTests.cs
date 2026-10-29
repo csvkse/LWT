@@ -38,6 +38,10 @@ public sealed class ApiKeyPermissionMatrixTests
     [Theory]
     [InlineData("terminal_create", true, false, false, false, false, false, true)]
     [InlineData("terminal_create", false, false, false, false, false, false, false)]
+    [InlineData("command_run", true, false, false, false, false, false, true)]
+    [InlineData("command_run", false, false, false, false, false, false, false)]
+    [InlineData("workflow_run", false, true, false, false, false, false, true)]
+    [InlineData("workflow_run", false, false, false, false, false, false, false)]
     [InlineData("schedule_list", false, true, false, false, false, false, true)]
     [InlineData("file_read", false, false, true, false, false, false, true)]
     [InlineData("transcode_submit", false, false, false, true, false, false, true)]
@@ -68,6 +72,46 @@ public sealed class ApiKeyPermissionMatrixTests
         bool allowRemote, string? allowedHostIds, string targetHostId, bool expected)
     {
         var result = ApiKeyPermissionMatrix.CanAccessRemoteHost(allowRemote, allowedHostIds, targetHostId);
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData(null, "command_run", true)]
+    [InlineData("*", "command_run", true)]
+    [InlineData("command_run,workflow_run", "command_run", true)]
+    [InlineData("command_run,workflow_run", "workflow_run", true)]
+    [InlineData("command_run,workflow_run", "WORKFLOW_RUN", true)] // 大小写不敏感
+    [InlineData("command_run,workflow_run", "schedule_delete", false)]
+    [InlineData("[\"command_run\", \"workflow_run\"]", "command_run", true)]
+    [InlineData("[\"command_run\", \"workflow_run\"]", "schedule_create", false)]
+    [InlineData("", "command_run", true)]
+    [InlineData("   ", "command_run", true)]
+    public void IsToolAllowed_EvaluatesAllowedToolsFilter(string? allowedTools, string toolName, bool expected)
+    {
+        var result = ApiKeyPermissionMatrix.IsToolAllowed(allowedTools, toolName);
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    // 模块未开启：即便在 AllowedTools 中也拒绝
+    [InlineData(false, false, false, false, false, false, "command_run", "command_run", "commands", false)]
+    [InlineData(false, false, false, false, false, false, "workflow_run", "workflow_run", "workflows", false)]
+    // 模块已开启且 AllowedTools 包含该工具：允许
+    [InlineData(true, false, false, false, false, false, "command_run", "command_run", "commands", true)]
+    [InlineData(false, true, false, false, false, false, "workflow_run", "workflow_run", "workflows", true)]
+    // 模块已开启但 AllowedTools 未包含该工具：拒绝
+    [InlineData(true, false, false, false, false, false, "command_list", "command_delete", "commands", false)]
+    [InlineData(false, true, false, false, false, false, "workflow_list", "workflow_toggle", "workflows", false)]
+    // 模块已开启且 AllowedTools 为 null (全量模式)：允许
+    [InlineData(true, false, false, false, false, false, null, "command_delete", "commands", true)]
+    [InlineData(false, true, false, false, false, false, null, "workflow_toggle", "workflows", true)]
+    public void IsToolPermitted_EvaluatesTwoLevelSecurityMatrix(
+        bool allowTerm, bool allowSched, bool allowFiles, bool allowTrans, bool allowGate, bool allowRemote,
+        string? allowedTools, string toolName, string moduleName, bool expected)
+    {
+        var result = ApiKeyPermissionMatrix.IsToolPermitted(
+            allowTerm, allowSched, allowFiles, allowTrans, allowGate, allowRemote,
+            allowedTools, toolName, moduleName);
         Assert.Equal(expected, result);
     }
 }

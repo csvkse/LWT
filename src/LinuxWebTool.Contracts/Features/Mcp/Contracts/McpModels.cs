@@ -39,3 +39,17 @@ public sealed record McpToolContent(
 public sealed record McpCallToolResult(
     List<McpToolContent> Content,
     bool IsError = false);
+
+/// <summary>MCP 工具目录叶子项（二级细粒度功能）</summary>
+public sealed record McpToolCatalogItem(
+    string Name,
+    string Description,
+    string RiskLevel, // "Read", "Execute", "Dangerous"
+    string ModuleName);
+
+/// <summary>MCP 领域分类目录项（一级领域模块）</summary>
+public sealed record McpCategoryCatalog(
+    string Key,
+    string Name,
+    string Description,
+    IReadOnlyList<McpToolCatalogItem> Tools);

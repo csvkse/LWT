@@ -52,6 +52,8 @@ public sealed class McpServerEngine
         _toolToProviderMap = dict.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
     }
 
+    public IReadOnlyList<McpCategoryCatalog> GetCatalog() => McpCatalogRegistry.GetCatalog();
+
     public async Task<McpRpcResponse> HandleRequestAsync(McpRpcRequest request, ApiKeyEntity? callerKey, HttpContext httpContext)
     {
         try
@@ -76,12 +78,20 @@ public sealed class McpServerEngine
     private McpRpcResponse HandleToolsList(McpRpcRequest request, ApiKeyEntity? callerKey)
     {
         var tools = new List<McpToolDefinition>();
+        var allowedSet = callerKey != null ? Application.Features.Security.ApiKeyPermissionMatrix.ParseAllowedTools(callerKey.AllowedTools) : null;
 
         foreach (var provider in _providers)
         {
             if (provider.IsPermitted(callerKey))
             {
-                tools.AddRange(provider.GetTools(callerKey));
+                var providerTools = provider.GetTools(callerKey);
+                foreach (var tool in providerTools)
+                {
+                    if (allowedSet == null || allowedSet.Contains(tool.Name))
+                    {
+                        tools.Add(tool);
+                    }
+                }
             }
         }
 
@@ -115,6 +125,12 @@ public sealed class McpServerEngine
         if (!provider.IsPermitted(callerKey))
         {
             return ToolErrorResponse(request.Id, $"Permission Denied: API Key does not have permission for module '{provider.ModuleName}'.");
+        }
+
+        // 二级细粒度工具权限独立拦截
+        if (callerKey != null && !Application.Features.Security.ApiKeyPermissionMatrix.IsToolAllowed(callerKey.AllowedTools, toolName))
+        {
+            return ToolErrorResponse(request.Id, $"Permission Denied: API Key is not authorized to execute tool '{toolName}'.");
         }
 
         var clientIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";

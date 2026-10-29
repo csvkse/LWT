@@ -40,6 +40,7 @@ public class ApiKeyService(ApiKeyStore store, ILogger<ApiKeyService> logger)
             AllowRemoteHosts = request.AllowRemoteHosts,
             AllowedPaths = string.IsNullOrWhiteSpace(request.AllowedPaths) ? null : request.AllowedPaths.Trim(),
             AllowedHostIds = string.IsNullOrWhiteSpace(request.AllowedHostIds) ? null : request.AllowedHostIds.Trim(),
+            AllowedTools = request.AllowedTools != null && request.AllowedTools.Count > 0 ? string.Join(",", request.AllowedTools) : null,
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = request.ExpiresAt
         };
@@ -123,5 +124,23 @@ public class ApiKeyService(ApiKeyStore store, ILogger<ApiKeyService> logger)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));
         return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    public static List<string>? ParseToolsList(string? allowedTools)
+    {
+        if (string.IsNullOrWhiteSpace(allowedTools) || allowedTools.Trim() == "*")
+            return null;
+
+        var tokens = allowedTools.Split(new[] { ',', ';', ' ', '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        var list = new List<string>();
+        foreach (var token in tokens)
+        {
+            var cleaned = token.Trim().Trim('"', '[', ']', '\'', ',');
+            if (!string.IsNullOrEmpty(cleaned) && !list.Contains(cleaned, StringComparer.OrdinalIgnoreCase))
+            {
+                list.Add(cleaned);
+            }
+        }
+        return list.Count > 0 ? list : null;
     }
 }

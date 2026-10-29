@@ -298,6 +298,7 @@ CREATE TABLE IF NOT EXISTS api_key (
   AllowedPaths TEXT,
   AllowRemoteHosts INTEGER NOT NULL DEFAULT 0,
   AllowedHostIds TEXT,
+  AllowedTools TEXT,
   CreatedAt TEXT NOT NULL,
   LastUsedAt TEXT,
   ExpiresAt TEXT
@@ -480,6 +481,7 @@ CREATE INDEX IF NOT EXISTS idx_backup_snapshot_task ON backup_snapshot(TaskId);
         EnsureColumnExists(db, "api_key", "AllowedPaths", "TEXT");
         EnsureColumnExists(db, "api_key", "AllowRemoteHosts", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumnExists(db, "api_key", "AllowedHostIds", "TEXT");
+        EnsureColumnExists(db, "api_key", "AllowedTools", "TEXT");
         EnsureColumnExists(db, "backup_sync_task", "ConsecutiveFailures", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumnExists(db, "backup_sync_task", "AutoPausedReason", "TEXT");
         EnsureColumnExists(db, "linux_command", "DefaultTargetHostId", "TEXT COLLATE NOCASE");

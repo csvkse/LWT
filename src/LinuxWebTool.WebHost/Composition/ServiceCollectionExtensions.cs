@@ -170,6 +170,8 @@ public static class ServiceCollectionExtensions
         builder.Services.AddHostedService(sp => sp.GetRequiredService<FrpTunnelManager>());
 
         // MCP (Model Context Protocol) 核心分发引擎与领域策略提供者
+        builder.Services.AddSingleton<IMcpToolProvider, CommandMcpToolProvider>();
+        builder.Services.AddSingleton<IMcpToolProvider, WorkflowMcpToolProvider>();
         builder.Services.AddSingleton<IMcpToolProvider, TerminalMcpToolProvider>();
         builder.Services.AddSingleton<IMcpToolProvider, ScheduleMcpToolProvider>();
         builder.Services.AddSingleton<IMcpToolProvider, FileMcpToolProvider>();
