@@ -1,4 +1,5 @@
 using LinuxWebTool.Infrastructure.Features.BackupSync.Adapters;
+using LinuxWebTool.Infrastructure.Features.BackupSync.Retention;
 using LinuxWebTool.Infrastructure.Shared.Persistence;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 using Microsoft.Extensions.Logging;
@@ -7,10 +8,12 @@ namespace LinuxWebTool.Infrastructure.Features.BackupSync.Safety;
 
 /// <summary>
 /// 备份与同步任务状态机与断路器管理器（状态机模式 + 断路器模式）
-/// 掌控任务在 Idle / Running / Success / Failed / AutoPaused 之间的状态迁移
+/// 掌控任务在 Idle / Running / Success / Failed / AutoPaused 之间的状态迁移与执行审计记录生命周期
 /// </summary>
 public class BackupSyncStateMachine(
     BackupSyncStore store,
+    BackupSyncRecordStore recordStore,
+    IBackupRecordRetentionStrategy retentionStrategy,
     IBackupSyncScheduler scheduler,
     IOperationLogger operationLogger,
     ILogger<BackupSyncStateMachine> logger)
@@ -22,6 +25,80 @@ public class BackupSyncStateMachine(
     public const string StatusSuccess = "Success";
     public const string StatusFailed = "Failed";
     public const string StatusAutoPaused = "AutoPaused";
+    public const string StatusInterrupted = "Interrupted";
+
+    /// <summary>
+    /// 开始单次执行生命周期：登记 Running 状态的执行审计记录
+    /// </summary>
+    public async Task<Guid> StartExecutionRecordAsync(BackupSyncTask task, bool isManual, string? clientIp = null)
+    {
+        var record = new BackupSyncRecord
+        {
+            Id = Guid.NewGuid(),
+            TaskId = task.Id,
+            TaskName = task.Name,
+            Mode = task.Mode,
+            TriggerType = isManual ? 1 : 2,
+            Status = StatusRunning,
+            StartTime = DateTime.Now,
+            ClientIp = clientIp
+        };
+
+        try
+        {
+            await recordStore.InsertRecordAsync(record);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "写入备份同步执行起始记录失败：{TaskId}", task.Id);
+        }
+
+        return record.Id;
+    }
+
+    /// <summary>
+    /// 结束单次执行生命周期：回写指标、更新最终状态并触发自动保留修剪
+    /// </summary>
+    public async Task CompleteExecutionRecordAsync(
+        Guid recordId,
+        BackupSyncTask task,
+        string status,
+        long durationMs,
+        long processedFiles,
+        long processedBytes,
+        long addedFiles,
+        long updatedFiles,
+        long deletedFiles,
+        long skippedFiles,
+        string? summary,
+        string? errorMessage)
+    {
+        if (recordId == Guid.Empty) return;
+
+        try
+        {
+            await recordStore.UpdateRecordCompletionAsync(
+                recordId,
+                status,
+                DateTime.Now,
+                durationMs,
+                processedFiles,
+                processedBytes,
+                addedFiles,
+                updatedFiles,
+                deletedFiles,
+                skippedFiles,
+                summary,
+                errorMessage);
+
+            // 触发自动修剪保留策略
+            await retentionStrategy.PruneRecordsAsync(task.Id, recordStore);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "更新备份同步执行记录或自动清理失败：{RecordId}", recordId);
+        }
+    }
 
     /// <summary>
     /// 触发自动熔断暂停

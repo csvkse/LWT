@@ -52,3 +52,25 @@ public class BackupSnapshot
     public bool IsPinned { get; set; }
     public string? Note { get; set; }
 }
+
+public class BackupSyncRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TaskId { get; set; }
+    public string TaskName { get; set; } = string.Empty;
+    public int Mode { get; set; } // 1 = Sync, 2 = Backup
+    public int TriggerType { get; set; } = 1; // 1 = Manual, 2 = Scheduled
+    public string Status { get; set; } = "Running"; // Running, Success, Failed, AutoPaused, Interrupted
+    public DateTime StartTime { get; set; } = DateTime.Now;
+    public DateTime? EndTime { get; set; }
+    public long DurationMs { get; set; }
+    public long ProcessedFiles { get; set; }
+    public long ProcessedBytes { get; set; }
+    public long AddedFiles { get; set; }
+    public long UpdatedFiles { get; set; }
+    public long DeletedFiles { get; set; }
+    public long SkippedFiles { get; set; }
+    public string? Summary { get; set; }
+    public string? ErrorMessage { get; set; }
+    public string? ClientIp { get; set; }
+}

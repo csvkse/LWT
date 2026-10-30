@@ -21,6 +21,7 @@ namespace LinuxWebTool.WebHost.Features.BackupSync.Routes;
 [Authorize]
 public class BackupSyncController(
     BackupSyncStore store,
+    BackupSyncRecordStore recordStore,
     BackupSyncCoordinator coordinator,
     BackupSnapshotCleaner cleaner,
     IBackupSyncScheduler scheduler,
@@ -302,6 +303,28 @@ public class BackupSyncController(
                 ErrorMessage = ex.Message
             });
         }
+    }
+
+    [HttpGet("Records")]
+    public async Task<IResult> GetRecords([FromQuery] Guid? taskId, [FromQuery] string? status, [FromQuery] int? page, [FromQuery] int? pageSize)
+    {
+        var query = new BackupSyncRecordQuery
+        {
+            TaskId = taskId,
+            Status = status,
+            Page = page,
+            PageSize = pageSize
+        };
+        var result = await recordStore.QueryRecordsAsync(query);
+        return Ok(result);
+    }
+
+    [HttpPost("Records/Clear")]
+    public async Task<IResult> ClearRecords([FromBody] ClearBackupSyncRecordsRequest request)
+    {
+        var count = await recordStore.ClearRecordsAsync(request.TaskId, request.OlderThanDays, HttpContext.RequestAborted);
+        await operationLogger.LogAsync("清理备份同步记录", "备份同步", request.TaskId?.ToString() ?? "全部任务", $"清理了 {count} 条历史执行记录", clientIp: HttpContext.GetClientIp());
+        return Ok(new MessageResponse($"已成功清理 {count} 条执行记录"));
     }
 
     private static (bool Valid, string Message, string NormalizedCron) ValidateTask(SaveBackupSyncTaskRequest request)

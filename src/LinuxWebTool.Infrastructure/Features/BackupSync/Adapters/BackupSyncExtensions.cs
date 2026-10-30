@@ -1,3 +1,4 @@
+using LinuxWebTool.Infrastructure.Features.BackupSync.Retention;
 using LinuxWebTool.Infrastructure.Features.BackupSync.Safety;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -23,6 +24,9 @@ public static class BackupSyncExtensions
         services.AddSingleton<IBackupSyncSafetyStrategy, DirectoryAccessibilityStrategy>();
         services.AddSingleton<IBackupSyncSafetyStrategy, EmptySourceDisasterPreventionStrategy>();
         services.AddSingleton<IBackupSyncSafetyStrategy, DiskSpaceSafetyStrategy>();
+
+        // 自动清理与修剪保留策略（策略模式）
+        services.AddSingleton<IBackupRecordRetentionStrategy, SmartHybridRecordRetentionStrategy>();
 
         // 安全流水线与状态机/断路器（状态机模式）
         services.AddSingleton<BackupSyncSafetyPipeline>();

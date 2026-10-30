@@ -87,7 +87,7 @@ public sealed class McpServerEngine
                 var providerTools = provider.GetTools(callerKey);
                 foreach (var tool in providerTools)
                 {
-                    if (allowedSet == null || allowedSet.Contains(tool.Name))
+                    if (allowedSet == null || Application.Features.Security.ApiKeyPermissionMatrix.IsToolAllowed(allowedSet, tool.Name))
                     {
                         tools.Add(tool);
                     }

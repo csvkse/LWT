@@ -46,6 +46,7 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<ExecutionStore>();
         builder.Services.AddSingleton<OperationLogStore>();
         builder.Services.AddSingleton<BackupSyncStore>();
+        builder.Services.AddSingleton<BackupSyncRecordStore>();
         builder.Services.AddSingleton<RemoteHostStore>();
         builder.Services.AddSingleton<HostCredentialProtector>();
         builder.Services.AddSingleton<RemoteHostClientFactory>();

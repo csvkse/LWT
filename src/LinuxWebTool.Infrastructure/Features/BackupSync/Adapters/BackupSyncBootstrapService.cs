@@ -9,6 +9,7 @@ namespace LinuxWebTool.Infrastructure.Features.BackupSync.Adapters;
 /// </summary>
 public sealed class BackupSyncBootstrapService(
     BackupSyncStore store,
+    BackupSyncRecordStore recordStore,
     IBackupSyncScheduler scheduler,
     ILogger<BackupSyncBootstrapService> logger) : IHostedService
 {
@@ -16,6 +17,12 @@ public sealed class BackupSyncBootstrapService(
     {
         try
         {
+            var interrupted = await recordStore.MarkInterruptedRunningRecordsAsync();
+            if (interrupted > 0)
+            {
+                logger.LogWarning("应用启动自愈：已将 {Count} 条上次服务中断遗留的 Running 执行记录标记为 Interrupted", interrupted);
+            }
+
             var tasks = (await store.GetEnabledTasksAsync()).ToList();
             await scheduler.SyncAllAsync(tasks);
             logger.LogInformation("备份与同步调度引导完成：已注册 {Count} 个启用任务", tasks.Count);

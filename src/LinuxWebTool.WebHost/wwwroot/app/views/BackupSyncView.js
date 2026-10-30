@@ -17,6 +17,16 @@ export default defineComponent({
     // 表格多选勾选快照 ID 列表
     const selectedSnapshotIds = ref([]);
 
+    // ---- 执行记录 ----
+    const records = ref([]);
+    const recordsLoading = ref(false);
+    const recordFilterTaskId = ref('');
+    const recordFilterStatus = ref('');
+    const recordPage = ref(1);
+    const recordPageSize = ref(20);
+    const recordTotal = ref(0);
+    const recordTotalPages = computed(() => Math.max(1, Math.ceil(recordTotal.value / recordPageSize.value)));
+
     // 文件选择器
     const picker = reactive({
       show: false,
@@ -154,6 +164,52 @@ export default defineComponent({
     async function refreshAll() {
       await loadTasks();
       await loadAllSnapshots();
+      if (activeTab.value === 'records') {
+        await loadRecords();
+      }
+    }
+
+    async function loadRecords() {
+      recordsLoading.value = true;
+      try {
+        const params = new URLSearchParams();
+        if (recordFilterTaskId.value) params.set('taskId', recordFilterTaskId.value);
+        if (recordFilterStatus.value) params.set('status', recordFilterStatus.value);
+        params.set('page', recordPage.value.toString());
+        params.set('pageSize', recordPageSize.value.toString());
+        const res = await http(`${API.backupSync.records}?${params.toString()}`);
+        if (res.ok && res.data) {
+          records.value = res.data.items || [];
+          recordTotal.value = res.data.total || 0;
+        }
+      } catch (e) {
+        toast.error(`加载执行记录失败：${e.message}`);
+      } finally {
+        recordsLoading.value = false;
+      }
+    }
+
+    function openRecordsTab(taskId = '') {
+      activeTab.value = 'records';
+      recordFilterTaskId.value = taskId;
+      recordPage.value = 1;
+      loadRecords();
+    }
+
+    async function clearRecords(taskId = null) {
+      if (!confirm(taskId ? '确定清理该任务的历史执行记录吗？' : '确定清理全部执行记录吗？')) return;
+      try {
+        const res = await http(API.backupSync.clearRecords, {
+          method: 'POST',
+          body: JSON.stringify({ taskId: taskId || undefined, keepLatestCount: 10 })
+        });
+        if (res.ok) {
+          toast.success(res.data?.message || '执行记录已清理');
+          await loadRecords();
+        }
+      } catch (e) {
+        toast.error(`清理记录失败：${e.message}`);
+      }
     }
 
     // ---- 任务操作 ----
@@ -618,6 +674,17 @@ export default defineComponent({
     return {
       activeTab,
       loading,
+      records,
+      recordsLoading,
+      recordFilterTaskId,
+      recordFilterStatus,
+      recordPage,
+      recordPageSize,
+      recordTotal,
+      recordTotalPages,
+      loadRecords,
+      openRecordsTab,
+      clearRecords,
       tasks,
       backupTasks,
       syncTasks,
@@ -746,6 +813,14 @@ export default defineComponent({
         >
           快照库与恢复 ({{ snapshots.length }})
         </button>
+        <button
+          type="button"
+          class="nav-link !rounded-b-none border-b-2"
+          :class="activeTab === 'records' ? '!border-cyan-400 text-cyan-300 bg-cyber-panel font-medium' : '!border-transparent text-slate-400 hover:text-slate-200'"
+          @click="openRecordsTab()"
+        >
+          执行记录
+        </button>
       </div>
 
       <!-- Tab 1: 增量备份任务列表 -->
@@ -805,6 +880,7 @@ export default defineComponent({
                     <button v-if="t.lastRunStatus === 'AutoPaused'" type="button" class="btn btn-xs border-amber-500/50 text-amber-300 hover:bg-amber-500/20" @click="resumeTask(t)" title="解除熔断状态并重新唤醒定时调度">恢复调度</button>
                     <button type="button" class="btn btn-xs btn-primary" @click="runTask(t)">立即备份</button>
                     <button type="button" class="btn btn-xs" @click="viewTaskSnapshots(t)">查看快照</button>
+                    <button type="button" class="btn btn-xs" @click="openRecordsTab(t.id)">记录</button>
                     <button type="button" class="btn btn-xs" @click="openEditTaskModal(t)">编辑</button>
                     <button type="button" class="btn btn-xs btn-danger" @click="deleteTask(t)">删除</button>
                   </div>
@@ -871,6 +947,7 @@ export default defineComponent({
                   <div class="inline-flex items-center gap-1.5">
                     <button v-if="t.lastRunStatus === 'AutoPaused'" type="button" class="btn btn-xs border-amber-500/50 text-amber-300 hover:bg-amber-500/20" @click="resumeTask(t)" title="解除熔断状态并重新唤醒定时调度">恢复调度</button>
                     <button type="button" class="btn btn-xs btn-primary" @click="runTask(t)">立即同步</button>
+                    <button type="button" class="btn btn-xs" @click="openRecordsTab(t.id)">记录</button>
                     <button type="button" class="btn btn-xs" @click="openEditTaskModal(t)">编辑</button>
                     <button type="button" class="btn btn-xs btn-danger" @click="deleteTask(t)">删除</button>
                   </div>
@@ -1005,6 +1082,149 @@ export default defineComponent({
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- Tab 4: 执行记录与历史审计 (Execution Logs) -->
+      <div v-if="activeTab === 'records'" class="flex flex-col gap-3">
+        <!-- 记录筛选工具栏 -->
+        <div class="panel p-3 flex flex-wrap items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="text-xs font-medium text-slate-400">过滤任务:</span>
+            <select
+              v-model="recordFilterTaskId"
+              class="input font-mono text-xs w-auto py-1"
+              @change="loadRecords()"
+            >
+              <option value="">全部任务</option>
+              <option v-for="t in tasks" :key="t.id" :value="t.id">
+                {{ t.name }} ({{ t.mode === 1 ? '直接同步' : '增量备份' }})
+              </option>
+            </select>
+
+            <span class="text-xs font-medium text-slate-400">执行状态:</span>
+            <select
+              v-model="recordFilterStatus"
+              class="input text-xs w-auto py-1"
+              @change="loadRecords()"
+            >
+              <option value="">全部状态</option>
+              <option value="Success">成功</option>
+              <option value="Failed">失败</option>
+              <option value="AutoPaused">自动暂停熔断</option>
+              <option value="Running">执行中</option>
+              <option value="Interrupted">服务中断</option>
+            </select>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="btn btn-xs"
+              :disabled="recordsLoading"
+              @click="loadRecords()"
+            >
+              {{ recordsLoading ? '刷新中...' : '刷新' }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-xs btn-danger"
+              @click="clearRecords(recordFilterTaskId)"
+              title="按当前过滤保留最新10条，修剪清理历史记录"
+            >
+              清理历史
+            </button>
+          </div>
+        </div>
+
+        <!-- 记录表格 -->
+        <div class="panel overflow-x-auto">
+          <div v-if="records.length === 0" class="p-8 text-center text-slate-500 text-xs">
+            {{ recordsLoading ? '正在加载执行记录...' : '暂无相关执行记录' }}
+          </div>
+          <table v-else class="data-table min-w-[56rem]">
+            <thead>
+              <tr>
+                <th>任务 / 模式</th>
+                <th>触发方式</th>
+                <th>状态</th>
+                <th>开始时间 / 耗时</th>
+                <th>文件 / 传输统计</th>
+                <th>运行摘要 / 错误提示</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in records" :key="r.id">
+                <td class="font-medium text-slate-200">
+                  <div>{{ r.taskName }}</div>
+                  <div class="text-[11px] text-slate-500 mt-0.5">
+                    {{ r.mode === 1 ? '直接同步' : '增量备份' }}
+                  </div>
+                </td>
+                <td class="text-xs text-slate-400">
+                  <span class="badge border-slate-600/60 text-slate-300">
+                    {{ r.triggerType === 1 ? '手动触发' : '定时调度' }}
+                  </span>
+                </td>
+                <td class="text-xs">
+                  <span
+                    class="badge font-medium"
+                    :class="{
+                      'border-emerald-500/50 bg-emerald-500/10 text-emerald-300': r.status === 'Success',
+                      'border-rose-500/50 bg-rose-500/10 text-rose-300': r.status === 'Failed',
+                      'border-amber-500/50 bg-amber-500/10 text-amber-300': r.status === 'AutoPaused',
+                      'border-cyan-500/50 bg-cyan-500/10 text-cyan-300': r.status === 'Running',
+                      'border-slate-500/50 bg-slate-500/10 text-slate-400': r.status === 'Interrupted'
+                    }"
+                  >
+                    {{ r.status === 'Success' ? '成功' : (r.status === 'Failed' ? '失败' : (r.status === 'AutoPaused' ? '自动熔断' : (r.status === 'Running' ? '执行中' : (r.status === 'Interrupted' ? '服务中断' : r.status)))) }}
+                  </span>
+                </td>
+                <td class="text-xs text-slate-400">
+                  <div class="font-mono text-cyan-300/80">{{ formatTime(r.startTime) }}</div>
+                  <div class="text-[11px] text-slate-500 mt-0.5">耗时 {{ r.durationMs }}ms</div>
+                </td>
+                <td class="text-xs text-slate-300 font-mono">
+                  <div>{{ r.processedFiles }} 个文件 · {{ formatBytes(r.processedBytes) }}</div>
+                  <div class="text-[11px] text-slate-500 mt-0.5">
+                    <span v-if="r.addedFiles > 0" class="text-emerald-400">+{{ r.addedFiles }} </span>
+                    <span v-if="r.updatedFiles > 0" class="text-cyan-400">~{{ r.updatedFiles }} </span>
+                    <span v-if="r.deletedFiles > 0" class="text-rose-400">-{{ r.deletedFiles }} </span>
+                    <span v-if="r.skippedFiles > 0" class="text-amber-400">跳过: {{ r.skippedFiles }}</span>
+                  </div>
+                </td>
+                <td class="text-xs max-w-xs">
+                  <div class="text-slate-300 truncate" :title="r.summary">{{ r.summary || '-' }}</div>
+                  <div v-if="r.errorMessage" class="text-rose-400/90 text-[11px] mt-0.5 truncate" :title="r.errorMessage">
+                    ⚠ {{ r.errorMessage }}
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 分页栏 -->
+        <div v-if="recordTotal > 0" class="flex items-center justify-between px-2 text-xs text-slate-400">
+          <div>共 {{ recordTotal }} 条记录，第 {{ recordPage }} / {{ recordTotalPages }} 页</div>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="btn btn-xs"
+              :disabled="recordPage <= 1"
+              @click="recordPage--; loadRecords()"
+            >
+              上一页
+            </button>
+            <button
+              type="button"
+              class="btn btn-xs"
+              :disabled="recordPage >= recordTotalPages"
+              @click="recordPage++; loadRecords()"
+            >
+              下一页
+            </button>
+          </div>
         </div>
       </div>
 

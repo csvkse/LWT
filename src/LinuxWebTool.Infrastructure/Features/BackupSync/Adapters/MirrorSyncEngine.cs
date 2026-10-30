@@ -1,3 +1,4 @@
+using System.Text;
 using LinuxWebTool.Contracts.Features.BackupSync.Contracts;
 using Microsoft.Extensions.Logging;
 
@@ -15,6 +16,7 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
         public long DeletedFiles { get; init; }
         public long TrashedFiles { get; init; }
         public long TotalBytesTransferred { get; init; }
+        public long SkippedFiles { get; init; }
         public long DurationMs { get; init; }
     }
 
@@ -40,6 +42,7 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
         long deletedFiles = 0;
         long trashedFiles = 0;
         long bytesTransferred = 0;
+        long skippedFiles = 0;
 
         var sourceDir = new DirectoryInfo(sourcePath);
         var targetDir = new DirectoryInfo(targetPath);
@@ -64,33 +67,65 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
             {
                 ct.ThrowIfCancellationRequested();
 
-                var rel = Path.GetRelativePath(sourcePath, sf.FullName);
-                sourceRelPaths.Add(rel);
+                try
+                {
+                    var rel = Path.GetRelativePath(sourcePath, sf.FullName);
+                    sourceRelPaths.Add(rel);
 
-                var targetFilePath = Path.Combine(targetPath, rel);
-                var targetFileDir = Path.GetDirectoryName(targetFilePath);
-                if (!string.IsNullOrEmpty(targetFileDir) && !Directory.Exists(targetFileDir))
-                {
-                    Directory.CreateDirectory(targetFileDir);
-                }
+                    var targetFilePath = Path.Combine(targetPath, rel);
+                    SymlinkAndFileTransferHelper.EnsureDirectoryCreated(targetFilePath);
 
-                if (!File.Exists(targetFilePath))
-                {
-                    sf.CopyTo(targetFilePath, overwrite: true);
-                    File.SetLastWriteTimeUtc(targetFilePath, sf.LastWriteTimeUtc);
-                    addedFiles++;
-                    bytesTransferred += sf.Length;
-                }
-                else
-                {
-                    var tf = new FileInfo(targetFilePath);
-                    if (tf.Length != sf.Length || Math.Abs((tf.LastWriteTimeUtc - sf.LastWriteTimeUtc).TotalSeconds) > 2)
+                    // 1. 符号链接（包含悬空损坏的软链接）保真同步
+                    if (SymlinkAndFileTransferHelper.IsSymbolicLink(sf))
                     {
+                        var linkTarget = SymlinkAndFileTransferHelper.GetLinkTarget(sf);
+                        if (!string.IsNullOrEmpty(linkTarget))
+                        {
+                            var targetLink = SymlinkAndFileTransferHelper.GetLinkTarget(new FileInfo(targetFilePath));
+                            if (!string.Equals(linkTarget, targetLink, StringComparison.Ordinal))
+                            {
+                                if (SymlinkAndFileTransferHelper.CreateOrUpdateSymlink(targetFilePath, linkTarget, logger))
+                                {
+                                    if (targetLink == null) addedFiles++; else updatedFiles++;
+                                    bytesTransferred += Encoding.UTF8.GetByteCount(linkTarget);
+                                }
+                            }
+                            continue;
+                        }
+                    }
+
+                    // 2. 普通文件安全长度与时间检测
+                    if (!SymlinkAndFileTransferHelper.TryGetSafeLength(sf, out var sfLength))
+                    {
+                        logger.LogWarning("源文件在同步过程中消失或不可读，跳过：{Path}", sf.FullName);
+                        continue;
+                    }
+
+                    if (!File.Exists(targetFilePath) || SymlinkAndFileTransferHelper.IsSymbolicLink(new FileInfo(targetFilePath)))
+                    {
+                        SymlinkAndFileTransferHelper.SafeDeleteFileOrLink(targetFilePath);
                         sf.CopyTo(targetFilePath, overwrite: true);
                         File.SetLastWriteTimeUtc(targetFilePath, sf.LastWriteTimeUtc);
-                        updatedFiles++;
-                        bytesTransferred += sf.Length;
+                        addedFiles++;
+                        bytesTransferred += sfLength;
                     }
+                    else
+                    {
+                        var tf = new FileInfo(targetFilePath);
+                        if (tf.Length != sfLength || Math.Abs((tf.LastWriteTimeUtc - sf.LastWriteTimeUtc).TotalSeconds) > 2)
+                        {
+                            sf.CopyTo(targetFilePath, overwrite: true);
+                            File.SetLastWriteTimeUtc(targetFilePath, sf.LastWriteTimeUtc);
+                            updatedFiles++;
+                            bytesTransferred += sfLength;
+                        }
+                    }
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    logger.LogWarning(ex, "镜像同步过程中跳过异常文件：{Path}", sf.FullName);
+                    skippedFiles++;
                 }
             }
         }, ct);
@@ -161,6 +196,7 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
             DeletedFiles = deletedFiles,
             TrashedFiles = trashedFiles,
             TotalBytesTransferred = bytesTransferred,
+            SkippedFiles = skippedFiles,
             DurationMs = sw.ElapsedMilliseconds
         };
     }

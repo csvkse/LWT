@@ -125,7 +125,9 @@ public class BackupSyncSafetyTests : IDisposable
 
         var opLogger = new OperationLogger(new OperationLogStore(_factory), NullLogger<OperationLogger>.Instance);
         var scheduler = new DummyScheduler();
-        var sm = new BackupSyncStateMachine(_store, scheduler, opLogger, NullLogger<BackupSyncStateMachine>.Instance);
+        var recordStore = new BackupSyncRecordStore(_factory);
+        var retention = new LinuxWebTool.Infrastructure.Features.BackupSync.Retention.SmartHybridRecordRetentionStrategy();
+        var sm = new BackupSyncStateMachine(_store, recordStore, retention, scheduler, opLogger, NullLogger<BackupSyncStateMachine>.Instance);
 
         // 第一次失败
         await sm.RecordFailureAsync(task, "网络连接超时 #1", null);
@@ -167,7 +169,9 @@ public class BackupSyncSafetyTests : IDisposable
 
         var opLogger = new OperationLogger(new OperationLogStore(_factory), NullLogger<OperationLogger>.Instance);
         var scheduler = new DummyScheduler();
-        var sm = new BackupSyncStateMachine(_store, scheduler, opLogger, NullLogger<BackupSyncStateMachine>.Instance);
+        var recordStore = new BackupSyncRecordStore(_factory);
+        var retention = new LinuxWebTool.Infrastructure.Features.BackupSync.Retention.SmartHybridRecordRetentionStrategy();
+        var sm = new BackupSyncStateMachine(_store, recordStore, retention, scheduler, opLogger, NullLogger<BackupSyncStateMachine>.Instance);
 
         var resumed = await sm.ResumeTaskAsync(task.Id);
 
