@@ -167,6 +167,7 @@ export const API = {
     cronPreview: '/BackupSync/CronPreview',
     taskProgress: (id) => `/BackupSync/Tasks/${id}/Progress`,
     records: '/BackupSync/Records',
+    probeExcludes: '/BackupSync/ProbeExcludes',
     clearRecords: '/BackupSync/Records/Clear',
   },
   workflows: {

@@ -1,3 +1,4 @@
+using LinuxWebTool.Infrastructure.Features.BackupSync.Exclusions;
 using LinuxWebTool.Infrastructure.Features.BackupSync.Progress;
 using LinuxWebTool.Infrastructure.Features.BackupSync.Retention;
 using LinuxWebTool.Infrastructure.Features.BackupSync.Safety;
@@ -35,6 +36,14 @@ public static class BackupSyncExtensions
 
         // 全局无锁实时进度追踪与适配器（状态机与观察者模式）
         services.AddSingleton<BackupProgressTracker>();
+
+        // 智能排除规则嗅探策略体系（策略与管道模式）
+        services.AddSingleton<IExcludeDetectionStrategy, NodeJsDetectionStrategy>();
+        services.AddSingleton<IExcludeDetectionStrategy, DotNetDetectionStrategy>();
+        services.AddSingleton<IExcludeDetectionStrategy, PythonDetectionStrategy>();
+        services.AddSingleton<IExcludeDetectionStrategy, VcsDetectionStrategy>();
+        services.AddSingleton<IExcludeDetectionStrategy, CommonTempAndLogsDetectionStrategy>();
+        services.AddSingleton<ExcludeDetectionPipeline>();
 
         // 统一协调器与调度
         services.AddSingleton<BackupSyncCoordinator>();

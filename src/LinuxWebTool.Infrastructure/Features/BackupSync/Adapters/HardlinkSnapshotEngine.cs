@@ -96,27 +96,18 @@ public partial class HardlinkSnapshotEngine(ILogger<HardlinkSnapshotEngine> logg
         long skippedFiles = 0;
 
         var sourceDirInfo = new DirectoryInfo(sourcePath);
-        var normalizedExcludes = excludePatterns?
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Select(p => p.Trim())
-            .ToList() ?? [];
+        var normalizedExcludes = ExcludePatternMatcher.NormalizePatterns(excludePatterns);
+        var sourceFiles = await Task.Run(() => ExcludePatternMatcher.EnumerateFilesWithPruning(sourceDirInfo, sourcePath, normalizedExcludes, ct), ct);
 
         await Task.Run(() =>
         {
-            foreach (var file in sourceDirInfo.EnumerateFiles("*", SearchOption.AllDirectories))
+            foreach (var file in sourceFiles)
             {
                 ct.ThrowIfCancellationRequested();
 
                 try
                 {
                     var relativePath = Path.GetRelativePath(sourcePath, file.FullName);
-
-                    // 检查排除通配符
-                    if (IsExcluded(relativePath, normalizedExcludes))
-                    {
-                        continue;
-                    }
-
                     var targetFilePath = Path.Combine(snapshotDir, relativePath);
                     SymlinkAndFileTransferHelper.EnsureDirectoryCreated(targetFilePath);
 
@@ -280,28 +271,6 @@ public partial class HardlinkSnapshotEngine(ILogger<HardlinkSnapshotEngine> logg
         }
 
         return null;
-    }
-
-    private static bool IsExcluded(string relativePath, IReadOnlyList<string> excludes)
-    {
-        if (excludes.Count == 0) return false;
-        var normalized = relativePath.Replace('\\', '/');
-
-        foreach (var pattern in excludes)
-        {
-            var p = pattern.Replace('\\', '/').TrimStart('/');
-            if (p.StartsWith("*."))
-            {
-                var ext = p[1..];
-                if (normalized.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-            else if (normalized.Contains(p, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-        return false;
     }
 
     /// <summary>

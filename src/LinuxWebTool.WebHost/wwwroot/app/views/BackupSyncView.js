@@ -3,10 +3,11 @@ import { http } from '../api/client.js';
 import { API } from '../config.js';
 import { toast } from '../store/toast.js';
 import FilePicker from '../components/FilePicker.js';
+import ExcludeRuleEditor from '../components/ExcludeRuleEditor.js';
 
 export default defineComponent({
   name: 'BackupSyncView',
-  components: { FilePicker },
+  components: { FilePicker, ExcludeRuleEditor },
   setup() {
     const activeTab = ref('backup'); // 'backup' | 'sync' | 'snapshots'
     const loading = ref(false);
@@ -33,6 +34,8 @@ export default defineComponent({
       mode: 'folder',
       target: '',
       startPath: '/',
+      basePath: '',
+      title: '',
     });
 
     // ---- 任务编辑弹窗 ----
@@ -495,13 +498,36 @@ export default defineComponent({
       picker.target = targetField;
       picker.mode = 'folder';
       picker.startPath = taskForm[targetField] || '/';
+      picker.basePath = '';
+      picker.title = targetField === 'sourcePath' ? '选择源文件夹' : '选择目标文件夹';
       picker.show = true;
     }
 
     function onPickerConfirm(selectedPath) {
       picker.show = false;
-      if (picker.target && selectedPath) {
+      if (picker.target && picker.target !== 'exclude' && selectedPath) {
         taskForm[picker.target] = selectedPath;
+      }
+    }
+
+    function onOpenExcludePicker(target) {
+      const p = target === 'source' ? (taskForm.sourcePath?.trim() || '/') : (taskForm.targetPath?.trim() || '/');
+      picker.target = 'exclude';
+      picker.mode = 'exclude';
+      picker.startPath = p;
+      picker.basePath = p;
+      picker.title = target === 'source' ? '浏览源端目录并选择排除项' : '浏览镜像目标目录并选择排除项';
+      picker.show = true;
+    }
+
+    function onExcludeRulePicked(pattern) {
+      if (!pattern) return;
+      const list = taskForm.excludePatternsText
+        ? taskForm.excludePatternsText.split(/[;,]/).map((s) => s.trim()).filter(Boolean)
+        : [];
+      if (!list.includes(pattern)) {
+        list.push(pattern);
+        taskForm.excludePatternsText = list.join('; ');
       }
     }
 
@@ -827,6 +853,8 @@ export default defineComponent({
       saveTask,
       openPickerFor,
       onPickerConfirm,
+      onOpenExcludePicker,
+      onExcludeRulePicked,
       toggleSelectAll,
       toggleSelectSnapshot,
       togglePin,
@@ -1585,16 +1613,13 @@ export default defineComponent({
               </div>
             </div>
 
-            <!-- 排除规则 -->
-            <div>
-              <label class="block text-xs text-slate-400 mb-1">排除规则 (通配符以分号或逗号分隔)</label>
-              <input
-                type="text"
-                v-model="taskForm.excludePatternsText"
-                placeholder="例如：node_modules; *.tmp; .git; *.cache"
-                class="input font-mono text-xs"
-              />
-            </div>
+            <!-- 排除规则 (可视化双模配置 + 智能探针 + 树形点选) -->
+            <ExcludeRuleEditor
+              v-model="taskForm.excludePatternsText"
+              :source-path="taskForm.sourcePath"
+              :target-path="taskForm.targetPath"
+              @open-exclude-picker="onOpenExcludePicker($event)"
+            />
           </div>
 
           <div class="flex items-center justify-end gap-2 pt-3 border-t border-cyber-line">
@@ -1807,7 +1832,10 @@ export default defineComponent({
         :show="picker.show"
         :mode="picker.mode"
         :start-path="picker.startPath"
+        :base-path="picker.basePath"
+        :title="picker.title"
         @select="onPickerConfirm($event)"
+        @select-exclude="onExcludeRulePicked($event)"
         @close="picker.show = false"
       />
     </div>

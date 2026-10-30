@@ -5,6 +5,7 @@ using Quartz;
 using LinuxWebTool.Contracts.Features.BackupSync.Contracts;
 using LinuxWebTool.Contracts.Shared.Contracts;
 using LinuxWebTool.Infrastructure.Features.BackupSync.Adapters;
+using LinuxWebTool.Infrastructure.Features.BackupSync.Exclusions;
 using LinuxWebTool.Infrastructure.Features.BackupSync.Progress;
 using LinuxWebTool.Infrastructure.Features.BackupSync.Safety;
 using LinuxWebTool.Infrastructure.Features.Scheduling.Adapters;
@@ -29,6 +30,7 @@ public class BackupSyncController(
     IBackupSyncScheduler scheduler,
     BackupSyncStateMachine stateMachine,
     BackupProgressTracker progressTracker,
+    ExcludeDetectionPipeline excludePipeline,
     IOperationLogger operationLogger) : MinimalApi.ControllerBase
 {
     [HttpGet("Tasks")]
@@ -331,6 +333,13 @@ public class BackupSyncController(
                 ErrorMessage = ex.Message
             });
         }
+    }
+
+    [HttpPost("ProbeExcludes")]
+    public IResult ProbeExcludes([FromBody] ProbeExcludesRequest request)
+    {
+        var response = excludePipeline.ProbePath(request.Path);
+        return Ok(response);
     }
 
     [HttpGet("Records")]
