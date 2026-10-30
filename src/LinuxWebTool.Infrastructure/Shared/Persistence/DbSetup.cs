@@ -466,6 +466,28 @@ CREATE TABLE IF NOT EXISTS backup_snapshot (
   PRIMARY KEY (TaskId, SnapshotId)
 );
 CREATE INDEX IF NOT EXISTS idx_backup_snapshot_task ON backup_snapshot(TaskId);
+CREATE TABLE IF NOT EXISTS backup_sync_record (
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
+  TaskId TEXT NOT NULL COLLATE NOCASE,
+  TaskName TEXT NOT NULL,
+  Mode INTEGER NOT NULL,
+  TriggerType INTEGER NOT NULL DEFAULT 1,
+  Status TEXT NOT NULL,
+  StartTime TEXT NOT NULL,
+  EndTime TEXT,
+  DurationMs INTEGER NOT NULL DEFAULT 0,
+  ProcessedFiles INTEGER NOT NULL DEFAULT 0,
+  ProcessedBytes INTEGER NOT NULL DEFAULT 0,
+  AddedFiles INTEGER NOT NULL DEFAULT 0,
+  UpdatedFiles INTEGER NOT NULL DEFAULT 0,
+  DeletedFiles INTEGER NOT NULL DEFAULT 0,
+  SkippedFiles INTEGER NOT NULL DEFAULT 0,
+  Summary TEXT,
+  ErrorMessage TEXT,
+  ClientIp TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_backup_sync_record_task_time ON backup_sync_record(TaskId, StartTime DESC);
+CREATE INDEX IF NOT EXISTS idx_backup_sync_record_time ON backup_sync_record(StartTime DESC);
 ";
         cmd.ExecuteNonQuery();
 
@@ -497,6 +519,8 @@ CREATE INDEX IF NOT EXISTS idx_backup_snapshot_task ON backup_snapshot(TaskId);
         EnsureColumnExists(db, "execution_record", "BatchId", "TEXT COLLATE NOCASE");
         EnsureColumnExists(db, "execution_record", "StepOrder", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumnExists(db, "execution_record", "WorkflowId", "TEXT COLLATE NOCASE");
+        EnsureColumnExists(db, "backup_sync_record", "SkippedFiles", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumnExists(db, "backup_sync_record", "ClientIp", "TEXT");
     }
 
     private static void EnsureColumnExists(SqliteConnection db, string table, string column, string definition)

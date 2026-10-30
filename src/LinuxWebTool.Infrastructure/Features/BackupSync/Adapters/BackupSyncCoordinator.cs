@@ -62,6 +62,7 @@ public class BackupSyncCoordinator(
             };
         }
 
+        var recordId = await stateMachine.StartExecutionRecordAsync(task, isManual, clientIp);
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
@@ -74,6 +75,10 @@ public class BackupSyncCoordinator(
                 if (preflight.IsFatal)
                 {
                     await stateMachine.TripAutoPauseAsync(task, preflightMsg, clientIp);
+                    await stateMachine.CompleteExecutionRecordAsync(
+                        recordId, task, BackupSyncStateMachine.StatusAutoPaused,
+                        sw.ElapsedMilliseconds, 0, 0, 0, 0, 0, 0,
+                        $"[安全熔断] {preflightMsg}", preflightMsg);
                     return new TaskRunResultResponse
                     {
                         Success = false,
@@ -84,6 +89,10 @@ public class BackupSyncCoordinator(
                 else
                 {
                     await stateMachine.RecordFailureAsync(task, preflightMsg, task.NextRunTime, clientIp);
+                    await stateMachine.CompleteExecutionRecordAsync(
+                        recordId, task, BackupSyncStateMachine.StatusFailed,
+                        sw.ElapsedMilliseconds, 0, 0, 0, 0, 0, 0,
+                        preflightMsg, preflightMsg);
                     return new TaskRunResultResponse
                     {
                         Success = false,
@@ -141,8 +150,14 @@ public class BackupSyncCoordinator(
                 }
 
                 sw.Stop();
-                var msg = $"增量备份成功：创建快照 {result.SnapshotId}，包含文件 {result.TotalFiles}，容量 {result.TotalSizeBytes} 字节，耗时 {sw.ElapsedMilliseconds}ms";
+                var msg = $"增量备份成功：创建快照 {result.SnapshotId}，包含文件 {result.TotalFiles}，容量 {result.TotalSizeBytes} 字节，跳过异常 {result.SkippedFiles}，耗时 {sw.ElapsedMilliseconds}ms";
                 await stateMachine.RecordSuccessAsync(task, msg, task.NextRunTime);
+                await stateMachine.CompleteExecutionRecordAsync(
+                    recordId, task, BackupSyncStateMachine.StatusSuccess,
+                    sw.ElapsedMilliseconds,
+                    result.TotalFiles, result.TotalSizeBytes,
+                    result.CopiedFiles, 0, 0, result.SkippedFiles,
+                    msg, null);
 
                 return new TaskRunResultResponse
                 {
@@ -166,8 +181,14 @@ public class BackupSyncCoordinator(
                     ct);
 
                 sw.Stop();
-                var msg = $"同步完成：新增 {syncResult.AddedFiles}，更新 {syncResult.UpdatedFiles}，删除 {syncResult.DeletedFiles}，暂存回收站 {syncResult.TrashedFiles}，耗时 {sw.ElapsedMilliseconds}ms";
+                var msg = $"同步完成：新增 {syncResult.AddedFiles}，更新 {syncResult.UpdatedFiles}，删除 {syncResult.DeletedFiles}，暂存回收站 {syncResult.TrashedFiles}，跳过异常 {syncResult.SkippedFiles}，耗时 {sw.ElapsedMilliseconds}ms";
                 await stateMachine.RecordSuccessAsync(task, msg, task.NextRunTime);
+                await stateMachine.CompleteExecutionRecordAsync(
+                    recordId, task, BackupSyncStateMachine.StatusSuccess,
+                    sw.ElapsedMilliseconds,
+                    syncResult.AddedFiles + syncResult.UpdatedFiles, syncResult.TotalBytesTransferred,
+                    syncResult.AddedFiles, syncResult.UpdatedFiles, syncResult.DeletedFiles, syncResult.SkippedFiles,
+                    msg, null);
 
                 return new TaskRunResultResponse
                 {
@@ -185,6 +206,11 @@ public class BackupSyncCoordinator(
             var errMsg = $"任务执行失败：{ex.Message}";
             logger.LogError(ex, "任务执行异常：{Name}", task.Name);
             await stateMachine.RecordFailureAsync(task, errMsg, task.NextRunTime, clientIp);
+            await stateMachine.CompleteExecutionRecordAsync(
+                recordId, task, BackupSyncStateMachine.StatusFailed,
+                sw.ElapsedMilliseconds,
+                0, 0, 0, 0, 0, 0,
+                errMsg, ex.ToString());
 
             return new TaskRunResultResponse
             {

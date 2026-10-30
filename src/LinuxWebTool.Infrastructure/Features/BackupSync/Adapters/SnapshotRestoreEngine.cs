@@ -1,3 +1,4 @@
+using System.Text;
 using LinuxWebTool.Contracts.Features.BackupSync.Contracts;
 using Microsoft.Extensions.Logging;
 
@@ -46,25 +47,51 @@ public class SnapshotRestoreEngine(ILogger<SnapshotRestoreEngine> logger)
             {
                 ct.ThrowIfCancellationRequested();
 
-                // 跳过快照元数据描述文件
-                if (file.Name.Equals("manifest.json", StringComparison.OrdinalIgnoreCase))
+                try
                 {
-                    continue;
+                    // 跳过快照元数据描述文件
+                    if (file.Name.Equals("manifest.json", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var rel = Path.GetRelativePath(snapshotDir, file.FullName);
+                    var destFile = Path.Combine(targetDirectory, rel);
+                    SymlinkAndFileTransferHelper.EnsureDirectoryCreated(destFile);
+
+                    // 1. 符号链接还原
+                    if (SymlinkAndFileTransferHelper.IsSymbolicLink(file))
+                    {
+                        var linkTarget = SymlinkAndFileTransferHelper.GetLinkTarget(file);
+                        if (!string.IsNullOrEmpty(linkTarget))
+                        {
+                            if (SymlinkAndFileTransferHelper.CreateOrUpdateSymlink(destFile, linkTarget, logger))
+                            {
+                                filesCount++;
+                                totalBytes += Encoding.UTF8.GetByteCount(linkTarget);
+                            }
+                            continue;
+                        }
+                    }
+
+                    // 2. 普通文件还原
+                    if (!SymlinkAndFileTransferHelper.TryGetSafeLength(file, out var fileLength))
+                    {
+                        logger.LogWarning("快照文件丢失或不可读，跳过还原：{Path}", file.FullName);
+                        continue;
+                    }
+
+                    SymlinkAndFileTransferHelper.SafeDeleteFileOrLink(destFile);
+                    file.CopyTo(destFile, overwrite: true);
+                    File.SetLastWriteTimeUtc(destFile, file.LastWriteTimeUtc);
+                    filesCount++;
+                    totalBytes += fileLength;
                 }
-
-                var rel = Path.GetRelativePath(snapshotDir, file.FullName);
-                var destFile = Path.Combine(targetDirectory, rel);
-                var destDir = Path.GetDirectoryName(destFile);
-
-                if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    Directory.CreateDirectory(destDir);
+                    logger.LogWarning(ex, "快照还原过程中跳过异常项：{Path}", file.FullName);
                 }
-
-                file.CopyTo(destFile, overwrite: true);
-                File.SetLastWriteTimeUtc(destFile, file.LastWriteTimeUtc);
-                filesCount++;
-                totalBytes += file.Length;
             }
         }, ct);
 

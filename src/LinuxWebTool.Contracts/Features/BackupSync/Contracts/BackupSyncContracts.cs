@@ -177,3 +177,43 @@ public sealed record TaskRunResultResponse
     public long ProcessedFiles { get; init; }
     public long ProcessedBytes { get; init; }
 }
+
+/// <summary>备份与同步执行记录 DTO</summary>
+public sealed record BackupSyncRecordItem
+{
+    public Guid Id { get; init; }
+    public Guid TaskId { get; init; }
+    public string TaskName { get; init; } = string.Empty;
+    public TaskMode Mode { get; init; } = TaskMode.Backup;
+    public int TriggerType { get; init; } = 1; // 1 = 手动, 2 = 定时调度
+    public string Status { get; init; } = string.Empty; // Running, Success, Failed, AutoPaused, Interrupted
+    public DateTime StartTime { get; init; }
+    public DateTime? EndTime { get; init; }
+    public long DurationMs { get; init; }
+    public long ProcessedFiles { get; init; }
+    public long ProcessedBytes { get; init; }
+    public long AddedFiles { get; init; }
+    public long UpdatedFiles { get; init; }
+    public long DeletedFiles { get; init; }
+    public long SkippedFiles { get; init; }
+    public string? Summary { get; init; }
+    public string? ErrorMessage { get; init; }
+    public string? ClientIp { get; init; }
+}
+
+/// <summary>执行记录查询条件</summary>
+public sealed record BackupSyncRecordQuery
+{
+    public Guid? TaskId { get; init; }
+    public string? Status { get; init; }
+    public int? Page { get; init; } = 1;
+    public int? PageSize { get; init; } = 20;
+}
+
+/// <summary>清空或修剪执行记录请求</summary>
+public sealed record ClearBackupSyncRecordsRequest
+{
+    public Guid? TaskId { get; init; }
+    public int? OlderThanDays { get; init; }
+    public int? KeepLatestCount { get; init; }
+}

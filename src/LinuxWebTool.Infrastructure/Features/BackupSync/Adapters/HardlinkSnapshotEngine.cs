@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using LinuxWebTool.Contracts.Features.BackupSync.Contracts;
 using Microsoft.Extensions.Logging;
@@ -26,6 +27,7 @@ public partial class HardlinkSnapshotEngine(ILogger<HardlinkSnapshotEngine> logg
         public long TotalSizeBytes { get; init; }
         public long HardlinkedFiles { get; init; }
         public long CopiedFiles { get; init; }
+        public long SkippedFiles { get; init; }
         public DateTime CreatedAt { get; init; }
     }
 
@@ -67,6 +69,7 @@ public partial class HardlinkSnapshotEngine(ILogger<HardlinkSnapshotEngine> logg
         long totalBytes = 0;
         long hardlinkedFiles = 0;
         long copiedFiles = 0;
+        long skippedFiles = 0;
 
         var sourceDirInfo = new DirectoryInfo(sourcePath);
         var normalizedExcludes = excludePatterns?
@@ -80,50 +83,91 @@ public partial class HardlinkSnapshotEngine(ILogger<HardlinkSnapshotEngine> logg
             {
                 ct.ThrowIfCancellationRequested();
 
-                var relativePath = Path.GetRelativePath(sourcePath, file.FullName);
-
-                // 检查排除通配符
-                if (IsExcluded(relativePath, normalizedExcludes))
+                try
                 {
-                    continue;
-                }
+                    var relativePath = Path.GetRelativePath(sourcePath, file.FullName);
 
-                var targetFilePath = Path.Combine(snapshotDir, relativePath);
-                var targetFileDir = Path.GetDirectoryName(targetFilePath);
-                if (!string.IsNullOrEmpty(targetFileDir) && !Directory.Exists(targetFileDir))
-                {
-                    Directory.CreateDirectory(targetFileDir);
-                }
-
-                totalFiles++;
-                totalBytes += file.Length;
-
-                var linked = false;
-                if (!string.IsNullOrEmpty(previousSnapshotDir))
-                {
-                    var previousFilePath = Path.Combine(previousSnapshotDir, relativePath);
-                    if (File.Exists(previousFilePath))
+                    // 检查排除通配符
+                    if (IsExcluded(relativePath, normalizedExcludes))
                     {
-                        var prevFileInfo = new FileInfo(previousFilePath);
-                        // 若文件大小与修改时间一致，尝试硬链接
-                        if (prevFileInfo.Length == file.Length &&
-                            Math.Abs((prevFileInfo.LastWriteTimeUtc - file.LastWriteTimeUtc).TotalSeconds) < 2)
+                        continue;
+                    }
+
+                    var targetFilePath = Path.Combine(snapshotDir, relativePath);
+                    SymlinkAndFileTransferHelper.EnsureDirectoryCreated(targetFilePath);
+
+                    // 1. 符号链接（包含悬空损坏的软链接）保真处理：绝不跟随解引用，直接在目标端重建同名软链
+                    if (SymlinkAndFileTransferHelper.IsSymbolicLink(file))
+                    {
+                        var linkTarget = SymlinkAndFileTransferHelper.GetLinkTarget(file);
+                        if (!string.IsNullOrEmpty(linkTarget))
                         {
-                            linked = TryCreateHardlink(previousFilePath, targetFilePath);
-                            if (linked)
+                            if (SymlinkAndFileTransferHelper.CreateOrUpdateSymlink(targetFilePath, linkTarget, logger))
                             {
-                                hardlinkedFiles++;
+                                totalFiles++;
+                                copiedFiles++;
+                                totalBytes += Encoding.UTF8.GetByteCount(linkTarget);
+                            }
+                            else
+                            {
+                                skippedFiles++;
+                            }
+                            continue;
+                        }
+                    }
+
+                    // 2. 普通文件：安全读取大小与修改时间（防御并发消失文件）
+                    if (!SymlinkAndFileTransferHelper.TryGetSafeLength(file, out var fileLength))
+                    {
+                        logger.LogWarning("文件在快照过程中消失或不可读，跳过：{Path}", file.FullName);
+                        skippedFiles++;
+                        continue;
+                    }
+
+                    totalFiles++;
+                    totalBytes += fileLength;
+
+                    var linked = false;
+                    if (!string.IsNullOrEmpty(previousSnapshotDir))
+                    {
+                        var previousFilePath = Path.Combine(previousSnapshotDir, relativePath);
+                        if (File.Exists(previousFilePath) && !SymlinkAndFileTransferHelper.IsSymbolicLink(new FileInfo(previousFilePath)))
+                        {
+                            try
+                            {
+                                var prevFileInfo = new FileInfo(previousFilePath);
+                                // 若文件大小与修改时间一致，尝试硬链接
+                                if (prevFileInfo.Length == fileLength &&
+                                    Math.Abs((prevFileInfo.LastWriteTimeUtc - file.LastWriteTimeUtc).TotalSeconds) < 2)
+                                {
+                                    linked = TryCreateHardlink(previousFilePath, targetFilePath);
+                                    if (linked)
+                                    {
+                                        hardlinkedFiles++;
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                logger.LogDebug(ex, "尝试复用上一快照硬链接失败，将执行常规复制：{Path}", previousFilePath);
                             }
                         }
                     }
-                }
 
-                if (!linked)
+                    if (!linked)
+                    {
+                        // 新增或已修改文件：直接复制并保留时间戳
+                        SymlinkAndFileTransferHelper.SafeDeleteFileOrLink(targetFilePath);
+                        file.CopyTo(targetFilePath, overwrite: true);
+                        File.SetLastWriteTimeUtc(targetFilePath, file.LastWriteTimeUtc);
+                        copiedFiles++;
+                    }
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    // 新增或已修改文件：直接复制并保留时间戳
-                    file.CopyTo(targetFilePath, overwrite: true);
-                    File.SetLastWriteTimeUtc(targetFilePath, file.LastWriteTimeUtc);
-                    copiedFiles++;
+                    logger.LogWarning(ex, "跳过异常或并发变动文件：{Path}", file.FullName);
+                    skippedFiles++;
                 }
             }
         }, ct);
@@ -154,6 +198,7 @@ public partial class HardlinkSnapshotEngine(ILogger<HardlinkSnapshotEngine> logg
             TotalSizeBytes = totalBytes,
             HardlinkedFiles = hardlinkedFiles,
             CopiedFiles = copiedFiles,
+            SkippedFiles = skippedFiles,
             CreatedAt = now
         };
     }

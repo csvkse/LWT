@@ -81,12 +81,12 @@ public static class McpCatalogRegistry
             "SSH/SFTP 远端节点管理、连接探活与远端操作",
             new List<McpToolCatalogItem>
             {
-                new("remote_host_list", "获取系统中配置的远程主机列表及连通状态", "Read", "remote_hosts"),
-                new("remote_host_get", "获取指定远程主机的连接与状态详情", "Read", "remote_hosts"),
-                new("remote_host_test_connection", "测试指定远程主机的 SSH/SFTP 连通性", "Execute", "remote_hosts"),
-                new("remote_host_execute", "在指定的远程主机上通过 SSH 执行 Shell 命令行", "Dangerous", "remote_hosts"),
-                new("remote_host_read_file", "通过 SFTP 读取指定远程主机上的文件文本内容", "Read", "remote_hosts"),
-                new("remote_host_write_file", "通过 SFTP 向指定远程主机写入或覆盖文件内容", "Dangerous", "remote_hosts")
+                new("remote_list_hosts", "查询已纳管的远程受控主机列表（自动根据 API Key 授权白名单进行范围投影）", "Read", "remote_hosts"),
+                new("remote_test_connection", "对指定远程受控主机发起网络连通与认证探测，返回往返延迟(ms)", "Execute", "remote_hosts"),
+                new("remote_execute_command", "在指定远程受控主机上执行非交互式 Shell 指令，获取 stdout/stderr、退出码与执行耗时", "Dangerous", "remote_hosts"),
+                new("remote_list_directory", "浏览指定远程受控主机的 SFTP 目录，列出文件与子目录的名称、大小、权限与更新时间", "Read", "remote_hosts"),
+                new("remote_read_file", "读取指定远程受控主机上的文本文件内容（单次读取上限 2MB）", "Read", "remote_hosts"),
+                new("remote_write_file", "向指定远程受控主机写入或覆盖保存文本文件内容", "Dangerous", "remote_hosts")
             },
             ModuleCode: "remote_hosts",
             SupportsApi: true,
@@ -98,11 +98,12 @@ public static class McpCatalogRegistry
             "宿主机本地文件浏览、读取、写入与目录管理",
             new List<McpToolCatalogItem>
             {
-                new("file_list", "浏览指定目录下的文件与子目录列表", "Read", "files"),
-                new("file_read_text", "读取指定文本文件的内容", "Read", "files"),
-                new("file_write_text", "写入或覆盖指定的文本文件内容", "Dangerous", "files"),
-                new("file_delete", "删除指定的文件或文件夹目录", "Dangerous", "files"),
-                new("file_create_directory", "在指定路径创建新的文件夹目录", "Execute", "files")
+                new("file_list_directory", "获取指定绝对路径下的文件与子目录列表", "Read", "files"),
+                new("file_read_text", "读取指定文本文件的内容（保护区核心数据库文件拒绝读取）", "Read", "files"),
+                new("file_write_text", "保存或覆写文本文件内容（保护区核心数据库文件拒绝写入）", "Dangerous", "files"),
+                new("file_create_directory", "在指定路径创建多级目录", "Execute", "files"),
+                new("file_delete", "删除文件或空目录（根目录受保护禁止删除）", "Dangerous", "files"),
+                new("file_get_storage_status", "查询磁盘容量、使用率及 SMB/WebDAV/Rclone 存储挂载健康状态", "Read", "files")
             },
             ModuleCode: "files",
             SupportsApi: true,
@@ -114,10 +115,11 @@ public static class McpCatalogRegistry
             "FFmpeg 视频转码队列、预设查询与任务管理",
             new List<McpToolCatalogItem>
             {
-                new("transcode_list_presets", "查询系统可用的视频转码预设模版列表", "Read", "transcode"),
-                new("transcode_list_jobs", "查询正在运行或最近完成的媒体转码任务列表", "Read", "transcode"),
-                new("transcode_create_job", "提交新的媒体转码任务到后台执行队列", "Execute", "transcode"),
-                new("transcode_cancel_job", "取消正在等待或执行中的转码任务", "Dangerous", "transcode")
+                new("transcode_get_capabilities", "探查系统 FFmpeg 版本及显卡硬件加速（VAAPI/NVENC/QSV）支持状态", "Read", "transcode"),
+                new("transcode_list_presets", "查询已配置的音视频转码规格预设列表", "Read", "transcode"),
+                new("transcode_list_jobs", "分页查询转码排队队列与历史任务执行状态", "Read", "transcode"),
+                new("transcode_submit_job", "提交单个媒体文件转码任务至异步处理队列", "Execute", "transcode"),
+                new("transcode_cancel_job", "取消正在排队或执行中的转码任务", "Dangerous", "transcode")
             },
             ModuleCode: "transcode",
             SupportsApi: true,
@@ -129,8 +131,7 @@ public static class McpCatalogRegistry
             "反向代理站点查询、启停与流量管控",
             new List<McpToolCatalogItem>
             {
-                new("gateway_list_websites", "查询当前反向代理网关配置的站点列表与状态", "Read", "gateway"),
-                new("gateway_toggle_website", "启用或停用指定的反向代理站点", "Execute", "gateway")
+                new("gateway_list_routes", "查询家庭网关中已配置的 L7 HTTP 反向代理路由与网站代理", "Read", "gateway")
             },
             ModuleCode: "gateway",
             SupportsApi: true,

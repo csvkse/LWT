@@ -114,4 +114,30 @@ public sealed class ApiKeyPermissionMatrixTests
             allowedTools, toolName, moduleName);
         Assert.Equal(expected, result);
     }
+
+    [Theory]
+    [InlineData("remote_execute_command,remote_list_hosts", "remote_execute_command", true)]
+    [InlineData("remote_execute_command,remote_list_hosts", "remote_list_hosts", true)]
+    [InlineData("file_list_directory,file_read_text", "file_list_directory", true)]
+    [InlineData("transcode_submit_job", "transcode_submit_job", true)]
+    [InlineData("gateway_list_routes", "gateway_list_routes", true)]
+    [InlineData("remote_execute_command", "file_list_directory", false)]
+    public void IsToolAllowed_ExactMatching_EvaluatesDirectToolNames(
+        string allowedTools, string queriedTool, bool expected)
+    {
+        var result = ApiKeyPermissionMatrix.IsToolAllowed(allowedTools, queriedTool);
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void ParseAllowedTools_CorrectlyParsesDirectToolNames()
+    {
+        var raw = "remote_execute_command, file_list_directory, schedule_list";
+        var set = ApiKeyPermissionMatrix.ParseAllowedTools(raw);
+
+        Assert.NotNull(set);
+        Assert.Contains("remote_execute_command", set);
+        Assert.Contains("file_list_directory", set);
+        Assert.Contains("schedule_list", set);
+    }
 }

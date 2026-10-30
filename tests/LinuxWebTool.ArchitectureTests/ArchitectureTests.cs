@@ -853,5 +853,160 @@ public class ArchitectureTests
         // 5. SMB 挂载参数必须默认注入 echo_interval 以缩短内核 D 状态阻塞窗口
         Assert.Contains("echo_interval", smbServiceContent);
     }
+
+    [Fact]
+    public void LinuxArch031_McpCatalog与所有Provider工具必须完全双向一致零差异零孤儿()
+    {
+        var mcpDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "Mcp", "Engine");
+        var catalogFile = Path.Combine(mcpDir, "McpCatalogRegistry.cs");
+        var providersDir = Path.Combine(mcpDir, "Providers");
+
+        Assert.True(File.Exists(catalogFile), "McpCatalogRegistry.cs 不存在");
+        Assert.True(Directory.Exists(providersDir), "Providers 目录不存在");
+
+        var catalogContent = File.ReadAllText(catalogFile);
+
+        // 1. 提取所有 Provider 中注册的实际工具名
+        var providerTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in Directory.EnumerateFiles(providersDir, "*Provider.cs"))
+        {
+            var content = File.ReadAllText(file);
+            var matches = Regex.Matches(content, @"new\s+McpToolDefinition\s*\(\s*""([^""]+)""");
+            foreach (Match m in matches)
+            {
+                providerTools.Add(m.Groups[1].Value);
+            }
+        }
+        Assert.True(providerTools.Count >= 20, $"扫描到的 Provider 工具数量异常过少: {providerTools.Count}");
+
+        // 2. 提取 Catalog 中注册的所有工具名
+        var catalogTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var catMatches = Regex.Matches(catalogContent, @"new\s*\(\s*""([^""]+)""\s*,\s*""[^""]+""\s*,\s*""(?:Read|Execute|Dangerous)""");
+        foreach (Match m in catMatches)
+        {
+            catalogTools.Add(m.Groups[1].Value);
+        }
+        Assert.True(catalogTools.Count >= 20, $"扫描到的 Catalog 工具数量异常过少: {catalogTools.Count}");
+
+        // 3. 双向契约一致性校验：Provider 中的每个工具必须在 Catalog 中有对应（1:1 无孤儿工具）
+        var missingInCatalog = new List<string>();
+        foreach (var tool in providerTools)
+        {
+            if (!catalogTools.Contains(tool))
+            {
+                missingInCatalog.Add(tool);
+            }
+        }
+        Assert.True(missingInCatalog.Count == 0,
+            $"发现底层 Provider 已实现但未在 McpCatalogRegistry.cs 中登记的孤儿工具（前端无法勾选）：\n{string.Join("\n", missingInCatalog)}");
+
+        // 4. 双向契约一致性校验：Catalog 中的每个工具必须在 Provider 中有真实实现（1:1 无幽灵工具）
+        var ghostInCatalog = new List<string>();
+        foreach (var tool in catalogTools)
+        {
+            if (!providerTools.Contains(tool))
+            {
+                ghostInCatalog.Add(tool);
+            }
+        }
+        Assert.True(ghostInCatalog.Count == 0,
+            $"发现 McpCatalogRegistry.cs 中登记但底层 Provider 未实现的幽灵工具（勾选后无法执行）：\n{string.Join("\n", ghostInCatalog)}");
+    }
+
+    [Fact]
+    public void LinuxArch032_备份同步引擎必须具备符号链接保真与单文件异常弹性防御能力()
+    {
+        var backupDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure", "Features", "BackupSync", "Adapters");
+        var helperFile = Path.Combine(backupDir, "SymlinkAndFileTransferHelper.cs");
+        var hardlinkEngineFile = Path.Combine(backupDir, "HardlinkSnapshotEngine.cs");
+        var mirrorEngineFile = Path.Combine(backupDir, "MirrorSyncEngine.cs");
+        var restoreEngineFile = Path.Combine(backupDir, "SnapshotRestoreEngine.cs");
+
+        Assert.True(File.Exists(helperFile), "SymlinkAndFileTransferHelper.cs 不存在");
+        Assert.True(File.Exists(hardlinkEngineFile), "HardlinkSnapshotEngine.cs 不存在");
+        Assert.True(File.Exists(mirrorEngineFile), "MirrorSyncEngine.cs 不存在");
+        Assert.True(File.Exists(restoreEngineFile), "SnapshotRestoreEngine.cs 不存在");
+
+        var helperContent = File.ReadAllText(helperFile);
+        var hardlinkContent = File.ReadAllText(hardlinkEngineFile);
+        var mirrorContent = File.ReadAllText(mirrorEngineFile);
+        var restoreContent = File.ReadAllText(restoreEngineFile);
+
+        // 1. 验证辅助类具备符号链接判断与安全删除/重建
+        Assert.Contains("IsSymbolicLink", helperContent);
+        Assert.Contains("GetLinkTarget", helperContent);
+        Assert.Contains("CreateOrUpdateSymlink", helperContent);
+        Assert.Contains("SafeDeleteFileOrLink", helperContent);
+        Assert.Contains("TryGetSafeLength", helperContent);
+
+        // 2. 验证三个核心引擎均集成了 SymlinkAndFileTransferHelper
+        Assert.Contains("SymlinkAndFileTransferHelper", hardlinkContent);
+        Assert.Contains("SymlinkAndFileTransferHelper", mirrorContent);
+        Assert.Contains("SymlinkAndFileTransferHelper", restoreContent);
+
+        // 3. 验证严禁直接调用无防护的 file.Length 或 file.CopyTo
+        Assert.Contains("IsSymbolicLink", hardlinkContent);
+        Assert.Contains("IsSymbolicLink", mirrorContent);
+        Assert.Contains("IsSymbolicLink", restoreContent);
+
+        // 4. 验证引擎循环内必须具备单文件异常弹性捕获隔离（防止单个消失文件中断全局备份）
+        Assert.Contains("IOException or UnauthorizedAccessException", hardlinkContent);
+        Assert.Contains("IOException or UnauthorizedAccessException", mirrorContent);
+        Assert.Contains("IOException or UnauthorizedAccessException", restoreContent);
+    }
+
+    [Fact]
+    public void LinuxArch033_备份同步执行记录必须具备状态机生命周期与自动清理保留策略()
+    {
+        var infraDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure");
+        var persistenceDir = Path.Combine(infraDir, "Shared", "Persistence");
+        var backupRetentionDir = Path.Combine(infraDir, "Features", "BackupSync", "Retention");
+        var backupSafetyDir = Path.Combine(infraDir, "Features", "BackupSync", "Safety");
+        var webhostDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost");
+
+        var dbSetupFile = Path.Combine(persistenceDir, "DbSetup.cs");
+        var recordStoreFile = Path.Combine(persistenceDir, "BackupSyncRecordStore.cs");
+        var retentionStrategyFile = Path.Combine(backupRetentionDir, "IBackupRecordRetentionStrategy.cs");
+        var stateMachineFile = Path.Combine(backupSafetyDir, "BackupSyncStateMachine.cs");
+        var controllerFile = Path.Combine(webhostDir, "Features", "BackupSync", "Routes", "BackupSyncController.cs");
+
+        Assert.True(File.Exists(dbSetupFile), "DbSetup.cs 不存在");
+        Assert.True(File.Exists(recordStoreFile), "BackupSyncRecordStore.cs 不存在");
+        Assert.True(File.Exists(retentionStrategyFile), "IBackupRecordRetentionStrategy.cs 不存在");
+        Assert.True(File.Exists(stateMachineFile), "BackupSyncStateMachine.cs 不存在");
+        Assert.True(File.Exists(controllerFile), "BackupSyncController.cs 不存在");
+
+        var dbSetup = File.ReadAllText(dbSetupFile);
+        var recordStore = File.ReadAllText(recordStoreFile);
+        var retention = File.ReadAllText(retentionStrategyFile);
+        var stateMachine = File.ReadAllText(stateMachineFile);
+        var controller = File.ReadAllText(controllerFile);
+
+        // 1. 验证 SQLite 建表具备 COLLATE NOCASE 和索引
+        Assert.Contains("CREATE TABLE IF NOT EXISTS backup_sync_record", dbSetup);
+        Assert.Contains("idx_backup_sync_record_task_time", dbSetup);
+        Assert.Contains("idx_backup_sync_record_time", dbSetup);
+
+        // 2. 验证仓储具备 DapperAot、生命周期更新、查询与智能修剪
+        Assert.Contains("[DapperAot]", recordStore);
+        Assert.Contains("InsertRecordAsync", recordStore);
+        Assert.Contains("UpdateRecordCompletionAsync", recordStore);
+        Assert.Contains("QueryRecordsAsync", recordStore);
+        Assert.Contains("PruneTaskRecordsAsync", recordStore);
+        Assert.Contains("MarkInterruptedRunningRecordsAsync", recordStore);
+
+        // 3. 验证保留策略抽象与智能复合实现
+        Assert.Contains("interface IBackupRecordRetentionStrategy", retention);
+        Assert.Contains("class SmartHybridRecordRetentionStrategy", retention);
+
+        // 4. 验证状态机驱动单次执行生命周期
+        Assert.Contains("StartExecutionRecordAsync", stateMachine);
+        Assert.Contains("CompleteExecutionRecordAsync", stateMachine);
+        Assert.Contains("StatusInterrupted", stateMachine);
+
+        // 5. 验证控制器暴露查询与清理端点
+        Assert.Contains("[HttpGet(\"Records\")]", controller);
+        Assert.Contains("[HttpPost(\"Records/Clear\")]", controller);
+    }
 }
 
