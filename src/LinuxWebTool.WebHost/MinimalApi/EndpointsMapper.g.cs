@@ -368,6 +368,8 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_ServicesController.MapGet("Extensions", async ([FromServices] ServicesController ctrl, HttpContext ctx, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetExtensions(ct); });
             group_ServicesController.MapPost("Extensions/Action", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromBody] ExtensionActionRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.ExecuteExtensionAction(request, ct); });
             group_ServicesController.MapGet("Extensions/Logs", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromQuery] string id, [FromQuery] int lines = 100, CancellationToken ct = default) => { ctrl.HttpContext = ctx; return await ctrl.GetExtensionLogs(id, lines, ct); });
+            group_ServicesController.MapPost("Extensions/Repo/Inspect", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromBody] InspectRepoModulesRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.InspectRepositoryModules(request, ct); });
+            group_ServicesController.MapPost("Extensions/Repo/Import", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromBody] BatchImportModulesRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.BatchImportModules(request, ct); });
         }
     }
 }

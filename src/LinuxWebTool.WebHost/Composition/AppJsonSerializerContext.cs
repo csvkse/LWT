@@ -352,6 +352,10 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(UpdateFirewallRuleRequest))]
 [JsonSerializable(typeof(ExtensionFormField))]
 [JsonSerializable(typeof(ExtensionCapabilities))]
+[JsonSerializable(typeof(ExtensionDependencies))]
+[JsonSerializable(typeof(ExtensionCustomAction))]
+[JsonSerializable(typeof(List<ExtensionCustomAction>))]
+[JsonSerializable(typeof(IReadOnlyList<ExtensionCustomAction>))]
 [JsonSerializable(typeof(ExtensionManifest))]
 [JsonSerializable(typeof(ExtensionInstance))]
 [JsonSerializable(typeof(List<ExtensionInstance>))]
@@ -360,6 +364,13 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(SystemdUnitFileResponse))]
 [JsonSerializable(typeof(DockerContainerLogsResponse))]
 [JsonSerializable(typeof(ExtensionLogsResponse))]
+[JsonSerializable(typeof(DiscoveredModuleItem))]
+[JsonSerializable(typeof(List<DiscoveredModuleItem>))]
+[JsonSerializable(typeof(IReadOnlyList<DiscoveredModuleItem>))]
+[JsonSerializable(typeof(InspectRepoModulesRequest))]
+[JsonSerializable(typeof(InspectRepoModulesResponse))]
+[JsonSerializable(typeof(BatchImportModulesRequest))]
+[JsonSerializable(typeof(BatchImportModulesResult))]
 
 public partial class AppJsonSerializerContext
  : JsonSerializerContext

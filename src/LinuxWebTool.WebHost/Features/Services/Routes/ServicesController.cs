@@ -159,6 +159,18 @@ public class ServicesController(
     [HttpPost("Extensions/Action")]
     public async Task<IResult> ExecuteExtensionAction([FromBody] ExtensionActionRequest request, CancellationToken cancellationToken)
     {
+        if (request.Action.Equals("ban_ip", StringComparison.OrdinalIgnoreCase) &&
+            request.ActionParams != null &&
+            request.ActionParams.TryGetValue("ip", out var banIp) &&
+            !string.IsNullOrWhiteSpace(banIp))
+        {
+            var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+            if (!string.IsNullOrEmpty(clientIp) && (clientIp.Equals(banIp.Trim(), StringComparison.OrdinalIgnoreCase) || clientIp.Contains(banIp.Trim())))
+            {
+                return BadRequest(new ServiceActionResult { Success = false, Message = $"安全拦截：不能封禁当前客户端正在连接的 IP ({clientIp})" });
+            }
+        }
+
         var res = await extensionManager.ExecuteExtensionActionAsync(request, cancellationToken);
         return res.Success ? Ok(res) : BadRequest(res);
     }
@@ -168,6 +180,20 @@ public class ServicesController(
     {
         var logs = await extensionManager.GetExtensionLogsAsync(id, lines, cancellationToken);
         return Ok(new ExtensionLogsResponse { ExtensionId = id, Logs = logs });
+    }
+
+    [HttpPost("Extensions/Repo/Inspect")]
+    public async Task<IResult> InspectRepositoryModules([FromBody] InspectRepoModulesRequest request, CancellationToken cancellationToken)
+    {
+        var resp = await extensionManager.InspectRepositoryModulesAsync(request, cancellationToken);
+        return Ok(resp);
+    }
+
+    [HttpPost("Extensions/Repo/Import")]
+    public async Task<IResult> BatchImportModules([FromBody] BatchImportModulesRequest request, CancellationToken cancellationToken)
+    {
+        var result = await extensionManager.BatchImportModulesAsync(request, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
     }
     #endregion
 }
