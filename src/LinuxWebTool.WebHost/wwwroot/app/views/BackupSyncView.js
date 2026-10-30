@@ -1,14 +1,18 @@
 import { computed, defineComponent, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { http } from '../api/client.js';
 import { API } from '../config.js';
 import { toast } from '../store/toast.js';
 import FilePicker from '../components/FilePicker.js';
 import ExcludeRuleEditor from '../components/ExcludeRuleEditor.js';
+import TaskProgressMonitor from '../components/TaskProgressMonitor.js';
+import BackupTaskCard from '../components/BackupTaskCard.js';
 
 export default defineComponent({
   name: 'BackupSyncView',
-  components: { FilePicker, ExcludeRuleEditor },
+  components: { FilePicker, ExcludeRuleEditor, TaskProgressMonitor, BackupTaskCard },
   setup() {
+    const router = useRouter();
     const activeTab = ref('backup'); // 'backup' | 'sync' | 'snapshots'
     const loading = ref(false);
     const tasks = ref([]);
@@ -357,6 +361,13 @@ export default defineComponent({
     function viewTaskSnapshots(task) {
       selectedTaskId.value = task.id;
       activeTab.value = 'snapshots';
+    }
+
+    function jumpToFiles(path) {
+      if (!path || typeof path !== 'string') return;
+      const targetPath = path.trim();
+      if (!targetPath) return;
+      router.push({ path: '/files', query: { path: targetPath } });
     }
 
     // ---- 任务编辑与向导 ----
@@ -795,6 +806,7 @@ export default defineComponent({
     });
 
     return {
+      jumpToFiles,
       taskProgressMap,
       formatSpeed,
       formatEta,
@@ -957,108 +969,122 @@ export default defineComponent({
         <div v-if="backupTasks.length === 0" class="panel p-8 text-center text-slate-500 text-xs">
           暂无增量备份任务，点击右上角「＋ 新建任务」创建首个版本备份作业。
         </div>
-        <div v-else class="panel overflow-x-auto">
-          <table class="data-table min-w-[52rem]">
-            <thead>
-              <tr>
-                <th>任务名称</th>
-                <th>路径 (源端 -> 备份库)</th>
-                <th>调度频率</th>
-                <th>GFS 保留策略</th>
-                <th>上次运行</th>
-                <th class="text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="t in backupTasks" :key="t.id">
-                <td class="font-medium text-slate-200">
-                  <div class="flex items-center gap-2">
-                    <span>{{ t.name }}</span>
-                    <span v-if="!t.enabled" class="badge border-slate-600/60 text-slate-500">停用</span>
-                  </div>
-                  <!-- 实时执行进度面板 -->
-                  <div v-if="taskProgressMap[t.id]?.isRunning || t.lastRunStatus === 'Running'" class="mt-2 p-2.5 rounded-lg bg-cyan-950/40 border border-cyan-500/30 text-xs shadow-inner min-w-[20rem]">
-                    <div class="flex items-center justify-between gap-2 mb-1.5">
-                      <div class="flex items-center gap-1.5 font-medium text-cyan-300">
-                        <span class="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-                        <span>{{ taskProgressMap[t.id]?.phaseDescription || '正在处理中...' }}</span>
+        <template v-else>
+          <!-- 桌面端宽屏：结构化数据表格 + 跨列从属进度行 -->
+          <div class="hidden md:block panel overflow-x-auto">
+            <table class="data-table min-w-[52rem]">
+              <thead>
+                <tr>
+                  <th>任务名称</th>
+                  <th>路径 (源端 -> 备份库)</th>
+                  <th>调度频率</th>
+                  <th>GFS 保留策略</th>
+                  <th>上次运行</th>
+                  <th class="text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template v-for="t in backupTasks" :key="t.id">
+                  <tr>
+                    <td class="font-medium text-slate-200">
+                      <div class="flex items-center gap-2">
+                        <span>{{ t.name }}</span>
+                        <span v-if="!t.enabled" class="badge border-slate-600/60 text-slate-500">停用</span>
                       </div>
-                      <div class="font-mono text-cyan-400 font-bold text-xs">
-                        {{ (taskProgressMap[t.id]?.filePercent || 0).toFixed(1) }}%
+                    </td>
+                    <td class="text-slate-400">
+                      <div class="flex items-center gap-1.5 group/src">
+                        <span class="font-mono text-xs text-cyan-300/80 truncate max-w-[20rem]" :title="t.sourcePath">{{ t.sourcePath }}</span>
+                        <button
+                          type="button"
+                          class="opacity-60 hover:opacity-100 hover:text-cyan-300 transition-opacity p-0.5 rounded hover:bg-cyan-500/10 text-xs shrink-0"
+                          title="在文件管理器中打开源端目录"
+                          @click="jumpToFiles(t.sourcePath)"
+                        >
+                          📂
+                        </button>
                       </div>
-                    </div>
-                    <!-- 动态渐变进度条 -->
-                    <div class="w-full bg-slate-800/80 rounded-full h-1.5 overflow-hidden mb-1.5">
-                      <div class="bg-gradient-to-r from-cyan-500 to-emerald-400 h-1.5 rounded-full transition-all duration-300"
-                           :style="{ width: Math.max(3, (taskProgressMap[t.id]?.filePercent || 0)) + '%' }"></div>
-                    </div>
-                    <!-- 数据统计与指标 -->
-                    <div class="flex items-center justify-between text-[11px] text-slate-400">
-                      <div class="flex items-center gap-1.5">
-                        <span>{{ (taskProgressMap[t.id]?.processedFiles || 0).toLocaleString() }} / {{ Math.max(taskProgressMap[t.id]?.processedFiles || 0, taskProgressMap[t.id]?.scannedFiles || 0).toLocaleString() }} 项</span>
-                        <span>·</span>
-                        <span>{{ formatBytes(taskProgressMap[t.id]?.processedBytes || 0) }}</span>
+                      <div class="flex items-center gap-1.5 mt-0.5 group/dst">
+                        <span class="text-xs text-slate-500 truncate max-w-[20rem]" :title="t.targetPath">↳ {{ t.targetPath }}</span>
+                        <button
+                          type="button"
+                          class="opacity-60 hover:opacity-100 hover:text-cyan-300 transition-opacity p-0.5 rounded hover:bg-cyan-500/10 text-xs shrink-0"
+                          title="在文件管理器中打开备份库目录"
+                          @click="jumpToFiles(t.targetPath)"
+                        >
+                          📂
+                        </button>
                       </div>
-                      <div class="flex items-center gap-2 font-mono text-[11px]">
-                        <span v-if="taskProgressMap[t.id]?.speedBytesPerSec > 0" class="text-cyan-300">
-                          ⚡ {{ formatSpeed(taskProgressMap[t.id]?.speedBytesPerSec) }}
-                        </span>
-                        <span v-if="taskProgressMap[t.id]?.estimatedRemainingMs > 0" class="text-amber-300">
-                          ⏳ 约 {{ formatEta(taskProgressMap[t.id]?.estimatedRemainingMs) }}
-                        </span>
+                    </td>
+                    <td>
+                      <span class="badge border-slate-600/60 text-slate-300 font-mono">
+                        {{ t.cronDescription || t.cronExpression }}
+                      </span>
+                    </td>
+                    <td class="text-xs text-slate-400">
+                      <span>最近{{ t.keepLastCount }}次</span> · 
+                      <span>{{ t.keepDays }}天</span> · 
+                      <span>{{ t.keepWeeks }}周</span> · 
+                      <span>{{ t.keepMonths }}月</span>
+                    </td>
+                    <td class="text-xs">
+                      <div v-if="t.lastRunStatus === 'AutoPaused'" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-500/50 bg-amber-500/10 text-amber-300 font-medium" :title="t.autoPausedReason || t.lastRunMessage">
+                        <span>⚠ 自动暂停</span>
                       </div>
-                    </div>
-                    <!-- 实时当前文件追踪 -->
-                    <div v-if="taskProgressMap[t.id]?.currentItemPath" class="text-[10px] text-slate-400 truncate mt-1 font-mono max-w-[28rem]" :title="taskProgressMap[t.id]?.currentItemPath">
-                      正在处理: {{ taskProgressMap[t.id]?.currentItemPath }}
-                    </div>
-                  </div>
-                </td>
-                <td class="text-slate-400">
-                  <div class="font-mono text-xs text-cyan-300/80">{{ t.sourcePath }}</div>
-                  <div class="text-xs text-slate-500 mt-0.5">↳ {{ t.targetPath }}</div>
-                </td>
-                <td>
-                  <span class="badge border-slate-600/60 text-slate-300 font-mono">
-                    {{ t.cronDescription || t.cronExpression }}
-                  </span>
-                </td>
-                <td class="text-xs text-slate-400">
-                  <span>最近{{ t.keepLastCount }}次</span> · 
-                  <span>{{ t.keepDays }}天</span> · 
-                  <span>{{ t.keepWeeks }}周</span> · 
-                  <span>{{ t.keepMonths }}月</span>
-                </td>
-                <td class="text-xs">
-                  <div v-if="t.lastRunStatus === 'AutoPaused'" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-500/50 bg-amber-500/10 text-amber-300 font-medium" :title="t.autoPausedReason || t.lastRunMessage">
-                    <span>⚠ 自动暂停</span>
-                  </div>
-                  <div v-else-if="t.lastRunStatus === 'Running' || taskProgressMap[t.id]?.isRunning" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-cyan-500/50 bg-cyan-500/10 text-cyan-300 font-medium animate-pulse">
-                    <span>⚡ {{ taskProgressMap[t.id]?.phaseDescription || '执行中...' }}</span>
-                  </div>
-                  <div v-else :class="t.lastRunStatus === 'Success' ? 'text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-rose-400' : 'text-slate-500')">
-                    {{ t.lastRunStatus === 'Success' ? '成功' : (t.lastRunStatus === 'Failed' ? '失败' : (t.lastRunStatus || '未运行')) }}
-                  </div>
-                  <div v-if="t.autoPausedReason" class="text-amber-400/90 text-[11px] mt-0.5 truncate max-w-[200px]" :title="t.autoPausedReason">
-                    {{ t.autoPausedReason }}
-                  </div>
-                  <div v-else class="text-slate-500 mt-0.5 text-[11px]">{{ formatTime(t.lastRunTime) }}</div>
-                </td>
-                <td class="text-right whitespace-nowrap">
-                  <div class="inline-flex items-center gap-1.5">
-                    <button v-if="t.lastRunStatus === 'AutoPaused'" type="button" class="btn btn-xs border-amber-500/50 text-amber-300 hover:bg-amber-500/20" @click="resumeTask(t)" title="解除熔断状态并重新唤醒定时调度">恢复调度</button>
-                    <button v-if="t.lastRunStatus === 'Running'" type="button" class="btn btn-xs border-rose-500/50 text-rose-300 hover:bg-rose-500/20" @click="cancelTask(t)" title="强制终止当前正在运行的备份任务并释放锁">终止任务</button>
-                    <button v-else type="button" class="btn btn-xs btn-primary" @click="runTask(t)">立即备份</button>
-                    <button type="button" class="btn btn-xs" @click="viewTaskSnapshots(t)">查看快照</button>
-                    <button type="button" class="btn btn-xs" @click="openRecordsTab(t.id)">记录</button>
-                    <button type="button" class="btn btn-xs" @click="openEditTaskModal(t)">编辑</button>
-                    <button type="button" class="btn btn-xs btn-danger" @click="deleteTask(t)">删除</button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                      <div v-else-if="t.lastRunStatus === 'Running' || taskProgressMap[t.id]?.isRunning" class="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-cyan-500/50 bg-cyan-500/10 text-cyan-300 font-medium animate-pulse">
+                        <span class="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                        <span>运行中 {{ taskProgressMap[t.id]?.filePercent ? '(' + taskProgressMap[t.id].filePercent.toFixed(0) + '%)' : '' }}</span>
+                      </div>
+                      <div v-else :class="t.lastRunStatus === 'Success' ? 'text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-rose-400' : 'text-slate-500')">
+                        {{ t.lastRunStatus === 'Success' ? '成功' : (t.lastRunStatus === 'Failed' ? '失败' : (t.lastRunStatus || '未运行')) }}
+                      </div>
+                      <div v-if="t.autoPausedReason" class="text-amber-400/90 text-[11px] mt-0.5 truncate max-w-[200px]" :title="t.autoPausedReason">
+                        {{ t.autoPausedReason }}
+                      </div>
+                      <div v-else class="text-slate-500 mt-0.5 text-[11px]">{{ formatTime(t.lastRunTime) }}</div>
+                    </td>
+                    <td class="text-right whitespace-nowrap">
+                      <div class="inline-flex items-center gap-1.5">
+                        <button v-if="t.lastRunStatus === 'AutoPaused'" type="button" class="btn btn-xs border-amber-500/50 text-amber-300 hover:bg-amber-500/20" @click="resumeTask(t)" title="解除熔断状态并重新唤醒定时调度">恢复调度</button>
+                        <button v-if="t.lastRunStatus === 'Running'" type="button" class="btn btn-xs border-rose-500/50 text-rose-300 hover:bg-rose-500/20" @click="cancelTask(t)" title="强制终止当前正在运行的备份任务并释放锁">终止任务</button>
+                        <button v-else type="button" class="btn btn-xs btn-primary" @click="runTask(t)">立即备份</button>
+                        <button type="button" class="btn btn-xs" @click="viewTaskSnapshots(t)">查看快照</button>
+                        <button type="button" class="btn btn-xs" @click="openRecordsTab(t.id)">记录</button>
+                        <button type="button" class="btn btn-xs" @click="openEditTaskModal(t)">编辑</button>
+                        <button type="button" class="btn btn-xs btn-danger" @click="deleteTask(t)">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <!-- 桌面端实时执行进度跨列从属行 -->
+                  <tr v-if="taskProgressMap[t.id]?.isRunning || t.lastRunStatus === 'Running'" class="bg-cyan-950/15 border-b border-cyan-500/20">
+                    <td colspan="6" class="p-3">
+                      <TaskProgressMonitor :progress="taskProgressMap[t.id]" variant="subrow" />
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- 移动端窄屏：自适应赛博触控卡片流 -->
+          <div class="block md:hidden space-y-3">
+            <BackupTaskCard
+              v-for="t in backupTasks"
+              :key="t.id"
+              :task="t"
+              :progress="taskProgressMap[t.id]"
+              mode="backup"
+              @run="runTask($event)"
+              @cancel="cancelTask($event)"
+              @resume="resumeTask($event)"
+              @snapshots="viewTaskSnapshots($event)"
+              @records="openRecordsTab($event)"
+              @edit="openEditTaskModal($event)"
+              @delete="deleteTask($event)"
+              @jump="jumpToFiles($event)"
+            />
+          </div>
+        </template>
       </div>
 
       <!-- Tab 2: 直接同步任务列表 -->
@@ -1066,107 +1092,120 @@ export default defineComponent({
         <div v-if="syncTasks.length === 0" class="panel p-8 text-center text-slate-500 text-xs">
           暂无直接镜像同步任务，点击右上角「＋ 新建任务」创建首个目录镜像作业。
         </div>
-        <div v-else class="panel overflow-x-auto">
-          <table class="data-table min-w-[52rem]">
-            <thead>
-              <tr>
-                <th>任务名称</th>
-                <th>路径 (源端 -> 镜像目标)</th>
-                <th>同步策略</th>
-                <th>调度频率</th>
-                <th>上次同步</th>
-                <th class="text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="t in syncTasks" :key="t.id">
-                <td class="font-medium text-slate-200">
-                  <div class="flex items-center gap-2">
-                    <span>{{ t.name }}</span>
-                    <span v-if="!t.enabled" class="badge border-slate-600/60 text-slate-500">停用</span>
-                  </div>
-                  <!-- 实时执行进度面板 -->
-                  <div v-if="taskProgressMap[t.id]?.isRunning || t.lastRunStatus === 'Running'" class="mt-2 p-2.5 rounded-lg bg-cyan-950/40 border border-cyan-500/30 text-xs shadow-inner min-w-[20rem]">
-                    <div class="flex items-center justify-between gap-2 mb-1.5">
-                      <div class="flex items-center gap-1.5 font-medium text-cyan-300">
-                        <span class="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-                        <span>{{ taskProgressMap[t.id]?.phaseDescription || '正在处理中...' }}</span>
+        <template v-else>
+          <!-- 桌面端宽屏：结构化数据表格 + 跨列从属进度行 -->
+          <div class="hidden md:block panel overflow-x-auto">
+            <table class="data-table min-w-[52rem]">
+              <thead>
+                <tr>
+                  <th>任务名称</th>
+                  <th>路径 (源端 -> 镜像目标)</th>
+                  <th>同步策略</th>
+                  <th>调度频率</th>
+                  <th>上次同步</th>
+                  <th class="text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template v-for="t in syncTasks" :key="t.id">
+                  <tr>
+                    <td class="font-medium text-slate-200">
+                      <div class="flex items-center gap-2">
+                        <span>{{ t.name }}</span>
+                        <span v-if="!t.enabled" class="badge border-slate-600/60 text-slate-500">停用</span>
                       </div>
-                      <div class="font-mono text-cyan-400 font-bold text-xs">
-                        {{ (taskProgressMap[t.id]?.filePercent || 0).toFixed(1) }}%
+                    </td>
+                    <td class="text-slate-400">
+                      <div class="flex items-center gap-1.5 group/src">
+                        <span class="font-mono text-xs text-cyan-300/80 truncate max-w-[20rem]" :title="t.sourcePath">{{ t.sourcePath }}</span>
+                        <button
+                          type="button"
+                          class="opacity-60 hover:opacity-100 hover:text-cyan-300 transition-opacity p-0.5 rounded hover:bg-cyan-500/10 text-xs shrink-0"
+                          title="在文件管理器中打开源端目录"
+                          @click="jumpToFiles(t.sourcePath)"
+                        >
+                          📂
+                        </button>
                       </div>
-                    </div>
-                    <!-- 动态渐变进度条 -->
-                    <div class="w-full bg-slate-800/80 rounded-full h-1.5 overflow-hidden mb-1.5">
-                      <div class="bg-gradient-to-r from-cyan-500 to-emerald-400 h-1.5 rounded-full transition-all duration-300"
-                           :style="{ width: Math.max(3, (taskProgressMap[t.id]?.filePercent || 0)) + '%' }"></div>
-                    </div>
-                    <!-- 数据统计与指标 -->
-                    <div class="flex items-center justify-between text-[11px] text-slate-400">
-                      <div class="flex items-center gap-1.5">
-                        <span>{{ (taskProgressMap[t.id]?.processedFiles || 0).toLocaleString() }} / {{ Math.max(taskProgressMap[t.id]?.processedFiles || 0, taskProgressMap[t.id]?.scannedFiles || 0).toLocaleString() }} 项</span>
-                        <span>·</span>
-                        <span>{{ formatBytes(taskProgressMap[t.id]?.processedBytes || 0) }}</span>
+                      <div class="flex items-center gap-1.5 mt-0.5 group/dst">
+                        <span class="text-xs text-slate-500 truncate max-w-[20rem]" :title="t.targetPath">↳ {{ t.targetPath }}</span>
+                        <button
+                          type="button"
+                          class="opacity-60 hover:opacity-100 hover:text-cyan-300 transition-opacity p-0.5 rounded hover:bg-cyan-500/10 text-xs shrink-0"
+                          title="在文件管理器中打开镜像目标目录"
+                          @click="jumpToFiles(t.targetPath)"
+                        >
+                          📂
+                        </button>
                       </div>
-                      <div class="flex items-center gap-2 font-mono text-[11px]">
-                        <span v-if="taskProgressMap[t.id]?.speedBytesPerSec > 0" class="text-cyan-300">
-                          ⚡ {{ formatSpeed(taskProgressMap[t.id]?.speedBytesPerSec) }}
-                        </span>
-                        <span v-if="taskProgressMap[t.id]?.estimatedRemainingMs > 0" class="text-amber-300">
-                          ⏳ 约 {{ formatEta(taskProgressMap[t.id]?.estimatedRemainingMs) }}
-                        </span>
+                    </td>
+                    <td class="text-xs text-slate-400">
+                      <div>{{ t.syncDirection === 1 ? '单向镜像 (跟随删除)' : '单向累加 (不删目标)' }}</div>
+                      <div v-if="t.syncDirection === 1" class="text-slate-500 mt-0.5">
+                        {{ t.deleteHandling === 2 ? '暂存目标回收站 (' + t.trashRetentionDays + '天)' : '直接永久删除' }}
                       </div>
-                    </div>
-                    <!-- 实时当前文件追踪 -->
-                    <div v-if="taskProgressMap[t.id]?.currentItemPath" class="text-[10px] text-slate-400 truncate mt-1 font-mono max-w-[28rem]" :title="taskProgressMap[t.id]?.currentItemPath">
-                      正在处理: {{ taskProgressMap[t.id]?.currentItemPath }}
-                    </div>
-                  </div>
-                </td>
-                <td class="text-slate-400">
-                  <div class="font-mono text-xs text-cyan-300/80">{{ t.sourcePath }}</div>
-                  <div class="text-xs text-slate-500 mt-0.5">↳ {{ t.targetPath }}</div>
-                </td>
-                <td class="text-xs text-slate-400">
-                  <div>{{ t.syncDirection === 1 ? '单向镜像 (跟随删除)' : '单向累加 (不删目标)' }}</div>
-                  <div v-if="t.syncDirection === 1" class="text-slate-500 mt-0.5">
-                    {{ t.deleteHandling === 2 ? '暂存目标回收站 (' + t.trashRetentionDays + '天)' : '直接永久删除' }}
-                  </div>
-                </td>
-                <td>
-                  <span class="badge border-slate-600/60 text-slate-300 font-mono">
-                    {{ t.cronDescription || t.cronExpression }}
-                  </span>
-                </td>
-                <td class="text-xs">
-                  <div v-if="t.lastRunStatus === 'AutoPaused'" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-500/50 bg-amber-500/10 text-amber-300 font-medium" :title="t.autoPausedReason || t.lastRunMessage">
-                    <span>⚠ 自动暂停</span>
-                  </div>
-                  <div v-else-if="t.lastRunStatus === 'Running' || taskProgressMap[t.id]?.isRunning" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-cyan-500/50 bg-cyan-500/10 text-cyan-300 font-medium animate-pulse">
-                    <span>⚡ {{ taskProgressMap[t.id]?.phaseDescription || '执行中...' }}</span>
-                  </div>
-                  <div v-else :class="t.lastRunStatus === 'Success' ? 'text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-rose-400' : 'text-slate-500')">
-                    {{ t.lastRunStatus === 'Success' ? '成功' : (t.lastRunStatus === 'Failed' ? '失败' : (t.lastRunStatus || '未运行')) }}
-                  </div>
-                  <div v-if="t.autoPausedReason" class="text-amber-400/90 text-[11px] mt-0.5 truncate max-w-[200px]" :title="t.autoPausedReason">
-                    {{ t.autoPausedReason }}
-                  </div>
-                  <div v-else class="text-slate-500 mt-0.5 text-[11px]">{{ formatTime(t.lastRunTime) }}</div>
-                </td>
-                <td class="text-right whitespace-nowrap">
-                  <div class="inline-flex items-center gap-1.5">
-                    <button v-if="t.lastRunStatus === 'AutoPaused'" type="button" class="btn btn-xs border-amber-500/50 text-amber-300 hover:bg-amber-500/20" @click="resumeTask(t)" title="解除熔断状态并重新唤醒定时调度">恢复调度</button>
-                    <button v-if="t.lastRunStatus === 'Running'" type="button" class="btn btn-xs border-rose-500/50 text-rose-300 hover:bg-rose-500/20" @click="cancelTask(t)" title="强制终止当前正在运行的同步任务并释放锁">终止任务</button>
-                    <button v-else type="button" class="btn btn-xs btn-primary" @click="runTask(t)">立即同步</button>
-                    <button type="button" class="btn btn-xs" @click="openRecordsTab(t.id)">记录</button>
-                    <button type="button" class="btn btn-xs" @click="openEditTaskModal(t)">编辑</button>
-                    <button type="button" class="btn btn-xs btn-danger" @click="deleteTask(t)">删除</button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                    </td>
+                    <td>
+                      <span class="badge border-slate-600/60 text-slate-300 font-mono">
+                        {{ t.cronDescription || t.cronExpression }}
+                      </span>
+                    </td>
+                    <td class="text-xs">
+                      <div v-if="t.lastRunStatus === 'AutoPaused'" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-500/50 bg-amber-500/10 text-amber-300 font-medium" :title="t.autoPausedReason || t.lastRunMessage">
+                        <span>⚠ 自动暂停</span>
+                      </div>
+                      <div v-else-if="t.lastRunStatus === 'Running' || taskProgressMap[t.id]?.isRunning" class="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-cyan-500/50 bg-cyan-500/10 text-cyan-300 font-medium animate-pulse">
+                        <span class="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                        <span>运行中 {{ taskProgressMap[t.id]?.filePercent ? '(' + taskProgressMap[t.id].filePercent.toFixed(0) + '%)' : '' }}</span>
+                      </div>
+                      <div v-else :class="t.lastRunStatus === 'Success' ? 'text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-rose-400' : 'text-slate-500')">
+                        {{ t.lastRunStatus === 'Success' ? '成功' : (t.lastRunStatus === 'Failed' ? '失败' : (t.lastRunStatus || '未运行')) }}
+                      </div>
+                      <div v-if="t.autoPausedReason" class="text-amber-400/90 text-[11px] mt-0.5 truncate max-w-[200px]" :title="t.autoPausedReason">
+                        {{ t.autoPausedReason }}
+                      </div>
+                      <div v-else class="text-slate-500 mt-0.5 text-[11px]">{{ formatTime(t.lastRunTime) }}</div>
+                    </td>
+                    <td class="text-right whitespace-nowrap">
+                      <div class="inline-flex items-center gap-1.5">
+                        <button v-if="t.lastRunStatus === 'AutoPaused'" type="button" class="btn btn-xs border-amber-500/50 text-amber-300 hover:bg-amber-500/20" @click="resumeTask(t)" title="解除熔断状态并重新唤醒定时调度">恢复调度</button>
+                        <button v-if="t.lastRunStatus === 'Running'" type="button" class="btn btn-xs border-rose-500/50 text-rose-300 hover:bg-rose-500/20" @click="cancelTask(t)" title="强制终止当前正在运行的同步任务并释放锁">终止任务</button>
+                        <button v-else type="button" class="btn btn-xs btn-primary" @click="runTask(t)">立即同步</button>
+                        <button type="button" class="btn btn-xs" @click="openRecordsTab(t.id)">记录</button>
+                        <button type="button" class="btn btn-xs" @click="openEditTaskModal(t)">编辑</button>
+                        <button type="button" class="btn btn-xs btn-danger" @click="deleteTask(t)">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <!-- 桌面端实时执行进度跨列从属行 -->
+                  <tr v-if="taskProgressMap[t.id]?.isRunning || t.lastRunStatus === 'Running'" class="bg-cyan-950/15 border-b border-cyan-500/20">
+                    <td colspan="6" class="p-3">
+                      <TaskProgressMonitor :progress="taskProgressMap[t.id]" variant="subrow" />
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- 移动端窄屏：自适应赛博触控卡片流 -->
+          <div class="block md:hidden space-y-3">
+            <BackupTaskCard
+              v-for="t in syncTasks"
+              :key="t.id"
+              :task="t"
+              :progress="taskProgressMap[t.id]"
+              mode="sync"
+              @run="runTask($event)"
+              @cancel="cancelTask($event)"
+              @resume="resumeTask($event)"
+              @records="openRecordsTab($event)"
+              @edit="openEditTaskModal($event)"
+              @delete="deleteTask($event)"
+              @jump="jumpToFiles($event)"
+            />
+          </div>
+        </template>
       </div>
 
       <!-- Tab 3: 快照库与恢复 (Snapshots & Restore) -->
