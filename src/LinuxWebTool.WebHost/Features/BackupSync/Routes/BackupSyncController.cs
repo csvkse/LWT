@@ -183,6 +183,20 @@ public class BackupSyncController(
         return Ok(ToTaskItem(resumedTask));
     }
 
+    [HttpPost("Tasks/{id:guid}/Cancel")]
+    public async Task<IResult> CancelTask(Guid id)
+    {
+        var existing = await store.GetTaskByIdAsync(id);
+        if (existing is null)
+        {
+            return NotFound(new MessageResponse("未找到指定任务"));
+        }
+
+        var cancelled = await coordinator.CancelTaskAsync(id, clientIp: HttpContext.GetClientIp());
+        await operationLogger.LogAsync("终止备份同步任务", "备份同步", existing.Name, cancelled ? "已终止或重置任务" : "任务并未在执行中", clientIp: HttpContext.GetClientIp(), success: cancelled);
+        return Ok(new MessageResponse(cancelled ? "已成功发送终止信号并释放任务互斥锁" : "任务当前并未在执行中或已处于非运行状态"));
+    }
+
     [HttpGet("Tasks/{id:guid}/Snapshots")]
     public async Task<IResult> GetSnapshots(Guid id)
     {

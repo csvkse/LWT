@@ -222,4 +222,84 @@ public class BackupSyncRecordTests : IDisposable
         Assert.NotNull(zombie.ErrorMessage);
         Assert.Contains("中断", zombie.ErrorMessage);
     }
+
+    [Fact]
+    public async Task UpdateProgressCheckpoint_UpdatesInFlightMetricsWhileRunning()
+    {
+        var recordId = Guid.NewGuid();
+        var taskId = Guid.NewGuid();
+        await _recordStore.InsertRecordAsync(new BackupSyncRecord
+        {
+            Id = recordId,
+            TaskId = taskId,
+            TaskName = "大文件传输任务",
+            Mode = 1,
+            TriggerType = 1,
+            Status = "Running",
+            StartTime = DateTime.Now,
+            ProcessedFiles = 0,
+            ProcessedBytes = 0,
+            DurationMs = 0
+        });
+
+        // 第一次检查点：处理了 500 个文件
+        await _recordStore.UpdateProgressCheckpointAsync(recordId, 5000, 500, 1024000, "正在传输 (500/10000)");
+        var r1 = await _recordStore.GetRecordByIdAsync(recordId);
+        Assert.NotNull(r1);
+        Assert.Equal("Running", r1.Status);
+        Assert.Equal(5000, r1.DurationMs);
+        Assert.Equal(500, r1.ProcessedFiles);
+        Assert.Equal(1024000, r1.ProcessedBytes);
+        Assert.Equal("正在传输 (500/10000)", r1.Summary);
+
+        // 第二次检查点：处理了 2500 个文件
+        await _recordStore.UpdateProgressCheckpointAsync(recordId, 25000, 2500, 8192000, "正在传输 (2500/10000)");
+        var r2 = await _recordStore.GetRecordByIdAsync(recordId);
+        Assert.NotNull(r2);
+        Assert.Equal("Running", r2.Status);
+        Assert.Equal(25000, r2.DurationMs);
+        Assert.Equal(2500, r2.ProcessedFiles);
+        Assert.Equal(8192000, r2.ProcessedBytes);
+
+        // 如果记录已经变为 Success，UpdateProgressCheckpoint 不会误覆盖
+        await _recordStore.UpdateRecordCompletionAsync(
+            recordId, "Success", DateTime.Now, 30000, 10000, 50000000, 10000, 0, 0, 0, "全部完成", null);
+        await _recordStore.UpdateProgressCheckpointAsync(recordId, 99999, 0, 0, "迟到的检查点");
+        var rFinal = await _recordStore.GetRecordByIdAsync(recordId);
+        Assert.NotNull(rFinal);
+        Assert.Equal("Success", rFinal.Status);
+        Assert.Equal("全部完成", rFinal.Summary);
+    }
+
+    [Fact]
+    public async Task GetRunningRecordsByTaskId_ReturnsOnlyRunningRecords()
+    {
+        var taskId = Guid.NewGuid();
+        var r1 = Guid.NewGuid();
+        var r2 = Guid.NewGuid();
+        await _recordStore.InsertRecordAsync(new BackupSyncRecord
+        {
+            Id = r1,
+            TaskId = taskId,
+            TaskName = "任务A",
+            Mode = 1,
+            TriggerType = 1,
+            Status = "Running",
+            StartTime = DateTime.Now
+        });
+        await _recordStore.InsertRecordAsync(new BackupSyncRecord
+        {
+            Id = r2,
+            TaskId = taskId,
+            TaskName = "任务A",
+            Mode = 1,
+            TriggerType = 1,
+            Status = "Success",
+            StartTime = DateTime.Now.AddMinutes(-10)
+        });
+
+        var running = (await _recordStore.GetRunningRecordsByTaskIdAsync(taskId)).ToList();
+        Assert.Single(running);
+        Assert.Equal(r1, running[0].Id);
+    }
 }

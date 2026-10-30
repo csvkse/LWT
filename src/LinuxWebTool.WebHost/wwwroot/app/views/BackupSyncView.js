@@ -333,6 +333,24 @@ export default defineComponent({
       }
     }
 
+    async function cancelTask(task) {
+      if (!confirm(`确定要终止正在运行的同步任务【${task.name}】吗？\n终止后系统将立即安全取消文件传输并释放任务互斥锁。${task.lastRunStatus === 'Running' ? '' : '\n注意：如果后台进程已结束但状态假死残留，此操作将直接重置为已终止。'}`)) {
+        return;
+      }
+      try {
+        const res = await http(API.backupSync.taskCancel(task.id), { method: 'POST' });
+        if (res.ok) {
+          toast.success(res.data?.message || '已成功发送终止信号并释放任务锁');
+          delete taskProgressMap.value[task.id];
+          await refreshAll();
+        } else {
+          toast.error(res.data?.message || '终止任务失败');
+        }
+      } catch (e) {
+        toast.error(`终止任务异常：${e.message}`);
+      }
+    }
+
     function viewTaskSnapshots(task) {
       selectedTaskId.value = task.id;
       activeTab.value = 'snapshots';
@@ -800,6 +818,7 @@ export default defineComponent({
       runTask,
       deleteTask,
       resumeTask,
+      cancelTask,
       viewTaskSnapshots,
       openCreateTaskModal,
       openEditTaskModal,
@@ -1000,7 +1019,8 @@ export default defineComponent({
                 <td class="text-right whitespace-nowrap">
                   <div class="inline-flex items-center gap-1.5">
                     <button v-if="t.lastRunStatus === 'AutoPaused'" type="button" class="btn btn-xs border-amber-500/50 text-amber-300 hover:bg-amber-500/20" @click="resumeTask(t)" title="解除熔断状态并重新唤醒定时调度">恢复调度</button>
-                    <button type="button" class="btn btn-xs btn-primary" @click="runTask(t)">立即备份</button>
+                    <button v-if="t.lastRunStatus === 'Running'" type="button" class="btn btn-xs border-rose-500/50 text-rose-300 hover:bg-rose-500/20" @click="cancelTask(t)" title="强制终止当前正在运行的备份任务并释放锁">终止任务</button>
+                    <button v-else type="button" class="btn btn-xs btn-primary" @click="runTask(t)">立即备份</button>
                     <button type="button" class="btn btn-xs" @click="viewTaskSnapshots(t)">查看快照</button>
                     <button type="button" class="btn btn-xs" @click="openRecordsTab(t.id)">记录</button>
                     <button type="button" class="btn btn-xs" @click="openEditTaskModal(t)">编辑</button>
@@ -1108,7 +1128,8 @@ export default defineComponent({
                 <td class="text-right whitespace-nowrap">
                   <div class="inline-flex items-center gap-1.5">
                     <button v-if="t.lastRunStatus === 'AutoPaused'" type="button" class="btn btn-xs border-amber-500/50 text-amber-300 hover:bg-amber-500/20" @click="resumeTask(t)" title="解除熔断状态并重新唤醒定时调度">恢复调度</button>
-                    <button type="button" class="btn btn-xs btn-primary" @click="runTask(t)">立即同步</button>
+                    <button v-if="t.lastRunStatus === 'Running'" type="button" class="btn btn-xs border-rose-500/50 text-rose-300 hover:bg-rose-500/20" @click="cancelTask(t)" title="强制终止当前正在运行的同步任务并释放锁">终止任务</button>
+                    <button v-else type="button" class="btn btn-xs btn-primary" @click="runTask(t)">立即同步</button>
                     <button type="button" class="btn btn-xs" @click="openRecordsTab(t.id)">记录</button>
                     <button type="button" class="btn btn-xs" @click="openEditTaskModal(t)">编辑</button>
                     <button type="button" class="btn btn-xs btn-danger" @click="deleteTask(t)">删除</button>
@@ -1336,10 +1357,12 @@ export default defineComponent({
                       'border-rose-500/50 bg-rose-500/10 text-rose-300': r.status === 'Failed',
                       'border-amber-500/50 bg-amber-500/10 text-amber-300': r.status === 'AutoPaused',
                       'border-cyan-500/50 bg-cyan-500/10 text-cyan-300': r.status === 'Running',
+                      'border-orange-500/50 bg-orange-500/10 text-orange-300': r.status === 'Cancelled',
+                      'border-red-500/50 bg-red-500/10 text-red-300': r.status === 'TimedOut',
                       'border-slate-500/50 bg-slate-500/10 text-slate-400': r.status === 'Interrupted'
                     }"
                   >
-                    {{ r.status === 'Success' ? '成功' : (r.status === 'Failed' ? '失败' : (r.status === 'AutoPaused' ? '自动熔断' : (r.status === 'Running' ? '执行中' : (r.status === 'Interrupted' ? '服务中断' : r.status)))) }}
+                    {{ r.status === 'Success' ? '成功' : (r.status === 'Failed' ? '失败' : (r.status === 'AutoPaused' ? '自动熔断' : (r.status === 'Running' ? '执行中' : (r.status === 'Cancelled' ? '已终止' : (r.status === 'TimedOut' ? '执行超时' : (r.status === 'Interrupted' ? '服务中断' : r.status)))))) }}
                   </span>
                 </td>
                 <td class="text-xs text-slate-400">

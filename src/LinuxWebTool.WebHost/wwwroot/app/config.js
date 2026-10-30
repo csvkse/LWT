@@ -155,6 +155,7 @@ export const API = {
     taskItem: (id) => `/BackupSync/Tasks/${id}`,
     taskRun: (id) => `/BackupSync/Tasks/${id}/Run`,
     taskResume: (id) => `/BackupSync/Tasks/${id}/Resume`,
+    taskCancel: (id) => `/BackupSync/Tasks/${id}/Cancel`,
     snapshots: (id) => `/BackupSync/Tasks/${id}/Snapshots`,
     snapshotFiles: (id, snapshotId) => `/BackupSync/Tasks/${id}/Snapshots/${snapshotId}/Files`,
     snapshotRestore: (id, snapshotId) => `/BackupSync/Tasks/${id}/Snapshots/${snapshotId}/Restore`,

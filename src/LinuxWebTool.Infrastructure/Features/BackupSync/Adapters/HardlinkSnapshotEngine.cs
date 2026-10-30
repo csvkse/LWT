@@ -188,7 +188,7 @@ public partial class HardlinkSnapshotEngine(ILogger<HardlinkSnapshotEngine> logg
                         // 新增或已修改文件：直接复制并保留时间戳
                         SymlinkAndFileTransferHelper.SafeDeleteFileOrLink(targetFilePath);
                         file.CopyTo(targetFilePath, overwrite: true);
-                        File.SetLastWriteTimeUtc(targetFilePath, file.LastWriteTimeUtc);
+                        SymlinkAndFileTransferHelper.SafeSetLastWriteTimeUtc(targetFilePath, file.LastWriteTimeUtc, logger);
                         copiedFiles++;
                         progressReporter?.ReportFileProcessed(fileLength, relativePath);
                     }

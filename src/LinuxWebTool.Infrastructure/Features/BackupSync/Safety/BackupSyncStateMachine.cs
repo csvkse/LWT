@@ -26,6 +26,8 @@ public class BackupSyncStateMachine(
     public const string StatusFailed = "Failed";
     public const string StatusAutoPaused = "AutoPaused";
     public const string StatusInterrupted = "Interrupted";
+    public const string StatusCancelled = "Cancelled";
+    public const string StatusTimedOut = "TimedOut";
 
     /// <summary>
     /// 开始单次执行生命周期：登记 Running 状态的执行审计记录
@@ -182,6 +184,33 @@ public class BackupSyncStateMachine(
             nextRun,
             task.ConsecutiveFailures,
             null);
+    }
+
+    /// <summary>
+    /// 记录执行已被取消（手动终止或超时保护）
+    /// </summary>
+    public async Task RecordCancelledAsync(BackupSyncTask task, string reason, string? clientIp = null)
+    {
+        task.LastRunStatus = StatusCancelled;
+        task.LastRunMessage = reason;
+        task.LastRunTime = DateTime.Now;
+
+        await store.UpdateTaskRunInfoAsync(
+            task.Id,
+            StatusCancelled,
+            reason,
+            task.LastRunTime,
+            task.NextRunTime,
+            task.ConsecutiveFailures,
+            null);
+
+        await operationLogger.LogAsync(
+            "终止备份同步任务",
+            "备份同步",
+            task.Name,
+            reason,
+            clientIp: clientIp,
+            success: true);
     }
 
     /// <summary>

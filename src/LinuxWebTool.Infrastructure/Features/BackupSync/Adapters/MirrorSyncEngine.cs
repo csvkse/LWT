@@ -119,7 +119,7 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
                     {
                         SymlinkAndFileTransferHelper.SafeDeleteFileOrLink(targetFilePath);
                         sf.CopyTo(targetFilePath, overwrite: true);
-                        File.SetLastWriteTimeUtc(targetFilePath, sf.LastWriteTimeUtc);
+                        SymlinkAndFileTransferHelper.SafeSetLastWriteTimeUtc(targetFilePath, sf.LastWriteTimeUtc, logger);
                         addedFiles++;
                         bytesTransferred += sfLength;
                         progressReporter?.ReportFileProcessed(sfLength, rel);
@@ -130,7 +130,7 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
                         if (tf.Length != sfLength || Math.Abs((tf.LastWriteTimeUtc - sf.LastWriteTimeUtc).TotalSeconds) > 2)
                         {
                             sf.CopyTo(targetFilePath, overwrite: true);
-                            File.SetLastWriteTimeUtc(targetFilePath, sf.LastWriteTimeUtc);
+                            SymlinkAndFileTransferHelper.SafeSetLastWriteTimeUtc(targetFilePath, sf.LastWriteTimeUtc, logger);
                             updatedFiles++;
                             bytesTransferred += sfLength;
                             progressReporter?.ReportFileProcessed(sfLength, rel);
