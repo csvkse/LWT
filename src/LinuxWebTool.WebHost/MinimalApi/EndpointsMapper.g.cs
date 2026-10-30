@@ -283,6 +283,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_BackupSyncController.RequireAuthorization();
             group_BackupSyncController.MapGet("Tasks", async ([FromServices] BackupSyncController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.GetTasks(); });
             group_BackupSyncController.MapGet("Tasks/{id:guid}", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.GetTask(id); });
+            group_BackupSyncController.MapGet("Tasks/{id:guid}/Progress", ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return ctrl.GetTaskProgress(id); });
             group_BackupSyncController.MapPost("Tasks", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, [FromBody] SaveBackupSyncTaskRequest request) => { ctrl.HttpContext = ctx; return await ctrl.CreateTask(request); });
             group_BackupSyncController.MapPut("Tasks/{id:guid}", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id, [FromBody] SaveBackupSyncTaskRequest request) => { ctrl.HttpContext = ctx; return await ctrl.UpdateTask(id, request); });
             group_BackupSyncController.MapDelete("Tasks/{id:guid}", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.DeleteTask(id); });

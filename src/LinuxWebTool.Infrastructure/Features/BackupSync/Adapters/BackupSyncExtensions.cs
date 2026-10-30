@@ -1,3 +1,4 @@
+using LinuxWebTool.Infrastructure.Features.BackupSync.Progress;
 using LinuxWebTool.Infrastructure.Features.BackupSync.Retention;
 using LinuxWebTool.Infrastructure.Features.BackupSync.Safety;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,6 +32,9 @@ public static class BackupSyncExtensions
         // 安全流水线与状态机/断路器（状态机模式）
         services.AddSingleton<BackupSyncSafetyPipeline>();
         services.AddSingleton<BackupSyncStateMachine>();
+
+        // 全局无锁实时进度追踪与适配器（状态机与观察者模式）
+        services.AddSingleton<BackupProgressTracker>();
 
         // 统一协调器与调度
         services.AddSingleton<BackupSyncCoordinator>();

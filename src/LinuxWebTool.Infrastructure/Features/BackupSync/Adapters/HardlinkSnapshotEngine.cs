@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using LinuxWebTool.Contracts.Features.BackupSync.Contracts;
+using LinuxWebTool.Infrastructure.Features.BackupSync.Progress;
 using Microsoft.Extensions.Logging;
 
 namespace LinuxWebTool.Infrastructure.Features.BackupSync.Adapters;
@@ -39,6 +40,7 @@ public partial class HardlinkSnapshotEngine(ILogger<HardlinkSnapshotEngine> logg
         string targetBasePath,
         Guid taskId,
         IReadOnlyList<string>? excludePatterns,
+        IBackupProgressReporter? progressReporter = null,
         CancellationToken ct = default)
     {
         if (!Directory.Exists(sourcePath))
@@ -64,6 +66,28 @@ public partial class HardlinkSnapshotEngine(ILogger<HardlinkSnapshotEngine> logg
 
         // 寻找上一份最新快照目录（作为 link-dest 参考基准）
         var previousSnapshotDir = FindLatestPreviousSnapshotDir(targetBasePath, snapshotId);
+        if (!string.IsNullOrEmpty(previousSnapshotDir))
+        {
+            try
+            {
+                var prevManifestFile = Path.Combine(previousSnapshotDir, "manifest.json");
+                if (File.Exists(prevManifestFile))
+                {
+                    var prevManifestJson = File.ReadAllText(prevManifestFile);
+                    using var doc = JsonDocument.Parse(prevManifestJson);
+                    if (doc.RootElement.TryGetProperty("TotalFiles", out var tfProp) && tfProp.GetInt64() > 0)
+                    {
+                        var prevTotalBytes = doc.RootElement.TryGetProperty("TotalSizeBytes", out var tbProp) ? tbProp.GetInt64() : 0;
+                        progressReporter?.SetTotalScanTarget(tfProp.GetInt64(), prevTotalBytes);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "尝试读取上一快照 manifest 预估总进度失败");
+            }
+        }
+        progressReporter?.UpdatePhase(BackupExecutionPhase.Transferring, "正在比对增量与建立快照...");
 
         long totalFiles = 0;
         long totalBytes = 0;
@@ -106,11 +130,14 @@ public partial class HardlinkSnapshotEngine(ILogger<HardlinkSnapshotEngine> logg
                             {
                                 totalFiles++;
                                 copiedFiles++;
-                                totalBytes += Encoding.UTF8.GetByteCount(linkTarget);
+                                var linkBytes = Encoding.UTF8.GetByteCount(linkTarget);
+                                totalBytes += linkBytes;
+                                progressReporter?.ReportFileProcessed(linkBytes, relativePath);
                             }
                             else
                             {
                                 skippedFiles++;
+                                progressReporter?.ReportFileProcessed(0, relativePath, isSkipped: true);
                             }
                             continue;
                         }
@@ -121,6 +148,7 @@ public partial class HardlinkSnapshotEngine(ILogger<HardlinkSnapshotEngine> logg
                     {
                         logger.LogWarning("文件在快照过程中消失或不可读，跳过：{Path}", file.FullName);
                         skippedFiles++;
+                        progressReporter?.ReportFileProcessed(0, file.FullName, isSkipped: true);
                         continue;
                     }
 
@@ -144,6 +172,7 @@ public partial class HardlinkSnapshotEngine(ILogger<HardlinkSnapshotEngine> logg
                                     if (linked)
                                     {
                                         hardlinkedFiles++;
+                                        progressReporter?.ReportFileProcessed(fileLength, relativePath);
                                     }
                                 }
                             }
@@ -161,6 +190,7 @@ public partial class HardlinkSnapshotEngine(ILogger<HardlinkSnapshotEngine> logg
                         file.CopyTo(targetFilePath, overwrite: true);
                         File.SetLastWriteTimeUtc(targetFilePath, file.LastWriteTimeUtc);
                         copiedFiles++;
+                        progressReporter?.ReportFileProcessed(fileLength, relativePath);
                     }
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -168,6 +198,7 @@ public partial class HardlinkSnapshotEngine(ILogger<HardlinkSnapshotEngine> logg
                 {
                     logger.LogWarning(ex, "跳过异常或并发变动文件：{Path}", file.FullName);
                     skippedFiles++;
+                    progressReporter?.ReportFileProcessed(0, file.FullName, isSkipped: true);
                 }
             }
         }, ct);
