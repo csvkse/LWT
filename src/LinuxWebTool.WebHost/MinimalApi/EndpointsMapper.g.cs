@@ -21,6 +21,8 @@ using static LinuxWebTool.WebHost.Features.Transcode.Routes.TranscodeController;
 using LinuxWebTool.WebHost.Features.RemoteHost.Routes;
 using LinuxWebTool.WebHost.Features.Workflows.Routes;
 using LinuxWebTool.Contracts.Features.Workflows.Contracts;
+using LinuxWebTool.WebHost.Features.Services.Routes;
+using LinuxWebTool.Contracts.Features.Services.Contracts;
 
 namespace LinuxWebTool.WebHost.MinimalApi
 {
@@ -50,6 +52,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             services.AddScoped<BackupSyncController>();
             services.AddScoped<RemoteHostsController>();
             services.AddScoped<WorkflowsController>();
+            services.AddScoped<ServicesController>();
         }
 
         public static void MapAutoControllers(this WebApplication app)
@@ -342,6 +345,29 @@ namespace LinuxWebTool.WebHost.MinimalApi
                 return await ctrl.Run(id, request);
             });
             group_WorkflowsController.MapGet("{id:guid}/History", async ([FromServices] WorkflowsController ctrl, HttpContext ctx, Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20) => { ctrl.HttpContext = ctx; return await ctrl.History(id, page, pageSize); });
+
+            var group_ServicesController = app.MapGroup("/api/Services");
+            group_ServicesController.RequireAuthorization();
+            group_ServicesController.MapGet("Environment", async ([FromServices] ServicesController ctrl, HttpContext ctx, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetEnvironment(ct); });
+            group_ServicesController.MapGet("Systemd/Units", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromQuery] string? keyword, [FromQuery] string? state, [FromQuery] string? type, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetSystemdUnits(keyword, state, type, ct); });
+            group_ServicesController.MapPost("Systemd/Action", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromBody] ServiceActionRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.ExecuteSystemdAction(request, ct); });
+            group_ServicesController.MapGet("Systemd/Journal", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromQuery] string unit, [FromQuery] int lines = 100, CancellationToken ct = default) => { ctrl.HttpContext = ctx; return await ctrl.GetSystemdJournal(unit, lines, ct); });
+            group_ServicesController.MapGet("Systemd/UnitFile", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromQuery] string unit, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetSystemdUnitFile(unit, ct); });
+            group_ServicesController.MapGet("Docker/Containers", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromQuery] bool all = true, CancellationToken ct = default) => { ctrl.HttpContext = ctx; return await ctrl.GetDockerContainers(all, ct); });
+            group_ServicesController.MapPost("Docker/Action", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromBody] DockerContainerActionRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.ExecuteDockerAction(request, ct); });
+            group_ServicesController.MapGet("Docker/Logs", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromQuery] string containerId, [FromQuery] int tail = 200, CancellationToken ct = default) => { ctrl.HttpContext = ctx; return await ctrl.GetDockerLogs(containerId, tail, ct); });
+            group_ServicesController.MapGet("Docker/Images", async ([FromServices] ServicesController ctrl, HttpContext ctx, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetDockerImages(ct); });
+            group_ServicesController.MapGet("Config/Ssh", async ([FromServices] ServicesController ctrl, HttpContext ctx, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetSshConfig(ct); });
+            group_ServicesController.MapPost("Config/Ssh", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromBody] UpdateSshConfigRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.UpdateSshConfig(request, ct); });
+            group_ServicesController.MapGet("Config/Samba", async ([FromServices] ServicesController ctrl, HttpContext ctx, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetSambaConfig(ct); });
+            group_ServicesController.MapPost("Config/Samba", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromBody] IReadOnlyList<SambaShareItem> shares, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.UpdateSambaConfig(shares, ct); });
+            group_ServicesController.MapGet("Config/Network", async ([FromServices] ServicesController ctrl, HttpContext ctx, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetNetworkInterfaces(ct); });
+            group_ServicesController.MapGet("Config/Dns", async ([FromServices] ServicesController ctrl, HttpContext ctx, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetDnsConfig(ct); });
+            group_ServicesController.MapGet("Config/Firewall", async ([FromServices] ServicesController ctrl, HttpContext ctx, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetFirewallStatus(ct); });
+            group_ServicesController.MapPost("Config/Firewall/Rule", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromBody] UpdateFirewallRuleRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.UpdateFirewallRule(request, ct); });
+            group_ServicesController.MapGet("Extensions", async ([FromServices] ServicesController ctrl, HttpContext ctx, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetExtensions(ct); });
+            group_ServicesController.MapPost("Extensions/Action", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromBody] ExtensionActionRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.ExecuteExtensionAction(request, ct); });
+            group_ServicesController.MapGet("Extensions/Logs", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromQuery] string id, [FromQuery] int lines = 100, CancellationToken ct = default) => { ctrl.HttpContext = ctx; return await ctrl.GetExtensionLogs(id, lines, ct); });
         }
     }
 }

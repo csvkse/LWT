@@ -197,5 +197,24 @@ export const API = {
       return `${protocol}//${window.location.host}/api/remote-hosts/${encodeURIComponent(id)}/terminal/ws/${encodeURIComponent(sessionId)}${query}`;
     },
   },
+  services: {
+    environment: '/Services/Environment',
+    systemdUnits: '/Services/Systemd/Units',
+    systemdAction: '/Services/Systemd/Action',
+    systemdJournal: '/Services/Systemd/Journal',
+    systemdUnitFile: '/Services/Systemd/UnitFile',
+    dockerContainers: '/Services/Docker/Containers',
+    dockerAction: '/Services/Docker/Action',
+    dockerLogs: '/Services/Docker/Logs',
+    dockerImages: '/Services/Docker/Images',
+    sshConfig: '/Services/Config/Ssh',
+    sambaConfig: '/Services/Config/Samba',
+    networkConfig: '/Services/Config/Network',
+    dnsConfig: '/Services/Config/Dns',
+    firewallConfig: '/Services/Config/Firewall',
+    firewallRule: '/Services/Config/Firewall/Rule',
+    extensions: '/Services/Extensions',
+    extensionAction: '/Services/Extensions/Action',
+    extensionLogs: '/Services/Extensions/Logs',
+  },
 };
-

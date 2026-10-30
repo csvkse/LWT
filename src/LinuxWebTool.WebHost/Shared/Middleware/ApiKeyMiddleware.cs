@@ -132,7 +132,8 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
         if (path.StartsWith("/api/Auth", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/api/ApiKeys", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/api/FrpTunnel", StringComparison.OrdinalIgnoreCase) ||
-            path.StartsWith("/api/EasyTier", StringComparison.OrdinalIgnoreCase))
+            path.StartsWith("/api/EasyTier", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/api/Services", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
