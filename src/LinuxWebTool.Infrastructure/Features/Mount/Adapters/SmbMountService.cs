@@ -336,7 +336,7 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
     // ---------- 工具 ----------
 
     /// <summary>组合挂载选项：用户选项优先，缺 iocharset 时补 utf8；凭据走 credentials= 文件。</summary>
-    private string BuildOptions(SmbMount mount)
+    internal string BuildOptions(SmbMount mount)
     {
         var parts = new List<string>();
         var userOptions = (mount.Options ?? string.Empty)
@@ -348,6 +348,12 @@ public sealed class SmbMountService(DataPaths dataPaths, ILogger<SmbMountService
             parts.Add("iocharset=utf8");
         }
         parts.AddRange(userOptions);
+
+        // 默认注入 echo_interval=10 心跳参数，防止远端 SMB 失联时内核进程长期卡死在 D 状态（TASK_UNINTERRUPTIBLE）
+        if (!userOptions.Any(o => o.StartsWith("echo_interval=", StringComparison.OrdinalIgnoreCase)))
+        {
+            parts.Add("echo_interval=10");
+        }
 
         if (!string.IsNullOrEmpty(mount.Username) || !string.IsNullOrEmpty(mount.Password))
         {

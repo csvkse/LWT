@@ -24,6 +24,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="LinuxWebTool.ArchitectureTests" />
     <InternalsVisibleTo Include="LinuxWebTool.IntegrationTests" />
+    <InternalsVisibleTo Include="LinuxWebTool.UnitTests" />
   </ItemGroup>
 
   <ItemGroup>

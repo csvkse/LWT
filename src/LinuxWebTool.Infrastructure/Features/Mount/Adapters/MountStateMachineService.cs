@@ -302,18 +302,19 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
         lock (gate) runtime = Ensure(descriptor);
         SetPhase(runtime, job, MountExecutionPhase.Probing);
         ct.ThrowIfCancellationRequested();
-        if (MountProbeProcessGuard.IsBlocked(descriptor.Path))
-        {
-            Failed(job, new(false, MountFailureKind.Busy, "上次文件系统探针尚未退出，暂停创建探针和挂载操作")); return;
-        }
+
+        // 1. 挂载状态前置（内存解析 /proc/self/mountinfo，零系统调用挂起风险）
         var status = descriptor.Status();
         lock (gate) runtime.ObservedStatus = status;
         if (status == SmbMountStatus.Abnormal)
         {
             Failed(job, new(false, MountFailureKind.Conflict, "挂载身份与配置不一致，拒绝自动操作")); return;
         }
+
+        // 2. 卸载或删除操作绝对豁免：必须优先处理，绝不允许被历史探针残留锁死
         if (job.Action is "Unmount" or "Delete")
         {
+            MountProbeProcessGuard.Clear(descriptor.Path);
             SetPhase(runtime, job, MountExecutionPhase.Unmounting);
             var result = status is SmbMountStatus.NotMounted or SmbMountStatus.Unsupported ? new MountOperationResult(true)
                 : await descriptor.Unmount(job.Lazy, ct);
@@ -331,6 +332,18 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
                 Finish(runtime, job, MountHealthState.NotMounted, "已卸载，自动恢复已暂停");
             }
             return;
+        }
+
+        // 3. 若本身未挂载或用户手动执行挂载，清理历史旧挂载残留阻断
+        if (status == SmbMountStatus.NotMounted || job.Action == "Mount")
+        {
+            MountProbeProcessGuard.Clear(descriptor.Path);
+        }
+
+        // 4. 仅在存量挂载且非手动挂载时校验探针阻断
+        if (job.Action != "Mount" && MountProbeProcessGuard.IsBlocked(descriptor.Path))
+        {
+            Failed(job, new(false, MountFailureKind.Busy, "上次文件系统探针尚未退出，暂停创建探针和挂载操作")); return;
         }
         if (!descriptor.Supported)
         {
@@ -393,11 +406,9 @@ public sealed class MountStateMachineService(MountBackendCatalog catalog, MountO
             }
             SetPhase(runtime, job, MountExecutionPhase.Unmounting);
             ct.ThrowIfCancellationRequested();
-            if (MountProbeProcessGuard.IsBlocked(descriptor.Path))
-            {
-                Failed(job, new(false, MountFailureKind.Busy, "文件系统探针尚未退出，保留原挂载")); return;
-            }
-            var unmounted = await Measure("Unmount", () => descriptor.Unmount(descriptor.Key.Backend == "smb", ct));
+            var unmountLazy = descriptor.Key.Backend == "smb" || MountProbeProcessGuard.IsBlocked(descriptor.Path);
+            MountProbeProcessGuard.Clear(descriptor.Path);
+            var unmounted = await Measure("Unmount", () => descriptor.Unmount(unmountLazy, ct));
             ct.ThrowIfCancellationRequested();
             if (!unmounted.Success) { Failed(job, unmounted); return; }
         }
