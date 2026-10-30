@@ -13,6 +13,7 @@ namespace LinuxWebTool.Infrastructure.Features.BackupSync.Adapters;
 /// </summary>
 public class BackupSyncCoordinator(
     BackupSyncStore store,
+    BackupSyncRecordStore recordStore,
     HardlinkSnapshotEngine hardlinkEngine,
     MirrorSyncEngine mirrorEngine,
     SnapshotRestoreEngine restoreEngine,
@@ -23,6 +24,7 @@ public class BackupSyncCoordinator(
     ILogger<BackupSyncCoordinator> logger)
 {
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> TaskLocks = new();
+    private static readonly ConcurrentDictionary<Guid, CancellationTokenSource> ActiveCts = new();
 
     /// <summary>
     /// 触发指定任务执行（备份或直接同步）
@@ -68,12 +70,43 @@ public class BackupSyncCoordinator(
         var reporter = progressTracker.StartTracking(task.Id, task.Name, (TaskMode)task.Mode);
         reporter.UpdatePhase(BackupExecutionPhase.PreflightChecking, "正在执行安全预检与连通性验证...");
         var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        linkedCts.CancelAfter(TimeSpan.FromHours(4)); // 4 小时绝对硬超时看门狗，防挂死
+        ActiveCts[taskId] = linkedCts;
+
+        using var checkpointCts = new CancellationTokenSource();
+        var checkpointTask = Task.Run(async () =>
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+            while (!checkpointCts.IsCancellationRequested && await timer.WaitForNextTickAsync(checkpointCts.Token).ConfigureAwait(false))
+            {
+                try
+                {
+                    var snap = reporter.GetSnapshot();
+                    if (snap.IsRunning)
+                    {
+                        var summary = $"{snap.PhaseDescription} ({snap.ProcessedFiles}/{Math.Max(snap.ProcessedFiles, snap.ScannedFiles)})";
+                        await recordStore.UpdateProgressCheckpointAsync(
+                            recordId,
+                            snap.ElapsedMs,
+                            snap.ProcessedFiles,
+                            snap.ProcessedBytes,
+                            summary).ConfigureAwait(false);
+                    }
+                }
+                catch { }
+            }
+        }, CancellationToken.None);
+
         try
         {
             // 2. 真实动作前执行安全预检流水线（挂载状态机检测、目录可读写 Canary 探针、灾难空源防误删、磁盘空间防护）
-            var preflight = await safetyPipeline.EvaluateAsync(task, ct);
+            var preflight = await safetyPipeline.EvaluateAsync(task, linkedCts.Token);
             if (!preflight.IsPassed)
             {
+                checkpointCts.Cancel();
+                try { await checkpointTask.ConfigureAwait(false); } catch { }
                 sw.Stop();
                 var preflightMsg = preflight.ErrorMessage ?? "安全策略预检未通过";
                 if (preflight.IsFatal)
@@ -132,7 +165,7 @@ public class BackupSyncCoordinator(
                     task.Id,
                     excludeList,
                     reporter,
-                    ct);
+                    linkedCts.Token);
 
                 // 2. 登记元数据到数据库
                 var snapshotRecord = new BackupSnapshot
@@ -152,13 +185,15 @@ public class BackupSyncCoordinator(
                 try
                 {
                     reporter.UpdatePhase(BackupExecutionPhase.RetentionPruning, "正在修剪过期快照与提交元数据...");
-                    await AutoGfsPruneAsync(task, ct);
+                    await AutoGfsPruneAsync(task, linkedCts.Token);
                 }
                 catch (Exception pruneEx)
                 {
                     logger.LogWarning(pruneEx, "自动 GFS 修剪异常（不影响本次备份成功）");
                 }
 
+                checkpointCts.Cancel();
+                try { await checkpointTask.ConfigureAwait(false); } catch { }
                 sw.Stop();
                 var msg = $"增量备份成功：创建快照 {result.SnapshotId}，包含文件 {result.TotalFiles}，容量 {result.TotalSizeBytes} 字节，跳过异常 {result.SkippedFiles}，耗时 {sw.ElapsedMilliseconds}ms";
                 reporter.UpdatePhase(BackupExecutionPhase.Completed, "增量备份已顺利完成");
@@ -191,8 +226,10 @@ public class BackupSyncCoordinator(
                     task.TrashRetentionDays,
                     excludeList,
                     reporter,
-                    ct);
+                    linkedCts.Token);
 
+                checkpointCts.Cancel();
+                try { await checkpointTask.ConfigureAwait(false); } catch { }
                 sw.Stop();
                 var msg = $"同步完成：新增 {syncResult.AddedFiles}，更新 {syncResult.UpdatedFiles}，删除 {syncResult.DeletedFiles}，暂存回收站 {syncResult.TrashedFiles}，跳过异常 {syncResult.SkippedFiles}，耗时 {sw.ElapsedMilliseconds}ms";
                 reporter.UpdatePhase(BackupExecutionPhase.Completed, "目录镜像同步已顺利完成");
@@ -215,8 +252,38 @@ public class BackupSyncCoordinator(
                 };
             }
         }
+        catch (OperationCanceledException)
+        {
+            checkpointCts.Cancel();
+            try { await checkpointTask.ConfigureAwait(false); } catch { }
+            sw.Stop();
+            var cancelMsg = linkedCts.IsCancellationRequested ? "任务已被主动终止或执行超时" : "任务已中断";
+            logger.LogWarning("任务已被取消：{Name}，耗时 {Elapsed}ms", task.Name, sw.ElapsedMilliseconds);
+            reporter.UpdatePhase(BackupExecutionPhase.Faulted, cancelMsg);
+            progressTracker.CompleteTracking(task.Id, false, cancelMsg);
+            await stateMachine.RecordCancelledAsync(task, cancelMsg, clientIp);
+            var snap = progressTracker.GetProgress(task.Id);
+            var processedFiles = snap?.ProcessedFiles ?? 0;
+            var processedBytes = snap?.ProcessedBytes ?? 0;
+            var skippedFiles = snap?.SkippedFiles ?? 0;
+            await stateMachine.CompleteExecutionRecordAsync(
+                recordId, task, BackupSyncStateMachine.StatusCancelled,
+                sw.ElapsedMilliseconds,
+                processedFiles, processedBytes,
+                0, 0, 0, skippedFiles,
+                cancelMsg, null);
+
+            return new TaskRunResultResponse
+            {
+                Success = false,
+                Message = cancelMsg,
+                DurationMs = sw.ElapsedMilliseconds
+            };
+        }
         catch (Exception ex)
         {
+            checkpointCts.Cancel();
+            try { await checkpointTask.ConfigureAwait(false); } catch { }
             sw.Stop();
             var errMsg = $"任务执行失败：{ex.Message}";
             logger.LogError(ex, "任务执行异常：{Name}", task.Name);
@@ -238,8 +305,50 @@ public class BackupSyncCoordinator(
         }
         finally
         {
+            ActiveCts.TryRemove(taskId, out _);
             taskLock.Release();
         }
+    }
+
+    /// <summary>
+    /// 手动终止或重置指定任务的执行状态并释放互斥锁
+    /// </summary>
+    public async Task<bool> CancelTaskAsync(Guid taskId, string? reason = null, string? clientIp = null)
+    {
+        var hasActive = false;
+        if (ActiveCts.TryGetValue(taskId, out var cts))
+        {
+            hasActive = true;
+            logger.LogInformation("正在手动取消活跃任务 {TaskId}：{Reason}", taskId, reason ?? "用户主动终止");
+            try
+            {
+                cts.Cancel();
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "通知取消令牌异常：{TaskId}", taskId);
+            }
+        }
+
+        // 无论内存中是否仍有活跃 CTS，检查数据库是否有残留 Running 状态，进行自愈
+        var task = await store.GetTaskByIdAsync(taskId);
+        if (task is not null && task.LastRunStatus == BackupSyncStateMachine.StatusRunning)
+        {
+            await stateMachine.RecordCancelledAsync(task, reason ?? "用户手动终止（重置运行状态）", clientIp);
+            var runningRecords = await recordStore.GetRunningRecordsByTaskIdAsync(taskId);
+            foreach (var rec in runningRecords)
+            {
+                var duration = Math.Max(0, (long)(DateTime.Now - rec.StartTime).TotalMilliseconds);
+                await stateMachine.CompleteExecutionRecordAsync(
+                    rec.Id, task, BackupSyncStateMachine.StatusCancelled,
+                    duration,
+                    rec.ProcessedFiles, rec.ProcessedBytes, 0, 0, 0, 0,
+                    "用户手动重置终止", null);
+            }
+            hasActive = true;
+        }
+
+        return hasActive;
     }
 
     /// <summary>

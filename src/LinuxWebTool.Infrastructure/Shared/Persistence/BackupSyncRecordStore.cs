@@ -75,6 +75,45 @@ WHERE Id = @Id COLLATE NOCASE";
         });
     }
 
+    /// <summary>
+    /// 在途进度检查点持久化：节流更新正在执行（Running）记录的实时耗时、文件数与容量指标
+    /// </summary>
+    public async Task UpdateProgressCheckpointAsync(
+        Guid recordId,
+        long durationMs,
+        long processedFiles,
+        long processedBytes,
+        string? summary)
+    {
+        if (recordId == Guid.Empty) return;
+        using var db = factory.CreateConnection();
+        const string sql = @"
+UPDATE backup_sync_record SET
+    DurationMs = @DurationMs,
+    ProcessedFiles = @ProcessedFiles,
+    ProcessedBytes = @ProcessedBytes,
+    Summary = COALESCE(@Summary, Summary)
+WHERE Id = @Id COLLATE NOCASE AND Status = 'Running'";
+        await db.ExecuteAsync(sql, new
+        {
+            Id = recordId,
+            DurationMs = durationMs,
+            ProcessedFiles = processedFiles,
+            ProcessedBytes = processedBytes,
+            Summary = summary
+        });
+    }
+
+    /// <summary>
+    /// 获取指定任务当前处于 Running 状态的执行记录（用于自愈或取消）
+    /// </summary>
+    public async Task<IEnumerable<BackupSyncRecord>> GetRunningRecordsByTaskIdAsync(Guid taskId)
+    {
+        using var db = factory.CreateConnection();
+        const string sql = "SELECT * FROM backup_sync_record WHERE TaskId = @TaskId COLLATE NOCASE AND Status = 'Running'";
+        return await db.QueryAsync<BackupSyncRecord>(sql, new { TaskId = taskId });
+    }
+
     public async Task<BackupSyncRecord?> GetRecordByIdAsync(Guid id)
     {
         using var db = factory.CreateConnection();

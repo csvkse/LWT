@@ -124,4 +124,19 @@ internal static class SymlinkAndFileTransferHelper
             Directory.CreateDirectory(dir);
         }
     }
+
+    /// <summary>
+    /// 安全设置文件最后修改时间戳（针对 CIFS/Samba/FAT32 等特殊文件系统容错，若系统属性锁或协议缓冲导致受阻则降级记录，不阻塞同步主干）
+    /// </summary>
+    public static void SafeSetLastWriteTimeUtc(string targetFilePath, DateTime lastWriteTimeUtc, ILogger? logger = null)
+    {
+        try
+        {
+            File.SetLastWriteTimeUtc(targetFilePath, lastWriteTimeUtc);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogTrace(ex, "目标文件系统时间戳写入受阻（已降级忽略）：{Target}", targetFilePath);
+        }
+    }
 }
