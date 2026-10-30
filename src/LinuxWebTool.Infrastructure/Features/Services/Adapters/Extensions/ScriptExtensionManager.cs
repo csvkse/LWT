@@ -2,26 +2,42 @@ using System.Text.Json;
 using LinuxWebTool.Contracts.Features.Services.Contracts;
 using LinuxWebTool.Contracts.Features.Shell.Contracts;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions;
 
 /// <summary>
 /// 动态脚本扩展管理器实现：
 /// - 扫描本地 data/services/extensions/ 目录下的插件包；
-/// - 基于 manifest.json 元数据与钩子脚本 (Bash/PowerShell/Python/Node) 动态承载自定义服务；
-/// - 统一超时约束与安全防护。
+/// - 基于 manifest.json 元数据、声明式依赖检查与多语言钩子脚本 (Bash/Node/Python/PowerShell) 动态承载自定义服务；
+/// - 深度支持环境依赖探针、缺失状态置灰与多发行版安装引导；
+/// - 支持从 GitHub 仓库 (单仓库多模块 Mono-repo) 检索与批量导入插件，全流程抗路径穿透。
 /// </summary>
-public sealed class ScriptExtensionManager : IScriptExtensionManager
+public sealed partial class ScriptExtensionManager : IScriptExtensionManager
 {
     private readonly IShellExecutor _shellExecutor;
+    private readonly IExtensionRepoFetcher _repoFetcher;
     private readonly ILogger<ScriptExtensionManager> _logger;
     private readonly string _baseExtensionsDir;
 
-    public ScriptExtensionManager(IShellExecutor shellExecutor, ILogger<ScriptExtensionManager> logger, string? baseExtensionsDir = null)
+    public ScriptExtensionManager(
+        IShellExecutor shellExecutor,
+        IExtensionRepoFetcher repoFetcher,
+        ILogger<ScriptExtensionManager> logger,
+        string? baseExtensionsDir = null)
     {
         _shellExecutor = shellExecutor;
+        _repoFetcher = repoFetcher;
         _logger = logger;
         _baseExtensionsDir = baseExtensionsDir ?? Path.Combine(AppContext.BaseDirectory, "data", "services", "extensions");
+    }
+
+    public ScriptExtensionManager(
+        IShellExecutor shellExecutor,
+        ILogger<ScriptExtensionManager> logger,
+        string? baseExtensionsDir = null)
+        : this(shellExecutor, new CompositeExtensionRepoFetcher(shellExecutor, NullLogger<CompositeExtensionRepoFetcher>.Instance), logger, baseExtensionsDir)
+    {
     }
 
     public async Task<IReadOnlyList<ExtensionInstance>> ListExtensionsAsync(CancellationToken cancellationToken = default)
@@ -29,11 +45,11 @@ public sealed class ScriptExtensionManager : IScriptExtensionManager
         if (!Directory.Exists(_baseExtensionsDir))
         {
             Directory.CreateDirectory(_baseExtensionsDir);
-            EnsureSampleExtensionCreated();
+            EnsureDefaultExtensionsCreated();
         }
         else if (!Directory.EnumerateFileSystemEntries(_baseExtensionsDir).Any())
         {
-            EnsureSampleExtensionCreated();
+            EnsureDefaultExtensionsCreated();
         }
 
         var list = new List<ExtensionInstance>();
@@ -47,82 +63,39 @@ public sealed class ScriptExtensionManager : IScriptExtensionManager
             try
             {
                 var json = await File.ReadAllTextAsync(manifestPath, cancellationToken);
-                using var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
+                var manifest = ParseManifest(json, dir);
+                if (manifest == null) continue;
 
-                var id = root.TryGetProperty("id", out var pId) ? pId.GetString() ?? Path.GetFileName(dir) : Path.GetFileName(dir);
-                var name = root.TryGetProperty("name", out var pName) ? pName.GetString() ?? id : id;
-                var cat = root.TryGetProperty("category", out var pCat) ? pCat.GetString() ?? "custom" : "custom";
-                var ver = root.TryGetProperty("version", out var pVer) ? pVer.GetString() ?? "1.0.0" : "1.0.0";
-                var desc = root.TryGetProperty("description", out var pDesc) ? pDesc.GetString() : null;
-                var icon = root.TryGetProperty("icon", out var pIcon) ? pIcon.GetString() : "🔌";
-
-                var platforms = new List<string>();
-                if (root.TryGetProperty("supportedPlatforms", out var pPlat) && pPlat.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var p in pPlat.EnumerateArray()) platforms.Add(p.GetString() ?? "");
-                }
-                if (platforms.Count == 0) platforms.AddRange(["linux", "windows"]);
-
-                // 检查当前操作系统是否匹配
                 var currentOs = OperatingSystem.IsWindows() ? "windows" : (OperatingSystem.IsLinux() ? "linux" : "macos");
-                if (!platforms.Contains(currentOs, StringComparer.OrdinalIgnoreCase))
+                if (!manifest.SupportedPlatforms.Contains(currentOs, StringComparer.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                var formFields = new List<ExtensionFormField>();
-                if (root.TryGetProperty("configForm", out var pForm) && pForm.ValueKind == JsonValueKind.Array)
+                var missingRunners = ProbeMissingRunners(manifest.Dependencies.Runners);
+                var missingBinaries = ProbeMissingBinaries(manifest.Dependencies.Binaries);
+
+                string status;
+                string? statusMsg;
+                int? pid = null;
+
+                if (missingRunners.Count > 0)
                 {
-                    foreach (var f in pForm.EnumerateArray())
-                    {
-                        var field = f.TryGetProperty("field", out var pF) ? pF.GetString() ?? "" : "";
-                        var label = f.TryGetProperty("label", out var pL) ? pL.GetString() ?? field : field;
-                        var type = f.TryGetProperty("type", out var pT) ? pT.GetString() ?? "text" : "text";
-                        var def = f.TryGetProperty("default", out var pD) ? pD.GetString() : null;
-                        var req = f.TryGetProperty("required", out var pR) && pR.GetBoolean();
-                        formFields.Add(new ExtensionFormField
-                        {
-                            Field = field,
-                            Label = label,
-                            Type = type,
-                            DefaultValue = def,
-                            Required = req
-                        });
-                    }
+                    status = "MissingRuntime";
+                    statusMsg = $"缺少执行运行时: {string.Join(", ", missingRunners)}";
+                }
+                else if (missingBinaries.Count > 0)
+                {
+                    status = "MissingBinary";
+                    statusMsg = $"缺少依赖程序: {string.Join(", ", missingBinaries)}";
+                }
+                else
+                {
+                    (status, statusMsg, pid) = await ProbeExtensionStatusAsync(dir, cancellationToken);
                 }
 
-                var manifest = new ExtensionManifest
-                {
-                    Id = id,
-                    Name = name,
-                    Category = cat,
-                    Version = ver,
-                    Description = desc,
-                    Icon = icon,
-                    SupportedPlatforms = platforms,
-                    ConfigForm = formFields
-                };
-
-                // 执行 status 钩子获取真实运行状态
-                var (status, statusMsg, pid) = await ProbeExtensionStatusAsync(dir, cancellationToken);
-
-                // 读取 config.json
-                var configDict = new Dictionary<string, string>();
-                var configPath = Path.Combine(dir, "config.json");
-                if (File.Exists(configPath))
-                {
-                    try
-                    {
-                        var cJson = await File.ReadAllTextAsync(configPath, cancellationToken);
-                        using var cDoc = JsonDocument.Parse(cJson);
-                        foreach (var prop in cDoc.RootElement.EnumerateObject())
-                        {
-                            configDict[prop.Name] = prop.Value.ToString();
-                        }
-                    }
-                    catch { }
-                }
+                var installGuideText = ResolveInstallGuide(manifest, missingRunners, missingBinaries);
+                var configDict = ReadExtensionConfig(dir);
 
                 list.Add(new ExtensionInstance
                 {
@@ -130,7 +103,10 @@ public sealed class ScriptExtensionManager : IScriptExtensionManager
                     Status = status,
                     StatusMessage = statusMsg,
                     Pid = pid,
-                    CurrentConfig = configDict
+                    CurrentConfig = configDict,
+                    MissingRunners = missingRunners,
+                    MissingBinaries = missingBinaries,
+                    InstallGuideText = installGuideText
                 });
             }
             catch (Exception ex)
@@ -158,19 +134,35 @@ public sealed class ScriptExtensionManager : IScriptExtensionManager
                 var json = SerializeDictionary(request.ConfigValues);
                 await File.WriteAllTextAsync(configPath, json, cancellationToken);
             }
-
-            // 若有 config_set 钩子则触发
-            await RunHookScriptAsync(dir, "config_set", cancellationToken);
-            return new ServiceActionResult { Success = true, Message = "配置已保存并同步给扩展服务" };
+            await RunHookScriptAsync(dir, "config_reload", null, cancellationToken);
+            return new ServiceActionResult { Success = true, Message = "配置已更新" };
         }
 
-        var actionVerb = request.Action.ToLowerInvariant();
-        var (exitCode, stdout, stderr) = await RunHookScriptAsync(dir, actionVerb, cancellationToken);
+        var (exitCode, stdout, stderr) = await RunHookScriptAsync(dir, request.Action, request.ActionParams, cancellationToken);
+        var isSuccess = exitCode == 0;
+
+        string? parsedMessage = null;
+        if (!string.IsNullOrWhiteSpace(stdout))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(stdout.Trim());
+                if (doc.RootElement.TryGetProperty("message", out var pMsg))
+                {
+                    parsedMessage = pMsg.GetString();
+                }
+                if (doc.RootElement.TryGetProperty("success", out var pSucc))
+                {
+                    isSuccess = pSucc.GetBoolean();
+                }
+            }
+            catch { }
+        }
 
         return new ServiceActionResult
         {
-            Success = exitCode == 0,
-            Message = exitCode == 0 ? $"操作 [{actionVerb}] 执行成功" : $"执行失败: {stderr}",
+            Success = isSuccess,
+            Message = parsedMessage ?? (isSuccess ? "操作成功完成" : $"操作失败 (退出码 {exitCode}): {stderr}"),
             Output = stdout
         };
     }
@@ -178,45 +170,48 @@ public sealed class ScriptExtensionManager : IScriptExtensionManager
     public async Task<string> GetExtensionLogsAsync(string extensionId, int lines = 100, CancellationToken cancellationToken = default)
     {
         var dir = Path.Combine(_baseExtensionsDir, extensionId);
-        if (!Directory.Exists(dir)) return "扩展包未找到";
-
-        // 优先检查是否有 logs 钩子
-        var (exitCode, stdout, _) = await RunHookScriptAsync(dir, "logs", cancellationToken);
-        if (exitCode == 0 && !string.IsNullOrWhiteSpace(stdout))
+        if (!Directory.Exists(dir))
         {
-            return stdout;
+            return "未找到该扩展插件目录。";
         }
 
-        // 降级检查本地 service.log
-        var logFile = Path.Combine(dir, "service.log");
-        if (File.Exists(logFile))
+        var logPath = Path.Combine(dir, "service.log");
+        if (!File.Exists(logPath))
         {
-            try
+            var (exitCode, stdout, stderr) = await RunHookScriptAsync(dir, "logs", null, cancellationToken);
+            if (exitCode == 0 && !string.IsNullOrWhiteSpace(stdout))
             {
-                var allLines = await File.ReadAllLinesAsync(logFile, cancellationToken);
-                return string.Join(Environment.NewLine, allLines.TakeLast(lines));
+                return stdout;
             }
-            catch (Exception ex)
-            {
-                return $"读取日志失败: {ex.Message}";
-            }
+            return "暂无持久化日志记录文件 (service.log)。";
         }
 
-        return "暂无日志输出。可在扩展包下放置 logs 钩子脚本或写入 service.log。";
+        try
+        {
+            var allLines = await File.ReadAllLinesAsync(logPath, cancellationToken);
+            var tailLines = allLines.TakeLast(Math.Max(10, lines));
+            return string.Join(Environment.NewLine, tailLines);
+        }
+        catch (Exception ex)
+        {
+            return $"读取日志失败: {ex.Message}";
+        }
     }
 
+    #region 内部工具与探针实现
     private async Task<(string Status, string? Message, int? Pid)> ProbeExtensionStatusAsync(string dir, CancellationToken cancellationToken)
     {
-        var (exitCode, stdout, _) = await RunHookScriptAsync(dir, "status", cancellationToken);
+        var (exitCode, stdout, stderr) = await RunHookScriptAsync(dir, "status", null, cancellationToken);
         if (exitCode == 0 && !string.IsNullOrWhiteSpace(stdout))
         {
             try
             {
                 using var doc = JsonDocument.Parse(stdout.Trim());
-                var st = doc.RootElement.TryGetProperty("status", out var pSt) ? pSt.GetString() ?? "Stopped" : "Stopped";
-                var msg = doc.RootElement.TryGetProperty("message", out var pMsg) ? pMsg.GetString() : null;
-                var pid = doc.RootElement.TryGetProperty("pid", out var pPid) ? pPid.GetInt32() : (int?)null;
-                return (st, msg, pid);
+                var root = doc.RootElement;
+                var stat = root.TryGetProperty("status", out var pStat) ? pStat.GetString() ?? "Running" : "Running";
+                var msg = root.TryGetProperty("message", out var pMsg) ? pMsg.GetString() : null;
+                int? pid = root.TryGetProperty("pid", out var pPid) && pPid.TryGetInt32(out var p) ? p : null;
+                return (stat, msg, pid);
             }
             catch
             {
@@ -226,105 +221,348 @@ public sealed class ScriptExtensionManager : IScriptExtensionManager
         return ("Stopped", "服务未运行", null);
     }
 
-    private async Task<(int ExitCode, string StandardOutput, string StandardError)> RunHookScriptAsync(string dir, string hookName, CancellationToken cancellationToken)
+    private async Task<(int ExitCode, string StandardOutput, string StandardError)> RunHookScriptAsync(
+        string dir,
+        string hookName,
+        Dictionary<string, string>? parameters,
+        CancellationToken cancellationToken)
     {
         var hooksDir = Path.Combine(dir, "hooks");
         if (!Directory.Exists(hooksDir)) hooksDir = dir;
 
-        // 按优先级寻找匹配的执行脚本
         string? scriptPath = null;
         string runnerCmd = "";
-
         var isWindows = OperatingSystem.IsWindows();
 
         if (isWindows)
         {
             var ps1 = Path.Combine(hooksDir, $"{hookName}.ps1");
             var bat = Path.Combine(hooksDir, $"{hookName}.bat");
+            var js = Path.Combine(hooksDir, $"{hookName}.js");
             if (File.Exists(ps1)) { scriptPath = ps1; runnerCmd = $"powershell -ExecutionPolicy Bypass -File \"{ps1}\""; }
             else if (File.Exists(bat)) { scriptPath = bat; runnerCmd = $"cmd /c \"{bat}\""; }
+            else if (File.Exists(js)) { scriptPath = js; runnerCmd = $"node \"{js}\""; }
         }
         else
         {
             var sh = Path.Combine(hooksDir, $"{hookName}.sh");
-            var py = Path.Combine(hooksDir, $"{hookName}.py");
             var js = Path.Combine(hooksDir, $"{hookName}.js");
+            var py = Path.Combine(hooksDir, $"{hookName}.py");
             if (File.Exists(sh)) { scriptPath = sh; runnerCmd = $"bash \"{sh}\""; }
-            else if (File.Exists(py)) { scriptPath = py; runnerCmd = $"python3 \"{py}\""; }
             else if (File.Exists(js)) { scriptPath = js; runnerCmd = $"node \"{js}\""; }
+            else if (File.Exists(py)) { scriptPath = py; runnerCmd = $"python3 \"{py}\""; }
         }
 
         if (string.IsNullOrEmpty(scriptPath) || string.IsNullOrEmpty(runnerCmd))
         {
-            return (-1, "", $"未找到钩子脚本: {hookName}");
+            return (-1, "", $"未找到动作钩子脚本: {hookName}");
+        }
+
+        if (parameters != null)
+        {
+            foreach (var kvp in parameters)
+            {
+                if (kvp.Key.Equals("ip", StringComparison.OrdinalIgnoreCase))
+                {
+                    runnerCmd += $" \"{EscapeCliArg(kvp.Value)}\"";
+                }
+            }
         }
 
         var res = await _shellExecutor.ExecuteAsync(new ShellRequest
         {
             CommandText = runnerCmd,
             WorkingDirectory = dir,
-            TimeoutSeconds = 8
+            TimeoutSeconds = 12
         }, cancellationToken);
 
         return (res.ExitCode ?? -1, res.StandardOutput, res.ErrorOutput);
     }
 
-    private void EnsureSampleExtensionCreated()
+    private static IReadOnlyList<string> ProbeMissingRunners(IReadOnlyList<string> requiredRunners)
+    {
+        var missing = new List<string>();
+        var isWindows = OperatingSystem.IsWindows();
+
+        foreach (var r in requiredRunners)
+        {
+            var runner = r.ToLowerInvariant().Trim();
+            if (runner == "sh" || runner == "bash")
+            {
+                if (isWindows)
+                {
+                    if (!File.Exists(@"C:\Program Files\Git\bin\bash.exe") && !ProbeCommand("bash --version")) missing.Add(runner);
+                }
+                else
+                {
+                    if (!File.Exists("/bin/bash") && !File.Exists("/bin/sh") && !File.Exists("/usr/bin/bash") && !File.Exists("/usr/bin/sh")) missing.Add(runner);
+                }
+            }
+            else if (runner == "node" || runner == "nodejs" || runner == "js")
+            {
+                if (isWindows)
+                {
+                    if (!ProbeCommand("node -v")) missing.Add("node");
+                }
+                else
+                {
+                    if (!File.Exists("/usr/bin/node") && !File.Exists("/bin/node") && !File.Exists("/usr/local/bin/node")) missing.Add("node");
+                }
+            }
+            else if (runner == "python" || runner == "python3" || runner == "py")
+            {
+                if (isWindows)
+                {
+                    if (!ProbeCommand("python --version")) missing.Add("python3");
+                }
+                else
+                {
+                    if (!File.Exists("/usr/bin/python3") && !File.Exists("/bin/python3")) missing.Add("python3");
+                }
+            }
+        }
+
+        return missing;
+    }
+
+    private static IReadOnlyList<string> ProbeMissingBinaries(IReadOnlyList<string> requiredBinaries)
+    {
+        var missing = new List<string>();
+        var isWindows = OperatingSystem.IsWindows();
+
+        foreach (var b in requiredBinaries)
+        {
+            var bin = b.Trim();
+            if (isWindows)
+            {
+                if (!ProbeCommand($"{bin} --version") && !ProbeCommand($"where {bin}")) missing.Add(bin);
+            }
+            else
+            {
+                var paths = new[]
+                {
+                    $"/usr/bin/{bin}",
+                    $"/bin/{bin}",
+                    $"/usr/sbin/{bin}",
+                    $"/sbin/{bin}",
+                    $"/usr/local/bin/{bin}"
+                };
+                if (!paths.Any(File.Exists)) missing.Add(bin);
+            }
+        }
+
+        return missing;
+    }
+
+    private static bool ProbeCommand(string cmd)
     {
         try
         {
-            var sampleDir = Path.Combine(_baseExtensionsDir, "sample-healthcheck");
-            if (Directory.Exists(sampleDir)) return;
-            Directory.CreateDirectory(sampleDir);
-            var hooksDir = Path.Combine(sampleDir, "hooks");
-            Directory.CreateDirectory(hooksDir);
-
-            const string sampleManifestJson = """
-{
-  "id": "sample-healthcheck",
-  "name": "系统健康守护扩展 (示例)",
-  "category": "system",
-  "version": "1.0.0",
-  "description": "基于动态脚本扩展的系统自检守护服务示例",
-  "icon": "🩺",
-  "supportedPlatforms": ["linux", "windows"],
-  "configForm": [
-    { "field": "check_interval", "label": "巡检频率(秒)", "type": "number", "default": "60", "required": true }
-  ]
-}
-""";
-
-            File.WriteAllText(Path.Combine(sampleDir, "manifest.json"), sampleManifestJson);
-
-            // 写入 Windows 与 Linux 示例 status 钩子
-            File.WriteAllText(Path.Combine(hooksDir, "status.ps1"), "Write-Output '{\"status\":\"Running\",\"message\":\"Active & healthy\",\"pid\":9999}'");
-            File.WriteAllText(Path.Combine(hooksDir, "status.sh"), "echo '{\"status\":\"Running\",\"message\":\"Active & healthy\",\"pid\":9999}'");
-            File.WriteAllText(Path.Combine(hooksDir, "start.ps1"), "Write-Output 'Started'");
-            File.WriteAllText(Path.Combine(hooksDir, "start.sh"), "echo 'Started'");
-            File.WriteAllText(Path.Combine(hooksDir, "stop.ps1"), "Write-Output 'Stopped'");
-            File.WriteAllText(Path.Combine(hooksDir, "stop.sh"), "echo 'Stopped'");
+            using var proc = new System.Diagnostics.Process();
+            proc.StartInfo.FileName = OperatingSystem.IsWindows() ? "cmd.exe" : "sh";
+            proc.StartInfo.Arguments = OperatingSystem.IsWindows() ? $"/c \"{cmd}\"" : $"-c \"{cmd}\"";
+            proc.StartInfo.RedirectStandardOutput = true;
+            proc.StartInfo.RedirectStandardError = true;
+            proc.StartInfo.UseShellExecute = false;
+            proc.StartInfo.CreateNoWindow = true;
+            proc.Start();
+            return proc.WaitForExit(1000) && proc.ExitCode == 0;
         }
-        catch (Exception ex)
+        catch
         {
-            _logger.LogDebug(ex, "Failed to create sample extension");
+            return false;
         }
     }
+
+    private static string? ResolveInstallGuide(ExtensionManifest manifest, IReadOnlyList<string> missingRunners, IReadOnlyList<string> missingBinaries)
+    {
+        if (missingRunners.Count == 0 && missingBinaries.Count == 0) return null;
+
+        var distroKey = "debian";
+        if (OperatingSystem.IsWindows()) distroKey = "windows";
+        else if (File.Exists("/etc/alpine-release")) distroKey = "alpine";
+        else if (File.Exists("/etc/redhat-release")) distroKey = "rhel";
+
+        if (manifest.InstallGuide.TryGetValue(distroKey, out var guide))
+        {
+            return guide;
+        }
+
+        var missingAll = missingRunners.Concat(missingBinaries).Distinct();
+        if (OperatingSystem.IsWindows())
+        {
+            return $"winget install {string.Join(" ", missingAll)}";
+        }
+        return distroKey switch
+        {
+            "alpine" => $"apk add --no-cache {string.Join(" ", missingAll)}",
+            "rhel" => $"dnf install -y {string.Join(" ", missingAll)}",
+            _ => $"apt update && apt install -y {string.Join(" ", missingAll)}"
+        };
+    }
+
+    private static ExtensionManifest? ParseManifest(string json, string dir)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var id = root.TryGetProperty("id", out var pId) ? pId.GetString() ?? Path.GetFileName(dir) : Path.GetFileName(dir);
+            var name = root.TryGetProperty("name", out var pName) ? pName.GetString() ?? id : id;
+            var cat = root.TryGetProperty("category", out var pCat) ? pCat.GetString() ?? "custom" : "custom";
+            var ver = root.TryGetProperty("version", out var pVer) ? pVer.GetString() ?? "1.0.0" : "1.0.0";
+            var desc = root.TryGetProperty("description", out var pDesc) ? pDesc.GetString() : null;
+            var icon = root.TryGetProperty("icon", out var pIcon) ? pIcon.GetString() : "🔌";
+
+            var platforms = new List<string>();
+            if (root.TryGetProperty("supportedPlatforms", out var pPlat) && pPlat.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var p in pPlat.EnumerateArray()) platforms.Add(p.GetString() ?? "");
+            }
+            if (platforms.Count == 0) platforms.AddRange(["linux", "windows"]);
+
+            var runners = new List<string>();
+            var binaries = new List<string>();
+            if (root.TryGetProperty("dependencies", out var pDep))
+            {
+                if (pDep.TryGetProperty("runners", out var pR) && pR.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var r in pR.EnumerateArray()) runners.Add(r.GetString() ?? "");
+                }
+                if (pDep.TryGetProperty("binaries", out var pB) && pB.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var b in pB.EnumerateArray()) binaries.Add(b.GetString() ?? "");
+                }
+            }
+
+            var installGuide = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (root.TryGetProperty("installGuide", out var pGuide) && pGuide.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var p in pGuide.EnumerateObject())
+                {
+                    installGuide[p.Name] = p.Value.GetString() ?? "";
+                }
+            }
+
+            var customActions = new List<ExtensionCustomAction>();
+            if (root.TryGetProperty("customActions", out var pActs) && pActs.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var a in pActs.EnumerateArray())
+                {
+                    var action = a.TryGetProperty("action", out var pA) ? pA.GetString() ?? "" : "";
+                    var label = a.TryGetProperty("label", out var pL) ? pL.GetString() ?? action : action;
+                    var aIcon = a.TryGetProperty("icon", out var pI) ? pI.GetString() : "⚙️";
+                    var aDesc = a.TryGetProperty("description", out var pD) ? pD.GetString() : null;
+                    var reqParam = a.TryGetProperty("requireParam", out var pReq) && pReq.GetBoolean();
+                    var pNameStr = a.TryGetProperty("paramName", out var pPn) ? pPn.GetString() : null;
+                    var pPlace = a.TryGetProperty("paramPlaceholder", out var pPh) ? pPh.GetString() : null;
+
+                    customActions.Add(new ExtensionCustomAction
+                    {
+                        Action = action,
+                        Label = label,
+                        Icon = aIcon,
+                        Description = aDesc,
+                        RequireParam = reqParam,
+                        ParamName = pNameStr,
+                        ParamPlaceholder = pPlace
+                    });
+                }
+            }
+
+            var formFields = new List<ExtensionFormField>();
+            if (root.TryGetProperty("configForm", out var pForm) && pForm.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var f in pForm.EnumerateArray())
+                {
+                    var field = f.TryGetProperty("field", out var pF) ? pF.GetString() ?? "" : "";
+                    var label = f.TryGetProperty("label", out var pL) ? pL.GetString() ?? field : field;
+                    var type = f.TryGetProperty("type", out var pT) ? pT.GetString() ?? "text" : "text";
+                    var def = f.TryGetProperty("default", out var pD) ? pD.GetString() : null;
+                    var req = f.TryGetProperty("required", out var pR) && pR.GetBoolean();
+                    formFields.Add(new ExtensionFormField
+                    {
+                        Field = field,
+                        Label = label,
+                        Type = type,
+                        DefaultValue = def,
+                        Required = req
+                    });
+                }
+            }
+
+            return new ExtensionManifest
+            {
+                Id = id,
+                Name = name,
+                Category = cat,
+                Version = ver,
+                Description = desc,
+                Icon = icon,
+                SupportedPlatforms = platforms,
+                Dependencies = new ExtensionDependencies { Runners = runners, Binaries = binaries },
+                InstallGuide = installGuide,
+                CustomActions = customActions,
+                ConfigForm = formFields
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static Dictionary<string, string> ReadExtensionConfig(string dir)
+    {
+        var configDict = new Dictionary<string, string>();
+        var configPath = Path.Combine(dir, "config.json");
+        if (File.Exists(configPath))
+        {
+            try
+            {
+                var cJson = File.ReadAllText(configPath);
+                using var cDoc = JsonDocument.Parse(cJson);
+                foreach (var prop in cDoc.RootElement.EnumerateObject())
+                {
+                    configDict[prop.Name] = prop.Value.ToString();
+                }
+            }
+            catch { }
+        }
+        return configDict;
+    }
+
+    private static void CopyDirectoryRecursive(string sourceDir, string targetDir)
+    {
+        foreach (var file in Directory.GetFiles(sourceDir))
+        {
+            File.Copy(file, Path.Combine(targetDir, Path.GetFileName(file)), overwrite: true);
+        }
+        foreach (var sub in Directory.GetDirectories(sourceDir))
+        {
+            var destSub = Path.Combine(targetDir, Path.GetFileName(sub));
+            Directory.CreateDirectory(destSub);
+            CopyDirectoryRecursive(sub, destSub);
+        }
+    }
+
+    private static string EscapeJson(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "");
+    private static string EscapeCliArg(string s) => s.Replace("\"", "\\\"").Replace(";", "").Replace("&", "").Replace("|", "");
 
     private static string SerializeDictionary(Dictionary<string, string> dict)
     {
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("{");
+        sb.Append("{\n");
         var first = true;
-        foreach (var (k, v) in dict)
+        foreach (var kvp in dict)
         {
-            if (!first) sb.AppendLine(",");
+            if (!first) sb.Append(",\n");
+            sb.Append($"  \"{EscapeJson(kvp.Key)}\": \"{EscapeJson(kvp.Value)}\"");
             first = false;
-            var safeKey = System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(k);
-            var safeVal = System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(v);
-            sb.Append($"  \"{safeKey}\": \"{safeVal}\"");
         }
-        sb.AppendLine();
-        sb.Append('}');
+        sb.Append("\n}");
         return sb.ToString();
     }
+    #endregion
 }

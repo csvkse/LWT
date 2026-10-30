@@ -102,6 +102,7 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.ISystemdServiceAdapter, LinuxWebTool.Infrastructure.Features.Services.Adapters.Systemd.SystemdServiceAdapter>();
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IDockerEngineAdapter, LinuxWebTool.Infrastructure.Features.Services.Adapters.Docker.DockerEngineAdapter>();
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.ISystemServiceConfigAdapter, LinuxWebTool.Infrastructure.Features.Services.Adapters.Config.SystemServiceConfigAdapter>();
+        builder.Services.AddSingleton<LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.IExtensionRepoFetcher, LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.CompositeExtensionRepoFetcher>();
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IScriptExtensionManager, LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.ScriptExtensionManager>();
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IServicesHubOrchestrator, LinuxWebTool.Application.Features.Services.ServicesHubOrchestrator>();
 

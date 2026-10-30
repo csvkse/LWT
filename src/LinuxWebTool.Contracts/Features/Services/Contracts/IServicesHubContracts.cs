@@ -56,6 +56,8 @@ public interface IScriptExtensionManager
     Task<IReadOnlyList<ExtensionInstance>> ListExtensionsAsync(CancellationToken cancellationToken = default);
     Task<ServiceActionResult> ExecuteExtensionActionAsync(ExtensionActionRequest request, CancellationToken cancellationToken = default);
     Task<string> GetExtensionLogsAsync(string extensionId, int lines = 100, CancellationToken cancellationToken = default);
+    Task<InspectRepoModulesResponse> InspectRepositoryModulesAsync(InspectRepoModulesRequest request, CancellationToken cancellationToken = default);
+    Task<BatchImportModulesResult> BatchImportModulesAsync(BatchImportModulesRequest request, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

@@ -216,5 +216,7 @@ export const API = {
     extensions: '/Services/Extensions',
     extensionAction: '/Services/Extensions/Action',
     extensionLogs: '/Services/Extensions/Logs',
+    extensionRepoInspect: '/Services/Extensions/Repo/Inspect',
+    extensionRepoImport: '/Services/Extensions/Repo/Import',
   },
 };

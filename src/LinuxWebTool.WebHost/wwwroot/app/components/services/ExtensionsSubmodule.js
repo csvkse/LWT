@@ -2,9 +2,19 @@ import { defineComponent, onMounted, reactive, ref } from 'vue';
 import { http } from '../../api/client.js';
 import { API } from '../../config.js';
 import { toast } from '../../store/toast.js';
+import ExtensionActionModal from './ExtensionActionModal.js';
+import ExtensionConfigModal from './ExtensionConfigModal.js';
+import ExtensionInstallGuideModal from './ExtensionInstallGuideModal.js';
+import ExtensionRepoImportModal from './ExtensionRepoImportModal.js';
 
 export default defineComponent({
   name: 'ExtensionsSubmodule',
+  components: {
+    ExtensionInstallGuideModal,
+    ExtensionActionModal,
+    ExtensionRepoImportModal,
+    ExtensionConfigModal,
+  },
   setup() {
     const loading = ref(false);
     const extensions = ref([]);
@@ -20,6 +30,14 @@ export default defineComponent({
     const logsExtId = ref('');
     const logsContent = ref('');
     const logsLoading = ref(false);
+
+    // 引导与操作弹窗
+    const showGuideModal = ref(false);
+    const activeGuideExt = ref(null);
+    const showActionModal = ref(false);
+    const activeActionExt = ref(null);
+    const activeActionDef = ref(null);
+    const showRepoModal = ref(false);
 
     async function loadExtensions() {
       loading.value = true;
@@ -97,7 +115,7 @@ export default defineComponent({
       logsLoading.value = true;
       showLogsModal.value = true;
       try {
-        const res = await http(API.services.extensionLogs(extId, 150));
+        const res = await http(`${API.services.extensionLogs}?id=${encodeURIComponent(extId)}&lines=150`);
         if (res.ok && res.data?.logs) {
           logsContent.value = res.data.logs;
         } else {
@@ -108,6 +126,21 @@ export default defineComponent({
       } finally {
         logsLoading.value = false;
       }
+    }
+
+    function openInstallGuide(ext) {
+      activeGuideExt.value = ext;
+      showGuideModal.value = true;
+    }
+
+    function openCustomAction(ext, actDef) {
+      activeActionExt.value = ext;
+      activeActionDef.value = actDef;
+      showActionModal.value = true;
+    }
+
+    function openRepoImport() {
+      showRepoModal.value = true;
     }
 
     onMounted(() => {
@@ -125,11 +158,20 @@ export default defineComponent({
       logsExtId,
       logsContent,
       logsLoading,
+      showGuideModal,
+      activeGuideExt,
+      showActionModal,
+      activeActionExt,
+      activeActionDef,
+      showRepoModal,
       loadExtensions,
       executeAction,
       openConfig,
       saveConfig,
       viewLogs,
+      openInstallGuide,
+      openCustomAction,
+      openRepoImport,
     };
   },
   template: `
@@ -144,13 +186,18 @@ export default defineComponent({
               <span class="badge border-cyan-500/40 text-cyan-300">契约驱动</span>
             </div>
             <div class="text-xs text-slate-400 mt-0.5">
-              目录: <code class="font-mono text-cyan-300/80">data/services/extensions/</code> (支持 Bash / PowerShell / Python / Node.js 钩子)
+              内置 SSH 访问安全守卫 (.sh) 与 Caddy Web 管理 (.js)，支持环境自检与 GitHub Mono-repo 导入
             </div>
           </div>
         </div>
-        <button type="button" class="btn btn-xs hover:border-cyan-500/40" :disabled="loading" @click="loadExtensions()">
-          🔄 重新扫描插件
-        </button>
+        <div class="flex items-center gap-2">
+          <button type="button" class="btn btn-xs hover:border-cyan-500/40 text-cyan-400" @click="openRepoImport()">
+            🌐 从 GitHub 导入扩展
+          </button>
+          <button type="button" class="btn btn-xs hover:border-cyan-500/40" :disabled="loading" @click="loadExtensions()">
+            🔄 重新扫描插件
+          </button>
+        </div>
       </div>
 
       <!-- 扩展卡片流 -->
@@ -158,13 +205,14 @@ export default defineComponent({
         正在扫描与探测动态扩展服务...
       </div>
       <div v-else-if="extensions.length === 0" class="panel p-8 text-center text-slate-500 text-xs">
-        当前无可用扩展插件。请在 <code class="font-mono">data/services/extensions/</code> 放置包含 <code class="font-mono">manifest.json</code> 的服务插件包。
+        当前无可用扩展插件。请在 <code class="font-mono">data/services/extensions/</code> 放置包含 <code class="font-mono">manifest.json</code> 的插件包，或点击上方「从 GitHub 导入」。
       </div>
       <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         <div
           v-for="ext in extensions"
           :key="ext.manifest.id"
           class="panel p-4 flex flex-col justify-between gap-3 border-cyber-line/50 hover:border-cyan-500/40 transition-colors"
+          :class="{ 'opacity-90 border-amber-500/30': ext.status.startsWith('Missing') }"
         >
           <div>
             <!-- 卡片头部 -->
@@ -180,9 +228,20 @@ export default defineComponent({
               </div>
               <span
                 class="badge text-[11px] shrink-0"
-                :class="ext.status === 'Running' ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10' : 'border-slate-700 text-slate-500'"
+                :class="[
+                  ext.status === 'Running' ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10' : '',
+                  ext.status === 'Stopped' ? 'border-slate-700 text-slate-500' : '',
+                  ext.status === 'MissingRuntime' ? 'border-amber-500/50 text-amber-300 bg-amber-500/10' : '',
+                  ext.status === 'MissingBinary' ? 'border-amber-500/50 text-amber-300 bg-amber-500/10' : '',
+                  ext.status === 'Degraded' ? 'border-rose-500/40 text-rose-300 bg-rose-500/10' : ''
+                ]"
               >
-                {{ ext.status === 'Running' ? '运行中' : '已停止' }}
+                {{
+                  ext.status === 'Running' ? '运行中' :
+                  ext.status === 'MissingRuntime' ? '⚠️ 缺少运行时' :
+                  ext.status === 'MissingBinary' ? '⚠️ 缺少目标程序' :
+                  ext.status === 'Degraded' ? '异常' : '已停止'
+                }}
               </span>
             </div>
 
@@ -190,8 +249,35 @@ export default defineComponent({
               {{ ext.manifest.description || '无详细描述' }}
             </div>
 
-            <div v-if="ext.statusMessage" class="mt-2 p-1.5 rounded bg-black/25 text-[11px] font-mono text-cyan-300/80 truncate">
+            <!-- 缺失依赖置灰引导 -->
+            <div v-if="ext.status.startsWith('Missing')" class="mt-2.5 p-2 rounded bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2">
+              <div class="text-[11px] text-amber-300 font-mono truncate">
+                {{ ext.statusMessage || '环境依赖不满足' }}
+              </div>
+              <button
+                type="button"
+                class="text-[11px] text-cyan-400 hover:text-cyan-300 shrink-0 underline"
+                @click="openInstallGuide(ext)"
+              >
+                🛠️ 安装引导
+              </button>
+            </div>
+            <div v-else-if="ext.statusMessage" class="mt-2 p-1.5 rounded bg-black/25 text-[11px] font-mono text-cyan-300/80 truncate">
               提示: {{ ext.statusMessage }}
+            </div>
+
+            <!-- 自定义 Actions 快速操作条 -->
+            <div v-if="ext.manifest.customActions && ext.manifest.customActions.length > 0 && !ext.status.startsWith('Missing')" class="mt-2.5 pt-2 border-t border-cyber-line/30 flex flex-wrap gap-1.5">
+              <button
+                v-for="act in ext.manifest.customActions"
+                :key="act.action"
+                type="button"
+                class="btn btn-xs hover:border-cyan-500/40 text-[11px] py-0.5 px-2 flex items-center gap-1"
+                @click="openCustomAction(ext, act)"
+              >
+                <span>{{ act.icon || '⚙️' }}</span>
+                <span>{{ act.label }}</span>
+              </button>
             </div>
           </div>
 
@@ -202,6 +288,7 @@ export default defineComponent({
                 v-if="ext.status !== 'Running'"
                 type="button"
                 class="btn btn-xs border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/20"
+                :disabled="ext.status.startsWith('Missing')"
                 @click="executeAction(ext.manifest.id, 'start', '启动')"
               >
                 启动
@@ -217,26 +304,28 @@ export default defineComponent({
               <button
                 type="button"
                 class="btn btn-xs hover:border-cyan-500/40"
+                :disabled="ext.status.startsWith('Missing')"
                 @click="executeAction(ext.manifest.id, 'restart', '重启')"
               >
                 重启
               </button>
             </div>
+
             <div class="flex items-center gap-1">
               <button
-                v-if="ext.manifest.configForm?.length > 0"
+                v-if="ext.manifest.configForm && ext.manifest.configForm.length > 0"
                 type="button"
-                class="btn btn-xs"
+                class="btn btn-xs hover:border-cyan-500/40"
+                :disabled="ext.status.startsWith('Missing')"
                 @click="openConfig(ext)"
-                title="修改参数配置"
               >
-                参数
+                配置
               </button>
               <button
+                v-if="ext.manifest.capabilities?.logs"
                 type="button"
-                class="btn btn-xs"
+                class="btn btn-xs hover:border-cyan-500/40"
                 @click="viewLogs(ext.manifest.id)"
-                title="查看运行日志"
               >
                 日志
               </button>
@@ -245,60 +334,54 @@ export default defineComponent({
         </div>
       </div>
 
-      <!-- 参数配置弹窗 -->
-      <div v-if="showConfigModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-        <div class="panel max-w-md w-full flex flex-col border-cyan-500/40 shadow-2xl">
-          <div class="p-3.5 border-b border-cyber-line/50 flex items-center justify-between">
-            <span class="font-display font-semibold text-slate-100 text-sm">配置: {{ editingExt?.manifest?.name }}</span>
-            <button type="button" class="btn btn-xs" @click="showConfigModal = false">✕ 关闭</button>
-          </div>
-          <div class="p-4 space-y-3 max-h-[60vh] overflow-y-auto">
-            <div v-for="field in editingExt?.manifest?.configForm" :key="field.field">
-              <label class="block text-xs text-slate-400 mb-1">{{ field.label }}</label>
-              <input
-                v-if="field.type === 'number'"
-                type="number"
-                v-model="configFormValues[field.field]"
-                class="input text-xs w-full"
-              />
-              <input
-                v-else-if="field.type === 'password'"
-                type="password"
-                v-model="configFormValues[field.field]"
-                class="input text-xs w-full font-mono"
-              />
-              <input
-                v-else
-                type="text"
-                v-model="configFormValues[field.field]"
-                class="input text-xs w-full"
-              />
+      <!-- 配置编辑弹窗组件 -->
+      <ExtensionConfigModal
+        :show="showConfigModal"
+        :ext="editingExt"
+        :form-values="configFormValues"
+        :saving="savingConfig"
+        @close="showConfigModal = false"
+        @save="saveConfig()"
+      />
+
+      <!-- 日志弹窗 -->
+      <div v-if="showLogsModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+        <div class="panel max-w-3xl w-full p-5 flex flex-col gap-3 border-cyan-500/40 animate-fade-in max-h-[85vh]">
+          <div class="flex items-center justify-between border-b border-cyber-line/50 pb-2.5">
+            <div class="font-display font-semibold text-slate-100 text-sm">
+              运行日志: <span class="font-mono text-cyan-400">{{ logsExtId }}</span>
             </div>
+            <button type="button" class="btn btn-xs hover:border-slate-500" @click="showLogsModal = false">✕</button>
           </div>
-          <div class="p-3 border-t border-cyber-line/50 flex justify-end gap-2">
-            <button type="button" class="btn btn-xs" @click="showConfigModal = false">取消</button>
-            <button type="button" class="btn btn-xs btn-primary" :disabled="savingConfig" @click="saveConfig()">
-              {{ savingConfig ? '保存中...' : '💾 保存并应用' }}
-            </button>
+          <pre class="p-3 bg-cyber-bg/95 rounded border border-cyber-line/70 font-mono text-xs text-slate-300 flex-1 overflow-y-auto whitespace-pre-wrap select-all leading-relaxed">{{ logsContent }}</pre>
+          <div class="flex justify-end">
+            <button type="button" class="btn btn-xs hover:border-slate-500" @click="showLogsModal = false">关闭</button>
           </div>
         </div>
       </div>
 
-      <!-- 日志弹窗 -->
-      <div v-if="showLogsModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-        <div class="panel max-w-4xl w-full max-h-[85vh] flex flex-col border-cyan-500/40 shadow-2xl">
-          <div class="p-3.5 border-b border-cyber-line/50 flex items-center justify-between">
-            <span class="font-display font-semibold text-slate-100 text-sm">扩展服务日志: {{ logsExtId }}</span>
-            <button type="button" class="btn btn-xs" @click="showLogsModal = false">✕ 关闭</button>
-          </div>
-          <div class="p-4 flex-1 overflow-auto bg-black/50">
-            <pre class="font-mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed select-text">{{ logsContent }}</pre>
-          </div>
-          <div class="p-3 border-t border-cyber-line/50 flex justify-end">
-            <button type="button" class="btn btn-xs btn-primary" @click="showLogsModal = false">关闭</button>
-          </div>
-        </div>
-      </div>
+      <!-- 安装引导弹窗组件 -->
+      <ExtensionInstallGuideModal
+        :show="showGuideModal"
+        :ext="activeGuideExt"
+        @close="showGuideModal = false"
+      />
+
+      <!-- 自定义动作弹窗组件 -->
+      <ExtensionActionModal
+        :show="showActionModal"
+        :ext="activeActionExt"
+        :action-def="activeActionDef"
+        @close="showActionModal = false"
+        @refresh="loadExtensions()"
+      />
+
+      <!-- GitHub 仓库多模块导入弹窗组件 -->
+      <ExtensionRepoImportModal
+        :show="showRepoModal"
+        @close="showRepoModal = false"
+        @imported="loadExtensions()"
+      />
     </div>
   `,
 });
