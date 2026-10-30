@@ -48,19 +48,14 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
 
         var sourceDir = new DirectoryInfo(sourcePath);
         var targetDir = new DirectoryInfo(targetPath);
-        var normalizedExcludes = excludePatterns?
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Select(p => p.Trim())
-            .ToList() ?? [];
+        var normalizedExcludes = ExcludePatternMatcher.NormalizePatterns(excludePatterns);
 
         var todayTrashDirName = $".lwt_trash_{DateTime.Now:yyyyMMdd}";
         var trashBaseDir = Path.Combine(targetPath, todayTrashDirName);
 
-        // 1. 源到目标：增量同步新增与修改的文件
+        // 1. 源到目标：增量同步新增与修改的文件（使用目录级剪枝跳过排除子树）
         progressReporter?.UpdatePhase(BackupExecutionPhase.Scanning, "正在扫描源目录并计算比对差异...");
-        var sourceFiles = sourceDir.EnumerateFiles("*", SearchOption.AllDirectories)
-            .Where(f => !IsExcluded(Path.GetRelativePath(sourcePath, f.FullName), normalizedExcludes))
-            .ToList();
+        var sourceFiles = await Task.Run(() => ExcludePatternMatcher.EnumerateFilesWithPruning(sourceDir, sourcePath, normalizedExcludes, ct), ct);
 
         progressReporter?.SetTotalScanTarget(sourceFiles.Count, 0);
         progressReporter?.UpdatePhase(BackupExecutionPhase.Transferring, "正在镜像复制变动数据...");
@@ -158,14 +153,8 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
             progressReporter?.UpdatePhase(BackupExecutionPhase.CleaningTarget, "正在比对并清理目标端差异文件...");
             await Task.Run(() =>
             {
-                var targetFiles = targetDir.EnumerateFiles("*", SearchOption.AllDirectories)
-                    .Where(f =>
-                    {
-                        var rel = Path.GetRelativePath(targetPath, f.FullName).Replace('\\', '/');
-                        // 忽略垃圾箱文件夹
-                        return !rel.StartsWith(".lwt_trash") && !IsExcluded(rel, normalizedExcludes);
-                    })
-                    .ToList();
+                var targetExcludes = new List<string>(normalizedExcludes) { ".lwt_trash*" };
+                var targetFiles = ExcludePatternMatcher.EnumerateFilesWithPruning(targetDir, targetPath, targetExcludes, ct);
 
                 foreach (var tf in targetFiles)
                 {
@@ -270,27 +259,5 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
         {
             logger.LogWarning(ex, "清理过期同步回收站失败");
         }
-    }
-
-    private static bool IsExcluded(string relativePath, IReadOnlyList<string> excludes)
-    {
-        if (excludes.Count == 0) return false;
-        var normalized = relativePath.Replace('\\', '/');
-
-        foreach (var pattern in excludes)
-        {
-            var p = pattern.Replace('\\', '/').TrimStart('/');
-            if (p.StartsWith("*."))
-            {
-                var ext = p[1..];
-                if (normalized.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-            else if (normalized.Contains(p, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-        return false;
     }
 }

@@ -299,6 +299,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_BackupSyncController.MapGet("Tasks/{id:guid}/PrunePreview", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.PrunePreview(id); });
             group_BackupSyncController.MapPost("Tasks/{id:guid}/PruneExecute", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, Guid id) => { ctrl.HttpContext = ctx; return await ctrl.PruneExecute(id); });
             group_BackupSyncController.MapPost("CronPreview", ([FromServices] BackupSyncController ctrl, HttpContext ctx, [FromBody] CronPreviewRequest request) => { ctrl.HttpContext = ctx; return ctrl.CronPreview(request); });
+            group_BackupSyncController.MapPost("ProbeExcludes", ([FromServices] BackupSyncController ctrl, HttpContext ctx, [FromBody] ProbeExcludesRequest request) => { ctrl.HttpContext = ctx; return ctrl.ProbeExcludes(request); });
             group_BackupSyncController.MapGet("Records", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, [FromQuery] Guid? taskId, [FromQuery] string? status, [FromQuery] int? page, [FromQuery] int? pageSize) => { ctrl.HttpContext = ctx; return await ctrl.GetRecords(taskId, status, page, pageSize); });
             group_BackupSyncController.MapPost("Records/Clear", async ([FromServices] BackupSyncController ctrl, HttpContext ctx, [FromBody] ClearBackupSyncRecordsRequest request) => { ctrl.HttpContext = ctx; return await ctrl.ClearRecords(request); });
 

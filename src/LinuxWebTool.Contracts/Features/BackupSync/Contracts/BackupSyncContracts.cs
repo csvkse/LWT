@@ -217,3 +217,39 @@ public sealed record ClearBackupSyncRecordsRequest
     public int? OlderThanDays { get; init; }
     public int? KeepLatestCount { get; init; }
 }
+
+/// <summary>探测排除规则请求</summary>
+public sealed record ProbeExcludesRequest
+{
+    public string Path { get; init; } = string.Empty;
+}
+
+/// <summary>排除规则推荐项</summary>
+public sealed record ExcludeRecommendationItem
+{
+    public string Pattern { get; init; } = string.Empty;
+    public string Category { get; init; } = string.Empty;
+    public string Reason { get; init; } = string.Empty;
+    public List<string> MatchedPaths { get; init; } = [];
+    public bool IsRecommended { get; init; } = true;
+    public string ImpactLevel { get; init; } = "High"; // High | Medium | Low
+}
+
+/// <summary>常用排除规则预设模板</summary>
+public sealed record ExcludePresetTemplate
+{
+    public string Name { get; init; } = string.Empty;
+    public string Description { get; init; } = string.Empty;
+    public List<string> Patterns { get; init; } = [];
+}
+
+/// <summary>探测排除规则响应</summary>
+public sealed record ProbeExcludesResponse
+{
+    public bool Success { get; init; }
+    public string Message { get; init; } = string.Empty;
+    public string ScannedPath { get; init; } = string.Empty;
+    public List<string> DetectedTechStacks { get; init; } = [];
+    public List<ExcludeRecommendationItem> Recommendations { get; init; } = [];
+    public List<ExcludePresetTemplate> PresetTemplates { get; init; } = [];
+}
