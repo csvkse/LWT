@@ -818,5 +818,40 @@ public class ArchitectureTests
         Assert.Contains("openCopyDialog", feContent);
         Assert.Contains("openMoveDialog", feContent);
     }
+
+    [Fact]
+    public void LinuxArch030_挂载进程守卫必须具备有界TTL与僵尸进程豁免且卸载和未挂载状态不被死锁拦截()
+    {
+        var mountDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure", "Features", "Mount", "Adapters");
+        var guardFile = Path.Combine(mountDir, "MountProbeProcessGuard.cs");
+        var stateMachineFile = Path.Combine(mountDir, "MountStateMachineService.cs");
+        var smbServiceFile = Path.Combine(mountDir, "SmbMountService.cs");
+
+        Assert.True(File.Exists(guardFile), "MountProbeProcessGuard.cs 不存在");
+        Assert.True(File.Exists(stateMachineFile), "MountStateMachineService.cs 不存在");
+        Assert.True(File.Exists(smbServiceFile), "SmbMountService.cs 不存在");
+
+        var guardContent = File.ReadAllText(guardFile);
+        var stateMachineContent = File.ReadAllText(stateMachineFile);
+        var smbServiceContent = File.ReadAllText(smbServiceFile);
+
+        // 1. 严禁 Win32Exception 永久返回 true 导致进程守卫死锁
+        Assert.DoesNotContain("catch (System.ComponentModel.Win32Exception) { return true; }", guardContent);
+
+        // 2. 必须具备有界 TTL (RecordedAt + DefaultTtl) 与主动 Clear 能力
+        Assert.Contains("RecordedAt", guardContent);
+        Assert.Contains("DefaultTtl", guardContent);
+        Assert.Contains("public static void Clear(string path)", guardContent);
+
+        // 3. 必须识别并放行 Linux 僵尸进程 (Z) 和已退出进程
+        Assert.Contains("\"Z\"", guardContent);
+        Assert.Contains("exited-or-unavailable", guardContent);
+
+        // 4. 状态机在卸载/删除或未挂载状态时必须调用 MountProbeProcessGuard.Clear 解锁，严禁死锁拦截
+        Assert.Contains("MountProbeProcessGuard.Clear(descriptor.Path)", stateMachineContent);
+
+        // 5. SMB 挂载参数必须默认注入 echo_interval 以缩短内核 D 状态阻塞窗口
+        Assert.Contains("echo_interval", smbServiceContent);
+    }
 }
 
