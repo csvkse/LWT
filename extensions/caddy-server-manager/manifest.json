@@ -1,0 +1,23 @@
+{
+  "id": "caddy-server-manager",
+  "name": "Caddy 现代 Web 服务器",
+  "category": "web",
+  "version": "1.0.0",
+  "description": "基于 Node.js 原生驱动的 Caddy 服务生命周期控制、Admin API 探测与 Caddyfile 语法预检热重载",
+  "icon": "🌐",
+  "supportedPlatforms": ["linux", "windows"],
+  "dependencies": {
+    "runners": ["node"],
+    "binaries": ["caddy"]
+  },
+  "installGuide": {
+    "debian": "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install -y nodejs && apt install -y debian-keyring debian-archive-keyring apt-transport-https && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list && apt update && apt install -y caddy",
+    "rhel": "dnf module install -y nodejs:20 && dnf copr enable @caddy/caddy && dnf install -y caddy",
+    "alpine": "apk add --no-cache nodejs caddy",
+    "windows": "winget install OpenJS.NodeJS.LTS ; winget install CaddyServer.Caddy"
+  },
+  "configForm": [
+    { "field": "caddyfile_path", "label": "Caddyfile 路径", "type": "text", "default": "/etc/caddy/Caddyfile", "required": true },
+    { "field": "admin_api_endpoint", "label": "Admin API 端点", "type": "text", "default": "http://127.0.0.1:2019", "required": false }
+  ]
+}

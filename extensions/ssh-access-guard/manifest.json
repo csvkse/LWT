@@ -1,0 +1,25 @@
+{
+  "id": "ssh-access-guard",
+  "name": "SSH 访问安全卫士",
+  "category": "security",
+  "version": "1.0.0",
+  "description": "实时监控 SSH 成功与失败登录轨迹，支持恶意 IP/网段一键封禁与解封",
+  "icon": "🛡️",
+  "supportedPlatforms": ["linux", "windows"],
+  "dependencies": {
+    "runners": ["sh"],
+    "binaries": ["last", "who"]
+  },
+  "installGuide": {
+    "debian": "apt update && apt install -y util-linux coreutils",
+    "rhel": "dnf install -y util-linux coreutils",
+    "alpine": "apk add --no-cache util-linux coreutils",
+    "windows": "winget install Git.Git"
+  },
+  "customActions": [
+    { "action": "records", "label": "登录审计记录", "icon": "📜", "description": "查看最近登录历史与失败尝试" },
+    { "action": "banned_list", "label": "封禁名单列表", "icon": "🚫", "description": "查看 /etc/hosts.deny 中的已封禁 IP" },
+    { "action": "ban_ip", "label": "封禁 IP / 网段", "icon": "⛔", "requireParam": true, "paramName": "ip", "paramPlaceholder": "例如 192.168.1.100 或 10.0.0.0/24" },
+    { "action": "unban_ip", "label": "解封 IP / 网段", "icon": "🔓", "requireParam": true, "paramName": "ip", "paramPlaceholder": "输入要解封的 IP 或网段" }
+  ]
+}

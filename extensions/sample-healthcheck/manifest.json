@@ -1,0 +1,19 @@
+{
+  "id": "sample-healthcheck",
+  "name": "系统健康守护扩展 (示例)",
+  "category": "system",
+  "version": "1.0.0",
+  "description": "基于动态脚本扩展的系统自检守护服务示例",
+  "icon": "🩺",
+  "supportedPlatforms": ["linux", "windows"],
+  "dependencies": {
+    "runners": ["sh"]
+  },
+  "installGuide": {
+    "debian": "apt update && apt install -y bash",
+    "windows": "winget install Git.Git"
+  },
+  "configForm": [
+    { "field": "check_interval", "label": "巡检频率(秒)", "type": "number", "default": "60", "required": true }
+  ]
+}
