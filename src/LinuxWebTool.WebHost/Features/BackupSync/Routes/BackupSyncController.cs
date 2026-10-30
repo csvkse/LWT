@@ -5,10 +5,12 @@ using Quartz;
 using LinuxWebTool.Contracts.Features.BackupSync.Contracts;
 using LinuxWebTool.Contracts.Shared.Contracts;
 using LinuxWebTool.Infrastructure.Features.BackupSync.Adapters;
+using LinuxWebTool.Infrastructure.Features.BackupSync.Progress;
 using LinuxWebTool.Infrastructure.Features.BackupSync.Safety;
 using LinuxWebTool.Infrastructure.Features.Scheduling.Adapters;
 using LinuxWebTool.Infrastructure.Shared.Persistence;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
+using LinuxWebTool.WebHost.Composition;
 using LinuxWebTool.WebHost.Shared.Extensions;
 
 namespace LinuxWebTool.WebHost.Features.BackupSync.Routes;
@@ -26,6 +28,7 @@ public class BackupSyncController(
     BackupSnapshotCleaner cleaner,
     IBackupSyncScheduler scheduler,
     BackupSyncStateMachine stateMachine,
+    BackupProgressTracker progressTracker,
     IOperationLogger operationLogger) : MinimalApi.ControllerBase
 {
     [HttpGet("Tasks")]
@@ -45,6 +48,17 @@ public class BackupSyncController(
             return NotFound(new MessageResponse("未找到指定任务"));
         }
         return Ok(ToTaskItem(task));
+    }
+
+    [HttpGet("Tasks/{id:guid}/Progress")]
+    public IResult GetTaskProgress(Guid id)
+    {
+        var snapshot = progressTracker.GetProgress(id);
+        if (snapshot is null)
+        {
+            return NotFound(new MessageResponse("未找到该任务的实时执行进度"));
+        }
+        return Results.Json(snapshot, AppJsonSerializerContext.Default.BackupProgressSnapshot);
     }
 
     [HttpPost("Tasks")]

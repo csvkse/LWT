@@ -1,4 +1,4 @@
-import { computed, defineComponent, onMounted, reactive, ref } from 'vue';
+import { computed, defineComponent, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { http } from '../api/client.js';
 import { API } from '../config.js';
 import { toast } from '../store/toast.js';
@@ -128,6 +128,67 @@ export default defineComponent({
       return d.toLocaleString('zh-CN', { hour12: false });
     }
 
+    const taskProgressMap = ref({});
+    let progressTimer = null;
+    let isProgressPolling = false;
+
+    function formatSpeed(bytesPerSec) {
+      if (!bytesPerSec || bytesPerSec <= 0) return '0 B/s';
+      if (bytesPerSec >= 1024 * 1024 * 1024) return (bytesPerSec / (1024 * 1024 * 1024)).toFixed(1) + ' GB/s';
+      if (bytesPerSec >= 1024 * 1024) return (bytesPerSec / (1024 * 1024)).toFixed(1) + ' MB/s';
+      if (bytesPerSec >= 1024) return (bytesPerSec / 1024).toFixed(1) + ' KB/s';
+      return Math.round(bytesPerSec) + ' B/s';
+    }
+
+    function formatEta(ms) {
+      if (!ms || ms <= 0) return '计算中...';
+      const totalSec = Math.round(ms / 1000);
+      if (totalSec < 60) return `${totalSec}秒`;
+      const min = Math.floor(totalSec / 60);
+      const sec = totalSec % 60;
+      if (min < 60) return `${min}分${sec}秒`;
+      const hr = Math.floor(min / 60);
+      return `${hr}小时${min % 60}分`;
+    }
+
+    async function pollRunningTasksProgress() {
+      if (isProgressPolling) return;
+      isProgressPolling = true;
+      try {
+        const runningTasks = tasks.value.filter(t => t.lastRunStatus === 'Running' || taskProgressMap.value[t.id]?.isRunning);
+        if (runningTasks.length === 0) return;
+
+        for (const t of runningTasks) {
+          try {
+            const res = await http(API.backupSync.taskProgress(t.id));
+            if (res.ok && res.data) {
+              const prev = taskProgressMap.value[t.id];
+              taskProgressMap.value[t.id] = res.data;
+              if (prev && prev.isRunning && !res.data.isRunning) {
+                await loadTasks();
+                if (activeTab.value === 'snapshots') await loadAllSnapshots();
+                if (activeTab.value === 'records') await loadRecords();
+              }
+            }
+          } catch (_) {}
+        }
+      } finally {
+        isProgressPolling = false;
+      }
+    }
+
+    function startProgressPolling() {
+      stopProgressPolling();
+      progressTimer = setInterval(pollRunningTasksProgress, 1500);
+    }
+
+    function stopProgressPolling() {
+      if (progressTimer) {
+        clearInterval(progressTimer);
+        progressTimer = null;
+      }
+    }
+
     // ---- 数据获取 ----
     async function loadTasks() {
       loading.value = true;
@@ -214,6 +275,19 @@ export default defineComponent({
 
     // ---- 任务操作 ----
     async function runTask(task) {
+      task.lastRunStatus = 'Running';
+      taskProgressMap.value[task.id] = {
+        isRunning: true,
+        phaseDescription: '正在初始化任务...',
+        filePercent: 0,
+        bytePercent: 0,
+        processedFiles: 0,
+        scannedFiles: 0,
+        processedBytes: 0,
+        speedBytesPerSec: 0,
+        currentItemPath: ''
+      };
+      setTimeout(pollRunningTasksProgress, 300);
       toast.info(`正在启动任务：${task.name}...`);
       try {
         const res = await http(API.backupSync.taskRun(task.id), { method: 'POST' });
@@ -669,9 +743,17 @@ export default defineComponent({
 
     onMounted(async () => {
       await refreshAll();
+      startProgressPolling();
+    });
+
+    onUnmounted(() => {
+      stopProgressPolling();
     });
 
     return {
+      taskProgressMap,
+      formatSpeed,
+      formatEta,
       activeTab,
       loading,
       records,
@@ -847,6 +929,43 @@ export default defineComponent({
                     <span>{{ t.name }}</span>
                     <span v-if="!t.enabled" class="badge border-slate-600/60 text-slate-500">停用</span>
                   </div>
+                  <!-- 实时执行进度面板 -->
+                  <div v-if="taskProgressMap[t.id]?.isRunning || t.lastRunStatus === 'Running'" class="mt-2 p-2.5 rounded-lg bg-cyan-950/40 border border-cyan-500/30 text-xs shadow-inner min-w-[20rem]">
+                    <div class="flex items-center justify-between gap-2 mb-1.5">
+                      <div class="flex items-center gap-1.5 font-medium text-cyan-300">
+                        <span class="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                        <span>{{ taskProgressMap[t.id]?.phaseDescription || '正在处理中...' }}</span>
+                      </div>
+                      <div class="font-mono text-cyan-400 font-bold text-xs">
+                        {{ (taskProgressMap[t.id]?.filePercent || 0).toFixed(1) }}%
+                      </div>
+                    </div>
+                    <!-- 动态渐变进度条 -->
+                    <div class="w-full bg-slate-800/80 rounded-full h-1.5 overflow-hidden mb-1.5">
+                      <div class="bg-gradient-to-r from-cyan-500 to-emerald-400 h-1.5 rounded-full transition-all duration-300"
+                           :style="{ width: Math.max(3, (taskProgressMap[t.id]?.filePercent || 0)) + '%' }"></div>
+                    </div>
+                    <!-- 数据统计与指标 -->
+                    <div class="flex items-center justify-between text-[11px] text-slate-400">
+                      <div class="flex items-center gap-1.5">
+                        <span>{{ (taskProgressMap[t.id]?.processedFiles || 0).toLocaleString() }} / {{ Math.max(taskProgressMap[t.id]?.processedFiles || 0, taskProgressMap[t.id]?.scannedFiles || 0).toLocaleString() }} 项</span>
+                        <span>·</span>
+                        <span>{{ formatBytes(taskProgressMap[t.id]?.processedBytes || 0) }}</span>
+                      </div>
+                      <div class="flex items-center gap-2 font-mono text-[11px]">
+                        <span v-if="taskProgressMap[t.id]?.speedBytesPerSec > 0" class="text-cyan-300">
+                          ⚡ {{ formatSpeed(taskProgressMap[t.id]?.speedBytesPerSec) }}
+                        </span>
+                        <span v-if="taskProgressMap[t.id]?.estimatedRemainingMs > 0" class="text-amber-300">
+                          ⏳ 约 {{ formatEta(taskProgressMap[t.id]?.estimatedRemainingMs) }}
+                        </span>
+                      </div>
+                    </div>
+                    <!-- 实时当前文件追踪 -->
+                    <div v-if="taskProgressMap[t.id]?.currentItemPath" class="text-[10px] text-slate-400 truncate mt-1 font-mono max-w-[28rem]" :title="taskProgressMap[t.id]?.currentItemPath">
+                      正在处理: {{ taskProgressMap[t.id]?.currentItemPath }}
+                    </div>
+                  </div>
                 </td>
                 <td class="text-slate-400">
                   <div class="font-mono text-xs text-cyan-300/80">{{ t.sourcePath }}</div>
@@ -867,8 +986,11 @@ export default defineComponent({
                   <div v-if="t.lastRunStatus === 'AutoPaused'" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-500/50 bg-amber-500/10 text-amber-300 font-medium" :title="t.autoPausedReason || t.lastRunMessage">
                     <span>⚠ 自动暂停</span>
                   </div>
-                  <div v-else :class="t.lastRunStatus === 'Success' ? 'text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-rose-400' : (t.lastRunStatus === 'Running' ? 'text-cyan-400' : 'text-slate-500'))">
-                    {{ t.lastRunStatus === 'Success' ? '成功' : (t.lastRunStatus === 'Failed' ? '失败' : (t.lastRunStatus === 'Running' ? '执行中...' : (t.lastRunStatus || '未运行'))) }}
+                  <div v-else-if="t.lastRunStatus === 'Running' || taskProgressMap[t.id]?.isRunning" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-cyan-500/50 bg-cyan-500/10 text-cyan-300 font-medium animate-pulse">
+                    <span>⚡ {{ taskProgressMap[t.id]?.phaseDescription || '执行中...' }}</span>
+                  </div>
+                  <div v-else :class="t.lastRunStatus === 'Success' ? 'text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-rose-400' : 'text-slate-500')">
+                    {{ t.lastRunStatus === 'Success' ? '成功' : (t.lastRunStatus === 'Failed' ? '失败' : (t.lastRunStatus || '未运行')) }}
                   </div>
                   <div v-if="t.autoPausedReason" class="text-amber-400/90 text-[11px] mt-0.5 truncate max-w-[200px]" :title="t.autoPausedReason">
                     {{ t.autoPausedReason }}
@@ -915,6 +1037,43 @@ export default defineComponent({
                     <span>{{ t.name }}</span>
                     <span v-if="!t.enabled" class="badge border-slate-600/60 text-slate-500">停用</span>
                   </div>
+                  <!-- 实时执行进度面板 -->
+                  <div v-if="taskProgressMap[t.id]?.isRunning || t.lastRunStatus === 'Running'" class="mt-2 p-2.5 rounded-lg bg-cyan-950/40 border border-cyan-500/30 text-xs shadow-inner min-w-[20rem]">
+                    <div class="flex items-center justify-between gap-2 mb-1.5">
+                      <div class="flex items-center gap-1.5 font-medium text-cyan-300">
+                        <span class="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                        <span>{{ taskProgressMap[t.id]?.phaseDescription || '正在处理中...' }}</span>
+                      </div>
+                      <div class="font-mono text-cyan-400 font-bold text-xs">
+                        {{ (taskProgressMap[t.id]?.filePercent || 0).toFixed(1) }}%
+                      </div>
+                    </div>
+                    <!-- 动态渐变进度条 -->
+                    <div class="w-full bg-slate-800/80 rounded-full h-1.5 overflow-hidden mb-1.5">
+                      <div class="bg-gradient-to-r from-cyan-500 to-emerald-400 h-1.5 rounded-full transition-all duration-300"
+                           :style="{ width: Math.max(3, (taskProgressMap[t.id]?.filePercent || 0)) + '%' }"></div>
+                    </div>
+                    <!-- 数据统计与指标 -->
+                    <div class="flex items-center justify-between text-[11px] text-slate-400">
+                      <div class="flex items-center gap-1.5">
+                        <span>{{ (taskProgressMap[t.id]?.processedFiles || 0).toLocaleString() }} / {{ Math.max(taskProgressMap[t.id]?.processedFiles || 0, taskProgressMap[t.id]?.scannedFiles || 0).toLocaleString() }} 项</span>
+                        <span>·</span>
+                        <span>{{ formatBytes(taskProgressMap[t.id]?.processedBytes || 0) }}</span>
+                      </div>
+                      <div class="flex items-center gap-2 font-mono text-[11px]">
+                        <span v-if="taskProgressMap[t.id]?.speedBytesPerSec > 0" class="text-cyan-300">
+                          ⚡ {{ formatSpeed(taskProgressMap[t.id]?.speedBytesPerSec) }}
+                        </span>
+                        <span v-if="taskProgressMap[t.id]?.estimatedRemainingMs > 0" class="text-amber-300">
+                          ⏳ 约 {{ formatEta(taskProgressMap[t.id]?.estimatedRemainingMs) }}
+                        </span>
+                      </div>
+                    </div>
+                    <!-- 实时当前文件追踪 -->
+                    <div v-if="taskProgressMap[t.id]?.currentItemPath" class="text-[10px] text-slate-400 truncate mt-1 font-mono max-w-[28rem]" :title="taskProgressMap[t.id]?.currentItemPath">
+                      正在处理: {{ taskProgressMap[t.id]?.currentItemPath }}
+                    </div>
+                  </div>
                 </td>
                 <td class="text-slate-400">
                   <div class="font-mono text-xs text-cyan-300/80">{{ t.sourcePath }}</div>
@@ -935,8 +1094,11 @@ export default defineComponent({
                   <div v-if="t.lastRunStatus === 'AutoPaused'" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-500/50 bg-amber-500/10 text-amber-300 font-medium" :title="t.autoPausedReason || t.lastRunMessage">
                     <span>⚠ 自动暂停</span>
                   </div>
-                  <div v-else :class="t.lastRunStatus === 'Success' ? 'text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-rose-400' : (t.lastRunStatus === 'Running' ? 'text-cyan-400' : 'text-slate-500'))">
-                    {{ t.lastRunStatus === 'Success' ? '成功' : (t.lastRunStatus === 'Failed' ? '失败' : (t.lastRunStatus === 'Running' ? '执行中...' : (t.lastRunStatus || '未运行'))) }}
+                  <div v-else-if="t.lastRunStatus === 'Running' || taskProgressMap[t.id]?.isRunning" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-cyan-500/50 bg-cyan-500/10 text-cyan-300 font-medium animate-pulse">
+                    <span>⚡ {{ taskProgressMap[t.id]?.phaseDescription || '执行中...' }}</span>
+                  </div>
+                  <div v-else :class="t.lastRunStatus === 'Success' ? 'text-emerald-400' : (t.lastRunStatus === 'Failed' ? 'text-rose-400' : 'text-slate-500')">
+                    {{ t.lastRunStatus === 'Success' ? '成功' : (t.lastRunStatus === 'Failed' ? '失败' : (t.lastRunStatus || '未运行')) }}
                   </div>
                   <div v-if="t.autoPausedReason" class="text-amber-400/90 text-[11px] mt-0.5 truncate max-w-[200px]" :title="t.autoPausedReason">
                     {{ t.autoPausedReason }}

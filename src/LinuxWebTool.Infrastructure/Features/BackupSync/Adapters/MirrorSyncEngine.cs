@@ -1,5 +1,6 @@
 using System.Text;
 using LinuxWebTool.Contracts.Features.BackupSync.Contracts;
+using LinuxWebTool.Infrastructure.Features.BackupSync.Progress;
 using Microsoft.Extensions.Logging;
 
 namespace LinuxWebTool.Infrastructure.Features.BackupSync.Adapters;
@@ -27,6 +28,7 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
         DeleteHandling deleteHandling,
         int trashRetentionDays,
         IReadOnlyList<string>? excludePatterns,
+        IBackupProgressReporter? progressReporter = null,
         CancellationToken ct = default)
     {
         if (!Directory.Exists(sourcePath))
@@ -55,9 +57,13 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
         var trashBaseDir = Path.Combine(targetPath, todayTrashDirName);
 
         // 1. 源到目标：增量同步新增与修改的文件
+        progressReporter?.UpdatePhase(BackupExecutionPhase.Scanning, "正在扫描源目录并计算比对差异...");
         var sourceFiles = sourceDir.EnumerateFiles("*", SearchOption.AllDirectories)
             .Where(f => !IsExcluded(Path.GetRelativePath(sourcePath, f.FullName), normalizedExcludes))
             .ToList();
+
+        progressReporter?.SetTotalScanTarget(sourceFiles.Count, 0);
+        progressReporter?.UpdatePhase(BackupExecutionPhase.Transferring, "正在镜像复制变动数据...");
 
         var sourceRelPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -87,8 +93,14 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
                                 if (SymlinkAndFileTransferHelper.CreateOrUpdateSymlink(targetFilePath, linkTarget, logger))
                                 {
                                     if (targetLink == null) addedFiles++; else updatedFiles++;
-                                    bytesTransferred += Encoding.UTF8.GetByteCount(linkTarget);
+                                    var linkBytes = Encoding.UTF8.GetByteCount(linkTarget);
+                                    bytesTransferred += linkBytes;
+                                    progressReporter?.ReportFileProcessed(linkBytes, rel);
                                 }
+                            }
+                            else
+                            {
+                                progressReporter?.ReportFileProcessed(0, rel);
                             }
                             continue;
                         }
@@ -98,6 +110,8 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
                     if (!SymlinkAndFileTransferHelper.TryGetSafeLength(sf, out var sfLength))
                     {
                         logger.LogWarning("源文件在同步过程中消失或不可读，跳过：{Path}", sf.FullName);
+                        skippedFiles++;
+                        progressReporter?.ReportFileProcessed(0, sf.FullName, isSkipped: true);
                         continue;
                     }
 
@@ -108,6 +122,7 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
                         File.SetLastWriteTimeUtc(targetFilePath, sf.LastWriteTimeUtc);
                         addedFiles++;
                         bytesTransferred += sfLength;
+                        progressReporter?.ReportFileProcessed(sfLength, rel);
                     }
                     else
                     {
@@ -118,6 +133,12 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
                             File.SetLastWriteTimeUtc(targetFilePath, sf.LastWriteTimeUtc);
                             updatedFiles++;
                             bytesTransferred += sfLength;
+                            progressReporter?.ReportFileProcessed(sfLength, rel);
+                        }
+                        else
+                        {
+                            // 文件无变动
+                            progressReporter?.ReportFileProcessed(0, rel);
                         }
                     }
                 }
@@ -126,6 +147,7 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
                 {
                     logger.LogWarning(ex, "镜像同步过程中跳过异常文件：{Path}", sf.FullName);
                     skippedFiles++;
+                    progressReporter?.ReportFileProcessed(0, sf.FullName, isSkipped: true);
                 }
             }
         }, ct);
@@ -133,6 +155,7 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
         // 2. 目标清理：如果为单向镜像（OneWayMirror），处理目标端存在但源端已被删除的文件
         if (direction == SyncDirection.OneWayMirror)
         {
+            progressReporter?.UpdatePhase(BackupExecutionPhase.CleaningTarget, "正在比对并清理目标端差异文件...");
             await Task.Run(() =>
             {
                 var targetFiles = targetDir.EnumerateFiles("*", SearchOption.AllDirectories)
@@ -165,11 +188,13 @@ public class MirrorSyncEngine(ILogger<MirrorSyncEngine> logger)
                             }
                             File.Move(tf.FullName, trashPath);
                             trashedFiles++;
+                            progressReporter?.ReportItemsDeleted(1, 0);
                         }
                         else
                         {
                             File.Delete(tf.FullName);
                             deletedFiles++;
+                            progressReporter?.ReportItemsDeleted(1, 0);
                         }
                     }
                 }

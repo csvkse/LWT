@@ -164,6 +164,7 @@ export const API = {
     prunePreview: (id) => `/BackupSync/Tasks/${id}/PrunePreview`,
     pruneExecute: (id) => `/BackupSync/Tasks/${id}/PruneExecute`,
     cronPreview: '/BackupSync/CronPreview',
+    taskProgress: (id) => `/BackupSync/Tasks/${id}/Progress`,
     records: '/BackupSync/Records',
     clearRecords: '/BackupSync/Records/Clear',
   },

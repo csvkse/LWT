@@ -1008,5 +1008,46 @@ public class ArchitectureTests
         Assert.Contains("[HttpGet(\"Records\")]", controller);
         Assert.Contains("[HttpPost(\"Records/Clear\")]", controller);
     }
+
+    [Fact]
+    public void LinuxArch034_备份同步执行进度必须具备内存无锁热路径与阶段状态机管理()
+    {
+        var contractsDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.Contracts", "Features", "BackupSync", "Contracts");
+        var progressDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure", "Features", "BackupSync", "Progress");
+        var aotFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Composition", "AppJsonSerializerContext.cs");
+        var controllerFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "BackupSync", "Routes", "BackupSyncController.cs");
+        var endpointsFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "MinimalApi", "EndpointsMapper.g.cs");
+
+        var progressContractsFile = Path.Combine(contractsDir, "BackupSyncProgressContracts.cs");
+        var reporterInterfaceFile = Path.Combine(progressDir, "IBackupProgressReporter.cs");
+        var trackerFile = Path.Combine(progressDir, "BackupProgressTracker.cs");
+
+        Assert.True(File.Exists(progressContractsFile), "BackupSyncProgressContracts.cs 不存在");
+        Assert.True(File.Exists(reporterInterfaceFile), "IBackupProgressReporter.cs 不存在");
+        Assert.True(File.Exists(trackerFile), "BackupProgressTracker.cs 不存在");
+
+        var contractsContent = File.ReadAllText(progressContractsFile);
+        var trackerContent = File.ReadAllText(trackerFile);
+        var aotContent = File.ReadAllText(aotFile);
+        var controllerContent = File.ReadAllText(controllerFile);
+        var endpointsContent = File.ReadAllText(endpointsFile);
+
+        // 1. 契约层具备状态机枚举与不可变快照模型
+        Assert.Contains("enum BackupExecutionPhase", contractsContent);
+        Assert.Contains("record BackupProgressSnapshot", contractsContent);
+
+        // 2. 内存热路径无锁约束（ReportFileProcessed 严禁互斥锁）
+        Assert.Contains("Interlocked.Increment(ref _processedFiles)", trackerContent);
+        Assert.Contains("Interlocked.Add(ref _processedBytes", trackerContent);
+        Assert.Contains("Volatile.Read(ref _scannedFiles)", trackerContent);
+
+        // 3. AOT 零反射序列化契约绑定
+        Assert.Contains("[JsonSerializable(typeof(BackupProgressSnapshot))]", aotContent);
+        Assert.Contains("[JsonSerializable(typeof(BackupExecutionPhase))]", aotContent);
+
+        // 4. REST 端点与 Minimal API 映射匹配
+        Assert.Contains("[HttpGet(\"Tasks/{id:guid}/Progress\")]", controllerContent);
+        Assert.Contains("group_BackupSyncController.MapGet(\"Tasks/{id:guid}/Progress\"", endpointsContent);
+    }
 }
 

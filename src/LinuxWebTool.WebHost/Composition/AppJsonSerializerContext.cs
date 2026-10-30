@@ -234,6 +234,8 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(List<BackupSyncTaskItem>))]
 [JsonSerializable(typeof(SaveBackupSyncTaskRequest))]
 [JsonSerializable(typeof(BackupSnapshotItem))]
+[JsonSerializable(typeof(BackupProgressSnapshot))]
+[JsonSerializable(typeof(BackupExecutionPhase))]
 [JsonSerializable(typeof(List<BackupSnapshotItem>))]
 [JsonSerializable(typeof(SnapshotFileNode))]
 [JsonSerializable(typeof(List<SnapshotFileNode>))]

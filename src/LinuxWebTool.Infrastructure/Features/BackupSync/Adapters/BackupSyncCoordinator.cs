@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using LinuxWebTool.Contracts.Features.BackupSync.Contracts;
+using LinuxWebTool.Infrastructure.Features.BackupSync.Progress;
 using LinuxWebTool.Infrastructure.Features.BackupSync.Safety;
 using LinuxWebTool.Infrastructure.Shared.Persistence;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
@@ -18,6 +19,7 @@ public class BackupSyncCoordinator(
     BackupSnapshotCleaner cleaner,
     BackupSyncSafetyPipeline safetyPipeline,
     BackupSyncStateMachine stateMachine,
+    BackupProgressTracker progressTracker,
     ILogger<BackupSyncCoordinator> logger)
 {
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> TaskLocks = new();
@@ -63,6 +65,8 @@ public class BackupSyncCoordinator(
         }
 
         var recordId = await stateMachine.StartExecutionRecordAsync(task, isManual, clientIp);
+        var reporter = progressTracker.StartTracking(task.Id, task.Name, (TaskMode)task.Mode);
+        reporter.UpdatePhase(BackupExecutionPhase.PreflightChecking, "正在执行安全预检与连通性验证...");
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
@@ -74,6 +78,8 @@ public class BackupSyncCoordinator(
                 var preflightMsg = preflight.ErrorMessage ?? "安全策略预检未通过";
                 if (preflight.IsFatal)
                 {
+                    reporter.UpdatePhase(BackupExecutionPhase.AutoPaused, $"[安全熔断] {preflightMsg}");
+                    progressTracker.CompleteTracking(task.Id, false, preflightMsg);
                     await stateMachine.TripAutoPauseAsync(task, preflightMsg, clientIp);
                     await stateMachine.CompleteExecutionRecordAsync(
                         recordId, task, BackupSyncStateMachine.StatusAutoPaused,
@@ -88,6 +94,8 @@ public class BackupSyncCoordinator(
                 }
                 else
                 {
+                    reporter.UpdatePhase(BackupExecutionPhase.Faulted, preflightMsg);
+                    progressTracker.CompleteTracking(task.Id, false, preflightMsg);
                     await stateMachine.RecordFailureAsync(task, preflightMsg, task.NextRunTime, clientIp);
                     await stateMachine.CompleteExecutionRecordAsync(
                         recordId, task, BackupSyncStateMachine.StatusFailed,
@@ -123,6 +131,7 @@ public class BackupSyncCoordinator(
                     task.TargetPath,
                     task.Id,
                     excludeList,
+                    reporter,
                     ct);
 
                 // 2. 登记元数据到数据库
@@ -142,6 +151,7 @@ public class BackupSyncCoordinator(
                 // 3. 自动 GFS 轮转修剪过期快照
                 try
                 {
+                    reporter.UpdatePhase(BackupExecutionPhase.RetentionPruning, "正在修剪过期快照与提交元数据...");
                     await AutoGfsPruneAsync(task, ct);
                 }
                 catch (Exception pruneEx)
@@ -151,6 +161,8 @@ public class BackupSyncCoordinator(
 
                 sw.Stop();
                 var msg = $"增量备份成功：创建快照 {result.SnapshotId}，包含文件 {result.TotalFiles}，容量 {result.TotalSizeBytes} 字节，跳过异常 {result.SkippedFiles}，耗时 {sw.ElapsedMilliseconds}ms";
+                reporter.UpdatePhase(BackupExecutionPhase.Completed, "增量备份已顺利完成");
+                progressTracker.CompleteTracking(task.Id, true);
                 await stateMachine.RecordSuccessAsync(task, msg, task.NextRunTime);
                 await stateMachine.CompleteExecutionRecordAsync(
                     recordId, task, BackupSyncStateMachine.StatusSuccess,
@@ -178,10 +190,13 @@ public class BackupSyncCoordinator(
                     (DeleteHandling)task.DeleteHandling,
                     task.TrashRetentionDays,
                     excludeList,
+                    reporter,
                     ct);
 
                 sw.Stop();
                 var msg = $"同步完成：新增 {syncResult.AddedFiles}，更新 {syncResult.UpdatedFiles}，删除 {syncResult.DeletedFiles}，暂存回收站 {syncResult.TrashedFiles}，跳过异常 {syncResult.SkippedFiles}，耗时 {sw.ElapsedMilliseconds}ms";
+                reporter.UpdatePhase(BackupExecutionPhase.Completed, "目录镜像同步已顺利完成");
+                progressTracker.CompleteTracking(task.Id, true);
                 await stateMachine.RecordSuccessAsync(task, msg, task.NextRunTime);
                 await stateMachine.CompleteExecutionRecordAsync(
                     recordId, task, BackupSyncStateMachine.StatusSuccess,
@@ -205,6 +220,8 @@ public class BackupSyncCoordinator(
             sw.Stop();
             var errMsg = $"任务执行失败：{ex.Message}";
             logger.LogError(ex, "任务执行异常：{Name}", task.Name);
+            reporter.UpdatePhase(BackupExecutionPhase.Faulted, errMsg);
+            progressTracker.CompleteTracking(task.Id, false, errMsg);
             await stateMachine.RecordFailureAsync(task, errMsg, task.NextRunTime, clientIp);
             await stateMachine.CompleteExecutionRecordAsync(
                 recordId, task, BackupSyncStateMachine.StatusFailed,
