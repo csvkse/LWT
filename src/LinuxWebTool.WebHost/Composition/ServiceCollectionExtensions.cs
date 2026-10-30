@@ -97,6 +97,14 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton(shellOptions);
         builder.Services.AddSingleton<IShellExecutor, ShellExecutor>();
 
+        // 系统与服务管理中枢 (Services Hub)
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IServiceEnvironmentDetector, LinuxWebTool.Infrastructure.Features.Services.Detectors.ServiceEnvironmentDetector>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.ISystemdServiceAdapter, LinuxWebTool.Infrastructure.Features.Services.Adapters.Systemd.SystemdServiceAdapter>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IDockerEngineAdapter, LinuxWebTool.Infrastructure.Features.Services.Adapters.Docker.DockerEngineAdapter>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.ISystemServiceConfigAdapter, LinuxWebTool.Infrastructure.Features.Services.Adapters.Config.SystemServiceConfigAdapter>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IScriptExtensionManager, LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.ScriptExtensionManager>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IServicesHubOrchestrator, LinuxWebTool.Application.Features.Services.ServicesHubOrchestrator>();
+
         // 统一执行引擎与工作流活动
         builder.Services.AddHttpClient();
         builder.Services.AddSingleton<HostCircuitBreaker>();

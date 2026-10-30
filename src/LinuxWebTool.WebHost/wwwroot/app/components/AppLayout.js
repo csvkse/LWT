@@ -24,6 +24,7 @@ const NAV_GROUPS = [
       { path: '/commands', label: '指令管理', desc: 'Linux 常用脚本库与执行' },
       { path: '/workflows', label: '工作流编排', desc: '串并行流水线与多活动编排' },
       { path: '/schedules', label: '定时任务', desc: 'Quartz Cron 周期调度' },
+      { path: '/services', label: '服务运维', desc: 'Systemd、Docker 容器与扩展服务管理中枢' },
       { path: '/system', label: '系统监控', desc: 'CPU / 内存 / 磁盘 / 进程' },
     ],
   },

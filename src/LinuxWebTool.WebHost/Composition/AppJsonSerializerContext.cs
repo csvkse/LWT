@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 using LinuxWebTool.Infrastructure.Shared.Persistence;
 using LinuxWebTool.Contracts.Features.BackupSync.Contracts;
+using LinuxWebTool.Contracts.Features.Services.Contracts;
 
 namespace LinuxWebTool.WebHost.Composition;
 
@@ -316,6 +317,49 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(List<RemoteHostEntity>))]
 [JsonSerializable(typeof(IEnumerable<RemoteHostEntity>))]
 [JsonSerializable(typeof(IEnumerable<RemoteHostItemResponse>))]
+[JsonSerializable(typeof(ServiceEnvironmentInfo))]
+[JsonSerializable(typeof(ServiceActionRequest))]
+[JsonSerializable(typeof(ServiceActionResult))]
+[JsonSerializable(typeof(SystemdUnitItem))]
+[JsonSerializable(typeof(List<SystemdUnitItem>))]
+[JsonSerializable(typeof(IReadOnlyList<SystemdUnitItem>))]
+[JsonSerializable(typeof(SystemdQueryCriteria))]
+[JsonSerializable(typeof(SystemdJournalRequest))]
+[JsonSerializable(typeof(SystemdJournalResult))]
+[JsonSerializable(typeof(DockerPortMapping))]
+[JsonSerializable(typeof(List<DockerPortMapping>))]
+[JsonSerializable(typeof(DockerContainerSummary))]
+[JsonSerializable(typeof(List<DockerContainerSummary>))]
+[JsonSerializable(typeof(IReadOnlyList<DockerContainerSummary>))]
+[JsonSerializable(typeof(DockerContainerActionRequest))]
+[JsonSerializable(typeof(DockerImageSummary))]
+[JsonSerializable(typeof(List<DockerImageSummary>))]
+[JsonSerializable(typeof(IReadOnlyList<DockerImageSummary>))]
+[JsonSerializable(typeof(DockerLogsRequest))]
+[JsonSerializable(typeof(SshServiceConfig))]
+[JsonSerializable(typeof(UpdateSshConfigRequest))]
+[JsonSerializable(typeof(SambaShareItem))]
+[JsonSerializable(typeof(List<SambaShareItem>))]
+[JsonSerializable(typeof(IReadOnlyList<SambaShareItem>))]
+[JsonSerializable(typeof(SambaServiceConfig))]
+[JsonSerializable(typeof(NetworkInterfaceDetail))]
+[JsonSerializable(typeof(List<NetworkInterfaceDetail>))]
+[JsonSerializable(typeof(IReadOnlyList<NetworkInterfaceDetail>))]
+[JsonSerializable(typeof(DnsResolverConfig))]
+[JsonSerializable(typeof(FirewallPortRule))]
+[JsonSerializable(typeof(List<FirewallPortRule>))]
+[JsonSerializable(typeof(FirewallStatusInfo))]
+[JsonSerializable(typeof(UpdateFirewallRuleRequest))]
+[JsonSerializable(typeof(ExtensionFormField))]
+[JsonSerializable(typeof(ExtensionCapabilities))]
+[JsonSerializable(typeof(ExtensionManifest))]
+[JsonSerializable(typeof(ExtensionInstance))]
+[JsonSerializable(typeof(List<ExtensionInstance>))]
+[JsonSerializable(typeof(IReadOnlyList<ExtensionInstance>))]
+[JsonSerializable(typeof(ExtensionActionRequest))]
+[JsonSerializable(typeof(SystemdUnitFileResponse))]
+[JsonSerializable(typeof(DockerContainerLogsResponse))]
+[JsonSerializable(typeof(ExtensionLogsResponse))]
 
 public partial class AppJsonSerializerContext
  : JsonSerializerContext
