@@ -994,25 +994,25 @@ export default defineComponent({
                     </td>
                     <td class="text-slate-400">
                       <div class="flex items-center gap-1.5 group/src">
-                        <span class="font-mono text-xs text-cyan-300/80 truncate max-w-[20rem]" :title="t.sourcePath">{{ t.sourcePath }}</span>
+                        <span class="font-mono text-xs text-cyan-300/80 truncate max-w-[18rem]" :title="t.sourcePath">{{ t.sourcePath }}</span>
                         <button
                           type="button"
-                          class="opacity-60 hover:opacity-100 hover:text-cyan-300 transition-opacity p-0.5 rounded hover:bg-cyan-500/10 text-xs shrink-0"
+                          class="text-[11px] px-1.5 py-0.5 rounded border border-cyan-500/30 text-cyan-400/90 hover:text-cyan-200 hover:bg-cyan-500/20 hover:border-cyan-400/60 transition-all shrink-0 inline-flex items-center gap-1 shadow-sm"
                           title="在文件管理器中打开源端目录"
                           @click="jumpToFiles(t.sourcePath)"
                         >
-                          📂
+                          📂 打开
                         </button>
                       </div>
                       <div class="flex items-center gap-1.5 mt-0.5 group/dst">
-                        <span class="text-xs text-slate-500 truncate max-w-[20rem]" :title="t.targetPath">↳ {{ t.targetPath }}</span>
+                        <span class="text-xs text-slate-500 truncate max-w-[18rem]" :title="t.targetPath">↳ {{ t.targetPath }}</span>
                         <button
                           type="button"
-                          class="opacity-60 hover:opacity-100 hover:text-cyan-300 transition-opacity p-0.5 rounded hover:bg-cyan-500/10 text-xs shrink-0"
+                          class="text-[11px] px-1.5 py-0.5 rounded border border-slate-600/50 text-slate-300 hover:text-white hover:bg-slate-700/50 hover:border-slate-500 transition-all shrink-0 inline-flex items-center gap-1 shadow-sm"
                           title="在文件管理器中打开备份库目录"
                           @click="jumpToFiles(t.targetPath)"
                         >
-                          📂
+                          📂 打开
                         </button>
                       </div>
                     </td>
@@ -1117,25 +1117,25 @@ export default defineComponent({
                     </td>
                     <td class="text-slate-400">
                       <div class="flex items-center gap-1.5 group/src">
-                        <span class="font-mono text-xs text-cyan-300/80 truncate max-w-[20rem]" :title="t.sourcePath">{{ t.sourcePath }}</span>
+                        <span class="font-mono text-xs text-cyan-300/80 truncate max-w-[18rem]" :title="t.sourcePath">{{ t.sourcePath }}</span>
                         <button
                           type="button"
-                          class="opacity-60 hover:opacity-100 hover:text-cyan-300 transition-opacity p-0.5 rounded hover:bg-cyan-500/10 text-xs shrink-0"
+                          class="text-[11px] px-1.5 py-0.5 rounded border border-cyan-500/30 text-cyan-400/90 hover:text-cyan-200 hover:bg-cyan-500/20 hover:border-cyan-400/60 transition-all shrink-0 inline-flex items-center gap-1 shadow-sm"
                           title="在文件管理器中打开源端目录"
                           @click="jumpToFiles(t.sourcePath)"
                         >
-                          📂
+                          📂 打开
                         </button>
                       </div>
                       <div class="flex items-center gap-1.5 mt-0.5 group/dst">
-                        <span class="text-xs text-slate-500 truncate max-w-[20rem]" :title="t.targetPath">↳ {{ t.targetPath }}</span>
+                        <span class="text-xs text-slate-500 truncate max-w-[18rem]" :title="t.targetPath">↳ {{ t.targetPath }}</span>
                         <button
                           type="button"
-                          class="opacity-60 hover:opacity-100 hover:text-cyan-300 transition-opacity p-0.5 rounded hover:bg-cyan-500/10 text-xs shrink-0"
+                          class="text-[11px] px-1.5 py-0.5 rounded border border-slate-600/50 text-slate-300 hover:text-white hover:bg-slate-700/50 hover:border-slate-500 transition-all shrink-0 inline-flex items-center gap-1 shadow-sm"
                           title="在文件管理器中打开镜像目标目录"
                           @click="jumpToFiles(t.targetPath)"
                         >
-                          📂
+                          📂 打开
                         </button>
                       </div>
                     </td>
