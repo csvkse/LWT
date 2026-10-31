@@ -34,10 +34,10 @@ public partial class ScheduleStore(DbConnectionFactory factory)
         var sql = @"
 INSERT INTO schedule_task (
     Id, Name, CommandId, CronExpression, Enabled, GroupId, IsPinned, SortOrder, TimeoutSeconds, Arguments, 
-    LastRunTime, NextRunTime, CreateTime, UpdateTime, TargetHostMode, TargetHostId, TargetHostIds, FailurePolicy, TargetBizType, WorkflowId
+    LastRunTime, NextRunTime, CreateTime, UpdateTime, TargetHostMode, TargetHostId, TargetHostIds, FailurePolicy, TargetBizType, WorkflowId, ExecutionTarget
 ) VALUES (
     @Id, @Name, @CommandId, @CronExpression, @Enabled, @GroupId, @IsPinned, @SortOrder, @TimeoutSeconds, @Arguments, 
-    @LastRunTime, @NextRunTime, @CreateTime, @UpdateTime, @TargetHostMode, @TargetHostId, @TargetHostIds, @FailurePolicy, @TargetBizType, @WorkflowId
+    @LastRunTime, @NextRunTime, @CreateTime, @UpdateTime, @TargetHostMode, @TargetHostId, @TargetHostIds, @FailurePolicy, @TargetBizType, @WorkflowId, @ExecutionTarget
 )";
         await db.ExecuteAsync(sql, task);
     }
@@ -52,7 +52,8 @@ UPDATE schedule_task SET
     GroupId = @GroupId, IsPinned = @IsPinned, SortOrder = @SortOrder, TimeoutSeconds = @TimeoutSeconds, 
     Arguments = @Arguments, LastRunTime = @LastRunTime, NextRunTime = @NextRunTime, UpdateTime = @UpdateTime,
     TargetHostMode = @TargetHostMode, TargetHostId = @TargetHostId, TargetHostIds = @TargetHostIds,
-    FailurePolicy = @FailurePolicy, TargetBizType = @TargetBizType, WorkflowId = @WorkflowId
+    FailurePolicy = @FailurePolicy, TargetBizType = @TargetBizType, WorkflowId = @WorkflowId,
+    ExecutionTarget = @ExecutionTarget
 WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, task);
     }

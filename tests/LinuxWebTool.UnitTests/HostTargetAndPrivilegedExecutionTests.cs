@@ -80,4 +80,67 @@ public class HostTargetAndPrivilegedExecutionTests
         Assert.Equal("host", req.Target);
         Assert.True(req.AutoStart);
     }
+
+    [Fact]
+    public void ScheduleTask_And_SaveScheduleRequest_CarryExecutionTarget()
+    {
+        var task = new LinuxWebTool.Infrastructure.Shared.Persistence.Entities.ScheduleTask();
+        Assert.Equal("container", task.ExecutionTarget);
+
+        task.ExecutionTarget = "host";
+        Assert.Equal("host", task.ExecutionTarget);
+
+        var reqDefault = new SaveScheduleRequest(
+            Name: "Backup",
+            CommandId: Guid.NewGuid(),
+            CronExpression: "0 0 * * *",
+            Enabled: true,
+            GroupId: null,
+            IsPinned: false,
+            TimeoutSeconds: 60,
+            Arguments: null
+        );
+        Assert.Equal("container", reqDefault.ExecutionTarget);
+
+        var reqHost = new SaveScheduleRequest(
+            Name: "Host Clean",
+            CommandId: Guid.NewGuid(),
+            CronExpression: "0 0 * * *",
+            Enabled: true,
+            GroupId: null,
+            IsPinned: false,
+            TimeoutSeconds: 60,
+            Arguments: null,
+            ExecutionTarget: "host"
+        );
+        Assert.Equal("host", reqHost.ExecutionTarget);
+    }
+
+    [Fact]
+    public void ScheduleItemResponse_CarriesExecutionTarget()
+    {
+        var resp = new LinuxWebTool.WebHost.Shared.Routes.ScheduleItemResponse(
+            Id: Guid.NewGuid(),
+            Name: "Test",
+            CommandId: Guid.NewGuid(),
+            CommandName: "ls",
+            CommandText: "ls -l",
+            ScriptType: 0,
+            CronExpression: "* * * * *",
+            Enabled: true,
+            GroupId: null,
+            GroupName: null,
+            IsPinned: false,
+            SortOrder: 0,
+            TimeoutSeconds: 30,
+            Arguments: null,
+            LastRunTime: null,
+            NextRunTime: null,
+            CreateTime: DateTime.UtcNow,
+            UpdateTime: DateTime.UtcNow,
+            ExecutionTarget: "host"
+        );
+
+        Assert.Equal("host", resp.ExecutionTarget);
+    }
 }

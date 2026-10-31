@@ -56,7 +56,8 @@ public class SchedulesController(
                 t.GroupId.HasValue && groupNames.TryGetValue(t.GroupId.Value, out var name) ? name : null, 
                 t.IsPinned, t.SortOrder, t.TimeoutSeconds, t.Arguments, 
                 t.LastRunTime, t.NextRunTime, t.CreateTime, t.UpdateTime,
-                t.TargetHostMode, t.TargetHostId, t.TargetHostIds, t.FailurePolicy, t.TargetBizType, t.WorkflowId);
+                t.TargetHostMode, t.TargetHostId, t.TargetHostIds, t.FailurePolicy, t.TargetBizType, t.WorkflowId,
+                t.ExecutionTarget ?? "container");
         });
         return Ok(items.ToList());
     }
@@ -85,7 +86,8 @@ public class SchedulesController(
             TargetHostIds = string.IsNullOrWhiteSpace(request.TargetHostIds) ? null : request.TargetHostIds.Trim(),
             FailurePolicy = (int)request.FailurePolicy,
             TargetBizType = (int)request.TargetBizType,
-            WorkflowId = string.IsNullOrWhiteSpace(request.WorkflowId) ? null : request.WorkflowId.Trim()
+            WorkflowId = string.IsNullOrWhiteSpace(request.WorkflowId) ? null : request.WorkflowId.Trim(),
+            ExecutionTarget = string.IsNullOrWhiteSpace(request.ExecutionTarget) ? "container" : request.ExecutionTarget.Trim()
         };
         await scheduleStore.InsertAsync(task);
         task.NextRunTime = await SyncScheduleAsync(task);
@@ -122,6 +124,7 @@ public class SchedulesController(
         task.FailurePolicy = (int)request.FailurePolicy;
         task.TargetBizType = (int)request.TargetBizType;
         task.WorkflowId = string.IsNullOrWhiteSpace(request.WorkflowId) ? null : request.WorkflowId.Trim();
+        task.ExecutionTarget = string.IsNullOrWhiteSpace(request.ExecutionTarget) ? "container" : request.ExecutionTarget.Trim();
 
         await scheduleStore.UpdateAsync(task);
         task.NextRunTime = await SyncScheduleAsync(task);

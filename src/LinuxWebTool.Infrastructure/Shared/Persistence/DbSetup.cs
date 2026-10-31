@@ -110,7 +110,8 @@ CREATE TABLE IF NOT EXISTS schedule_task (
   TargetHostIds TEXT,
   FailurePolicy INTEGER NOT NULL DEFAULT 0,
   TargetBizType INTEGER NOT NULL DEFAULT 0,
-  WorkflowId TEXT COLLATE NOCASE
+  WorkflowId TEXT COLLATE NOCASE,
+  ExecutionTarget TEXT NOT NULL DEFAULT 'container'
 );
 CREATE TABLE IF NOT EXISTS workflows (
   Id TEXT PRIMARY KEY COLLATE NOCASE,
@@ -519,6 +520,7 @@ CREATE INDEX IF NOT EXISTS idx_backup_sync_record_time ON backup_sync_record(Sta
         EnsureColumnExists(db, "schedule_task", "FailurePolicy", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumnExists(db, "schedule_task", "TargetBizType", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumnExists(db, "schedule_task", "WorkflowId", "TEXT COLLATE NOCASE");
+        EnsureColumnExists(db, "schedule_task", "ExecutionTarget", "TEXT NOT NULL DEFAULT 'container'");
         EnsureColumnExists(db, "execution_record", "TargetType", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumnExists(db, "execution_record", "TargetHostId", "TEXT COLLATE NOCASE");
         EnsureColumnExists(db, "execution_record", "TargetHostName", "TEXT");

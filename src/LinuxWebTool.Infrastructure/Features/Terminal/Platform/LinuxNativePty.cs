@@ -23,6 +23,11 @@ internal static class LinuxNativePty
             .ToDictionary(entry => (string)entry.Key, entry => (string?)entry.Value ?? "", StringComparer.Ordinal);
         environment["TERM"] = "xterm-256color";
         environment["COLORTERM"] = "truecolor";
+        if (string.Equals(options.Target, "host", StringComparison.OrdinalIgnoreCase))
+        {
+            environment.Remove("LC_ALL");
+            environment["LANG"] = "C.UTF-8";
+        }
         if (options.EnvironmentVariables is not null)
             foreach (var (key, value) in options.EnvironmentVariables) environment[key] = value;
         using var argv = new NativeStrings(new[] { path }.Concat(args));

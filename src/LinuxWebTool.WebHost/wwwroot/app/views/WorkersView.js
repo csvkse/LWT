@@ -448,6 +448,18 @@ export default defineComponent({
 
     const isInstallGuideModalOpen = ref(false);
     const selectedGuideWorker = ref(null);
+    const envInfo = ref({});
+
+    async function loadEnvironment() {
+      try {
+        const res = await http(API.services.environment);
+        if (res.ok && res.data) {
+          envInfo.value = res.data;
+        }
+      } catch (e) {
+        // 静默降级
+      }
+    }
 
     function openInstallGuideModal(w) {
       selectedGuideWorker.value = w;
@@ -478,6 +490,7 @@ export default defineComponent({
 
     onMounted(() => {
       loadWorkers();
+      loadEnvironment();
     });
 
     onUnmounted(() => {
@@ -485,6 +498,7 @@ export default defineComponent({
     });
 
     return {
+      envInfo,
       workers,
       loading,
       filterMode,
@@ -1284,6 +1298,7 @@ export default defineComponent({
       <WorkerInstallGuideModal
         :show="isInstallGuideModalOpen"
         :worker="selectedGuideWorker"
+        :env="envInfo"
         @close="closeInstallGuideModal()"
       />
 
