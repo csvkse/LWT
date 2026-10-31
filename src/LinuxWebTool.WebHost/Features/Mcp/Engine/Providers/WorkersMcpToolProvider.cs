@@ -34,6 +34,7 @@ public sealed partial class WorkersMcpToolProvider(
             new McpToolDefinition("worker_get_code", "查询 Worker 的指定代码文件内容与文件目录列表", WorkerGetCodeSchema),
             new McpToolDefinition("worker_edit_code", "在线编辑 Worker 代码/配置文件（自动备份快照，可选项保存后自动重启）", WorkerEditCodeSchema),
             new McpToolDefinition("worker_create", "快速创建全新的 SaaS 函数微服务或常驻后台守护", WorkerCreateSchema),
+            new McpToolDefinition("worker_quick_create", "以单文件极速模式创建或部署 Worker（支持头部以 @name, @description, @runtime, @mode, @port, @target JSDoc/注释自省声明元数据，无需多层目录结构或zip脚手架）", WorkerQuickCreateSchema),
             new McpToolDefinition("worker_debug_run", "瞬态沙箱调试执行 Worker，捕获实时标准输出、标准错误与耗时（不干扰生产守护）", WorkerDebugRunSchema)
         ];
     }

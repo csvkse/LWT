@@ -34,8 +34,8 @@ public partial class CommandStore(DbConnectionFactory factory)
         command.CreateTime = DateTime.Now;
         command.UpdateTime = DateTime.Now;
         var sql = @"
-            INSERT INTO linux_command (Id, Name, CommandText, ScriptType, Description, GroupId, IsPinned, SortOrder, TimeoutSeconds, LastExecTime, CreateTime, UpdateTime, DefaultTargetHostId)
-            VALUES (@Id, @Name, @CommandText, @ScriptType, @Description, @GroupId, @IsPinned, @SortOrder, @TimeoutSeconds, @LastExecTime, @CreateTime, @UpdateTime, @DefaultTargetHostId)";
+            INSERT INTO linux_command (Id, Name, CommandText, ScriptType, Description, GroupId, IsPinned, SortOrder, TimeoutSeconds, LastExecTime, CreateTime, UpdateTime, DefaultTargetHostId, ExecutionTarget)
+            VALUES (@Id, @Name, @CommandText, @ScriptType, @Description, @GroupId, @IsPinned, @SortOrder, @TimeoutSeconds, @LastExecTime, @CreateTime, @UpdateTime, @DefaultTargetHostId, @ExecutionTarget)";
         await db.ExecuteAsync(sql, command);
     }
 
@@ -47,7 +47,8 @@ public partial class CommandStore(DbConnectionFactory factory)
             UPDATE linux_command 
             SET Name = @Name, CommandText = @CommandText, ScriptType = @ScriptType, Description = @Description, 
                 GroupId = @GroupId, IsPinned = @IsPinned, SortOrder = @SortOrder, TimeoutSeconds = @TimeoutSeconds, 
-                LastExecTime = @LastExecTime, CreateTime = @CreateTime, UpdateTime = @UpdateTime, DefaultTargetHostId = @DefaultTargetHostId
+                LastExecTime = @LastExecTime, CreateTime = @CreateTime, UpdateTime = @UpdateTime, DefaultTargetHostId = @DefaultTargetHostId,
+                ExecutionTarget = @ExecutionTarget
             WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, command);
     }

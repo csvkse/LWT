@@ -172,3 +172,16 @@ public sealed record WorkerDebugRunResultDto
     public required long ElapsedMilliseconds { get; init; }
 }
 
+
+
+/// <summary>
+/// 单文件极速部署请求。
+/// </summary>
+public sealed record WorkerQuickDeployRequest
+{
+    public required string FileName { get; init; }
+    public required string Content { get; init; }
+    public string? WorkerId { get; init; }
+    public string? Target { get; init; }
+    public bool AutoStart { get; init; } = true;
+}

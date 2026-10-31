@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS linux_command (
   LastExecTime TEXT,
   CreateTime TEXT,
   UpdateTime TEXT,
-  DefaultTargetHostId TEXT COLLATE NOCASE
+  DefaultTargetHostId TEXT COLLATE NOCASE,
+  ExecutionTarget TEXT NOT NULL DEFAULT 'container'
 );
 CREATE TABLE IF NOT EXISTS operation_log (
   Id TEXT PRIMARY KEY COLLATE NOCASE,
@@ -511,6 +512,7 @@ CREATE INDEX IF NOT EXISTS idx_backup_sync_record_time ON backup_sync_record(Sta
         EnsureColumnExists(db, "backup_sync_task", "ConsecutiveFailures", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumnExists(db, "backup_sync_task", "AutoPausedReason", "TEXT");
         EnsureColumnExists(db, "linux_command", "DefaultTargetHostId", "TEXT COLLATE NOCASE");
+        EnsureColumnExists(db, "linux_command", "ExecutionTarget", "TEXT NOT NULL DEFAULT 'container'");
         EnsureColumnExists(db, "schedule_task", "TargetHostMode", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumnExists(db, "schedule_task", "TargetHostId", "TEXT COLLATE NOCASE");
         EnsureColumnExists(db, "schedule_task", "TargetHostIds", "TEXT");

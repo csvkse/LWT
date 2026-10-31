@@ -178,6 +178,7 @@ public static class McpCatalogRegistry
                 new("worker_get_code", "查询 Worker 的指定代码文件内容与文件目录列表", "Read", "workers"),
                 new("worker_edit_code", "在线编辑 Worker 代码/配置文件（自动备份快照，支持热重载）", "Dangerous", "workers"),
                 new("worker_create", "快速创建全新的 SaaS 函数微服务或常驻后台守护", "Dangerous", "workers"),
+                new("worker_quick_create", "单文件极速模式创建或部署 Worker（支持自省头部元数据免目录脚手架）", "Dangerous", "workers"),
                 new("worker_debug_run", "瞬态沙箱调试执行 Worker，捕获实时标准输出与耗时", "Execute", "workers")
             },
             ModuleCode: "workers",

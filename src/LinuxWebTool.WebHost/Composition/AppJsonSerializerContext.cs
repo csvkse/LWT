@@ -382,6 +382,7 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(List<LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerInstanceDto>))]
 [JsonSerializable(typeof(IReadOnlyList<LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerInstanceDto>))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerCreateOrUpdateRequest))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerQuickDeployRequest))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerRepoScanItem))]
 [JsonSerializable(typeof(List<LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerRepoScanItem>))]
 [JsonSerializable(typeof(IReadOnlyList<LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerRepoScanItem>))]

@@ -56,6 +56,18 @@ public class WorkersController(IWorkersManager workersManager) : MinimalApi.Cont
         return Ok(new WorkerOperationResponse(success));
     }
 
+    
+    [HttpPost("Quick")]
+    public async Task<IResult> QuickDeploy([FromBody] WorkerQuickDeployRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.FileName) || string.IsNullOrWhiteSpace(request.Content))
+        {
+            return BadRequest(new WorkerOperationResponse(false, "文件名和内容不能为空。"));
+        }
+        var item = await workersManager.DeploySingleFileAsync(request, ct);
+        return Ok(item);
+    }
+
     [HttpPost]
     public async Task<IResult> CreateOrUpdate([FromBody] WorkerCreateOrUpdateRequest request, CancellationToken ct)
     {

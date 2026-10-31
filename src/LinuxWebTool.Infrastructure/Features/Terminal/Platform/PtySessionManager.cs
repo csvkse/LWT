@@ -39,7 +39,7 @@ public sealed class PtySessionManager : IPtySessionManager, IAsyncDisposable
             ObjectDisposedException.ThrowIf(disposed != 0, this);
             if (activeSessions.Count >= maxSessions) throw new InvalidOperationException("终端会话数量已达上限，请结束不再使用的会话");
             var session = await engine.StartSessionAsync(options, cancellationToken).ConfigureAwait(false);
-            var background = new BackgroundPtySession(session, options.WorkingDirectory, bufferBytes);
+            var background = new BackgroundPtySession(session, options.WorkingDirectory, bufferBytes, options.Target);
             activeSessions[session.SessionId] = background;
             background.Start();
             return session;

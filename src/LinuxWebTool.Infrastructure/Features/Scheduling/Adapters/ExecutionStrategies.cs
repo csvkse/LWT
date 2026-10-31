@@ -30,11 +30,13 @@ public sealed class LocalCommandExecutionStrategy(
                     ScriptText = context.CommandText,
                     ScriptArguments = context.Arguments,
                     TimeoutSeconds = context.TimeoutSeconds,
+                    Target = context.ExecutionTarget ?? "container",
                 }
                 : new ShellRequest
                 {
                     CommandText = context.CommandText,
                     TimeoutSeconds = context.TimeoutSeconds,
+                    Target = context.ExecutionTarget ?? "container",
                 };
 
             var shellResult = await shellExecutor.ExecuteAsync(shellRequest, cancellationToken);

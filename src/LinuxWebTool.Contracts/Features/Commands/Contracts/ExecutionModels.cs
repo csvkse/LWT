@@ -89,6 +89,9 @@ public sealed record ShellRequest
 
     /// <summary>为空时使用 Shell 默认工作目录。</summary>
     public string? WorkingDirectory { get; init; }
+
+    /// <summary>执行命名空间目标：container（当前容器）或 host（宿主机，要求特权容器与 nsenter）。</summary>
+    public string Target { get; init; } = "container";
 }
 
 /// <summary>一次 shell 执行结果。</summary>
@@ -136,7 +139,8 @@ public sealed record CommandExecutionContext(
     Guid? ScheduleTaskId = null,
     string? BatchId = null,
     int StepOrder = 0,
-    Guid? WorkflowId = null)
+    Guid? WorkflowId = null,
+    string ExecutionTarget = "container")
 {
     public CommandExecutionContext(
         string CommandText,
@@ -149,8 +153,9 @@ public sealed record CommandExecutionContext(
         Guid? ScheduleTaskId = null,
         string? BatchId = null,
         int StepOrder = 0,
-        Guid? WorkflowId = null)
-        : this(CommandText, (int)ScriptType, Arguments, TimeoutSeconds, null, Target, TriggerBy, CommandId, ScheduleTaskId, BatchId, StepOrder, WorkflowId)
+        Guid? WorkflowId = null,
+        string ExecutionTarget = "container")
+        : this(CommandText, (int)ScriptType, Arguments, TimeoutSeconds, null, Target, TriggerBy, CommandId, ScheduleTaskId, BatchId, StepOrder, WorkflowId, ExecutionTarget)
     {
     }
 }

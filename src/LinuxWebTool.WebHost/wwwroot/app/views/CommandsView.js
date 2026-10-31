@@ -80,6 +80,15 @@ export default defineComponent({
       return h ? `🌐 ${h.name || h.host}` : '已删除主机';
     }
 
+    async function checkPrivilegedEnvironment() {
+      try {
+        const res = await http(API.services.environment);
+        if (res.ok && res.data) {
+          isPrivilegedContainer.value = res.data.isPrivilegedContainer === true;
+        }
+      } catch { }
+    }
+
     async function loadRemoteHosts() {
       const result = await http(API.remoteHosts.list, { method: 'GET' });
       if (result.ok) remoteHosts.value = result.data || [];
@@ -380,7 +389,7 @@ export default defineComponent({
 
     return {
       groups, commands, remoteHosts, activeGroupId, keyword, loading,
-      quickText, quickTimeout, quickTargetHostId, quickRunning, quickResult,
+      quickText, quickTimeout, quickTargetHostId, quickExecutionTarget, isPrivilegedContainer, quickRunning, quickResult,
       showEditor, editingId, saving, form,
       selectedIds, showBatchModal, batchRunning, batchResult, batchForm,
       execModal, runningId, argModal, argText, argHostId, argRunning,
@@ -431,6 +440,10 @@ export default defineComponent({
               <option value="">🖥️ 本地主机</option>
               <option v-for="h in remoteHosts" :key="h.id" :value="h.id">🌐 {{ h.name || h.host }}</option>
             </select>
+            <select v-if="!quickTargetHostId && isPrivilegedContainer" class="input !w-28 !py-1 text-xs text-amber-300 border-amber-500/40" v-model="quickExecutionTarget">
+              <option value="container">📦 容器</option>
+              <option value="host">🖥️ 宿主</option>
+            </select>
             <label class="text-xs text-slate-500">超时(秒)</label>
             <input class="input !w-20 !py-1" type="number" min="1" max="86400" v-model="quickTimeout" />
             <button class="btn btn-primary" :disabled="quickRunning" @click="runQuick()">
@@ -472,7 +485,10 @@ export default defineComponent({
                   <span v-if="command.defaultTargetHostId" class="badge border-cyan-500/50 text-cyan-300 !text-[0.625rem]">
                     {{ getHostLabel(command.defaultTargetHostId) }}
                   </span>
-                  <span v-else class="badge border-slate-600/50 text-slate-400 !text-[0.625rem]">🖥️ 本地</span>
+                  <template v-else>
+                    <span v-if="command.executionTarget === 'host'" class="badge border-amber-500/50 text-amber-300 !text-[0.625rem]">🖥️ 宿主</span>
+                    <span v-else class="badge border-slate-600/50 text-slate-400 !text-[0.625rem]">📦 容器</span>
+                  </template>
                 </div>
                 <div class="font-mono text-xs text-cyan-300/80 break-all mt-0.5"
                      :class="command.scriptType === 1 ? 'line-clamp-3 whitespace-pre-wrap' : ''">{{ command.commandText }}</div>
@@ -553,6 +569,22 @@ export default defineComponent({
               </label>
             </div>
             <input v-if="form.groupId === NEW_GROUP" class="input" v-model="form.newGroupName" placeholder="新分组名称" @keyup.enter="save()" />
+            <div v-if="isPrivilegedContainer" class="flex flex-col gap-1 p-2.5 rounded bg-slate-900/60 border border-cyber-line/50 text-xs">
+              <div class="flex items-center justify-between">
+                <span class="text-slate-400 font-medium">执行目标 (Target):</span>
+                <span class="text-[10px] text-cyan-400 font-mono">特权容器穿透</span>
+              </div>
+              <div class="flex items-center gap-4 mt-0.5">
+                <label class="flex items-center gap-1.5 cursor-pointer text-slate-300">
+                  <input type="radio" v-model="form.executionTarget" value="container" class="accent-cyan-400" />
+                  <span>📦 当前容器</span>
+                </label>
+                <label class="flex items-center gap-1.5 cursor-pointer text-slate-300">
+                  <input type="radio" v-model="form.executionTarget" value="host" class="accent-cyan-400" />
+                  <span>🖥️ 宿主主机 (nsenter穿透)</span>
+                </label>
+              </div>
+            </div>
             <label class="flex items-center gap-2 text-sm text-slate-400">
               <input type="checkbox" v-model="form.isPinned" class="accent-cyan-400" /> 置顶显示
             </label>
