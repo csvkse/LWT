@@ -1,6 +1,6 @@
 import { defineComponent, ref, watch } from 'vue';
 import { API } from '../../config.js';
-import { httpGet, httpPost } from '../../api/client.js';
+import { http } from '../../api/client.js';
 import { toast } from '../../store/toast.js';
 
 export default defineComponent({
@@ -29,7 +29,7 @@ export default defineComponent({
       loading.value = true;
       try {
         const url = API.workers.code(props.worker.id, file || selectedFile.value);
-        const res = await httpGet(url);
+        const res = await http(url);
         if (res.ok && res.data) {
           selectedFile.value = res.data.selectedFile || '';
           codeContent.value = res.data.content || '';
@@ -65,10 +65,13 @@ export default defineComponent({
       saving.value = true;
       try {
         const url = API.workers.code(props.worker.id);
-        const res = await httpPost(url, {
-          filePath: selectedFile.value,
-          content: codeContent.value,
-          restartAfterSave: restartAfterSave.value,
+        const res = await http(url, {
+          method: 'POST',
+          body: {
+            filePath: selectedFile.value,
+            content: codeContent.value,
+            restartAfterSave: restartAfterSave.value,
+          },
         });
         if (res.ok) {
           toast.success(`Worker 代码保存成功${restartAfterSave.value ? '，并已请求热重载' : ''}`);
@@ -91,9 +94,12 @@ export default defineComponent({
       try {
         toast.info(`正在瞬态沙箱调试执行 Worker [${props.worker.id}]...`);
         const url = API.workers.debug(props.worker.id);
-        const res = await httpPost(url, {
-          args: debugArgs.value || null,
-          timeoutSeconds: 8,
+        const res = await http(url, {
+          method: 'POST',
+          body: {
+            args: debugArgs.value || null,
+            timeoutSeconds: 8,
+          },
         });
         if (res.ok && res.data) {
           debugResult.value = res.data;
