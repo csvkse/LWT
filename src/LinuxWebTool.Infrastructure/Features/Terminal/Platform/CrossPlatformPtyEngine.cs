@@ -90,7 +90,8 @@ public sealed class CrossPlatformPtyEngine : IPtyEngine
             var nsenter = File.Exists("/usr/bin/nsenter") ? "/usr/bin/nsenter" : (File.Exists("/bin/nsenter") ? "/bin/nsenter" : null);
             if (nsenter != null && Directory.Exists("/proc/1/ns"))
             {
-                return (nsenter, ["-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "/bin/bash", "--login"]);
+                var envExe = File.Exists("/usr/bin/env") ? "/usr/bin/env" : "/bin/env";
+                return (nsenter, ["-t", "1", "-m", "-u", "-i", "-n", "-p", "--wd=/root", "--", envExe, "-u", "LC_ALL", "LANG=C.UTF-8", "/bin/bash", "--login"]);
             }
         }
 

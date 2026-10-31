@@ -31,6 +31,7 @@ export default defineComponent({
     const groups = ref([]);
     const loading = ref(false);
     const runningId = ref(null);
+    const isPrivilegedContainer = ref(false);
 
     const showEditor = ref(false);
     const editingId = ref(null);
@@ -51,6 +52,7 @@ export default defineComponent({
       targetHostId: '',
       targetHostIds: '',
       failurePolicy: 0,
+      executionTarget: 'container',
     });
 
     const selectedCommand = computed(() => commands.value.find((c) => c.id === form.commandId));
@@ -93,6 +95,12 @@ export default defineComponent({
         if (groupResult.ok) groups.value = groupResult.data;
         if (hostResult.ok) remoteHosts.value = hostResult.data || [];
         if (wfResult.ok) workflows.value = wfResult.data || [];
+        try {
+          const envRes = await http(API.services.environment);
+          if (envRes.ok && envRes.data) {
+            isPrivilegedContainer.value = envRes.data.isPrivilegedContainer === true;
+          }
+        } catch { }
       } finally {
         loading.value = false;
       }
@@ -110,6 +118,9 @@ export default defineComponent({
         } else {
           form.targetHostMode = 0;
           form.targetHostId = '';
+        }
+        if (cmd?.executionTarget) {
+          form.executionTarget = cmd.executionTarget;
         }
       }
     }
@@ -133,6 +144,7 @@ export default defineComponent({
         targetHostId: firstCmd?.defaultTargetHostId || '',
         targetHostIds: '',
         failurePolicy: 0,
+        executionTarget: firstCmd?.executionTarget || 'container',
       });
       showEditor.value = true;
     }
@@ -155,6 +167,7 @@ export default defineComponent({
         targetHostId: task.targetHostId || '',
         targetHostIds: task.targetHostIds || '',
         failurePolicy: task.failurePolicy || 0,
+        executionTarget: task.executionTarget || 'container',
       });
       showEditor.value = true;
     }
@@ -192,6 +205,7 @@ export default defineComponent({
           targetHostId: form.targetHostId || null,
           targetHostIds: form.targetHostIds || null,
           failurePolicy: Number(form.failurePolicy) || 0,
+          executionTarget: form.executionTarget || 'container',
         };
         const request = editingId.value
           ? http(API.schedules.item(editingId.value), { method: 'PUT', body: payload })
@@ -231,6 +245,7 @@ export default defineComponent({
                 targetHostId: null,
                 targetHostIds: null,
                 failurePolicy: task.failurePolicy,
+                executionTarget: task.executionTarget || 'container',
               },
             });
           }
@@ -276,6 +291,7 @@ export default defineComponent({
           targetHostId: task.targetHostId,
           targetHostIds: task.targetHostIds,
           failurePolicy: task.failurePolicy,
+          executionTarget: task.executionTarget || 'container',
         },
       });
       if (result.ok) await load();
@@ -309,7 +325,7 @@ export default defineComponent({
       toggleEnabled, runNow, togglePin, remove, goRecords,
       selectedCommand, selectedWorkflow, optionLabel, onCommandSelectChange,
       orphanedTasks, rerouteOrphanedToLocal, getHostStatus,
-      CRON_PRESETS, NEW_GROUP, formatTime,
+      CRON_PRESETS, NEW_GROUP, formatTime, isPrivilegedContainer,
     };
   },
   template: `
@@ -369,7 +385,8 @@ export default defineComponent({
                   <span class="badge border-indigo-500/50 text-indigo-300">🌐 多主机分发</span>
                 </template>
                 <template v-else>
-                  <span class="badge border-slate-600/50 text-slate-400">🖥️ 本地执行</span>
+                  <span v-if="task.executionTarget === 'host'" class="badge border-amber-500/50 text-amber-300">🖥️ 宿主主机</span>
+                  <span v-else class="badge border-slate-600/50 text-slate-400">🖥️ 本地执行</span>
                 </template>
               </td>
               <td><span class="badge border-violet-500/50 text-violet-300 font-mono">{{ task.cronExpression }}</span></td>
@@ -439,6 +456,17 @@ export default defineComponent({
                   <button class="btn btn-xs flex-1" :class="Number(form.targetHostMode) === 0 ? 'btn-primary' : ''" @click="form.targetHostMode = 0">🖥️ 本地主机</button>
                   <button class="btn btn-xs flex-1" :class="Number(form.targetHostMode) === 1 ? 'btn-primary' : ''" @click="form.targetHostMode = 1">🌐 远端单主机</button>
                   <button class="btn btn-xs flex-1" :class="Number(form.targetHostMode) === 2 ? 'btn-primary' : ''" @click="form.targetHostMode = 2">🌐 多主机分发</button>
+                </div>
+                <div v-if="Number(form.targetHostMode) === 0 && isPrivilegedContainer" class="flex items-center gap-4 mt-1.5 p-2 rounded bg-slate-950/60 border border-cyber-line/40 text-xs">
+                  <span class="text-slate-400">穿透目标:</span>
+                  <label class="flex items-center gap-1.5 cursor-pointer text-slate-300">
+                    <input type="radio" v-model="form.executionTarget" value="container" class="accent-cyan-400" />
+                    <span>📦 当前容器</span>
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer text-slate-300">
+                    <input type="radio" v-model="form.executionTarget" value="host" class="accent-cyan-400" />
+                    <span>🖥️ 宿主主机 (nsenter穿透)</span>
+                  </label>
                 </div>
                 <div v-if="Number(form.targetHostMode) === 1" class="mt-1">
                   <select class="input text-xs" v-model="form.targetHostId">

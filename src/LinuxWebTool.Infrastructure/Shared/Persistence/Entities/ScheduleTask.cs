@@ -27,6 +27,9 @@ public class ScheduleTask
     /// <summary>执行主机模式：0=Local, 1=SingleRemote, 2=MultiRemote。</summary>
     public int TargetHostMode { get; set; }
 
+    /// <summary>本地执行目标模式："container" (默认当前容器) 或 "host" (特权模式穿透宿主)。</summary>
+    public string ExecutionTarget { get; set; } = "container";
+
     /// <summary>目标主机 Id（单主机模式）。</summary>
     public string? TargetHostId { get; set; }
 

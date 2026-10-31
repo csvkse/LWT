@@ -40,7 +40,8 @@ public sealed record SaveScheduleRequest(
     string? TargetHostIds = null,
     FailurePolicy FailurePolicy = FailurePolicy.FailFast,
     TargetBizType TargetBizType = TargetBizType.Command,
-    string? WorkflowId = null);
+    string? WorkflowId = null,
+    string ExecutionTarget = "container");
 
 public sealed record SaveGroupRequest(string Name, GroupBizType BizType, int SortOrder);
 

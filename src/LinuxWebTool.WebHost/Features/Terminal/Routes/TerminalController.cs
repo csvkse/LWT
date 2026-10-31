@@ -38,28 +38,36 @@ public class TerminalController(IPtySessionManager pty, TerminalDependencyServic
     [HttpPost("Sessions")]
     public async Task<IResult> CreateSession([FromBody] TerminalSessionCreateRequest request)
     {
-        var cwd = Directory.GetCurrentDirectory();
+        var isHost = string.Equals(request.Target, "host", StringComparison.OrdinalIgnoreCase);
+        var cwd = isHost ? "/root" : Directory.GetCurrentDirectory();
         if (request.WorkingDirectory is not null)
         {
             var requested = request.WorkingDirectory;
             if (string.IsNullOrWhiteSpace(requested) || requested.Length > 4096 || requested.Any(char.IsControl)
                 || !Path.IsPathFullyQualified(requested))
                 return BadRequest(new MessageResponse("工作目录必须是有效的绝对路径"));
-            try
+            if (isHost)
             {
-                cwd = Path.GetFullPath(requested);
-                if (!Directory.Exists(cwd))
-                    return BadRequest(new MessageResponse("工作目录不存在或不是目录"));
-                using var entries = Directory.EnumerateFileSystemEntries(cwd).GetEnumerator();
-                entries.MoveNext();
+                cwd = requested.Trim();
             }
-            catch (UnauthorizedAccessException)
+            else
             {
-                return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse("无权限访问工作目录"));
-            }
-            catch (Exception ex) when (ex is IOException or ArgumentException or NotSupportedException)
-            {
-                return BadRequest(new MessageResponse("无法访问工作目录"));
+                try
+                {
+                    cwd = Path.GetFullPath(requested);
+                    if (!Directory.Exists(cwd))
+                        return BadRequest(new MessageResponse("工作目录不存在或不是目录"));
+                    using var entries = Directory.EnumerateFileSystemEntries(cwd).GetEnumerator();
+                    entries.MoveNext();
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse("无权限访问工作目录"));
+                }
+                catch (Exception ex) when (ex is IOException or ArgumentException or NotSupportedException)
+                {
+                    return BadRequest(new MessageResponse("无法访问工作目录"));
+                }
             }
         }
 

@@ -187,7 +187,8 @@ public class ScheduledCommandJob(
                 Target: target,
                 TriggerBy: triggerBy,
                 CommandId: command.Id,
-                ScheduleTaskId: task.Id
+                ScheduleTaskId: task.Id,
+                ExecutionTarget: !string.IsNullOrWhiteSpace(task.ExecutionTarget) ? task.ExecutionTarget : (command.ExecutionTarget ?? "container")
             );
 
             var result = await executionEngine.ExecuteCommandAsync(cmdContext, command.Name);
@@ -247,6 +248,7 @@ public class ScheduledCommandJob(
                 TriggerBy: triggerBy,
                 CommandId: command.Id,
                 ScheduleTaskId: task.Id,
+                ExecutionTarget: !string.IsNullOrWhiteSpace(task.ExecutionTarget) ? task.ExecutionTarget : (command.ExecutionTarget ?? "container"),
                 BatchId: batchId,
                 StepOrder: stepOrder
             );
