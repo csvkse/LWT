@@ -292,6 +292,10 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
                 }
                 catch { }
             }
+            if (string.IsNullOrWhiteSpace(effectiveTarget) && Path.GetFileName(dir).Equals("ssh-access-guard", StringComparison.OrdinalIgnoreCase))
+            {
+                effectiveTarget = "host";
+            }
         }
         effectiveTarget = string.IsNullOrWhiteSpace(effectiveTarget) ? "container" : effectiveTarget.Trim().ToLowerInvariant();
 

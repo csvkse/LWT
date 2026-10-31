@@ -106,6 +106,7 @@ export default defineComponent({
     const supportBusy = ref(false);
     const supportCheckedAt = ref('');
     const supportError = ref('');
+    const isPrivilegedContainer = ref(false);
     const sessionBusy = ref(false);
     const renameDrafts = ref({});
     let disposed = false;
@@ -136,7 +137,13 @@ export default defineComponent({
       supportBusy.value = true;
       supportError.value = '';
       try {
-        const support = await http(API.terminal.support, { method: 'GET' });
+        const [support, envRes] = await Promise.all([
+          http(API.terminal.support, { method: 'GET' }),
+          http(API.services.environment, { method: 'GET' }).catch(() => null),
+        ]);
+        if (envRes && envRes.ok && envRes.data) {
+          isPrivilegedContainer.value = envRes.data.isPrivilegedContainer === true;
+        }
         if (support.ok) {
           capabilities.value = support.data;
           activeCommandSet.value = support.data.platform === 'Windows' ? 'windows' : 'linux';
@@ -679,6 +686,7 @@ export default defineComponent({
       backgroundSessions, showBackground, listBusy, listError, refreshSessions,
       attachBackground, endSession, retainSession, stateText,
       capabilities, supportBusy, supportCheckedAt, supportError, refreshSupport, openCurrentDirectory, renameSession,
+      isPrivilegedContainer,
       sessionBusy, renameDrafts,
     };
   },
@@ -701,6 +709,7 @@ export default defineComponent({
               :class="tab.isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'"
             ></span>
             <span>{{ tab.title }}</span>
+            <span v-if="tab.target === 'host'" class="text-[9px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono border border-amber-500/30">宿主</span>
             <span
               v-if="tabs.length > 1"
               class="ml-1 text-slate-500 hover:text-rose-400 text-sm font-bold leading-none"

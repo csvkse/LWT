@@ -28,6 +28,8 @@ export default defineComponent({
     const quickText = ref('');
     const quickTimeout = ref(60);
     const quickTargetHostId = ref('');
+    const quickExecutionTarget = ref('container');
+    const isPrivilegedContainer = ref(false);
     const quickRunning = ref(false);
     const quickResult = ref(null);
 
@@ -45,6 +47,7 @@ export default defineComponent({
       timeoutSeconds: 60,
       isPinned: false,
       defaultTargetHostId: '',
+      executionTarget: 'container',
     });
 
     // 多选与批量执行
@@ -126,6 +129,7 @@ export default defineComponent({
         timeoutSeconds: 60,
         isPinned: false,
         defaultTargetHostId: '',
+        executionTarget: 'container',
       });
       showEditor.value = true;
     }
@@ -142,6 +146,7 @@ export default defineComponent({
         timeoutSeconds: command.timeoutSeconds || 60,
         isPinned: command.isPinned,
         defaultTargetHostId: command.defaultTargetHostId || '',
+        executionTarget: command.executionTarget || 'container',
       });
       showEditor.value = true;
     }
@@ -173,6 +178,7 @@ export default defineComponent({
           isPinned: form.isPinned,
           timeoutSeconds: Number(form.timeoutSeconds) || null,
           defaultTargetHostId: form.defaultTargetHostId || null,
+          executionTarget: form.executionTarget || 'container',
         };
         const request = editingId.value
           ? http(API.commands.item(editingId.value), { method: 'PUT', body: payload })
@@ -305,13 +311,17 @@ export default defineComponent({
       if (!quickText.value.trim()) return toast.error('请输入要执行的指令');
       quickRunning.value = true;
       try {
+        const payload = {
+          commandText: quickText.value,
+          timeoutSeconds: Number(quickTimeout.value) || null,
+          targetHostId: quickTargetHostId.value || null,
+        };
+        if (!quickTargetHostId.value && quickExecutionTarget.value) {
+          payload.target = quickExecutionTarget.value;
+        }
         const result = await http(API.commands.quick, {
           method: 'POST',
-          body: {
-            commandText: quickText.value,
-            timeoutSeconds: Number(quickTimeout.value) || null,
-            targetHostId: quickTargetHostId.value || null,
-          },
+          body: payload,
         });
         if (result.ok) quickResult.value = result.data;
       } finally {
@@ -383,7 +393,7 @@ export default defineComponent({
     }
 
     onMounted(async () => {
-      await Promise.all([loadGroups(), loadRemoteHosts()]);
+      await Promise.all([loadGroups(), loadRemoteHosts(), checkPrivilegedEnvironment()]);
       await loadCommands();
     });
 
