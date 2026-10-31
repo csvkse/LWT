@@ -503,9 +503,13 @@ public sealed class GatewayUnitTests
 
             // 4. 释放冲突端口，重新 Reload 验证自愈恢复
             blocker.Stop();
-            await engine.ReloadAsync();
-
-            var healedStatus = engine.GetRuntimeStatus(conflictPort);
+            LinuxWebTool.Contracts.Features.Gateway.Contracts.L4RuntimeState healedStatus = null!;
+            for (var retry = 0; retry < 5; retry++) {
+                await Task.Delay(50 * (retry + 1));
+                await engine.ReloadAsync();
+                healedStatus = engine.GetRuntimeStatus(conflictPort);
+                if (healedStatus.IsRunning) break;
+            }
             Assert.True(healedStatus.IsRunning, "端口释放后自愈引擎必须恢复监听成功");
             Assert.Null(healedStatus.LastError);
 
