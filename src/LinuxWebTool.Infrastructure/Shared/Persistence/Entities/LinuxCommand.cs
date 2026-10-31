@@ -26,6 +26,9 @@ public class LinuxCommand
     /// <summary>推荐执行目标主机 Id（偏好建议，空表示本地服务器）。</summary>
     public string? DefaultTargetHostId { get; set; }
 
+    /// <summary>执行命名空间目标：container（当前容器）或 host（宿主机，要求特权容器与 nsenter）。</summary>
+    public string ExecutionTarget { get; set; } = "container";
+
     public DateTime? LastExecTime { get; set; }
 
     public DateTime CreateTime { get; set; } = DateTime.Now;

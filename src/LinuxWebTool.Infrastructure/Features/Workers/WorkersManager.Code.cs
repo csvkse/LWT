@@ -372,4 +372,59 @@ public sealed partial class WorkersManager
         catch { }
     }
     #endregion
+
+    public async ValueTask<WorkerInstanceDto> DeploySingleFileAsync(WorkerQuickDeployRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.FileName)) throw new ArgumentException("文件名不能为空", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.Content)) throw new ArgumentException("脚本内容不能为空", nameof(request));
+
+        var meta = SingleFileHeaderParser.Parse(request.Content, request.FileName);
+        var workerId = !string.IsNullOrWhiteSpace(request.WorkerId)
+            ? request.WorkerId.Trim().ToLowerInvariant()
+            : Path.GetFileNameWithoutExtension(request.FileName).Trim().ToLowerInvariant().Replace(' ', '-');
+
+        workerId = new string(workerId.Where(c => char.IsAsciiLetterOrDigit(c) || c == '-' || c == '_').ToArray());
+        if (string.IsNullOrEmpty(workerId)) workerId = "quick-" + Guid.NewGuid().ToString("N")[..8];
+
+        var runtimeType = meta.Runtime switch
+        {
+            "node" => WorkerRuntimeType.Node,
+            "python" => WorkerRuntimeType.Python,
+            "bash" => WorkerRuntimeType.Bash,
+            "powershell" => WorkerRuntimeType.PowerShell,
+            "batch" => WorkerRuntimeType.Batch,
+            "dotnet" => WorkerRuntimeType.DotNet,
+            _ => WorkerRuntimeType.Node
+        };
+
+        var entryFileName = Path.GetFileName(request.FileName);
+        var createReq = new WorkerCreateOrUpdateRequest
+        {
+            Id = workerId,
+            Name = meta.Name,
+            Description = string.IsNullOrWhiteSpace(meta.Description) ? $"单文件快速部署脚本 ({entryFileName})" : meta.Description,
+            Runtime = runtimeType,
+            Mode = meta.Mode,
+            Entrypoint = entryFileName,
+            ScriptContent = request.Content,
+            AutoRestart = true
+        };
+
+        var created = await CreateOrUpdateAsync(createReq, ct);
+        if (request.AutoStart)
+        {
+            try
+            {
+                await StartAsync(workerId, ct);
+                var latest = await GetByIdAsync(workerId, ct);
+                if (latest != null) return latest;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Worker {Id} 单文件快速部署后自动启动异常，保持就绪状态", workerId);
+            }
+        }
+        return created;
+    }
 }

@@ -152,7 +152,8 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
             return new ServiceActionResult { Success = true, Message = "配置已更新" };
         }
 
-        var (exitCode, stdout, stderr) = await RunHookScriptAsync(dir, request.Action, request.ActionParams, cancellationToken);
+        var effectiveTarget = request.Target ?? (request.ActionParams != null && request.ActionParams.TryGetValue("target", out var tVal) ? tVal : null);
+        var (exitCode, stdout, stderr) = await RunHookScriptAsync(dir, request.Action, request.ActionParams, cancellationToken, effectiveTarget);
         var isSuccess = exitCode == 0;
 
         string? parsedMessage = null;
@@ -239,7 +240,8 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
         string dir,
         string hookName,
         Dictionary<string, string>? parameters,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? explicitTarget = null)
     {
         var hooksDir = Path.Combine(dir, "hooks");
         if (!Directory.Exists(hooksDir)) hooksDir = dir;
@@ -272,6 +274,59 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
             return (-1, "", $"未找到动作钩子脚本: {hookName}");
         }
 
+        var effectiveTarget = explicitTarget;
+        if (string.IsNullOrWhiteSpace(effectiveTarget) && parameters != null && parameters.TryGetValue("target", out var pTar))
+        {
+            effectiveTarget = pTar;
+        }
+        if (string.IsNullOrWhiteSpace(effectiveTarget))
+        {
+            var mPath = Path.Combine(dir, "manifest.json");
+            if (File.Exists(mPath))
+            {
+                try
+                {
+                    using var mDoc = JsonDocument.Parse(File.ReadAllText(mPath));
+                    if (mDoc.RootElement.TryGetProperty("target", out var pT)) effectiveTarget = pT.GetString();
+                    else if (mDoc.RootElement.TryGetProperty("defaultTarget", out var pDT)) effectiveTarget = pDT.GetString();
+                }
+                catch { }
+            }
+        }
+        effectiveTarget = string.IsNullOrWhiteSpace(effectiveTarget) ? "container" : effectiveTarget.Trim().ToLowerInvariant();
+
+        // 宿主模式穿透执行 (Linux 下通过 nsenter 执行脚本文本，零物理文件残留)
+        if (!isWindows && effectiveTarget == "host")
+        {
+            var scriptContent = await File.ReadAllTextAsync(scriptPath, cancellationToken);
+            // 注入通用运维环境变量与 nsenter 穿透前缀
+            var envHeader = "export LWT_TARGET=\"host\"\nexport LWT_IS_PRIVILEGED=\"1\"\nexport LWT_NSENTER_PREFIX=\"\"\n";
+            var fullScript = envHeader + scriptContent;
+
+            var argsList = new List<string>();
+            if (parameters != null)
+            {
+                foreach (var kvp in parameters)
+                {
+                    if (!kvp.Key.Equals("target", StringComparison.OrdinalIgnoreCase))
+                    {
+                        argsList.Add(kvp.Value);
+                    }
+                }
+            }
+
+            var res = await _shellExecutor.ExecuteAsync(new ShellRequest
+            {
+                ScriptText = fullScript,
+                ScriptArguments = string.Join(" ", argsList.Select(a => $"\"{EscapeCliArg(a)}\"")),
+                Target = "host",
+                WorkingDirectory = "/",
+                TimeoutSeconds = 15
+            }, cancellationToken);
+
+            return (res.ExitCode ?? -1, res.StandardOutput, res.ErrorOutput);
+        }
+
         if (parameters != null)
         {
             foreach (var kvp in parameters)
@@ -283,14 +338,14 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
             }
         }
 
-        var res = await _shellExecutor.ExecuteAsync(new ShellRequest
+        var cmdRes = await _shellExecutor.ExecuteAsync(new ShellRequest
         {
             CommandText = runnerCmd,
             WorkingDirectory = dir,
             TimeoutSeconds = 12
         }, cancellationToken);
 
-        return (res.ExitCode ?? -1, res.StandardOutput, res.ErrorOutput);
+        return (cmdRes.ExitCode ?? -1, cmdRes.StandardOutput, cmdRes.ErrorOutput);
     }
 
     private static IReadOnlyList<string> ProbeMissingRunners(IReadOnlyList<string> requiredRunners)
@@ -428,6 +483,7 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
             var ver = root.TryGetProperty("version", out var pVer) ? pVer.GetString() ?? "1.0.0" : "1.0.0";
             var desc = root.TryGetProperty("description", out var pDesc) ? pDesc.GetString() : null;
             var icon = root.TryGetProperty("icon", out var pIcon) ? pIcon.GetString() : "🔌";
+            var target = root.TryGetProperty("target", out var pTar) ? pTar.GetString() ?? "container" : (root.TryGetProperty("defaultTarget", out var pDTar) ? pDTar.GetString() ?? "container" : "container");
 
             var platforms = new List<string>();
             if (root.TryGetProperty("supportedPlatforms", out var pPlat) && pPlat.ValueKind == JsonValueKind.Array)

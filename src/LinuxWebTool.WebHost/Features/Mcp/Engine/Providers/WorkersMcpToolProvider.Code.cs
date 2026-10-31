@@ -175,4 +175,46 @@ public sealed partial class WorkersMcpToolProvider
             ? McpToolExecutionResult.Success(sb.ToString().TrimEnd())
             : McpToolExecutionResult.Error(sb.ToString().TrimEnd());
     }
+
+    private async Task<McpToolExecutionResult> HandleWorkerQuickCreateAsync(JsonElement args, McpRequestContext context)
+    {
+        if (!args.TryGetProperty("file_name", out var fProp) || string.IsNullOrWhiteSpace(fProp.GetString()))
+            return McpToolExecutionResult.Error("缺少 file_name 参数");
+        if (!args.TryGetProperty("code_content", out var cProp) || string.IsNullOrWhiteSpace(cProp.GetString()))
+            return McpToolExecutionResult.Error("缺少 code_content 参数");
+
+        var fileName = fProp.GetString()!.Trim();
+        var codeContent = cProp.GetString()!;
+        var autoStart = !args.TryGetProperty("auto_start", out var aProp) || aProp.GetBoolean();
+
+        try
+        {
+            var worker = await workersManager.DeploySingleFileAsync(new WorkerQuickDeployRequest
+            {
+                FileName = fileName,
+                Content = codeContent,
+                AutoStart = autoStart
+            });
+
+            await operationLogger.LogAsync(
+                "MCP Worker单文件极速部署", "函数服务", worker.Id,
+                $"文件名: {fileName}, 名称: {worker.Name}, 运行时: {worker.Runtime}, 模式: {worker.Mode}, 状态: {worker.State}",
+                success: true, clientIp: context.ClientIp);
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"=== Worker [{worker.Id}] 单文件极速部署成功 ===");
+            sb.AppendLine($"显示名称: {worker.Name}");
+            sb.AppendLine($"运行时: {worker.Runtime} | 模式: {worker.Mode} | 入口: {worker.Entrypoint}");
+            if (worker.BoundPort.HasValue) sb.AppendLine($"网关代理端口: {worker.BoundPort.Value}");
+            sb.AppendLine($"当前运行状态: {worker.State}");
+            sb.AppendLine("💡 提示：可通过 worker_invoke 测试 HTTP 响应，或通过 worker_get_logs 查看输出。");
+
+            return McpToolExecutionResult.Success(sb.ToString().TrimEnd());
+        }
+        catch (Exception ex)
+        {
+            return McpToolExecutionResult.Error($"极速部署 Worker 失败: {ex.Message}");
+        }
+    }
+
 }

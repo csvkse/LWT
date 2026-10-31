@@ -13,7 +13,7 @@ public sealed class CrossPlatformPtyEngine : IPtyEngine
         cancellationToken.ThrowIfCancellationRequested();
 
         var sessionId = Guid.NewGuid().ToString("N");
-        var (shell, args) = ResolveShell(options.Executable, options.Arguments);
+        var (shell, args) = ResolveShell(options.Executable, options.Arguments, options.Target);
 
         if (LinuxNativePty.IsSupported)
             return Task.FromResult(LinuxNativePty.Start(sessionId, shell, args, options));
@@ -80,10 +80,19 @@ public sealed class CrossPlatformPtyEngine : IPtyEngine
         return Task.FromResult<IPtySession>(session);
     }
 
-    private static (string Executable, IReadOnlyList<string> Arguments) ResolveShell(string? explicitExe, IReadOnlyList<string>? explicitArgs)
+    private static (string Executable, IReadOnlyList<string> Arguments) ResolveShell(string? explicitExe, IReadOnlyList<string>? explicitArgs, string? target = "container")
     {
         if (!string.IsNullOrWhiteSpace(explicitExe))
             return (explicitExe, explicitArgs ?? []);
+
+        if (string.Equals(target, "host", StringComparison.OrdinalIgnoreCase) && OperatingSystem.IsLinux())
+        {
+            var nsenter = File.Exists("/usr/bin/nsenter") ? "/usr/bin/nsenter" : (File.Exists("/bin/nsenter") ? "/bin/nsenter" : null);
+            if (nsenter != null && Directory.Exists("/proc/1/ns"))
+            {
+                return (nsenter, ["-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "/bin/bash", "--login"]);
+            }
+        }
 
         if (OperatingSystem.IsWindows())
         {

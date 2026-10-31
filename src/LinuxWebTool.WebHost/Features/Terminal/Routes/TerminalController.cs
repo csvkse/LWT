@@ -87,7 +87,8 @@ public class TerminalController(IPtySessionManager pty, TerminalDependencyServic
             Executable: request.Executable,
             WorkingDirectory: cwd,
             Columns: request.Columns > 0 ? request.Columns : 80,
-            Rows: request.Rows > 0 ? request.Rows : 24);
+            Rows: request.Rows > 0 ? request.Rows : 24,
+            Target: request.Target ?? "container");
 
         try
         {

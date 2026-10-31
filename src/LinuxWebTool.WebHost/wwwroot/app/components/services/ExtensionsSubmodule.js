@@ -14,14 +14,11 @@ import ExtensionZipImportModal from './ExtensionZipImportModal.js';
 export default defineComponent({
   name: 'ExtensionsSubmodule',
   components: {
-    ExtensionInstallGuideModal,
-    ExtensionActionModal,
-    ExtensionRepoImportModal,
-    ExtensionZipImportModal,
-    ExtensionConfigModal,
-    ExtensionUpdateModal,
-    ExtensionLogsModal,
-    ExtensionCodeModal,
+    ExtensionInstallGuideModal, ExtensionActionModal, ExtensionRepoImportModal, ExtensionZipImportModal,
+    ExtensionConfigModal, ExtensionUpdateModal, ExtensionLogsModal, ExtensionCodeModal,
+  },
+  props: {
+    env: { type: Object, default: () => ({}) },
   },
   setup() {
     const loading = ref(false);
@@ -382,7 +379,7 @@ export default defineComponent({
 
       <ExtensionConfigModal :show="showConfigModal" :ext="editingExt" :form-values="configFormValues" :saving="savingConfig" @close="showConfigModal = false" @save="saveConfig()" />
       <ExtensionLogsModal :show="showLogsModal" :ext-id="logsExtId" :logs="logsContent" @close="showLogsModal = false" />
-      <ExtensionInstallGuideModal :show="showGuideModal" :ext="activeGuideExt" @close="showGuideModal = false" />
+      <ExtensionInstallGuideModal :show="showGuideModal" :ext="activeGuideExt" :env="env" @close="showGuideModal = false" />
       <ExtensionActionModal :show="showActionModal" :ext="activeActionExt" :action-def="activeActionDef" @close="showActionModal = false" @refresh="loadExtensions()" />
       <ExtensionRepoImportModal :show="showRepoModal" @close="showRepoModal = false" @imported="loadExtensions()" />
       <ExtensionUpdateModal :show="showUpdateModal" :ext="activeUpdateExt" @close="showUpdateModal = false" @updated="loadExtensions()" />

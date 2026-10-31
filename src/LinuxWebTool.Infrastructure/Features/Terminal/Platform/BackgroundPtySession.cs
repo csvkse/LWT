@@ -2,7 +2,7 @@ using System.Text;
 using System.Threading.Channels;
 namespace LinuxWebTool.Infrastructure.Features.Terminal.Platform;
 
-internal sealed class BackgroundPtySession(IPtySession pty, string? cwd, int limit) : IAsyncDisposable
+internal sealed class BackgroundPtySession(IPtySession pty, string? cwd, int limit, string target = "container") : IAsyncDisposable
 {
     private readonly object gate = new();
     private readonly SemaphoreSlim inputGate = new(1, 1);
@@ -17,7 +17,7 @@ internal sealed class BackgroundPtySession(IPtySession pty, string? cwd, int lim
     private int? exitCode;
     private Task pump = Task.CompletedTask;
     private Attachment? attachment;
-    private string name = "终端 " + pty.SessionId[..Math.Min(8, pty.SessionId.Length)];
+    private string name = (string.Equals(target, "host", StringComparison.OrdinalIgnoreCase) ? "[宿主] " : "") + "终端 " + pty.SessionId[..Math.Min(8, pty.SessionId.Length)];
     private int buffered;
     private long sequence;
     private bool truncated;
@@ -44,7 +44,7 @@ internal sealed class BackgroundPtySession(IPtySession pty, string? cwd, int lim
             var hasExited = closing || ended || pty.HasExited;
             if (!closing && pty.HasExited) exitCode = pty.ExitCode;
             return new(pty.SessionId, processId, name, hasExited ? "Exited" : attachment is null ? "RunningDetached" : "RunningAttached",
-                cwd, reportedDirectory, created, lastInput, detached, hasInput, keep, exitCode, truncated, sequence, pty.IsNativePty);
+                cwd, reportedDirectory, created, lastInput, detached, hasInput, keep, exitCode, truncated, sequence, pty.IsNativePty, target);
         }
     }
 

@@ -12,7 +12,7 @@ public record UserInfoResponse(string userName);
 public record FileContentResponse(string path, string name, long size, string content);
 public record LogContentResponse(string name, int tail, string content);
 public record ChangeCredentialResponse(string message, bool requireRelogin);
-public record CommandItemResponse(Guid Id, string Name, string CommandText, int ScriptType, string? Description, Guid? GroupId, string? GroupName, bool IsPinned, int SortOrder, int? TimeoutSeconds, DateTime? LastExecTime, DateTime CreateTime, DateTime UpdateTime, string? DefaultTargetHostId = null);
+public record CommandItemResponse(Guid Id, string Name, string CommandText, int ScriptType, string? Description, Guid? GroupId, string? GroupName, bool IsPinned, int SortOrder, int? TimeoutSeconds, DateTime? LastExecTime, DateTime CreateTime, DateTime UpdateTime, string? DefaultTargetHostId = null, string ExecutionTarget = "container");
 public record GroupItemResponse(Guid Id, string Name, int SortOrder, DateTime CreateTime, int UsageCount);
 public record ReadFileErrorResponse(string message, bool tooLarge, bool binary);
 public record CreateFileResponse(string message, string path);

@@ -114,6 +114,19 @@ public sealed partial class WorkersMcpToolProvider
     }
     """);
 
+    
+    private static readonly JsonElement WorkerQuickCreateSchema = Schema("""
+    {
+        "type": "object",
+        "properties": {
+            "file_name": { "type": "string", "description": "单文件名（含后缀，如 speedtest.js, monitor.py, backup.sh）" },
+            "code_content": { "type": "string", "description": "完整脚本代码文本。支持在顶部头部注释中自省声明元数据：\n/**\n * @name 节点测速\n * @description 实时探测上下行网速\n * @runtime node\n * @mode service\n * @port 8920\n * @target container\n */" },
+            "auto_start": { "type": "boolean", "description": "创建后是否自动启动（默认 true）" }
+        },
+        "required": ["file_name", "code_content"]
+    }
+    """);
+
     private static readonly JsonElement WorkerCreateSchema = Schema("""
     {
         "type": "object",

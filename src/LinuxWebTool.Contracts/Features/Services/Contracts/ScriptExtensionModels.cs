@@ -72,6 +72,7 @@ public sealed record ExtensionManifest
     public Dictionary<string, string> InstallGuide { get; init; } = [];
     public IReadOnlyList<ExtensionCustomAction> CustomActions { get; init; } = [];
     public IReadOnlyList<ExtensionFormField> ConfigForm { get; init; } = [];
+    public string Target { get; init; } = "container";
 }
 
 /// <summary>
@@ -89,6 +90,7 @@ public sealed record ExtensionInstance
     public string? InstallGuideText { get; init; }
     public bool IsEnabled { get; init; } = true;
     public ExtensionSourceMetadata? Source { get; init; }
+    public string Target { get; init; } = "container";
 }
 
 /// <summary>
@@ -100,6 +102,7 @@ public sealed record ExtensionActionRequest
     public required string Action { get; init; } // start, stop, restart, config_set 或自定义 action
     public Dictionary<string, string>? ConfigValues { get; init; }
     public Dictionary<string, string>? ActionParams { get; init; }
+    public string? Target { get; init; }
 }
 
 #region Mono-repo & GitHub 仓库导入模型
@@ -230,6 +233,7 @@ public sealed record ExtensionDebugRunRequest
     public string? HookName { get; init; } = "status";
     public Dictionary<string, string>? Params { get; init; }
     public int TimeoutSeconds { get; init; } = 8;
+    public string? Target { get; init; }
 }
 
 /// <summary>
@@ -243,6 +247,7 @@ public sealed record ExtensionCreateRequest
     public string Runner { get; init; } = "bash"; // bash, pwsh, python3, node
     public string? StartScript { get; init; }
     public string? StatusScript { get; init; }
+    public string Target { get; init; } = "container";
 }
 
 /// <summary>

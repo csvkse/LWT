@@ -313,13 +313,13 @@ export default defineComponent({
             runtime.term.writeln('\x1b[90m[历史会话已结束或服务已重启，正在为您自动创建新终端...]\x1b[0m');
             res = await http(API.terminal.sessions, {
               method: 'POST',
-              body: { columns: cols, rows, workingDirectory: tab.workingDirectory },
+              body: { columns: cols, rows, workingDirectory: tab.workingDirectory, target: tab.target || "container" },
             });
           }
         } else {
           res = await http(API.terminal.sessions, {
             method: 'POST',
-            body: { columns: cols, rows, workingDirectory: tab.workingDirectory },
+            body: { columns: cols, rows, workingDirectory: tab.workingDirectory, target: tab.target || "container" },
           });
         }
 
@@ -464,12 +464,15 @@ export default defineComponent({
       mountTab(tabId);
     }
 
-    function addTab(workingDirectory) {
+    function addTab(workingDirectory, target = 'container', initialCommand = null) {
       const nextNum = tabs.value.length + 1;
       const newId = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const isHost = target === 'host';
       tabs.value.push({
         id: newId,
-        title: `终端 ${nextNum}`,
+        title: isHost ? `[宿主] 终端 ${nextNum}` : `终端 ${nextNum}`,
+        target: isHost ? 'host' : 'container',
+        initialCommand,
         sessionId: '',
         isConnected: false,
         awaitingInput: null,
@@ -709,8 +712,18 @@ export default defineComponent({
             type="button"
             class="btn btn-xs font-bold text-slate-400 hover:text-neon-soft px-2.5 py-1 shrink-0"
             @click="addTab()"
-            title="新建终端"
+            title="新建容器终端"
           >+ 新建</button>
+          <button
+            v-if="isPrivilegedContainer"
+            type="button"
+            class="btn btn-xs font-semibold border-amber-500/40 hover:border-amber-400 text-amber-300 px-2.5 py-1 shrink-0 flex items-center gap-1"
+            @click="addTab(undefined, 'host')"
+            title="新建宿主透明穿透终端 (nsenter)"
+          >
+            <span>🖥️</span>
+            <span>+ 宿主终端</span>
+          </button>
 
           <!-- 交互式等待输入提示徽章（参考 AITool） -->
           <span

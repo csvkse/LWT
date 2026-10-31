@@ -20,10 +20,11 @@ public sealed record SaveCommandRequest(
     Guid? GroupId,
     bool IsPinned,
     int? TimeoutSeconds,
-    string? DefaultTargetHostId = null);
+    string? DefaultTargetHostId = null,
+    string ExecutionTarget = "container");
 
 public sealed record ExecuteCommandRequest(string? Arguments = null, string? TargetHostId = null);
-public sealed record QuickExecuteRequest(string CommandText, int? TimeoutSeconds = null, string? TargetHostId = null);
+public sealed record QuickExecuteRequest(string CommandText, int? TimeoutSeconds = null, string? TargetHostId = null, string Target = "container");
 
 public sealed record SaveScheduleRequest(
     string Name,

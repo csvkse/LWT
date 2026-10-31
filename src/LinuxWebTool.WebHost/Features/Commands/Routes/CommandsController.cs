@@ -40,7 +40,7 @@ public class CommandsController(
             c.Id, c.Name, c.CommandText, c.ScriptType, c.Description, c.GroupId,
             c.GroupId.HasValue && groupNames.TryGetValue(c.GroupId.Value, out var name) ? name : null,
             c.IsPinned, c.SortOrder, c.TimeoutSeconds, c.LastExecTime, c.CreateTime, c.UpdateTime,
-            c.DefaultTargetHostId));
+            c.DefaultTargetHostId, c.ExecutionTarget));
         return Ok(items.ToList());
     }
 
@@ -62,7 +62,8 @@ public class CommandsController(
             GroupId = request.GroupId,
             IsPinned = request.IsPinned,
             TimeoutSeconds = request.TimeoutSeconds,
-            DefaultTargetHostId = string.IsNullOrWhiteSpace(request.DefaultTargetHostId) ? null : request.DefaultTargetHostId.Trim()
+            DefaultTargetHostId = string.IsNullOrWhiteSpace(request.DefaultTargetHostId) ? null : request.DefaultTargetHostId.Trim(),
+            ExecutionTarget = string.IsNullOrWhiteSpace(request.ExecutionTarget) ? "container" : request.ExecutionTarget.Trim()
         };
         await commandStore.InsertAsync(command);
         await operationLogger.LogAsync(ScriptTypeLabel(request.ScriptType, "新增"), "指令", command.Name, Summarize(request), clientIp: HttpContext.GetClientIp());
@@ -92,6 +93,7 @@ public class CommandsController(
         command.IsPinned = request.IsPinned;
         command.TimeoutSeconds = request.TimeoutSeconds;
         command.DefaultTargetHostId = string.IsNullOrWhiteSpace(request.DefaultTargetHostId) ? null : request.DefaultTargetHostId.Trim();
+        command.ExecutionTarget = string.IsNullOrWhiteSpace(request.ExecutionTarget) ? command.ExecutionTarget : request.ExecutionTarget.Trim();
         await commandStore.UpdateAsync(command);
         await operationLogger.LogAsync(ScriptTypeLabel(request.ScriptType, "修改"), "指令", command.Name, Summarize(request), clientIp: HttpContext.GetClientIp());
         return Ok(command);
@@ -137,7 +139,8 @@ public class CommandsController(
             TimeoutSeconds: command.TimeoutSeconds is null or <= 0 ? 60 : command.TimeoutSeconds.Value,
             Target: target,
             TriggerBy: triggerBy,
-            CommandId: command.Id
+            CommandId: command.Id,
+            ExecutionTarget: command.ExecutionTarget
         );
 
         var result = await executionEngine.ExecuteCommandAsync(context, command.Name, HttpContext.RequestAborted);
@@ -189,7 +192,8 @@ public class CommandsController(
             Arguments: null,
             TimeoutSeconds: request.TimeoutSeconds is null or <= 0 ? 60 : request.TimeoutSeconds.Value,
             Target: target,
-            TriggerBy: triggerBy
+            TriggerBy: triggerBy,
+            ExecutionTarget: request.Target ?? "container"
         );
 
         var result = await executionEngine.ExecuteCommandAsync(context, "(快速)", HttpContext.RequestAborted);

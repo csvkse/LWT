@@ -131,7 +131,7 @@ public sealed partial class ScriptExtensionManager
 
         try
         {
-            var (exitCode, stdout, stderr) = await RunHookScriptAsync(dir, hookName, request.Params, cancellationToken);
+            var (exitCode, stdout, stderr) = await RunHookScriptAsync(dir, hookName, request.Params, cancellationToken, request.Target);
             sw.Stop();
 
             return new ExtensionDebugRunResultDto
@@ -184,6 +184,7 @@ public sealed partial class ScriptExtensionManager
             Description = request.Description ?? "自定义运维扩展服务",
             Version = "1.0.0",
             SupportedPlatforms = ["linux", "windows"],
+            Target = string.IsNullOrWhiteSpace(request.Target) ? "container" : request.Target.Trim().ToLowerInvariant(),
             Dependencies = new ExtensionDependencies
             {
                 Runners = runner switch

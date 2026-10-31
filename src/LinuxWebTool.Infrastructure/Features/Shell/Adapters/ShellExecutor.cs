@@ -44,6 +44,26 @@ public sealed class ShellExecutor : IShellExecutor
 
     private Task<ShellResult> ExecuteCommandAsync(ShellRequest request, TimeSpan timeout, CancellationToken cancellationToken)
     {
+        var isHost = string.Equals(request.Target, "host", StringComparison.OrdinalIgnoreCase) && OperatingSystem.IsLinux();
+        var nsenterPath = isHost ? (File.Exists("/usr/bin/nsenter") ? "/usr/bin/nsenter" : (File.Exists("/bin/nsenter") ? "/bin/nsenter" : null)) : null;
+
+        if (isHost && nsenterPath != null && Directory.Exists("/proc/1/ns"))
+        {
+            var hostStartInfo = CreateStartInfo(nsenterPath, request.WorkingDirectory);
+            hostStartInfo.ArgumentList.Add("-t");
+            hostStartInfo.ArgumentList.Add("1");
+            hostStartInfo.ArgumentList.Add("-m");
+            hostStartInfo.ArgumentList.Add("-u");
+            hostStartInfo.ArgumentList.Add("-i");
+            hostStartInfo.ArgumentList.Add("-n");
+            hostStartInfo.ArgumentList.Add("-p");
+            hostStartInfo.ArgumentList.Add("--");
+            hostStartInfo.ArgumentList.Add("/bin/bash");
+            hostStartInfo.ArgumentList.Add("-c");
+            hostStartInfo.ArgumentList.Add(request.CommandText ?? string.Empty);
+            return RunProcessAsync(hostStartInfo, $"[宿主] {request.CommandText ?? string.Empty}", timeout, cancellationToken);
+        }
+
         var (fileName, _) = ResolveShell();
         var startInfo = CreateStartInfo(fileName, request.WorkingDirectory);
 
@@ -88,11 +108,42 @@ public sealed class ShellExecutor : IShellExecutor
             var normalized = (request.ScriptText ?? string.Empty).Replace("\r\n", "\n").Replace("\r", "\n");
             await File.WriteAllTextAsync(scriptFile, normalized, new UTF8Encoding(false), cancellationToken);
 
-            var startInfo = CreateStartInfo(bashPath, request.WorkingDirectory);
-            startInfo.ArgumentList.Add(scriptFile);
-            foreach (var argument in ShellArgumentParser.Split(request.ScriptArguments))
+            ProcessStartInfo startInfo;
+            var isHost = string.Equals(request.Target, "host", StringComparison.OrdinalIgnoreCase) && OperatingSystem.IsLinux();
+            var nsenterPath = isHost ? (File.Exists("/usr/bin/nsenter") ? "/usr/bin/nsenter" : (File.Exists("/bin/nsenter") ? "/bin/nsenter" : null)) : null;
+
+            if (isHost && nsenterPath != null && Directory.Exists("/proc/1/ns"))
             {
-                startInfo.ArgumentList.Add(argument);
+                // 宿主模式零磁盘残留：通过 nsenter 直接送入 bash 执行
+                startInfo = CreateStartInfo(nsenterPath, request.WorkingDirectory);
+                startInfo.ArgumentList.Add("-t");
+                startInfo.ArgumentList.Add("1");
+                startInfo.ArgumentList.Add("-m");
+                startInfo.ArgumentList.Add("-u");
+                startInfo.ArgumentList.Add("-i");
+                startInfo.ArgumentList.Add("-n");
+                startInfo.ArgumentList.Add("-p");
+                startInfo.ArgumentList.Add("--");
+                startInfo.ArgumentList.Add("/bin/bash");
+                startInfo.ArgumentList.Add("-c");
+
+                // 避免参数转义逃逸：将脚本文本与参数拼接由宿主 bash -c 解释
+                var fullCmd = normalized;
+                var splitArgs = ShellArgumentParser.Split(request.ScriptArguments);
+                if (splitArgs.Count > 0)
+                {
+                    fullCmd = $"set -- {string.Join(" ", splitArgs.Select(a => $"'{a.Replace("'", "'\''")}'"))};\n" + normalized;
+                }
+                startInfo.ArgumentList.Add(fullCmd);
+            }
+            else
+            {
+                startInfo = CreateStartInfo(bashPath, request.WorkingDirectory);
+                startInfo.ArgumentList.Add(scriptFile);
+                foreach (var argument in ShellArgumentParser.Split(request.ScriptArguments))
+                {
+                    startInfo.ArgumentList.Add(argument);
+                }
             }
 
             var summary = $"[脚本 {normalized.Length} 字符]" + (request.ScriptArguments is { Length: > 0 } ? $" 参数: {request.ScriptArguments}" : string.Empty);

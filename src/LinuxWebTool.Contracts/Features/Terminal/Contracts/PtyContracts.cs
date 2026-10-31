@@ -8,7 +8,8 @@ public sealed record PtyStartOptions(
     string? WorkingDirectory = null,
     int Columns = 80,
     int Rows = 24,
-    IReadOnlyDictionary<string, string>? EnvironmentVariables = null);
+    IReadOnlyDictionary<string, string>? EnvironmentVariables = null,
+    string Target = "container");
 
 /// <summary>PTY 会话抽象。</summary>
 public interface IPtySession : IAsyncDisposable
@@ -62,7 +63,8 @@ public sealed record TerminalSessionInfo(
     [property: JsonPropertyName("exitCode")] int? ExitCode,
     [property: JsonPropertyName("bufferTruncated")] bool BufferTruncated,
     [property: JsonPropertyName("lastSequence")] long LastSequence,
-    [property: JsonPropertyName("nativePty")] bool NativePty = false);
+    [property: JsonPropertyName("nativePty")] bool NativePty = false,
+    [property: JsonPropertyName("target")] string Target = "container");
 public sealed record TerminalSessionUpdateRequest(
     [property: JsonPropertyName("name")] string? Name = null,
     [property: JsonPropertyName("keepAlive")] bool? KeepAlive = null);
@@ -83,7 +85,8 @@ public sealed record TerminalSessionCreateRequest(
     [property: JsonPropertyName("executable")] string? Executable = null,
     [property: JsonPropertyName("workingDirectory")] string? WorkingDirectory = null,
     [property: JsonPropertyName("columns")] int Columns = 80,
-    [property: JsonPropertyName("rows")] int Rows = 24);
+    [property: JsonPropertyName("rows")] int Rows = 24,
+    [property: JsonPropertyName("target")] string Target = "container");
 
 /// <summary>终端会话创建响应。</summary>
 public sealed record TerminalSessionCreateResponse(

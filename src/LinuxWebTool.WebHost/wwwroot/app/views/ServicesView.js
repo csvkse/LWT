@@ -213,6 +213,7 @@ export default defineComponent({
 
           <ExtensionsSubmodule
             v-else-if="activeModuleId === 'extensions'"
+            :env="envInfo"
           />
         </div>
       </div>
