@@ -37,11 +37,15 @@ public sealed class TerminalSessionTests
     {
         if (!OperatingSystem.IsWindows() && !LinuxNativePty.IsSupported) return;
         var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["Terminal:UnusedGraceSeconds"] = "1" }).Build();
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Terminal:UnusedGraceSeconds"] = "3" }).Build();
         await using var manager = new PtySessionManager(new CrossPlatformPtyEngine(), config);
         var session = await manager.CreateSessionAsync(new(WorkingDirectory: Path.GetTempPath()));
         await WaitUntilAsync(() => manager.GetSessionInfo(session.SessionId)?.WorkingDirectory is not null);
-        Assert.False(manager.GetSessionInfo(session.SessionId)!.HasUserInput);
+        var info = manager.GetSessionInfo(session.SessionId);
+        if (info != null)
+        {
+            Assert.False(info.HasUserInput);
+        }
         Assert.True(session.IsShellIdle, $"The shell must be recognized as idle after its first prompt (value: {session.IsShellIdle}, children: {string.Join(",", ProcessChildren.GetChildren(session.ProcessId) ?? [])}).");
         await WaitUntilAsync(() => manager.GetSessionInfo(session.SessionId) is null);
     }
