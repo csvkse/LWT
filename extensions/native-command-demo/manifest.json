@@ -1,0 +1,53 @@
+{
+  "manifestVersion": 1,
+  "hostApiVersion": "1",
+  "id": "native-command-demo",
+  "name": "原生命令行工具包装示例",
+  "category": "tools",
+  "version": "1.0.0",
+  "description": "直接调用原生命令行可执行程序，支持结构化参数绑定、进度解析与产物下载。",
+  "icon": "⚡",
+  "supportedPlatforms": ["linux", "windows"],
+  "customActions": [
+    {
+      "action": "convert",
+      "label": "快速格式转换",
+      "icon": "🔄",
+      "executor": "command",
+      "command": {
+        "commandId": "convert",
+        "programRef": "bin/tool",
+        "argumentBindings": [
+          { "type": "literal", "value": "--action=convert" },
+          { "type": "inputScalar", "value": "format", "prefix": "--format=" },
+          { "type": "artifactPath", "value": "output.txt" }
+        ],
+        "stdinMode": "closed",
+        "acceptedExitCodes": [0],
+        "resultParser": "artifacts",
+        "progressParser": "none",
+        "artifactRules": [
+          { "artifactId": "output", "relativePath": "output.txt", "contentType": "text/plain" }
+        ],
+        "timeoutSeconds": 30
+      }
+    },
+    {
+      "action": "query_json",
+      "label": "查询结构化指标",
+      "icon": "📊",
+      "executor": "command",
+      "command": {
+        "commandId": "query_json",
+        "programRef": "bin/tool",
+        "argumentBindings": [
+          { "type": "literal", "value": "--action=metrics" }
+        ],
+        "stdinMode": "closed",
+        "acceptedExitCodes": [0],
+        "resultParser": "json",
+        "timeoutSeconds": 10
+      }
+    }
+  ]
+}

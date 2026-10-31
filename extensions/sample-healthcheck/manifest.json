@@ -1,4 +1,6 @@
 {
+  "manifestVersion": 1,
+  "hostApiVersion": "1",
   "id": "sample-healthcheck",
   "name": "系统健康守护扩展 (示例)",
   "category": "system",

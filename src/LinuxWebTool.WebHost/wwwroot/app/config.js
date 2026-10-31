@@ -258,4 +258,10 @@ export const API = {
     code: (id, file) => (file ? `/Workers/${id}/Code?file=${encodeURIComponent(file)}` : `/Workers/${id}/Code`),
     debug: (id) => `/Workers/${id}/Debug`,
   },
+  pluginOperations: {
+    submit: '/PluginOperations/Submit',
+    item: (id) => `/PluginOperations/${encodeURIComponent(id)}`,
+    cancel: (id) => `/PluginOperations/${encodeURIComponent(id)}/Cancel`,
+    artifactDownload: (id, artifactId) => `/PluginOperations/${encodeURIComponent(id)}/Artifacts/${encodeURIComponent(artifactId)}`,
+  },
 };

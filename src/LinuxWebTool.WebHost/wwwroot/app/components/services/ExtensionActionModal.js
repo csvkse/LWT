@@ -2,6 +2,7 @@ import { defineComponent, ref, watch } from 'vue';
 import { http } from '../../api/client.js';
 import { API } from '../../config.js';
 import { toast } from '../../store/toast.js';
+import { formatBytes } from '../../utils/format.js';
 
 export default defineComponent({
   name: 'ExtensionActionModal',
@@ -17,6 +18,10 @@ export default defineComponent({
     const executing = ref(false);
     const actionResult = ref(null);
     const selectedTarget = ref('container');
+    const isPolling = ref(false);
+    const opProgress = ref(null);
+    const opProgressMsg = ref('');
+    const activeOpId = ref(null);
 
     watch(() => props.show, (val) => {
       if (val) {
@@ -25,9 +30,65 @@ export default defineComponent({
     }, { immediate: true });
 
     function closeModal() {
+      isPolling.value = false;
+      activeOpId.value = null;
       inputParam.value = '';
       actionResult.value = null;
       emit('close');
+    }
+
+    async function pollOperation(opId) {
+      activeOpId.value = opId;
+      isPolling.value = true;
+      while (isPolling.value) {
+        await new Promise(r => setTimeout(r, 1000));
+        if (!isPolling.value) break;
+
+        const opRes = await http(API.pluginOperations.item(opId));
+        if (opRes.ok && opRes.data) {
+          const op = opRes.data;
+          opProgress.value = op.progress != null ? Math.round(op.progress) : null;
+          opProgressMsg.value = op.progressMessage || (op.status === 'running' ? '正在执行中...' : '排队中...');
+
+          if (['succeeded', 'failed', 'cancelled', 'timedOut'].includes(op.status)) {
+            isPolling.value = false;
+            activeOpId.value = null;
+            const isSuccess = op.status === 'succeeded';
+            const outputText = op.result?.data ? JSON.stringify(op.result.data, null, 2) : (op.result?.message || op.result?.error || '');
+            actionResult.value = {
+              success: isSuccess,
+              message: op.result?.message || op.result?.error || (isSuccess ? '操作执行成功' : '操作未成功完成'),
+              output: outputText,
+              artifacts: op.result?.artifactRefs || [],
+              operationId: op.operationId,
+            };
+            if (isSuccess) {
+              toast.success(op.result?.message || '操作成功完成');
+              emit('refresh');
+            } else {
+              toast.error(op.result?.error || '操作执行失败');
+            }
+            break;
+          }
+        } else {
+          isPolling.value = false;
+          break;
+        }
+      }
+    }
+
+    async function cancelOperation() {
+      if (!activeOpId.value) return;
+      try {
+        await http(API.pluginOperations.cancel(activeOpId.value), { method: 'POST' });
+        toast.info('已请求取消操作');
+      } catch (err) {
+        toast.error('取消请求失败: ' + err.message);
+      }
+    }
+
+    function getArtifactDownloadUrl(opId, artId) {
+      return `/api${API.pluginOperations.artifactDownload(opId, artId)}`;
     }
 
     async function submitAction() {
@@ -57,12 +118,16 @@ export default defineComponent({
         });
 
         if (res.ok && res.data) {
-          actionResult.value = res.data;
-          if (res.data.success) {
-            toast.success(res.data.message || '操作成功完成');
-            emit('refresh');
+          if (res.status === 202 || res.data.operationId) {
+            await pollOperation(res.data.operationId);
           } else {
-            toast.error(res.data.message || '操作失败');
+            actionResult.value = res.data;
+            if (res.data.success) {
+              toast.success(res.data.message || '操作成功完成');
+              emit('refresh');
+            } else {
+              toast.error(res.data.message || '操作失败');
+            }
           }
         } else {
           toast.error(res.message || '请求处理失败');
@@ -79,8 +144,15 @@ export default defineComponent({
       executing,
       actionResult,
       selectedTarget,
+      isPolling,
+      opProgress,
+      opProgressMsg,
+      activeOpId,
+      formatBytes,
       closeModal,
       submitAction,
+      cancelOperation,
+      getArtifactDownloadUrl,
     };
   },
   template: `
@@ -137,6 +209,23 @@ export default defineComponent({
           />
         </div>
 
+        <!-- 异步操作排队/执行进度指示 -->
+        <div v-if="isPolling" class="p-3 rounded bg-cyan-950/40 border border-cyan-500/40 space-y-2">
+          <div class="flex items-center justify-between text-xs">
+            <span class="text-cyan-300 flex items-center gap-2">
+              <span class="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+              {{ opProgressMsg || '正在处理操作...' }}
+            </span>
+            <div class="flex items-center gap-2">
+              <span v-if="opProgress != null" class="font-mono text-cyan-400 font-bold">{{ opProgress }}%</span>
+              <button type="button" class="btn btn-xs border-rose-500/50 text-rose-300 hover:bg-rose-500/20" @click="cancelOperation()">取消</button>
+            </div>
+          </div>
+          <div v-if="opProgress != null" class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+            <div class="bg-cyan-400 h-1.5 transition-all duration-300" :style="{ width: opProgress + '%' }"></div>
+          </div>
+        </div>
+
         <!-- 执行按钮 -->
         <div class="flex items-center justify-end gap-2 pt-2">
           <button type="button" class="btn btn-xs hover:border-slate-500" @click="closeModal()">
@@ -145,10 +234,10 @@ export default defineComponent({
           <button
             type="button"
             class="btn btn-xs btn-primary min-w-[80px]"
-            :disabled="executing"
+            :disabled="executing || isPolling"
             @click="submitAction()"
           >
-            {{ executing ? '正在执行...' : '执行动作' }}
+            {{ executing || isPolling ? '正在处理...' : '执行动作' }}
           </button>
         </div>
 
@@ -164,6 +253,23 @@ export default defineComponent({
             v-if="actionResult.output"
             class="p-3 bg-cyber-bg/95 rounded border border-cyber-line/70 font-mono text-xs text-slate-300 max-h-64 overflow-y-auto whitespace-pre-wrap select-all leading-relaxed"
           >{{ actionResult.output }}</pre>
+
+          <!-- 产物下载链接 -->
+          <div v-if="actionResult.artifacts && actionResult.artifacts.length" class="space-y-1 pt-1">
+            <div class="text-xs text-cyan-300 font-medium">📦 生成产物列表：</div>
+            <div class="flex flex-wrap gap-2">
+              <a
+                v-for="art in actionResult.artifacts"
+                :key="art.artifactId"
+                :href="getArtifactDownloadUrl(actionResult.operationId, art.artifactId)"
+                target="_blank"
+                class="btn btn-xs border-cyan-500/50 text-cyan-300 hover:bg-cyan-500/20 flex items-center gap-1.5 font-mono"
+              >
+                <span>💾 {{ art.filename || art.artifactId }}</span>
+                <span class="text-[10px] text-slate-400">({{ formatBytes(art.sizeBytes) }})</span>
+              </a>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -86,7 +86,12 @@ server.listen(port, '0.0.0.0', () => {
             Entrypoint = "worker.py",
             Network = new WorkerNetworkConfig { RoutingMode = "path", PathPrefix = $"/w/{id}" },
             Storage = new WorkerStorageConfig { EnableSqlite = true, EnableKv = true },
-            Supervision = new WorkerSupervisionConfig { AutoRestart = true }
+            Supervision = new WorkerSupervisionConfig { AutoRestart = true },
+            Control = new LinuxWebTool.Contracts.Features.Plugins.Contracts.ResidentControlSpec
+            {
+                HealthPath = "/health",
+                SupportedCapabilities = ["health"]
+            }
         };
         File.WriteAllText(Path.Combine(dir, "worker.json"), JsonSerializer.Serialize(manifest, WorkerJsonContext.Default.WorkerManifest));
 
@@ -105,6 +110,13 @@ except Exception as e:
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(json.dumps({'status': 'Ready', 'message': 'Python worker is healthy'}).encode('utf-8'))
+            return
+
         count = 0
         try:
             with sqlite3.connect(DB_PATH) as conn:

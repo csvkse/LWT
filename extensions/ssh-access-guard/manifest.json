@@ -1,4 +1,6 @@
 {
+  "manifestVersion": 1,
+  "hostApiVersion": "1",
   "id": "ssh-access-guard",
   "name": "SSH 访问安全卫士",
   "category": "security",

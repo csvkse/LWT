@@ -148,6 +148,17 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
             return entity.AllowWorkers;
         }
 
+        if (path.StartsWith("/api/McpBridge", StringComparison.OrdinalIgnoreCase))
+        {
+            // 管理员专属路由显式拒绝普通 API Key
+            return false;
+        }
+
+        if (path.StartsWith("/api/PluginOperations", StringComparison.OrdinalIgnoreCase))
+        {
+            return entity.AllowServices || entity.AllowWorkers;
+        }
+
         // 2. 指令与终端模块
         if (path.StartsWith("/api/Commands", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/api/Groups", StringComparison.OrdinalIgnoreCase) ||

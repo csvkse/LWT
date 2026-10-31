@@ -10,6 +10,7 @@ public sealed record WorkerStartSpec
 {
     public required string FileName { get; init; }
     public required string Arguments { get; init; }
+    public IReadOnlyList<string>? ArgumentList { get; init; }
     public required string WorkingDirectory { get; init; }
     public IReadOnlyDictionary<string, string> EnvironmentVariables { get; init; } = new Dictionary<string, string>();
 }

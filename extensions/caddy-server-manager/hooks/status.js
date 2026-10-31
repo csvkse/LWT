@@ -14,14 +14,30 @@ function checkAdmin() {
 async function main() {
   const isHealthy = await checkAdmin();
   if (isHealthy) {
-    console.log(JSON.stringify({ status: 'Running', message: 'Caddy 运行中 (Admin API 就绪: 2019)', pid: null }));
+    console.log(JSON.stringify({
+      protocolVersion: 1,
+      status: 'succeeded',
+      data: { status: 'Running', message: 'Caddy 运行中 (Admin API 就绪: 2019)', pid: null },
+      message: 'Caddy 服务运行正常'
+    }));
     return;
   }
   try {
     const ver = execSync('caddy version', { encoding: 'utf-8', timeout: 2000 }).trim();
-    console.log(JSON.stringify({ status: 'Stopped', message: `未运行 (已安装: ${ver})`, pid: null }));
-  } catch {
-    console.log(JSON.stringify({ status: 'Stopped', message: '服务未启动或未安装 caddy', pid: null }));
+    console.log(JSON.stringify({
+      protocolVersion: 1,
+      status: 'succeeded',
+      data: { status: 'Stopped', message: `未运行 (已安装: ${ver})`, pid: null },
+      message: 'Caddy 未运行'
+    }));
+  } catch (err) {
+    console.error('探测 Caddy 版本失败: ' + err.message);
+    console.log(JSON.stringify({
+      protocolVersion: 1,
+      status: 'succeeded',
+      data: { status: 'Stopped', message: '服务未启动或未安装 caddy', pid: null },
+      message: 'Caddy 服务未启动或未安装'
+    }));
   }
 }
 main();

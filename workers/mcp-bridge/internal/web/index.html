@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP Bridge 控制台</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --success: #10b981;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      line-height: 1.5;
+      padding: 1.5rem;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 1.25rem;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    h1 { font-size: 1.5rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; }
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 0.6rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge-success { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .badge-danger { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
+    .badge-warning { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+    .badge-info { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.25rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+    }
+    .card-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .form-group { margin-bottom: 0.85rem; }
+    label { display: block; font-size: 0.8rem; font-weight: 500; color: var(--text-muted); margin-bottom: 0.35rem; }
+    input, select, textarea {
+      width: 100%;
+      padding: 0.55rem 0.75rem;
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      color: var(--text);
+      font-size: 0.875rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus, select:focus { border-color: var(--primary); }
+    .btn-group { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; }
+    button {
+      padding: 0.5rem 0.9rem;
+      border-radius: 0.375rem;
+      font-size: 0.825rem;
+      font-weight: 600;
+      border: 1px solid transparent;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      transition: all 0.15s;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-secondary { background: #334155; color: #f8fafc; }
+    .btn-secondary:hover { background: #475569; }
+    .btn-success { background: #059669; color: #fff; }
+    .btn-success:hover { background: #047857; }
+    .btn-danger { background: #dc2626; color: #fff; }
+    .btn-danger:hover { background: #b91c1c; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.825rem; margin-top: 0.5rem; }
+    th, td { padding: 0.6rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+    th { color: var(--text-muted); font-weight: 600; }
+    tr:hover { background: rgba(255, 255, 255, 0.02); }
+    .toast {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      padding: 0.75rem 1.25rem;
+      border-radius: 0.5rem;
+      background: #1e293b;
+      border: 1px solid var(--border);
+      color: var(--text);
+      box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
+      z-index: 1000;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>MCP Bridge 网关控制台 <span id="tunnelBadge" class="badge badge-warning">检查中...</span></h1>
+      <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.25rem;">
+        OpenAI Secure MCP Tunnel 与第三方 MCP 工具自治服务
+      </p>
+    </div>
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
+      <span style="font-size: 0.8rem; color: var(--text-muted);">版本: <span id="revisionVal">--</span></span>
+      <button class="btn-secondary" onclick="openTokenDialog()">🔑 令牌设置</button>
+      <button class="btn-primary" onclick="refreshStatus()">🔄 刷新</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <!-- Tunnel 配置卡片 -->
+    <div class="card">
+      <div class="card-title">
+        <span>🌐 OpenAI Tunnel 隧道</span>
+        <span id="tunnelStatusText" style="font-size: 0.8rem; color: var(--text-muted);">未连接</span>
+      </div>
+      <div class="form-group">
+        <label>Tunnel ID (格式: tunnel_xxxx 或 32位十六进制)</label>
+        <input type="text" id="tunnelIdInput" placeholder="tunnel_0123456789abcdef0123456789abcdef">
+      </div>
+      <div class="form-group">
+        <label>预共享密钥 (PreShared Key)</label>
+        <input type="password" id="presharedKeyInput" placeholder="•••••••• (留空保持原密钥)">
+      </div>
+      <div class="btn-group">
+        <button class="btn-primary" onclick="saveTunnel()">💾 保存配置</button>
+        <button class="btn-success" onclick="startTunnel()">▶ 启动隧道</button>
+        <button class="btn-danger" onclick="stopTunnel()">⏹ 停止隧道</button>
+      </div>
+    </div>
+
+    <!-- 运行指标与统计卡片 -->
+    <div class="card">
+      <div class="card-title">
+        <span>📊 运行状态与配额</span>
+      </div>
+      <div style="font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.5rem;">
+        <div>运行实例 ID: <code id="runIdVal">--</code></div>
+        <div>已配置第三方服务数: <strong id="serverCountVal">0</strong> 个</div>
+        <div>已激活工具数: <strong id="activeToolCountVal">0</strong> 个</div>
+        <div>草稿未应用变更: <span id="hasDraftVal" class="badge badge-info">无</span></div>
+      </div>
+      <div class="btn-group" style="margin-top: 1.5rem;">
+        <button class="btn-success" onclick="applyChanges()">🚀 应用生效配置 (Apply)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 第三方 MCP 服务管理卡片 -->
+  <div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-title">
+      <span>🔌 第三方 MCP 纳管服务</span>
+      <button class="btn-primary" onclick="openAddServerModal()">➕ 添加 MCP 服务</button>
+    </div>
+    <div style="overflow-x: auto;">
+      <table id="serverTable">
+        <thead>
+          <tr>
+            <th>服务 ID</th>
+            <th>名称</th>
+            <th>协议传输</th>
+            <th>超时</th>
+            <th>状态</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="serverTableBody">
+          <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">暂无已配置的服务</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 最近审计日志卡片 -->
+  <div class="card">
+    <div class="card-title">
+      <span>📜 审计日志 (最新 10 条)</span>
+    </div>
+    <div style="overflow-x: auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>操作</th>
+            <th>目标</th>
+            <th>状态</th>
+            <th>详情</th>
+          </tr>
+        </thead>
+        <tbody id="auditTableBody">
+          <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">暂无审计记录</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const baseUrl = window.location.pathname.replace(/\/+$/, '');
+    let currentToken = localStorage.getItem('mcp_bridge_token') || '';
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('token')) {
+      currentToken = urlParams.get('token');
+      localStorage.setItem('mcp_bridge_token', currentToken);
+    }
+
+    function showToast(msg, isError = false) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.style.borderColor = isError ? 'var(--danger)' : 'var(--success)';
+      t.style.display = 'block';
+      setTimeout(() => { t.style.display = 'none'; }, 3000);
+    }
+
+    function openTokenDialog() {
+      const t = prompt('请输入 Resident Control 访问令牌 (Token):', currentToken);
+      if (t !== null) {
+        currentToken = t.trim();
+        localStorage.setItem('mcp_bridge_token', currentToken);
+        showToast('令牌已保存');
+        refreshStatus();
+      }
+    }
+
+    async function apiCall(action, payload = null, queryParams = {}) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentToken) {
+        headers['Authorization'] = 'Bearer ' + currentToken;
+      }
+      const q = new URLSearchParams(queryParams);
+      if (currentToken) q.set('token', currentToken);
+      const qs = q.toString() ? '?' + q.toString() : '';
+      const url = `${baseUrl}/control/invoke/${action}${qs}`;
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: payload ? JSON.stringify(payload) : undefined
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.message || `HTTP ${res.status}`);
+        }
+        return data;
+      } catch (err) {
+        showToast(err.message, true);
+        throw err;
+      }
+    }
+
+    let currentStatus = null;
+
+    async function refreshStatus() {
+      try {
+        const s = await apiCall('status.get');
+        if (s) {
+          currentStatus = s;
+          renderStatus(s);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function renderStatus(s) {
+      document.getElementById('runIdVal').textContent = s.workerRunId || '--';
+      document.getElementById('revisionVal').textContent = `草稿 r${s.draftRevision} / 生效 r${s.activeRevision}`;
+      document.getElementById('hasDraftVal').textContent = s.hasUnappliedDraft ? '有待生效变更' : '已是最新';
+      document.getElementById('hasDraftVal').className = s.hasUnappliedDraft ? 'badge badge-warning' : 'badge badge-success';
+
+      const tb = document.getElementById('tunnelBadge');
+      const st = s.tunnelState || 'Disconnected';
+      document.getElementById('tunnelStatusText').textContent = st;
+      if (st === 'Connected') {
+        tb.className = 'badge badge-success';
+        tb.textContent = '已连接';
+      } else if (st === 'Connecting') {
+        tb.className = 'badge badge-warning';
+        tb.textContent = '连接中...';
+      } else {
+        tb.className = 'badge badge-danger';
+        tb.textContent = '未连接';
+      }
+
+      if (s.config && s.config.tunnel) {
+        document.getElementById('tunnelIdInput').value = s.config.tunnel.tunnelId || '';
+      }
+
+      // 渲染服务列表
+      const tbody = document.getElementById('serverTableBody');
+      const servers = (s.config && s.config.backends) || [];
+      document.getElementById('serverCountVal').textContent = servers.length;
+      if (servers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">暂无已配置的服务</td></tr>';
+      } else {
+        tbody.innerHTML = servers.map(srv => `
+          <tr>
+            <td><code>${srv.id}</code></td>
+            <td><strong>${srv.name || srv.id}</strong></td>
+            <td><span class="badge badge-info">${srv.transport}</span></td>
+            <td>${srv.timeoutSeconds || 30}s</td>
+            <td><span class="badge ${srv.enabled ? 'badge-success' : 'badge-danger'}">${srv.enabled ? '启用' : '禁用'}</span></td>
+            <td>
+              <button class="btn-secondary" style="padding: 0.25rem 0.5rem;" onclick="probeServer('${srv.id}')">🔍 探测</button>
+              <button class="btn-danger" style="padding: 0.25rem 0.5rem;" onclick="deleteServer('${srv.id}')">🗑 删除</button>
+            </td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    async function saveTunnel() {
+      const tunnelId = document.getElementById('tunnelIdInput').value.trim();
+      const psk = document.getElementById('presharedKeyInput').value.trim();
+      const payload = {
+        tunnelId,
+        expectedRevision: currentStatus ? currentStatus.draftRevision : 0,
+        secretAction: psk ? 'update' : 'keep'
+      };
+      if (psk) payload.presharedKey = psk;
+      const res = await apiCall('tunnel.save', payload);
+      if (res && res.success !== false) {
+        showToast('Tunnel 配置已保存');
+        refreshStatus();
+      }
+    }
+
+    async function startTunnel() {
+      const res = await apiCall('tunnel.start');
+      if (res && res.success !== false) {
+        showToast('Tunnel 启动中...');
+        refreshStatus();
+      }
+    }
+
+    async function stopTunnel() {
+      const res = await apiCall('tunnel.stop');
+      if (res && res.success !== false) {
+        showToast('Tunnel 已停止');
+        refreshStatus();
+      }
+    }
+
+    async function applyChanges() {
+      const rev = currentStatus ? currentStatus.draftRevision : 0;
+      const res = await apiCall('config.apply', { expectedRevision: rev });
+      if (res && res.success !== false) {
+        showToast('配置已成功生效！');
+        refreshStatus();
+      }
+    }
+
+    async function probeServer(id) {
+      showToast(`正在探测服务 ${id}...`);
+      const res = await apiCall('servers.probe', null, { id });
+      if (res && res.success !== false) {
+        showToast(`探测完成`);
+        refreshStatus();
+      }
+    }
+
+    async function deleteServer(id) {
+      if (!confirm(`确定要删除 MCP 服务 ${id} 吗？`)) return;
+      const rev = currentStatus ? currentStatus.draftRevision : 0;
+      const res = await apiCall('servers.delete', null, { id, expectedRevision: rev });
+      if (res && res.success !== false) {
+        showToast('服务已删除');
+        refreshStatus();
+      }
+    }
+
+    function openAddServerModal() {
+      const id = prompt('请输入新 MCP 服务 ID (仅小写字母、数字、短横线):');
+      if (!id) return;
+      const name = prompt('请输入服务显示名称:', id);
+      const transport = prompt('请输入传输协议 (stdio, http, sse):', 'stdio');
+      const cmd = prompt('请输入命令或 URL:', 'npx -y @modelcontextprotocol/server-everything');
+      if (!cmd) return;
+
+      const payload = {
+        server: {
+          id,
+          name: name || id,
+          transport,
+          command: transport === 'stdio' ? cmd : undefined,
+          url: transport !== 'stdio' ? cmd : undefined,
+          enabled: true,
+          timeoutSeconds: 30
+        },
+        expectedRevision: currentStatus ? currentStatus.draftRevision : 0
+      };
+      apiCall('servers.save', payload).then(res => {
+        if (res && res.success !== false) {
+          showToast('服务添加成功');
+          refreshStatus();
+        }
+      });
+    }
+
+    // 初始化
+    refreshStatus();
+  </script>
+</body>
+</html>

@@ -224,9 +224,9 @@ public sealed class ShellExecutor : IShellExecutor
             };
         }
 
-        // 读流不传 token：超时/取消杀掉进程后流自然关闭，保证尽量拿到已产出的输出。
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
+        // 增量有界读取：超过 MaxOutputBytes 后停止内存分配并持续排空管道，防止内存暴涨和管道反压死锁。
+        var stdoutTask = ReadBoundedStreamAsync(process.StandardOutput, _options.MaxOutputBytes);
+        var stderrTask = ReadBoundedStreamAsync(process.StandardError, _options.MaxOutputBytes);
 
         bool timedOut = false, cancelled = false;
         int? exitCode = null;
@@ -246,12 +246,9 @@ public sealed class ShellExecutor : IShellExecutor
             }
         }
 
-        var stdout = await SafeAwaitAsync(stdoutTask);
-        var stderr = await SafeAwaitAsync(stderrTask);
+        var (outText, outTruncated) = await SafeAwaitStreamAsync(stdoutTask);
+        var (errText, errTruncated) = await SafeAwaitStreamAsync(stderrTask);
         stopwatch.Stop();
-
-        var (outText, outTruncated) = Truncate(stdout, _options.MaxOutputBytes);
-        var (errText, errTruncated) = Truncate(stderr, _options.MaxOutputBytes);
 
         if (timedOut)
         {
@@ -340,6 +337,62 @@ public sealed class ShellExecutor : IShellExecutor
         catch
         {
             return new UTF8Encoding(false);
+        }
+    }
+
+    private static async Task<(string Text, bool Truncated)> ReadBoundedStreamAsync(StreamReader reader, int maxBytes)
+    {
+        var buffer = new char[4096];
+        var sb = new StringBuilder();
+        int bytesAccumulated = 0;
+        bool truncated = false;
+
+        try
+        {
+            while (true)
+            {
+                var read = await reader.ReadAsync(buffer, 0, buffer.Length);
+                if (read <= 0) break;
+
+                if (!truncated)
+                {
+                    var charBytes = Encoding.UTF8.GetByteCount(buffer, 0, read);
+                    if (bytesAccumulated + charBytes <= maxBytes)
+                    {
+                        sb.Append(buffer, 0, read);
+                        bytesAccumulated += charBytes;
+                    }
+                    else
+                    {
+                        truncated = true;
+                        var remaining = Math.Max(0, maxBytes - bytesAccumulated);
+                        if (remaining > 0)
+                        {
+                            var takeChars = Math.Min(read, remaining);
+                            sb.Append(buffer, 0, takeChars);
+                        }
+                        sb.Append("\n…[输出已截断]…");
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // 忽略进程中断/强杀导致的读取管道异常
+        }
+
+        return (sb.ToString(), truncated);
+    }
+
+    private static async Task<(string Text, bool Truncated)> SafeAwaitStreamAsync(Task<(string Text, bool Truncated)> task)
+    {
+        try
+        {
+            return await task;
+        }
+        catch
+        {
+            return (string.Empty, false);
         }
     }
 

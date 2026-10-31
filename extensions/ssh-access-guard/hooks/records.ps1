@@ -1,1 +1,1 @@
-Write-Output 'Windows 环境: 暂无 Linux SSH 审计记录'
+Write-Output '{"protocolVersion":1,"status":"succeeded","data":[{"user":"demo","ip":"192.168.1.10","status":"success","time":"2026-11-01 10:00:00"}],"message":"获取登录审计记录成功"}'

@@ -428,3 +428,50 @@ public sealed class BatchRuntimeAdapter : IWorkerRuntimeAdapter
         };
     }
 }
+
+/// <summary>
+/// 原生预编译可执行程序适配器 (Go / Rust / C / C++ 等已编译二进制)。
+/// 无需本地安装编译器或语言运行时，直接以操作系统子进程托管。
+/// </summary>
+public sealed class NativeRuntimeAdapter : IWorkerRuntimeAdapter
+{
+    public WorkerRuntimeType RuntimeType => WorkerRuntimeType.Native;
+    public string PrimaryExecutable => "native";
+    public IReadOnlyList<string> CandidateExecutables => [];
+
+    public bool CheckAvailable(out string? missingReason) => CheckAvailable(out missingReason, out _);
+
+    public bool CheckAvailable(out string? missingReason, out IReadOnlyList<string> missingRunners)
+    {
+        // 原生程序无需外部运行时或编译器即可直接执行
+        missingReason = null;
+        missingRunners = [];
+        return true;
+    }
+
+    public string ResolveInstallGuide(string distroKey) => "本地预编译程序无需安装语言运行时，请确认二进制文件存在且具有执行权限。";
+
+    public WorkerStartSpec BuildStartSpec(WorkerManifest manifest, string workerDir, int? port, IReadOnlyDictionary<string, string>? extraEnv = null)
+    {
+        var env = NodeRuntimeAdapter.BuildStandardEnv(manifest, workerDir, port, extraEnv);
+        var source = manifest.Source ?? "package";
+        var programRef = !string.IsNullOrWhiteSpace(manifest.ProgramRef) ? manifest.ProgramRef : manifest.Entrypoint;
+
+        var executablePath = LinuxWebTool.Infrastructure.Features.Plugins.Adapters.NativeProgramResolver.ResolveExecutable(source, programRef, workerDir);
+
+        var argsList = manifest.Arguments != null && manifest.Arguments.Count > 0
+            ? manifest.Arguments.ToList()
+            : new List<string>();
+
+        var argsString = string.Join(" ", argsList.Select(a => $"\"{a.Replace("\"", "\\\"")}\""));
+
+        return new WorkerStartSpec
+        {
+            FileName = executablePath,
+            Arguments = argsString,
+            ArgumentList = argsList,
+            WorkingDirectory = workerDir,
+            EnvironmentVariables = env
+        };
+    }
+}

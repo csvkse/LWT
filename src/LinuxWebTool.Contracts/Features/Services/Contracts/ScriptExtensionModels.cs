@@ -51,6 +51,26 @@ public sealed record ExtensionCustomAction
     public bool RequireParam { get; init; }
     public string? ParamName { get; init; }
     public string? ParamPlaceholder { get; init; }
+
+    /// <summary>
+    /// 执行器模式："hook" (默认，执行脚本并交互标准输入/输出 JSON) | "command" (直接执行原生命令行) | "http-control" (调用 HTTP 管理端点)。
+    /// </summary>
+    public string Executor { get; init; } = "hook";
+
+    /// <summary>
+    /// 当 Executor 为 command 时的命令参数与执行定义。
+    /// </summary>
+    public LinuxWebTool.Contracts.Features.Plugins.Contracts.NativeCommandDefinition? Command { get; init; }
+
+    /// <summary>
+    /// 允许的成功退出码（默认 [0]）。
+    /// </summary>
+    public IReadOnlyList<int>? AcceptedExitCodes { get; init; }
+
+    /// <summary>
+    /// 动作超时时间（秒，默认 30，最大 86400）。
+    /// </summary>
+    public int? TimeoutSeconds { get; init; }
 }
 
 /// <summary>
@@ -58,6 +78,8 @@ public sealed record ExtensionCustomAction
 /// </summary>
 public sealed record ExtensionManifest
 {
+    public int ManifestVersion { get; init; } = 1;
+    public string HostApiVersion { get; init; } = "1";
     public required string Id { get; init; }
     public required string Name { get; init; }
     public string Category { get; init; } = "custom";

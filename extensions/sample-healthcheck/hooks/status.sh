@@ -1,2 +1,2 @@
-#!/bin/bash
-echo '{"status":"Running","message":"Active & healthy","pid":9999}'
+#!/bin/sh
+echo '{"protocolVersion":1,"status":"succeeded","data":{"status":"Running","message":"Active & healthy","pid":9999},"message":"Active & healthy"}'

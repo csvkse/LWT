@@ -1,0 +1,36 @@
+{
+  "draftRevision": 1,
+  "desiredRevision": 1,
+  "activeRevision": 0,
+  "tunnel": {
+    "tunnelId": "tunnel_0123456789abcdef0123456789abcdef",
+    "encryptedKey": "",
+    "controlPlaneBaseUrl": "https://api.openai.com"
+  },
+  "servers": {
+    "local-python": {
+      "id": "local-python",
+      "name": "Local Python Tools",
+      "transport": "stdio",
+      "command": "python",
+      "args": ["-m", "my_mcp_server"],
+      "enabled": true,
+      "revision": 1
+    },
+    "nas-service": {
+      "id": "nas-service",
+      "name": "NAS Internal MCP",
+      "transport": "streamable-http",
+      "url": "http://127.0.0.1:8080/mcp",
+      "enabled": true,
+      "revision": 1
+    }
+  },
+  "selections": {
+    "local-python": {
+      "serverId": "local-python",
+      "selectedTools": ["query_status"],
+      "reviewFingerprint": ""
+    }
+  }
+}

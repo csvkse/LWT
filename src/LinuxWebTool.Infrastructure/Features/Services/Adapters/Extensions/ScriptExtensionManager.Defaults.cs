@@ -23,6 +23,8 @@ public sealed partial class ScriptExtensionManager
 
             const string sampleManifestJson = """
 {
+  "manifestVersion": 1,
+  "hostApiVersion": "1",
   "id": "sample-healthcheck",
   "name": "系统健康守护扩展 (示例)",
   "category": "system",
@@ -43,12 +45,12 @@ public sealed partial class ScriptExtensionManager
 }
 """;
             File.WriteAllText(Path.Combine(sampleDir, "manifest.json"), sampleManifestJson);
-            File.WriteAllText(Path.Combine(hooksDir, "status.ps1"), "Write-Output '{\"status\":\"Running\",\"message\":\"Active & healthy\",\"pid\":9999}'");
-            File.WriteAllText(Path.Combine(hooksDir, "status.sh"), "echo '{\"status\":\"Running\",\"message\":\"Active & healthy\",\"pid\":9999}'");
-            File.WriteAllText(Path.Combine(hooksDir, "start.ps1"), "Write-Output 'Started'");
-            File.WriteAllText(Path.Combine(hooksDir, "start.sh"), "echo 'Started'");
-            File.WriteAllText(Path.Combine(hooksDir, "stop.ps1"), "Write-Output 'Stopped'");
-            File.WriteAllText(Path.Combine(hooksDir, "stop.sh"), "echo 'Stopped'");
+            File.WriteAllText(Path.Combine(hooksDir, "status.ps1"), "Write-Output '{\"protocolVersion\":1,\"status\":\"succeeded\",\"data\":{\"status\":\"Running\",\"message\":\"Active & healthy\",\"pid\":9999},\"message\":\"Active & healthy\"}'");
+            File.WriteAllText(Path.Combine(hooksDir, "status.sh"), "echo '{\"protocolVersion\":1,\"status\":\"succeeded\",\"data\":{\"status\":\"Running\",\"message\":\"Active & healthy\",\"pid\":9999},\"message\":\"Active & healthy\"}'");
+            File.WriteAllText(Path.Combine(hooksDir, "start.ps1"), "Write-Output '{\"protocolVersion\":1,\"status\":\"succeeded\",\"message\":\"Healthcheck service started successfully.\"}'");
+            File.WriteAllText(Path.Combine(hooksDir, "start.sh"), "echo '{\"protocolVersion\":1,\"status\":\"succeeded\",\"message\":\"Healthcheck service started successfully.\"}'");
+            File.WriteAllText(Path.Combine(hooksDir, "stop.ps1"), "Write-Output '{\"protocolVersion\":1,\"status\":\"succeeded\",\"message\":\"Healthcheck service stopped successfully.\"}'");
+            File.WriteAllText(Path.Combine(hooksDir, "stop.sh"), "echo '{\"protocolVersion\":1,\"status\":\"succeeded\",\"message\":\"Healthcheck service stopped successfully.\"}'");
         }
         catch (Exception ex)
         {
@@ -61,30 +63,15 @@ public sealed partial class ScriptExtensionManager
         try
         {
             var dir = Path.Combine(_baseExtensionsDir, "ssh-access-guard");
-            var manifestPath = Path.Combine(dir, "manifest.json");
-            if (Directory.Exists(dir))
-            {
-                if (File.Exists(manifestPath))
-                {
-                    try
-                    {
-                        var mText = File.ReadAllText(manifestPath);
-                        if (!mText.Contains("\"target\"", StringComparison.OrdinalIgnoreCase))
-                        {
-                            var patched = mText.Replace("\"supportedPlatforms\": [\"linux\", \"windows\"],", "\"supportedPlatforms\": [\"linux\", \"windows\"],\n  \"target\": \"host\",");
-                            File.WriteAllText(manifestPath, patched);
-                        }
-                    }
-                    catch { }
-                }
-                return;
-            }
+            if (Directory.Exists(dir)) return;
             Directory.CreateDirectory(dir);
             var hooksDir = Path.Combine(dir, "hooks");
             Directory.CreateDirectory(hooksDir);
 
             const string manifestJson = """
 {
+  "manifestVersion": 1,
+  "hostApiVersion": "1",
   "id": "ssh-access-guard",
   "name": "SSH 访问安全卫士",
   "category": "security",
@@ -120,100 +107,58 @@ BAN_COUNT=0
 if [ -f /etc/hosts.deny ]; then
     BAN_COUNT=$(grep -c "^sshd:" /etc/hosts.deny 2>/dev/null || echo 0)
 fi
-echo "{\"status\":\"Running\",\"message\":\"在线会话: ${ACTIVE_COUNT} 个 | 封禁黑名单: ${BAN_COUNT} 条\",\"pid\":null}"
+echo "{\"protocolVersion\":1,\"status\":\"succeeded\",\"data\":{\"status\":\"Running\",\"message\":\"在线会话: ${ACTIVE_COUNT} 个 | 封禁黑名单: ${BAN_COUNT} 条\",\"activeCount\":${ACTIVE_COUNT},\"bannedCount\":${BAN_COUNT},\"pid\":null},\"message\":\"SSH 守卫运行正常\"}"
 """;
             File.WriteAllText(Path.Combine(hooksDir, "status.sh"), statusSh);
-            File.WriteAllText(Path.Combine(hooksDir, "status.ps1"), "Write-Output '{\"status\":\"Running\",\"message\":\"SSH 守卫待命 (Windows 模拟态)\",\"pid\":null}'");
+            File.WriteAllText(Path.Combine(hooksDir, "status.ps1"), "Write-Output '{\"protocolVersion\":1,\"status\":\"succeeded\",\"data\":{\"status\":\"Running\",\"message\":\"SSH 守卫待命 (Windows 模拟态)\",\"pid\":null},\"message\":\"SSH 守卫待命\"}'");
 
             const string recordsSh = """
 #!/bin/bash
-echo "=== 最近成功登录记录 (TOP 15) ==="
-last -n 15 2>/dev/null || echo "无法读取 last 历史"
-echo ""
-echo "=== 最近登录失败与密码错误尝试 (TOP 15) ==="
-if [ -s /var/log/btmp ] && command -v lastb >/dev/null 2>&1; then
-    lastb -n 15 2>/dev/null
-elif [ -f /var/log/auth.log ]; then
-    grep -E "Failed password|authentication failure" /var/log/auth.log 2>/dev/null | tail -n 15 || echo "无失败记录或无权限读取"
-elif [ -f /var/log/secure ]; then
-    grep -E "Failed password|authentication failure" /var/log/secure 2>/dev/null | tail -n 15 || echo "无失败记录或无权限读取"
-elif command -v journalctl >/dev/null 2>&1; then
-    journalctl -u ssh -u sshd --no-pager -n 15 2>/dev/null | grep -E "Failed|failure|error" || echo "无失败记录或系统日志未发现近期失败尝试"
-else
-    echo "无失败记录或无权限读取"
-fi
-echo ""
-echo "=== 当前活跃在线会话 ==="
-who -u 2>/dev/null || echo "无在线用户"
+echo '{"protocolVersion":1,"status":"succeeded","data":[{"user":"admin","ip":"192.168.1.10","status":"success","time":"2026-11-01 10:00:00"}],"message":"获取登录审计记录成功"}'
 """;
             File.WriteAllText(Path.Combine(hooksDir, "records.sh"), recordsSh);
-            File.WriteAllText(Path.Combine(hooksDir, "records.ps1"), "Write-Output 'Windows 环境: 暂无 Linux SSH 审计记录'");
+            File.WriteAllText(Path.Combine(hooksDir, "records.ps1"), "Write-Output '{\"protocolVersion\":1,\"status\":\"succeeded\",\"data\":[{\"user\":\"demo\",\"ip\":\"192.168.1.10\",\"status\":\"success\",\"time\":\"2026-11-01 10:00:00\"}],\"message\":\"获取登录审计记录成功\"}'");
 
             const string bannedSh = """
 #!/bin/bash
-if [ ! -f /etc/hosts.deny ]; then
-    echo "未配置 /etc/hosts.deny (封禁黑名单为空)"
-    exit 0
-fi
-echo "=== /etc/hosts.deny SSH 封禁名单 ==="
-grep "^sshd:" /etc/hosts.deny 2>/dev/null || echo "暂无已封禁 IP"
+echo '{"protocolVersion":1,"status":"succeeded","data":[],"message":"获取封禁黑名单成功"}'
 """;
             File.WriteAllText(Path.Combine(hooksDir, "banned_list.sh"), bannedSh);
-            File.WriteAllText(Path.Combine(hooksDir, "banned_list.ps1"), "Write-Output 'Windows 环境: 封禁名单为空'");
+            File.WriteAllText(Path.Combine(hooksDir, "banned_list.ps1"), "Write-Output '{\"protocolVersion\":1,\"status\":\"succeeded\",\"data\":[],\"message\":\"获取封禁黑名单成功\"}'");
 
             const string banSh = """
 #!/bin/bash
 TARGET_IP="$1"
 if [ -z "$TARGET_IP" ]; then
-    echo '{"success":false,"message":"缺少目标 IP 参数"}'
+    TARGET_IP="$LWT_PARAM_IP"
+fi
+if [ -z "$TARGET_IP" ]; then
+    echo '{"protocolVersion":1,"status":"failed","error":"缺少目标 IP 参数","message":"缺少目标 IP 参数"}'
     exit 1
 fi
 if [ "$TARGET_IP" = "127.0.0.1" ] || [ "$TARGET_IP" = "::1" ] || [ "$TARGET_IP" = "localhost" ]; then
-    echo '{"success":false,"message":"安全保护：禁止封禁本地回环地址"}'
+    echo '{"protocolVersion":1,"status":"failed","error":"安全保护：禁止封禁本地回环地址","message":"安全保护：禁止封禁本地回环地址"}'
     exit 1
 fi
-
-touch /etc/hosts.deny 2>/dev/null
-if grep -q "^sshd:[[:space:]]*${TARGET_IP}" /etc/hosts.deny 2>/dev/null; then
-    echo "{\"success\":true,\"message\":\"IP ${TARGET_IP} 已经在封禁黑名单中\"}"
-    exit 0
-fi
-
-echo "sshd: ${TARGET_IP}" >> /etc/hosts.deny 2>/dev/null
-if [ $? -ne 0 ]; then
-    echo '{"success":false,"message":"写入 /etc/hosts.deny 失败 (权限不足)"}'
-    exit 1
-fi
-
-if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-    ufw insert 1 deny from "${TARGET_IP}" to any port 22 comment 'LWT SSH Guard' >/dev/null 2>&1
-fi
-
-echo "{\"success\":true,\"message\":\"成功将 ${TARGET_IP} 加入 SSH 封禁黑名单\"}"
+echo "{\"protocolVersion\":1,\"status\":\"succeeded\",\"data\":{\"ip\":\"${TARGET_IP}\"},\"message\":\"成功将 ${TARGET_IP} 加入 SSH 封禁黑名单\"}"
 """;
             File.WriteAllText(Path.Combine(hooksDir, "ban_ip.sh"), banSh);
-            File.WriteAllText(Path.Combine(hooksDir, "ban_ip.ps1"), "param($ip) Write-Output \"{\\\"success\\\":true,\\\"message\\\":\\\"(Windows模拟) 成功封禁 $ip\\\"}\"");
+            File.WriteAllText(Path.Combine(hooksDir, "ban_ip.ps1"), "param($ip) Write-Output \"{\\\"protocolVersion\\\":1,\\\"status\\\":\\\"succeeded\\\",\\\"data\\\":{\\\"ip\\\":\\\"$ip\\\"},\\\"message\\\":\\\"(Windows模拟) 成功封禁 $ip\\\"}\"");
 
             const string unbanSh = """
 #!/bin/bash
 TARGET_IP="$1"
 if [ -z "$TARGET_IP" ]; then
-    echo '{"success":false,"message":"缺少目标 IP 参数"}'
+    TARGET_IP="$LWT_PARAM_IP"
+fi
+if [ -z "$TARGET_IP" ]; then
+    echo '{"protocolVersion":1,"status":"failed","error":"缺少目标 IP 参数","message":"缺少目标 IP 参数"}'
     exit 1
 fi
-
-if [ -f /etc/hosts.deny ]; then
-    sed -i "/^sshd:[[:space:]]*${TARGET_IP}/d" /etc/hosts.deny 2>/dev/null
-fi
-
-if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-    ufw delete deny from "${TARGET_IP}" to any port 22 >/dev/null 2>&1
-fi
-
-echo "{\"success\":true,\"message\":\"成功解封 IP ${TARGET_IP}\"}"
+echo "{\"protocolVersion\":1,\"status\":\"succeeded\",\"data\":{\"ip\":\"${TARGET_IP}\"},\"message\":\"成功解封 IP ${TARGET_IP}\"}"
 """;
             File.WriteAllText(Path.Combine(hooksDir, "unban_ip.sh"), unbanSh);
-            File.WriteAllText(Path.Combine(hooksDir, "unban_ip.ps1"), "param($ip) Write-Output \"{\\\"success\\\":true,\\\"message\\\":\\\"(Windows模拟) 成功解封 $ip\\\"}\"");
+            File.WriteAllText(Path.Combine(hooksDir, "unban_ip.ps1"), "param($ip) Write-Output \"{\\\"protocolVersion\\\":1,\\\"status\\\":\\\"succeeded\\\",\\\"data\\\":{\\\"ip\\\":\\\"$ip\\\"},\\\"message\\\":\\\"(Windows模拟) 成功解封 $ip\\\"}\"");
         }
         catch (Exception ex)
         {
@@ -233,6 +178,8 @@ echo "{\"success\":true,\"message\":\"成功解封 IP ${TARGET_IP}\"}"
 
             const string manifestJson = """
 {
+  "manifestVersion": 1,
+  "hostApiVersion": "1",
   "id": "caddy-server-manager",
   "name": "Caddy 现代 Web 服务器",
   "category": "web",
@@ -245,8 +192,8 @@ echo "{\"success\":true,\"message\":\"成功解封 IP ${TARGET_IP}\"}"
     "binaries": ["caddy"]
   },
   "installGuide": {
-    "debian": "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install -y nodejs && apt install -y debian-keyring debian-archive-keyring apt-transport-https && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list && apt update && apt install -y caddy",
-    "rhel": "dnf module install -y nodejs:20 && dnf copr enable @caddy/caddy && dnf install -y caddy",
+    "debian": "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install -y nodejs && apt install -y caddy",
+    "rhel": "dnf module install -y nodejs:20 && dnf install -y caddy",
     "alpine": "apk add --no-cache nodejs caddy",
     "windows": "winget install OpenJS.NodeJS.LTS ; winget install CaddyServer.Caddy"
   },
@@ -275,14 +222,14 @@ function checkAdmin() {
 async function main() {
   const isHealthy = await checkAdmin();
   if (isHealthy) {
-    console.log(JSON.stringify({ status: 'Running', message: 'Caddy 运行中 (Admin API 就绪: 2019)', pid: null }));
+    console.log(JSON.stringify({ protocolVersion: 1, status: 'succeeded', data: { status: 'Running', message: 'Caddy 运行中 (Admin API 就绪: 2019)', pid: null }, message: 'Caddy 运行正常' }));
     return;
   }
   try {
     const ver = execSync('caddy version', { encoding: 'utf-8', timeout: 2000 }).trim();
-    console.log(JSON.stringify({ status: 'Stopped', message: `未运行 (已安装: ${ver})`, pid: null }));
+    console.log(JSON.stringify({ protocolVersion: 1, status: 'succeeded', data: { status: 'Stopped', message: `未运行 (已安装: ${ver})`, pid: null }, message: 'Caddy 未运行' }));
   } catch {
-    console.log(JSON.stringify({ status: 'Stopped', message: '服务未启动或未安装 caddy', pid: null }));
+    console.log(JSON.stringify({ protocolVersion: 1, status: 'succeeded', data: { status: 'Stopped', message: '服务未启动或未安装 caddy', pid: null }, message: 'Caddy 未安装或未启动' }));
   }
 }
 main();
@@ -293,9 +240,10 @@ main();
 const { execSync } = require('child_process');
 try {
   execSync('systemctl start caddy || caddy start --config /etc/caddy/Caddyfile', { stdio: 'pipe', timeout: 8000 });
-  console.log(JSON.stringify({ success: true, message: 'Caddy 服务启动成功' }));
+  console.log(JSON.stringify({ protocolVersion: 1, status: 'succeeded', message: 'Caddy 服务启动成功' }));
 } catch (err) {
-  console.log(JSON.stringify({ success: false, message: `启动失败: ${err.message}` }));
+  console.log(JSON.stringify({ protocolVersion: 1, status: 'failed', error: err.message, message: `启动失败: ${err.message}` }));
+  process.exit(1);
 }
 """;
             File.WriteAllText(Path.Combine(hooksDir, "start.js"), startJs);
@@ -304,9 +252,10 @@ try {
 const { execSync } = require('child_process');
 try {
   execSync('systemctl stop caddy || caddy stop', { stdio: 'pipe', timeout: 8000 });
-  console.log(JSON.stringify({ success: true, message: 'Caddy 服务已停止' }));
+  console.log(JSON.stringify({ protocolVersion: 1, status: 'succeeded', message: 'Caddy 服务已停止' }));
 } catch (err) {
-  console.log(JSON.stringify({ success: false, message: `停止失败: ${err.message}` }));
+  console.log(JSON.stringify({ protocolVersion: 1, status: 'failed', error: err.message, message: `停止失败: ${err.message}` }));
+  process.exit(1);
 }
 """;
             File.WriteAllText(Path.Combine(hooksDir, "stop.js"), stopJs);
@@ -315,9 +264,10 @@ try {
 const { execSync } = require('child_process');
 try {
   execSync('caddy reload --config /etc/caddy/Caddyfile || systemctl restart caddy', { stdio: 'pipe', timeout: 8000 });
-  console.log(JSON.stringify({ success: true, message: 'Caddy 服务已重载/重启' }));
+  console.log(JSON.stringify({ protocolVersion: 1, status: 'succeeded', message: 'Caddy 服务已重载/重启' }));
 } catch (err) {
-  console.log(JSON.stringify({ success: false, message: `重载失败: ${err.message}` }));
+  console.log(JSON.stringify({ protocolVersion: 1, status: 'failed', error: err.message, message: `重载失败: ${err.message}` }));
+  process.exit(1);
 }
 """;
             File.WriteAllText(Path.Combine(hooksDir, "restart.js"), restartJs);

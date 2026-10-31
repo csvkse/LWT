@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Security;
 using System.Text.Json;
 using LinuxWebTool.Contracts.Features.Workers.Contracts;
+using LinuxWebTool.Contracts.Shared.Support;
 using Microsoft.Extensions.Logging;
 
 namespace LinuxWebTool.Infrastructure.Features.Workers;
@@ -17,6 +18,9 @@ public sealed partial class WorkersManager
         {
             using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Read, leaveOpen: false))
             {
+                // 统一安全校验：防 Zip Slip、展开炸弹、超限文件数与过长路径
+                PluginSecurityGuard.ValidateZipArchive(archive);
+
                 foreach (var entry in archive.Entries)
                 {
                     if (string.IsNullOrEmpty(entry.Name) && entry.FullName.EndsWith('/'))
@@ -53,11 +57,55 @@ public sealed partial class WorkersManager
             var manifest = JsonSerializer.Deserialize(json, WorkerJsonContext.Default.WorkerManifest)
                 ?? throw new InvalidOperationException("导入失败：worker.json 内容格式错误。");
 
-            var targetDir = Path.Combine(_workersRoot, manifest.Id);
+            if (!PluginSecurityGuard.IsValidPluginId(manifest.Id))
+            {
+                throw new SecurityException($"导入失败：Worker 清单中的 ID '{manifest.Id}' 不合法。");
+            }
+
+            var targetDir = PluginSecurityGuard.EnsureSafePluginDirectory(_workersRoot, manifest.Id);
+
+            // 保护用户专属数据：data.db, kv.db, .disabled 标记
+            string? backupDataDb = null;
+            string? backupKvDb = null;
+            bool wasDisabled = false;
+
+            if (Directory.Exists(targetDir))
+            {
+                var srcDataDb = Path.Combine(targetDir, "data.db");
+                if (File.Exists(srcDataDb))
+                {
+                    backupDataDb = Path.Combine(tempExtractDir, "__preserve_data.db");
+                    File.Copy(srcDataDb, backupDataDb, overwrite: true);
+                }
+
+                var srcKvDb = Path.Combine(targetDir, "kv.db");
+                if (File.Exists(srcKvDb))
+                {
+                    backupKvDb = Path.Combine(tempExtractDir, "__preserve_kv.db");
+                    File.Copy(srcKvDb, backupKvDb, overwrite: true);
+                }
+
+                wasDisabled = File.Exists(Path.Combine(targetDir, ".disabled"));
+            }
+
             Directory.CreateDirectory(targetDir);
 
             // 拷贝全部文件至目标目录
             CopyDirectory(sourceDir, targetDir, overwrite: true);
+
+            // 还原受保护数据
+            if (backupDataDb != null && File.Exists(backupDataDb))
+            {
+                File.Copy(backupDataDb, Path.Combine(targetDir, "data.db"), overwrite: true);
+            }
+            if (backupKvDb != null && File.Exists(backupKvDb))
+            {
+                File.Copy(backupKvDb, Path.Combine(targetDir, "kv.db"), overwrite: true);
+            }
+            if (wasDisabled)
+            {
+                await File.WriteAllTextAsync(Path.Combine(targetDir, ".disabled"), "disabled", ct);
+            }
 
             var sourceMeta = new WorkerSourceMetadata
             {

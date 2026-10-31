@@ -11,6 +11,7 @@ public sealed record WorkerCreateOrUpdateRequest
     public WorkerServiceMode Mode { get; init; } = WorkerServiceMode.Service;
     public WorkerRuntimeType Runtime { get; init; } = WorkerRuntimeType.Python;
     public string Entrypoint { get; init; } = "worker.py";
+    public IReadOnlyList<string>? Arguments { get; init; }
     public string? ScriptContent { get; init; }
     public bool AutoRestart { get; init; } = true;
     public bool EnableSqlite { get; init; } = true;

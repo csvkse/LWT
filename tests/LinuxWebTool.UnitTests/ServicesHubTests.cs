@@ -191,6 +191,8 @@ public sealed class ServicesHubTests
 
             File.WriteAllText(Path.Combine(modADir, "manifest.json"), """
 {
+  "manifestVersion": 1,
+  "hostApiVersion": "1",
   "id": "mod-a",
   "name": "模块 A (测试插件)",
   "version": "1.0.0",
@@ -199,6 +201,8 @@ public sealed class ServicesHubTests
 """);
             File.WriteAllText(Path.Combine(modBDir, "manifest.json"), """
 {
+  "manifestVersion": 1,
+  "hostApiVersion": "1",
   "id": "mod-b",
   "name": "模块 B (测试插件)",
   "version": "2.0.0",

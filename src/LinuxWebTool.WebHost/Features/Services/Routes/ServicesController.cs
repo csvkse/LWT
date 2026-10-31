@@ -15,7 +15,8 @@ public class ServicesController(
     ISystemdServiceAdapter systemdAdapter,
     IDockerEngineAdapter dockerAdapter,
     ISystemServiceConfigAdapter configAdapter,
-    IScriptExtensionManager extensionManager) : MinimalApi.ControllerBase
+    IScriptExtensionManager extensionManager,
+    LinuxWebTool.Contracts.Features.Plugins.Contracts.IPluginOperationCoordinator? pluginCoordinator = null) : MinimalApi.ControllerBase
 {
     [HttpGet("Environment")]
     public async Task<IResult> GetEnvironment(CancellationToken cancellationToken)
@@ -176,6 +177,27 @@ public class ServicesController(
             if (!string.IsNullOrEmpty(clientIp) && (clientIp.Equals(banIp.Trim(), StringComparison.OrdinalIgnoreCase) || clientIp.Contains(banIp.Trim())))
             {
                 return BadRequest(new ServiceActionResult { Success = false, Message = $"安全拦截：不能封禁当前客户端正在连接的 IP ({clientIp})" });
+            }
+        }
+
+        if (pluginCoordinator != null)
+        {
+            var exts = await extensionManager.ListExtensionsAsync(cancellationToken);
+            var targetExt = exts.FirstOrDefault(e => e.Manifest.Id.Equals(request.ExtensionId, StringComparison.OrdinalIgnoreCase));
+            var customAct = targetExt?.Manifest.CustomActions.FirstOrDefault(a => a.Action.Equals(request.Action, StringComparison.OrdinalIgnoreCase));
+            if (customAct?.Executor.Equals("command", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                var caller = User.Identity?.Name ?? "web";
+                var inputJson = System.Text.Json.JsonSerializer.SerializeToElement(request.ActionParams ?? new Dictionary<string, string>(), Composition.AppJsonSerializerContext.Default.DictionaryStringString);
+                var accepted = await pluginCoordinator.SubmitAsync(new LinuxWebTool.Contracts.Features.Plugins.Contracts.CommandInvocation
+                {
+                    Caller = caller,
+                    PluginIdentity = request.ExtensionId,
+                    Action = request.Action,
+                    Input = inputJson
+                }, cancellationToken);
+
+                return Accepted(accepted);
             }
         }
 

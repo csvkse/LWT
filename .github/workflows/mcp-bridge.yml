@@ -1,0 +1,34 @@
+name: MCP Bridge CI
+
+on:
+  push:
+    paths:
+      - 'workers/mcp-bridge/**'
+      - 'scripts/package-mcp-bridge.ps1'
+      - 'scripts/verify-mcp-bridge.ps1'
+      - '.github/workflows/mcp-bridge.yml'
+  pull_request:
+    paths:
+      - 'workers/mcp-bridge/**'
+
+jobs:
+  test-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: workers/mcp-bridge/go.sum
+
+      - name: Run Go tests
+        working-directory: workers/mcp-bridge
+        run: |
+          go test -v -race ./... -count=1
+
+      - name: Build and package
+        shell: pwsh
+        run: |
+          ./scripts/package-mcp-bridge.ps1

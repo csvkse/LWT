@@ -1,4 +1,6 @@
 {
+  "manifestVersion": 1,
+  "hostApiVersion": "1",
   "id": "caddy-server-manager",
   "name": "Caddy 现代 Web 服务器",
   "category": "web",

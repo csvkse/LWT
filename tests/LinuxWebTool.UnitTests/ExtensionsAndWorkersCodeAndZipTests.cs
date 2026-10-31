@@ -102,6 +102,8 @@ public sealed class ExtensionsAndWorkersCodeAndZipTests : IDisposable
             {
                 writer.Write("""
                 {
+                    "manifestVersion": 1,
+                    "hostApiVersion": "1",
                     "id": "zip-imported-service",
                     "name": "Zip 导入服务",
                     "version": "1.0.2",

@@ -19,6 +19,8 @@ namespace LinuxWebTool.Infrastructure.Features.Workers;
 [JsonSerializable(typeof(WorkerCodeSaveRequest))]
 [JsonSerializable(typeof(WorkerDebugRunRequest))]
 [JsonSerializable(typeof(WorkerDebugRunResultDto))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Plugins.Contracts.ResidentControlSpec))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Plugins.Contracts.NativeProgramSpec))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 internal partial class WorkerJsonContext : JsonSerializerContext
 {

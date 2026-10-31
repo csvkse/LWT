@@ -11,6 +11,9 @@ public sealed class WorkerStateMachine
 
     public string WorkerId { get; }
     public WorkerState State { get; private set; } = WorkerState.Stopped;
+    public string Readiness { get; private set; } = "Unsupported";
+    public long CurrentRunId { get; private set; }
+    public bool IsStopRequested { get; private set; }
     public int FastCrashCount { get; private set; }
     public DateTime? StartedAt { get; private set; }
     public string? LastError { get; private set; }
@@ -27,40 +30,47 @@ public sealed class WorkerStateMachine
     }
 
     /// <summary>
-    /// 触发状态进入 Starting。
+    /// 触发状态进入 Starting。关联当前运行代次 runId。
     /// </summary>
-    public void NotifyStarting()
+    public void NotifyStarting(long runId = 0)
     {
         lock (_lock)
         {
+            CurrentRunId = runId;
+            IsStopRequested = false;
             State = WorkerState.Starting;
+            Readiness = "Starting";
             StartedAt = DateTime.UtcNow;
             LastError = null;
         }
     }
 
     /// <summary>
-    /// 存活超过阈值判定为健康 Running。
+    /// 存活或就绪探测通过，判定为 Running。
     /// </summary>
-    public void NotifyRunning()
+    public void NotifyRunning(long runId = 0, string readiness = "Unsupported")
     {
         lock (_lock)
         {
+            if (runId != 0 && runId != CurrentRunId) return;
             if (State == WorkerState.Starting)
             {
                 State = WorkerState.Running;
+                Readiness = readiness;
             }
         }
     }
 
     /// <summary>
-    /// 用户手动停止或删除。
+    /// 用户手动停止或显式意图停止。
     /// </summary>
     public void NotifyStopped()
     {
         lock (_lock)
         {
+            IsStopRequested = true;
             State = WorkerState.Stopped;
+            Readiness = "Stopped";
             StartedAt = null;
             FastCrashCount = 0;
             LastError = null;
@@ -75,6 +85,7 @@ public sealed class WorkerStateMachine
         lock (_lock)
         {
             State = WorkerState.MissingRuntime;
+            Readiness = "MissingRuntime";
             StartedAt = null;
             LastError = missingReason;
         }
@@ -82,11 +93,22 @@ public sealed class WorkerStateMachine
 
     /// <summary>
     /// 进程异常退出时调用，返回是否应自动重启以及下一次重试前的等待延迟。
+    /// 若非当前 runId 或已存在人工停止意图，拒绝触发自动拉起。
     /// </summary>
-    public (bool ShouldRestart, TimeSpan Delay, WorkerState NextState) RecordExit(int exitCode, string? errorReason = null)
+    public (bool ShouldRestart, TimeSpan Delay, WorkerState NextState) RecordExit(int exitCode, long runId = 0, string? errorReason = null)
     {
         lock (_lock)
         {
+            if (runId != 0 && runId != CurrentRunId)
+            {
+                return (false, TimeSpan.Zero, State);
+            }
+
+            if (IsStopRequested || State == WorkerState.Stopped)
+            {
+                return (false, TimeSpan.Zero, WorkerState.Stopped);
+            }
+
             if (State == WorkerState.MissingRuntime)
             {
                 return (false, TimeSpan.Zero, WorkerState.MissingRuntime);
@@ -112,6 +134,7 @@ public sealed class WorkerStateMachine
             if (FastCrashCount >= _maxCrashRetries)
             {
                 State = WorkerState.Degraded;
+                Readiness = "Degraded";
                 LastError = $"触发 CrashLoop 熔断保护：在 {_flappingThresholdSec} 秒内连续崩溃 {FastCrashCount} 次，已停止无限重启。最后错误: {LastError}";
                 return (false, TimeSpan.Zero, WorkerState.Degraded);
             }
@@ -122,9 +145,13 @@ public sealed class WorkerStateMachine
             var delay = TimeSpan.FromSeconds(delaySec);
 
             State = WorkerState.Backoff;
+            Readiness = "Backoff";
             return (true, delay, WorkerState.Backoff);
         }
     }
+
+    public (bool ShouldRestart, TimeSpan Delay, WorkerState NextState) RecordExit(int exitCode, string? errorReason) =>
+        RecordExit(exitCode, 0, errorReason);
 
     /// <summary>
     /// 重置熔断与计数器。

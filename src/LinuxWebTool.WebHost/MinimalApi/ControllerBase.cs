@@ -13,6 +13,7 @@ public abstract class ControllerBase
     public ClaimsPrincipal User => HttpContext.User;
     protected IResult Ok() => Results.Ok();
     protected IResult Ok(object? value) => Results.Ok(value);
+    protected IResult Accepted(object? value = null) => Results.Accepted(value: value);
     protected IResult BadRequest() => Results.BadRequest();
     protected IResult BadRequest(object? error) => Results.BadRequest(error);
     protected IResult NotFound() => Results.NotFound();

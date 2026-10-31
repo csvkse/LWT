@@ -1,7 +1,9 @@
 #!/bin/bash
-if [ ! -f /etc/hosts.deny ]; then
-    echo "未配置 /etc/hosts.deny (封禁黑名单为空)"
-    exit 0
+LIST="[]"
+if [ -f /etc/hosts.deny ]; then
+    IPS=$(grep "^sshd:" /etc/hosts.deny 2>/dev/null | awk '{print $2}' | tr '\n' ' ')
+    if [ -n "$IPS" ]; then
+        LIST=$(echo "$IPS" | awk '{printf "["; for(i=1;i<=NF;i++) printf "\"%s\"%s", $i, (i==NF?"":","); printf "]" }')
+    fi
 fi
-echo "=== /etc/hosts.deny SSH 封禁名单 ==="
-grep "^sshd:" /etc/hosts.deny 2>/dev/null || echo "暂无已封禁 IP"
+echo "{\"protocolVersion\":1,\"status\":\"succeeded\",\"data\":${LIST},\"message\":\"获取封禁黑名单成功\"}"

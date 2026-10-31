@@ -746,7 +746,7 @@ export default defineComponent({
             <div class="flex items-start justify-between gap-2 mb-2">
               <div class="flex items-center gap-2 min-w-0 flex-1">
                 <span class="text-base shrink-0">
-                  {{ w.runtime === 0 ? '🟩' : (w.runtime === 1 ? '🐍' : (w.runtime === 2 ? '🟣' : (w.runtime === 3 ? '🐚' : '🟦'))) }}
+                  {{ w.runtime === 0 ? '🟩' : (w.runtime === 1 ? '🐍' : (w.runtime === 2 ? '🟣' : (w.runtime === 3 ? '🐚' : (w.runtime === 6 ? '⚙️' : '🟦')))) }}
                 </span>
                 <div class="min-w-0">
                   <div class="flex items-center gap-2">
@@ -774,7 +774,7 @@ export default defineComponent({
                   class="badge border-emerald-500/50 bg-emerald-500/10 text-emerald-300 text-xs flex items-center gap-1"
                 >
                   <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span>运行中</span>
+                  <span>{{ w.readiness ? '运行中 (' + w.readiness + ')' : '运行中' }}</span>
                 </span>
                 <span
                   v-else-if="w.state === 1"

@@ -10,7 +10,8 @@ public enum WorkerRuntimeType
     DotNet,
     Bash,
     PowerShell,
-    Batch
+    Batch,
+    Native = 6
 }
 
 /// <summary>
@@ -121,6 +122,8 @@ public sealed record WorkerSupervisionConfig
 /// </summary>
 public sealed record WorkerManifest
 {
+    public int ManifestVersion { get; init; } = 1;
+    public string HostApiVersion { get; init; } = "1";
     public required string Id { get; init; }
     public required string Name { get; init; }
     public string Version { get; init; } = "1.0.0";
@@ -135,14 +138,34 @@ public sealed record WorkerManifest
     public WorkerServiceMode Mode { get; init; } = WorkerServiceMode.Service;
 
     /// <summary>
-    /// 语言运行时类型：Node | Python | DotNet | Bash | PowerShell | Batch。
+    /// 语言运行时类型：Node | Python | DotNet | Bash | PowerShell | Batch | Native。
     /// </summary>
     public WorkerRuntimeType Runtime { get; init; } = WorkerRuntimeType.Python;
 
     /// <summary>
-    /// 入口文件名（如 worker.py, worker.js, Program.cs, worker.sh, worker.ps1）。
+    /// 入口文件名（如 worker.py, worker.js, Program.cs, worker.sh, worker.ps1, bin/app）。
     /// </summary>
     public required string Entrypoint { get; init; }
+
+    /// <summary>
+    /// 启动命令行结构化参数（推荐结构化传递，用于 Native/通用进程）。
+    /// </summary>
+    public IReadOnlyList<string>? Arguments { get; init; }
+
+    /// <summary>
+    /// 程序来源："package" (包内可执行程序) | "system" (管理员登记的系统路径)。
+    /// </summary>
+    public string Source { get; init; } = "package";
+
+    /// <summary>
+    /// 系统已批准程序引用或别名（当 Source 为 system 时使用）。
+    /// </summary>
+    public string? ProgramRef { get; init; }
+
+    /// <summary>
+    /// 可选常驻程序 HTTP 管理接口协议配置。
+    /// </summary>
+    public LinuxWebTool.Contracts.Features.Plugins.Contracts.ResidentControlSpec? Control { get; init; }
 
     /// <summary>
     /// 网络路由配置。
@@ -179,6 +202,7 @@ public sealed record WorkerInstanceDto
     public WorkerRuntimeType Runtime { get; init; }
     public string Entrypoint { get; init; } = "";
     public WorkerState State { get; init; }
+    public string Readiness { get; init; } = "Unsupported";
     public int? ProcessId { get; init; }
     public int? BoundPort { get; init; }
     public string? AccessUrl { get; init; }

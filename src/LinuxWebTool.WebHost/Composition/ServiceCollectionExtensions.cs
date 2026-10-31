@@ -117,6 +117,52 @@ public static class ServiceCollectionExtensions
         builder.Services.AddHostedService(sp =>
             sp.GetRequiredService<LinuxWebTool.Infrastructure.Features.Workers.WorkersManager>());
 
+        // 原生工具服务化与插件异步操作支持 (Native Tool Services & Plugins)
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Plugins.Contracts.INativeProgramResolver, LinuxWebTool.Infrastructure.Features.Plugins.Adapters.NativeProgramResolver>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Plugins.Contracts.ICommandBindingResolver, LinuxWebTool.Application.Features.Plugins.CommandBindingResolver>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Plugins.Contracts.INativeProcessRunner, LinuxWebTool.Infrastructure.Features.Plugins.Adapters.NativeProcessRunner>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Plugins.Contracts.INativeCommandExecutor, LinuxWebTool.Application.Features.Plugins.NativeCommandExecutor>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Plugins.Contracts.IPluginOperationStore, LinuxWebTool.Infrastructure.Features.Plugins.Storage.PluginOperationStore>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Plugins.Contracts.IPluginArtifactStore>(sp =>
+            new LinuxWebTool.Infrastructure.Features.Plugins.Storage.PluginArtifactStore(Path.Combine(contentRoot, "data", "operations")));
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Plugins.Contracts.IResidentControlClient, LinuxWebTool.Infrastructure.Features.Plugins.Adapters.ResidentControlClient>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Plugins.Contracts.IPluginOperationCoordinator>(sp =>
+        {
+            var store = sp.GetRequiredService<LinuxWebTool.Contracts.Features.Plugins.Contracts.IPluginOperationStore>();
+            var artifactStore = sp.GetRequiredService<LinuxWebTool.Contracts.Features.Plugins.Contracts.IPluginArtifactStore>();
+            var executor = sp.GetRequiredService<LinuxWebTool.Contracts.Features.Plugins.Contracts.INativeCommandExecutor>();
+            var extMgr = sp.GetRequiredService<LinuxWebTool.Contracts.Features.Services.Contracts.IScriptExtensionManager>();
+
+            return new LinuxWebTool.Application.Features.Plugins.PluginOperationCoordinator(
+                store,
+                artifactStore,
+                executor,
+                pluginIdentity =>
+                {
+                    var extDir = Path.Combine(contentRoot, "extensions", pluginIdentity);
+                    if (Directory.Exists(extDir)) return extDir;
+                    var workerDir = Path.Combine(contentRoot, "data", "workers", pluginIdentity);
+                    if (Directory.Exists(workerDir)) return workerDir;
+                    return null;
+                },
+                (pluginIdentity, actionName) =>
+                {
+                    try
+                    {
+                        var ext = extMgr.ListExtensionsAsync().GetAwaiter().GetResult().FirstOrDefault(e => e.Manifest.Id == pluginIdentity);
+                        return ext?.Manifest.CustomActions.FirstOrDefault(a => a.Action == actionName);
+                    }
+                    catch
+                    {
+                        return null;
+                    }
+                });
+        });
+
+        // MCP Bridge 长时函数服务编排 (MCP Bridge Orchestrator)
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.McpBridge.Contracts.IMcpBridgeControlActions, LinuxWebTool.Infrastructure.Features.McpBridge.Adapters.McpBridgeControlActions>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.McpBridge.Contracts.IMcpBridgeOrchestrator, LinuxWebTool.Application.Features.McpBridge.McpBridgeOrchestrator>();
+
         // 统一执行引擎与工作流活动
         builder.Services.AddHttpClient();
         builder.Services.AddSingleton<HostCircuitBreaker>();

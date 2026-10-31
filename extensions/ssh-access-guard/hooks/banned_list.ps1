@@ -1,1 +1,1 @@
-Write-Output 'Windows 环境: 封禁名单为空'
+Write-Output '{"protocolVersion":1,"status":"succeeded","data":[],"message":"获取封禁黑名单成功"}'

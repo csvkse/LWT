@@ -1,0 +1,27 @@
+{
+  "id": "mcp-bridge",
+  "name": "MCP Bridge",
+  "description": "Go 单进程 OpenAI Secure MCP Tunnel 与第三方 MCP 工具纳管网关",
+  "version": "1.0.0",
+  "runtime": 6,
+  "mode": "Service",
+  "entrypoint": "mcp-bridge",
+  "autoStart": false,
+  "autoRestart": false,
+  "argumentList": [
+    "serve",
+    "--state-dir",
+    "data/mcp-bridge",
+    "--control-token-file",
+    "{controlTokenFile}",
+    "--run-id",
+    "{runId}",
+    "--listen",
+    "{listenAddr}"
+  ],
+  "residentControl": {
+    "enabled": true,
+    "baseUrl": "http://127.0.0.1:{port}",
+    "timeoutSeconds": 15
+  }
+}
