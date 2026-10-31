@@ -26,13 +26,21 @@ public class ServicesController(
 
     #region Systemd
     [HttpGet("Systemd/Units")]
-    public async Task<IResult> GetSystemdUnits([FromQuery] string? keyword, [FromQuery] string? state, [FromQuery] string? type, CancellationToken cancellationToken)
+    public async Task<IResult> GetSystemdUnits(
+        [FromQuery] string? keyword,
+        [FromQuery] string? state,
+        [FromQuery] string? type,
+        [FromQuery] string? category,
+        [FromQuery] string? scope,
+        CancellationToken cancellationToken)
     {
         var criteria = new SystemdQueryCriteria
         {
             FilterKeyword = keyword,
             ActiveState = state,
-            UnitType = type
+            UnitType = type,
+            Category = category,
+            Scope = scope
         };
         var list = await systemdAdapter.ListUnitsAsync(criteria, cancellationToken);
         return Ok(list);
