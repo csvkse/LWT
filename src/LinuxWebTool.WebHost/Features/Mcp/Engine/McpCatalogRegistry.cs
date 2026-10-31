@@ -150,7 +150,12 @@ public static class McpCatalogRegistry
                 new("extension_import", "从 Git 仓库批量导入一个或多个运维扩展服务", "Dangerous", "services"),
                 new("extension_set_enabled", "启用或禁用指定的运维扩展服务", "Execute", "services"),
                 new("extension_check_update", "检查指定或全部运维扩展服务的远程发布版本", "Read", "services"),
-                new("extension_hot_update", "对指定运维扩展服务执行安全在线热更新", "Dangerous", "services")
+                new("extension_hot_update", "对指定运维扩展服务执行安全在线热更新", "Dangerous", "services"),
+                new("extension_get_code", "查询运维扩展的代码脚本与文件目录列表", "Read", "services"),
+                new("extension_edit_code", "在线编辑运维扩展代码/配置文件（自动备份快照）", "Dangerous", "services"),
+                new("extension_create", "快速创建全新的运维扩展模块", "Dangerous", "services"),
+                new("extension_get_logs", "获取运维扩展服务的持久化或实时执行日志", "Read", "services"),
+                new("extension_debug_run", "瞬态沙箱调试执行扩展动作钩子", "Execute", "services")
             },
             ModuleCode: "services",
             SupportsApi: true,
@@ -169,7 +174,11 @@ public static class McpCatalogRegistry
                 new("worker_import", "从 GitHub/Git 仓库批量导入函数微服务或后台长时守护", "Dangerous", "workers"),
                 new("worker_set_enabled", "启用或禁用指定 Worker（禁用时终止进程、关闭网关并暂停自愈）", "Execute", "workers"),
                 new("worker_check_update", "检查指定 Worker 或全部 Worker 的最新远程发布版本", "Read", "workers"),
-                new("worker_hot_update", "对指定 Worker 执行安全在线热更新（保护 SQLite/KV 数据并带瞬退回滚）", "Dangerous", "workers")
+                new("worker_hot_update", "对指定 Worker 执行安全在线热更新（保护 SQLite/KV 数据并带瞬退回滚）", "Dangerous", "workers"),
+                new("worker_get_code", "查询 Worker 的指定代码文件内容与文件目录列表", "Read", "workers"),
+                new("worker_edit_code", "在线编辑 Worker 代码/配置文件（自动备份快照，支持热重载）", "Dangerous", "workers"),
+                new("worker_create", "快速创建全新的 SaaS 函数微服务或常驻后台守护", "Dangerous", "workers"),
+                new("worker_debug_run", "瞬态沙箱调试执行 Worker，捕获实时标准输出与耗时", "Execute", "workers")
             },
             ModuleCode: "workers",
             SupportsApi: true,

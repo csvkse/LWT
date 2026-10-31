@@ -171,4 +171,43 @@ public class WorkersController(IWorkersManager workersManager) : MinimalApi.Cont
         var meta = await workersManager.GetSourceMetadataAsync(id, ct);
         return meta != null ? Ok(meta) : NotFound(new WorkerOperationResponse(false, "未找到来源元数据"));
     }
+
+    [HttpGet("{id}/Code")]
+    public async Task<IResult> GetCode(string id, [FromQuery] string? file, CancellationToken ct)
+    {
+        try
+        {
+            var code = await workersManager.GetCodeAsync(id, file, ct);
+            return Ok(code);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return NotFound(new WorkerOperationResponse(false, $"未找到 Worker: {id}"));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new WorkerOperationResponse(false, ex.Message));
+        }
+    }
+
+    [HttpPost("{id}/Code")]
+    public async Task<IResult> SaveCode(string id, [FromBody] WorkerCodeSaveRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var success = await workersManager.SaveCodeAsync(id, request, ct);
+            return Ok(new WorkerOperationResponse(success, success ? "代码保存成功" : "代码保存失败"));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new WorkerOperationResponse(false, ex.Message));
+        }
+    }
+
+    [HttpPost("{id}/Debug")]
+    public async Task<IResult> DebugRun(string id, [FromBody] WorkerDebugRunRequest request, CancellationToken ct)
+    {
+        var result = await workersManager.DebugRunAsync(id, request, ct);
+        return Ok(result);
+    }
 }

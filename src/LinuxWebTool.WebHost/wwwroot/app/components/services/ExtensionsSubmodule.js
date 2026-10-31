@@ -3,11 +3,13 @@ import { http } from '../../api/client.js';
 import { API } from '../../config.js';
 import { toast } from '../../store/toast.js';
 import ExtensionActionModal from './ExtensionActionModal.js';
+import ExtensionCodeModal from './ExtensionCodeModal.js';
 import ExtensionConfigModal from './ExtensionConfigModal.js';
 import ExtensionInstallGuideModal from './ExtensionInstallGuideModal.js';
 import ExtensionLogsModal from './ExtensionLogsModal.js';
 import ExtensionRepoImportModal from './ExtensionRepoImportModal.js';
 import ExtensionUpdateModal from './ExtensionUpdateModal.js';
+import ExtensionZipImportModal from './ExtensionZipImportModal.js';
 
 export default defineComponent({
   name: 'ExtensionsSubmodule',
@@ -15,13 +17,20 @@ export default defineComponent({
     ExtensionInstallGuideModal,
     ExtensionActionModal,
     ExtensionRepoImportModal,
+    ExtensionZipImportModal,
     ExtensionConfigModal,
     ExtensionUpdateModal,
     ExtensionLogsModal,
+    ExtensionCodeModal,
   },
   setup() {
     const loading = ref(false);
     const extensions = ref([]);
+
+    // 代码编辑与 Zip 导入
+    const showZipModal = ref(false);
+    const showCodeModal = ref(false);
+    const activeCodeExt = ref(null);
 
     // 配置弹窗
     const showConfigModal = ref(false);
@@ -170,6 +179,10 @@ export default defineComponent({
       showRepoModal,
       showUpdateModal,
       activeUpdateExt,
+      showZipModal,
+      showCodeModal,
+      activeCodeExt,
+      openCode: (ext) => { activeCodeExt.value = ext; showCodeModal.value = true; },
       loadExtensions,
       executeAction,
       openConfig,
@@ -200,7 +213,10 @@ export default defineComponent({
         </div>
         <div class="flex items-center gap-2">
           <button type="button" class="btn btn-xs hover:border-cyan-500/40 text-cyan-400" @click="openRepoImport()">
-            🌐 从 GitHub 导入扩展
+            🌐 从 GitHub 导入
+          </button>
+          <button type="button" class="btn btn-xs hover:border-cyan-500/40 text-cyber-primary" @click="showZipModal = true">
+            📦 导入 Zip
           </button>
           <button type="button" class="btn btn-xs hover:border-cyan-500/40" :disabled="loading" @click="loadExtensions()">
             🔄 重新扫描插件
@@ -351,6 +367,14 @@ export default defineComponent({
               >
                 日志
               </button>
+              <button
+                type="button"
+                class="btn btn-xs hover:border-amber-500/40 text-amber-300"
+                title="在线编辑代码与调试"
+                @click="openCode(ext)"
+              >
+                编辑
+              </button>
             </div>
           </div>
         </div>
@@ -362,6 +386,8 @@ export default defineComponent({
       <ExtensionActionModal :show="showActionModal" :ext="activeActionExt" :action-def="activeActionDef" @close="showActionModal = false" @refresh="loadExtensions()" />
       <ExtensionRepoImportModal :show="showRepoModal" @close="showRepoModal = false" @imported="loadExtensions()" />
       <ExtensionUpdateModal :show="showUpdateModal" :ext="activeUpdateExt" @close="showUpdateModal = false" @updated="loadExtensions()" />
+      <ExtensionZipImportModal :show="showZipModal" @close="showZipModal = false" @imported="loadExtensions()" />
+      <ExtensionCodeModal :show="showCodeModal" :extension-id="activeCodeExt?.manifest?.id" :extension-name="activeCodeExt?.manifest?.name" @close="showCodeModal = false" @saved="loadExtensions()" />
     </div>
   `,
 });

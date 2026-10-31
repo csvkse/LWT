@@ -223,5 +223,61 @@ public class ServicesController(
         var meta = await extensionManager.GetSourceMetadataAsync(id, cancellationToken);
         return meta != null ? Ok(meta) : NotFound(new ServiceActionResult { Success = false, Message = "未找到来源元数据" });
     }
+
+    [HttpPost("Extensions/Import/Zip")]
+    [Consumes("multipart/form-data")]
+    public async Task<IResult> ImportZip(IFormFile file, CancellationToken cancellationToken)
+    {
+        if (file == null || file.Length == 0) return BadRequest(new BatchImportModulesResult { Success = false, Message = "请选择有效的 Zip 文件上传。" });
+        using var stream = file.OpenReadStream();
+        var result = await extensionManager.ImportZipAsync(stream, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpGet("Extensions/{id}/Code")]
+    public async Task<IResult> GetExtensionCode(string id, [FromQuery] string? file, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var code = await extensionManager.GetCodeAsync(id, file, cancellationToken);
+            return Ok(code);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return NotFound(new ServiceActionResult { Success = false, Message = $"未找到扩展服务: {id}" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new ServiceActionResult { Success = false, Message = ex.Message });
+        }
+    }
+
+    [HttpPost("Extensions/{id}/Code")]
+    public async Task<IResult> SaveExtensionCode(string id, [FromBody] ExtensionCodeSaveRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var success = await extensionManager.SaveCodeAsync(id, request, cancellationToken);
+            return Ok(new ServiceActionResult { Success = success, Message = success ? "代码保存成功" : "代码保存失败" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new ServiceActionResult { Success = false, Message = ex.Message });
+        }
+    }
+
+    [HttpPost("Extensions/{id}/Debug")]
+    public async Task<IResult> DebugRunExtension(string id, [FromBody] ExtensionDebugRunRequest request, CancellationToken cancellationToken)
+    {
+        var result = await extensionManager.DebugRunAsync(id, request, cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpPost("Extensions/Create")]
+    public async Task<IResult> CreateExtension([FromBody] ExtensionCreateRequest request, CancellationToken cancellationToken)
+    {
+        var result = await extensionManager.CreateExtensionAsync(request, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
     #endregion
 }

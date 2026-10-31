@@ -25,4 +25,7 @@ public interface IWorkersManager
     ValueTask<WorkerUpdateCheckResponse> CheckUpdateAsync(string id, CancellationToken ct = default);
     ValueTask<WorkerHotUpdateResponse> HotUpdateAsync(string id, WorkerHotUpdateRequest request, CancellationToken ct = default);
     ValueTask<WorkerSourceMetadata?> GetSourceMetadataAsync(string id, CancellationToken ct = default);
+    ValueTask<WorkerCodeDto> GetCodeAsync(string id, string? filePath = null, CancellationToken ct = default);
+    ValueTask<bool> SaveCodeAsync(string id, WorkerCodeSaveRequest request, CancellationToken ct = default);
+    ValueTask<WorkerDebugRunResultDto> DebugRunAsync(string id, WorkerDebugRunRequest request, CancellationToken ct = default);
 }

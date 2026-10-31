@@ -200,4 +200,60 @@ public sealed record ExtensionHotUpdateResponse(
     string NewVersion,
     string? Message = null,
     bool RollbackPerformed = false);
+
+/// <summary>
+/// 扩展服务代码与文件结构 DTO。
+/// </summary>
+public sealed record ExtensionCodeDto
+{
+    public required string ExtensionId { get; init; }
+    public required string SelectedFile { get; init; }
+    public required string Content { get; init; }
+    public required IReadOnlyList<string> AvailableFiles { get; init; }
+    public required IReadOnlyList<string> Backups { get; init; }
+}
+
+/// <summary>
+/// 扩展服务代码保存请求。
+/// </summary>
+public sealed record ExtensionCodeSaveRequest
+{
+    public string? FilePath { get; init; }
+    public required string Content { get; init; }
+}
+
+/// <summary>
+/// 扩展服务调试运行请求。
+/// </summary>
+public sealed record ExtensionDebugRunRequest
+{
+    public string? HookName { get; init; } = "status";
+    public Dictionary<string, string>? Params { get; init; }
+    public int TimeoutSeconds { get; init; } = 8;
+}
+
+/// <summary>
+/// 扩展服务快速创建请求。
+/// </summary>
+public sealed record ExtensionCreateRequest
+{
+    public required string Id { get; init; }
+    public required string Name { get; init; }
+    public string? Description { get; init; }
+    public string Runner { get; init; } = "bash"; // bash, pwsh, python3, node
+    public string? StartScript { get; init; }
+    public string? StatusScript { get; init; }
+}
+
+/// <summary>
+/// 调试执行结果通用 DTO。
+/// </summary>
+public sealed record ExtensionDebugRunResultDto
+{
+    public required bool Success { get; init; }
+    public required int ExitCode { get; init; }
+    public required string StandardOutput { get; init; }
+    public required string StandardError { get; init; }
+    public required long ElapsedMilliseconds { get; init; }
+}
 #endregion
