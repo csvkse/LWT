@@ -138,11 +138,14 @@ public class WorkersManagerTests : IDisposable
         };
 
         var adapter = new DotNetRuntimeAdapter();
-        var csSpec = adapter.BuildStartSpec(csManifest, "C:\\mock\\path", 18060);
-        var projSpec = adapter.BuildStartSpec(projManifest, "C:\\mock\\path", 18061);
+        var mockDir = Path.Combine("mock", "path");
+        var csSpec = adapter.BuildStartSpec(csManifest, mockDir, 18060);
+        var projSpec = adapter.BuildStartSpec(projManifest, mockDir, 18061);
 
-        Assert.Contains("run \"C:\\mock\\path\\Program.cs\"", csSpec.Arguments);
-        Assert.Contains("run --project \"C:\\mock\\path\\MyWorker.csproj\"", projSpec.Arguments);
+        var expectedCs = Path.Combine(mockDir, "Program.cs");
+        var expectedProj = Path.Combine(mockDir, "MyWorker.csproj");
+        Assert.Contains($"run \"{expectedCs}\"", csSpec.Arguments);
+        Assert.Contains($"run --project \"{expectedProj}\"", projSpec.Arguments);
         Assert.Equal("1", csSpec.EnvironmentVariables["DOTNET_NOLOGO"]);
         Assert.Equal("1", csSpec.EnvironmentVariables["DOTNET_CLI_TELEMETRY_OPTOUT"]);
     }
