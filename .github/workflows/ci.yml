@@ -73,7 +73,7 @@ jobs:
           path: artifacts/
 
   docker-build:
-    name: Docker Image (${{ matrix.vendor }} - ${{ matrix.arch }})
+    name: Docker Image (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     needs: build-test
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
@@ -85,46 +85,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # AMD64 variants (原生 ubuntu-latest)
-          - vendor: all
-            tag: latest
-            arch: amd64
+          # AMD64 (原生 ubuntu-latest) - 包含全量 Intel + Mesa 驱动与 NVENC 透传支持
+          - arch: amd64
             os: ubuntu-latest
             platform: linux/amd64
-          - vendor: intel
-            tag: latest-intel
-            arch: amd64
-            os: ubuntu-latest
-            platform: linux/amd64
-          - vendor: amd
-            tag: latest-amd
-            arch: amd64
-            os: ubuntu-latest
-            platform: linux/amd64
-          - vendor: nv
-            tag: latest-nv
-            arch: amd64
-            os: ubuntu-latest
-            platform: linux/amd64
-          # ARM64 variants (原生 ARM64 物理机 ubuntu-24.04-arm，零 QEMU 模拟，无并发竞争 bug)
-          - vendor: all
-            tag: latest
-            arch: arm64
-            os: ubuntu-24.04-arm
-            platform: linux/arm64
-          - vendor: intel
-            tag: latest-intel
-            arch: arm64
-            os: ubuntu-24.04-arm
-            platform: linux/arm64
-          - vendor: amd
-            tag: latest-amd
-            arch: arm64
-            os: ubuntu-24.04-arm
-            platform: linux/arm64
-          - vendor: nv
-            tag: latest-nv
-            arch: arm64
+          # ARM64 (原生 ARM64 物理机 ubuntu-24.04-arm，零 QEMU 模拟) - 包含 Mesa 驱动与 NVENC 透传支持
+          - arch: arm64
             os: ubuntu-24.04-arm
             platform: linux/arm64
     steps:
@@ -164,40 +130,40 @@ jobs:
         with:
           context: .
           platforms: ${{ matrix.platform }}
-          build-args: VENDOR=${{ matrix.vendor }}
+          build-args: VENDOR=all
           load: true
           push: false
-          tags: ghcr.io/${{ steps.repo.outputs.repo_lower }}:test-${{ matrix.vendor }}-${{ matrix.arch }}
-          cache-from: type=gha,scope=${{ matrix.vendor }}-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.vendor }}-${{ matrix.arch }}
+          tags: ghcr.io/${{ steps.repo.outputs.repo_lower }}:test-${{ matrix.arch }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
       - name: Blackbox API, browser and PTY gates (amd64)
         if: matrix.arch == 'amd64'
         env:
-          SMOKE_TARGET: container-${{ matrix.vendor }}-amd64
+          SMOKE_TARGET: container-amd64
         shell: pwsh
-        run: ./scripts/smoke-aot.ps1 -ImageTag 'ghcr.io/${{ steps.repo.outputs.repo_lower }}:test-${{ matrix.vendor }}-${{ matrix.arch }}' -Browser -Terminal
+        run: ./scripts/smoke-aot.ps1 -ImageTag 'ghcr.io/${{ steps.repo.outputs.repo_lower }}:test-${{ matrix.arch }}' -Browser -Terminal
 
       - name: Blackbox API and PTY gates (arm64)
         if: matrix.arch == 'arm64'
         env:
-          SMOKE_TARGET: container-${{ matrix.vendor }}-arm64
+          SMOKE_TARGET: container-arm64
         shell: pwsh
-        run: ./scripts/smoke-aot.ps1 -ImageTag 'ghcr.io/${{ steps.repo.outputs.repo_lower }}:test-${{ matrix.vendor }}-${{ matrix.arch }}' -Terminal
+        run: ./scripts/smoke-aot.ps1 -ImageTag 'ghcr.io/${{ steps.repo.outputs.repo_lower }}:test-${{ matrix.arch }}' -Terminal
 
       - name: Push arch-specific image
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: |
           REPO="ghcr.io/${{ steps.repo.outputs.repo_lower }}"
-          IMAGE="${REPO}:sha-${{ github.sha }}-${{ matrix.vendor }}-${{ matrix.arch }}"
-          docker tag "${REPO}:test-${{ matrix.vendor }}-${{ matrix.arch }}" "${IMAGE}"
+          IMAGE="${REPO}:sha-${{ github.sha }}-${{ matrix.arch }}"
+          docker tag "${REPO}:test-${{ matrix.arch }}" "${IMAGE}"
           docker push "${IMAGE}"
 
       - name: Blackbox evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: blackbox-${{ matrix.vendor }}-${{ matrix.arch }}
+          name: blackbox-${{ matrix.arch }}
           path: |
             artifacts/smoke/
             tests/smoke/playwright-report/
@@ -229,35 +195,40 @@ jobs:
       - name: Create and push multi-arch manifests
         run: |
           REPO="ghcr.io/${{ steps.repo.outputs.repo_lower }}"
-          VENDORS=("all" "intel" "amd" "nv")
-          for VENDOR in "${VENDORS[@]}"; do
-            AMD_IMG="${REPO}:sha-${{ github.sha }}-${VENDOR}-amd64"
-            ARM_IMG="${REPO}:sha-${{ github.sha }}-${VENDOR}-arm64"
-            
-            TARGET_TAGS=()
-            if [ "${VENDOR}" = "all" ]; then
-              TARGET_TAGS+=("${REPO}:latest")
-              if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-                TARGET_TAGS+=("${REPO}:${{ github.ref_name }}")
-              fi
-            else
-              TARGET_TAGS+=("${REPO}:latest-${VENDOR}")
-              if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-                TARGET_TAGS+=("${REPO}:${{ github.ref_name }}-${VENDOR}")
-              fi
-            fi
-            TARGET_TAGS+=("${REPO}:sha-${{ github.sha }}-${VENDOR}")
-            
-            TAG_ARGS=()
-            for T in "${TARGET_TAGS[@]}"; do
-              TAG_ARGS+=("-t" "$T")
-            done
-            
-            echo "Creating manifest for ${VENDOR}:"
-            echo "  Images: ${AMD_IMG} and ${ARM_IMG}"
-            echo "  Tags: ${TARGET_TAGS[*]}"
-            docker buildx imagetools create "${TAG_ARGS[@]}" "${AMD_IMG}" "${ARM_IMG}"
+          AMD_IMG="${REPO}:sha-${{ github.sha }}-amd64"
+          ARM_IMG="${REPO}:sha-${{ github.sha }}-arm64"
+          
+          # 标准多架构标签 + 厂商兼容别名标签（全部指向统一全功能镜像）
+          TARGET_TAGS=(
+            "${REPO}:latest"
+            "${REPO}:sha-${{ github.sha }}"
+            "${REPO}:latest-intel"
+            "${REPO}:latest-amd"
+            "${REPO}:latest-nv"
+            "${REPO}:sha-${{ github.sha }}-all"
+            "${REPO}:sha-${{ github.sha }}-intel"
+            "${REPO}:sha-${{ github.sha }}-amd"
+            "${REPO}:sha-${{ github.sha }}-nv"
+          )
+          
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TARGET_TAGS+=(
+              "${REPO}:${{ github.ref_name }}"
+              "${REPO}:${{ github.ref_name }}-intel"
+              "${REPO}:${{ github.ref_name }}-amd"
+              "${REPO}:${{ github.ref_name }}-nv"
+            )
+          fi
+          
+          TAG_ARGS=()
+          for T in "${TARGET_TAGS[@]}"; do
+            TAG_ARGS+=("-t" "$T")
           done
+          
+          echo "Creating unified multi-arch manifest with all vendor compatibility tag aliases:"
+          echo "  Images: ${AMD_IMG} and ${ARM_IMG}"
+          echo "  Tags: ${TARGET_TAGS[*]}"
+          docker buildx imagetools create "${TAG_ARGS[@]}" "${AMD_IMG}" "${ARM_IMG}"
 
       - name: Inspect latest multi-arch manifest
         run: |
