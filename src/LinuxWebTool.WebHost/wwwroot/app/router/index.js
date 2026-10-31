@@ -11,6 +11,7 @@ const routes = [
   { path: '/schedules', name: 'schedules', component: () => import('../views/SchedulesView.js') },
   { path: '/system', name: 'system', component: () => import('../views/SystemStatusView.js') },
   { path: '/services', name: 'services', component: () => import('../views/ServicesView.js') },
+  { path: '/workers', name: 'workers', component: () => import('../views/WorkersView.js') },
   { path: '/files', name: 'files', component: () => import('../views/FilesView.js') },
   { path: '/mounts', name: 'mounts', component: () => import('../views/SmbMountsView.js') },
   { path: '/backup-sync', name: 'backup-sync', component: () => import('../views/BackupSyncView.js') },

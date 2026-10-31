@@ -23,6 +23,8 @@ using LinuxWebTool.WebHost.Features.Workflows.Routes;
 using LinuxWebTool.Contracts.Features.Workflows.Contracts;
 using LinuxWebTool.WebHost.Features.Services.Routes;
 using LinuxWebTool.Contracts.Features.Services.Contracts;
+using LinuxWebTool.WebHost.Features.Workers.Routes;
+using LinuxWebTool.Contracts.Features.Workers.Contracts;
 
 namespace LinuxWebTool.WebHost.MinimalApi
 {
@@ -53,6 +55,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             services.AddScoped<RemoteHostsController>();
             services.AddScoped<WorkflowsController>();
             services.AddScoped<ServicesController>();
+            services.AddScoped<WorkersController>();
         }
 
         public static void MapAutoControllers(this WebApplication app)
@@ -370,6 +373,24 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_ServicesController.MapGet("Extensions/Logs", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromQuery] string id, [FromQuery] int lines = 100, CancellationToken ct = default) => { ctrl.HttpContext = ctx; return await ctrl.GetExtensionLogs(id, lines, ct); });
             group_ServicesController.MapPost("Extensions/Repo/Inspect", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromBody] InspectRepoModulesRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.InspectRepositoryModules(request, ct); });
             group_ServicesController.MapPost("Extensions/Repo/Import", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromBody] BatchImportModulesRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.BatchImportModules(request, ct); });
+            var group_WorkersController = app.MapGroup("/api/Workers");
+            group_WorkersController.RequireAuthorization();
+            group_WorkersController.MapGet("", async ([FromServices] WorkersController ctrl, HttpContext ctx, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetAll(ct); });
+            group_WorkersController.MapGet("{id}", async ([FromServices] WorkersController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetById(id, ct); });
+            group_WorkersController.MapPost("{id}/Start", async ([FromServices] WorkersController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.Start(id, ct); });
+            group_WorkersController.MapPost("{id}/Stop", async ([FromServices] WorkersController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.Stop(id, ct); });
+            group_WorkersController.MapPost("{id}/Restart", async ([FromServices] WorkersController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.Restart(id, ct); });
+            group_WorkersController.MapDelete("{id}", async ([FromServices] WorkersController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.Delete(id, ct); });
+            group_WorkersController.MapPost("", async ([FromServices] WorkersController ctrl, HttpContext ctx, [FromBody] WorkerCreateOrUpdateRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.CreateOrUpdate(request, ct); });
+            group_WorkersController.MapGet("{id}/Logs", async ([FromServices] WorkersController ctrl, HttpContext ctx, string id, [FromQuery] int limit = 200, CancellationToken ct = default) => { ctrl.HttpContext = ctx; return await ctrl.GetLogs(id, limit, ct); });
+            group_WorkersController.MapGet("{id}/Storage/Sqlite", async ([FromServices] WorkersController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetSqliteInfo(id, ct); });
+            group_WorkersController.MapGet("{id}/Storage/Sqlite/Download", async ([FromServices] WorkersController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.DownloadSqlite(id, ct); });
+            group_WorkersController.MapGet("{id}/Storage/Kv", async ([FromServices] WorkersController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetKvList(id, ct); });
+            group_WorkersController.MapPost("{id}/Storage/Kv", async ([FromServices] WorkersController ctrl, HttpContext ctx, string id, [FromBody] WorkerKvItem item, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.SetKv(id, item, ct); });
+            group_WorkersController.MapDelete("{id}/Storage/Kv/{key}", async ([FromServices] WorkersController ctrl, HttpContext ctx, string id, string key, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.DeleteKv(id, key, ct); });
+            group_WorkersController.MapPost("Import/Zip", async ([FromServices] WorkersController ctrl, HttpContext ctx, IFormFile file, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.ImportZip(file, ct); });
+            group_WorkersController.MapPost("Import/Repo/Scan", async ([FromServices] WorkersController ctrl, HttpContext ctx, [FromBody] WorkerRepoScanRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.ScanRepo(request, ct); });
+            group_WorkersController.MapPost("Import/Repo/Apply", async ([FromServices] WorkersController ctrl, HttpContext ctx, [FromBody] WorkerRepoApplyRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.ApplyRepoModules(request, ct); });
         }
     }
 }
