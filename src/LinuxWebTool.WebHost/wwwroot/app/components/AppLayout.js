@@ -25,6 +25,7 @@ const NAV_GROUPS = [
       { path: '/workflows', label: '工作流编排', desc: '串并行流水线与多活动编排' },
       { path: '/schedules', label: '定时任务', desc: 'Quartz Cron 周期调度' },
       { path: '/services', label: '服务运维', desc: 'Systemd、Docker 容器与扩展服务管理中枢' },
+      { path: '/workers', label: '函数服务', desc: 'SaaS 函数微服务与长时守护进程托管' },
       { path: '/system', label: '系统监控', desc: 'CPU / 内存 / 磁盘 / 进程' },
     ],
   },

@@ -106,6 +106,16 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IScriptExtensionManager, LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.ScriptExtensionManager>();
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IServicesHubOrchestrator, LinuxWebTool.Application.Features.Services.ServicesHubOrchestrator>();
 
+        // SaaS 函数微服务与长时守护平台 (Workers & Daemons)
+        builder.Services.AddSingleton<LinuxWebTool.Infrastructure.Features.Workers.WorkersManager>(sp =>
+            new LinuxWebTool.Infrastructure.Features.Workers.WorkersManager(
+                sp.GetRequiredService<ILogger<LinuxWebTool.Infrastructure.Features.Workers.WorkersManager>>(),
+                contentRoot));
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Workers.Contracts.IWorkersManager>(sp =>
+            sp.GetRequiredService<LinuxWebTool.Infrastructure.Features.Workers.WorkersManager>());
+        builder.Services.AddHostedService(sp =>
+            sp.GetRequiredService<LinuxWebTool.Infrastructure.Features.Workers.WorkersManager>());
+
         // 统一执行引擎与工作流活动
         builder.Services.AddHttpClient();
         builder.Services.AddSingleton<HostCircuitBreaker>();

@@ -92,6 +92,74 @@ public static class PipelineExtensions
         app.MapMcpEndpoints();
         app.MapReverseProxy();
 
+        // SaaS 函数微服务 (Workers) 动态路径反向代理转发
+        app.Map("/w/{workerId}/{**catch-all}", async (
+            string workerId,
+            HttpContext context,
+            LinuxWebTool.Contracts.Features.Workers.Contracts.IWorkersManager workersManager,
+            IHttpClientFactory httpClientFactory) =>
+        {
+            var worker = await workersManager.GetByIdAsync(workerId, context.RequestAborted);
+            if (worker == null || !worker.BoundPort.HasValue || worker.State != LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerState.Running)
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                context.Response.ContentType = "application/json; charset=utf-8";
+                await context.Response.WriteAsync($"{{\"code\":503,\"message\":\"Worker '{workerId}' is not running or has no listening port.\"}}");
+                return;
+            }
+
+            var client = httpClientFactory.CreateClient();
+            var port = worker.BoundPort.Value;
+            var subPath = context.Request.RouteValues["catch-all"]?.ToString() ?? "";
+            var queryString = context.Request.QueryString.Value ?? "";
+            var targetUri = $"http://127.0.0.1:{port}/{subPath}{queryString}";
+
+            using var reqMsg = new HttpRequestMessage(new HttpMethod(context.Request.Method), targetUri);
+
+            foreach (var h in context.Request.Headers)
+            {
+                if (h.Key.Equals("Host", StringComparison.OrdinalIgnoreCase)) continue;
+                reqMsg.Headers.TryAddWithoutValidation(h.Key, h.Value.ToArray());
+            }
+
+            reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-For", context.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1");
+            reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-Host", context.Request.Host.Value);
+            reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-Prefix", $"/w/{workerId}");
+            reqMsg.Headers.TryAddWithoutValidation("X-LWT-Worker-Id", workerId);
+
+            if (HttpMethods.IsPost(context.Request.Method) ||
+                HttpMethods.IsPut(context.Request.Method) ||
+                HttpMethods.IsPatch(context.Request.Method))
+            {
+                reqMsg.Content = new StreamContent(context.Request.Body);
+                if (context.Request.ContentType != null)
+                {
+                    reqMsg.Content.Headers.TryAddWithoutValidation("Content-Type", context.Request.ContentType);
+                }
+            }
+
+            try
+            {
+                using var respMsg = await client.SendAsync(reqMsg, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
+                context.Response.StatusCode = (int)respMsg.StatusCode;
+                foreach (var h in respMsg.Headers)
+                {
+                    context.Response.Headers[h.Key] = h.Value.ToArray();
+                }
+                foreach (var h in respMsg.Content.Headers)
+                {
+                    context.Response.Headers[h.Key] = h.Value.ToArray();
+                }
+                await respMsg.Content.CopyToAsync(context.Response.Body, context.RequestAborted);
+            }
+            catch (Exception ex)
+            {
+                context.Response.StatusCode = StatusCodes.Status502BadGateway;
+                context.Response.ContentType = "application/json; charset=utf-8";
+                await context.Response.WriteAsync($"{{\"code\":502,\"message\":\"Failed to reach worker backend: {ex.Message}\"}}");
+            }
+        }).AllowAnonymous();
+
         // 未匹配的 API 必须返回 JSON 404，不能被 SPA fallback 返回 index.html（否则前端会把 HTML 当业务数据）。
         // 以 /api/{*path} 作为较具体的 fallback endpoint：正常 Controller 路由优先，未知 API 才落到这里。
         app.MapFallback("/api/{*path}", async context =>
