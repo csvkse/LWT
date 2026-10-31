@@ -126,24 +126,46 @@ public sealed record ApiKeyEntity
 - 当请求 `/api/Workers/*` 时，校验 `entity.AllowWorkers`；
 - 对于 Worker 暴露的直接业务路径 `/w/{id}/*`，保持开放或支持在请求头透传自定义 `Authorization` 给子进程自身处理。
 
-#### 2. MCP (Model Context Protocol) 核心工具注册
-在 `LinuxWebTool.WebHost/Features/Mcp/Engine/Providers/` 下增加两个专有 Tool Provider，大模型（AI Agent）可直接感知并调用：
+#### 2. MCP (Model Context Protocol) 全生命周期工具能力（导入、更新、启用、禁用、控制）
+在 `LinuxWebTool.WebHost/Features/Mcp/Engine/Providers/` 下增加两个专有 Tool Provider，赋予大模型（AI Agent，如 Cursor / Claude / Antigravity）对两大服务体系完整的**全生命周期闭环治理能力**：
 
-##### A. `ServicesMcpToolProvider`（服务运维工具集）
+##### A. `ServicesMcpToolProvider`（服务运维与扩展工具集）
 | MCP 工具名称 | 描述 | 参数 |
 | :--- | :--- | :--- |
-| `services_list` | 查询宿主 Systemd、Docker 容器及已安装扩展服务状态 | `category` (optional) |
+| `services_list` | 查询宿主 Systemd、Docker 容器及已安装扩展服务状态与启用状态 | `category` (optional) |
 | `systemd_action` | 执行 Systemd 服务启停查重操作 | `serviceName`, `action` ("start"/"stop"/"restart"/"status") |
 | `docker_action` | 执行 Docker 容器生命周期控制 | `containerId`, `action` ("start"/"stop"/"restart"/"pause") |
-| `extension_execute_action` | 执行指定脚本扩展自定义动作（如查询封禁IP列表、解封IP、查Top快照） | `extensionId`, `action`, `param` (optional) |
+| `extension_execute_action` | 执行指定脚本扩展自定义动作（如查询封禁IP、解封IP、查Top快照） | `extensionId`, `action`, `param` (optional) |
+| `extension_import` | **从 GitHub/Git 仓库导入一个或多个运维扩展服务** | `repoUrl`, `moduleIds` (string[]), `overwrite` (bool) |
+| `extension_set_enabled` | **启用或禁用指定的运维扩展服务**（禁用后停止运行且不可执行操作） | `extensionId`, `enabled` (bool) |
+| `extension_check_update` | **查询指定或全部扩展服务的远程版本与更新说明** | `extensionId` (optional) |
+| `extension_hot_update` | **对指定扩展服务执行在线热更新**（备份旧版本，失败自动回滚） | `extensionId`, `force` (bool) |
 
-##### B. `WorkersMcpToolProvider`（函数微服务工具集）
+##### B. `WorkersMcpToolProvider`（SaaS 函数微服务与守护治理工具集）
 | MCP 工具名称 | 描述 | 参数 |
 | :--- | :--- | :--- |
-| `workers_list` | 列出所有函数微服务与长时常驻守护进程的状态、端口与指标 | 无 |
+| `workers_list` | 列出所有函数微服务与长时常驻守护进程的状态、端口、指标与启用状态 | 无 |
 | `worker_control` | 启动、停止或重启指定的函数微服务 | `workerId`, `action` ("start"/"stop"/"restart") |
 | `worker_invoke` | 向指定的 HTTP Worker 发起内部调用并返回响应结果 | `workerId`, `subPath`, `method`, `body` (optional) |
 | `worker_get_logs` | 获取指定 Worker 进程最新的标准输出与错误日志 (RingBuffer) | `workerId`, `lines` (default: 50) |
+| `worker_import` | **从 GitHub 仓库批量导入函数微服务或后台长时守护** | `repoUrl`, `moduleIds` (string[]), `overwrite` (bool) |
+| `worker_set_enabled` | **启用或禁用指定 Worker**（禁用时优雅杀进程、停自愈拉起、网关阻断） | `workerId`, `enabled` (bool) |
+| `worker_check_update` | **检查指定 Worker 或全部 Worker 的最新远程发布版本** | `workerId` (optional) |
+| `worker_hot_update` | **对指定 Worker 执行安全在线热更新**（保留独立 SQLite/KV 数据并带看门狗回滚） | `workerId`, `force` (bool) |
+
+##### C. 启用/禁用状态在底层与网关层的硬性拦截规范
+1. **禁用状态的持久化**：
+   - 在服务的 `manifest.json` 或 `worker.json` 中持久化 `"enabled": false`（或在目录内生成轻量 `.disabled` 锁文件）；
+2. **进程守护看门狗拦截**：
+   - 处于禁用状态的 Worker，即使配置了 `AutoRestart = true`，**看门狗状态机坚决不予自动拉起**；
+3. **网关动态路由拦截 (`/w/{id}/*`)**：
+   - 当收到对禁用 Worker 的请求时，Kestrel 网关直接返回：
+     ```json
+     { "code": 503, "message": "Service Disabled: Worker 'my-worker' is explicitly disabled." }
+     ```
+4. **AI Agent 安全保护与幂等性**：
+   - 若服务已处于目标状态（例如已禁用再调禁用），操作为安全幂等并返回当前状态描述；
+   - 所有 MCP 工具调用统一返回符合 MCP 协议标准的 Content 结构（包含可读文本提示与结构化 JSON 数据），大模型能直观理解执行结果。
 
 ---
 
