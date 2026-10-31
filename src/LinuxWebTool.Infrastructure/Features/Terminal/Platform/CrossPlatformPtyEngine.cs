@@ -13,7 +13,7 @@ public sealed class CrossPlatformPtyEngine : IPtyEngine
         cancellationToken.ThrowIfCancellationRequested();
 
         var sessionId = Guid.NewGuid().ToString("N");
-        var (shell, args) = ResolveShell(options.Executable, options.Arguments, options.Target);
+        var (shell, args) = ResolveShell(options.Executable, options.Arguments, options.Target, options.WorkingDirectory);
 
         if (LinuxNativePty.IsSupported)
             return Task.FromResult(LinuxNativePty.Start(sessionId, shell, args, options));
@@ -80,7 +80,7 @@ public sealed class CrossPlatformPtyEngine : IPtyEngine
         return Task.FromResult<IPtySession>(session);
     }
 
-    private static (string Executable, IReadOnlyList<string> Arguments) ResolveShell(string? explicitExe, IReadOnlyList<string>? explicitArgs, string? target = "container")
+    private static (string Executable, IReadOnlyList<string> Arguments) ResolveShell(string? explicitExe, IReadOnlyList<string>? explicitArgs, string? target = "container", string? workingDirectory = null)
     {
         if (!string.IsNullOrWhiteSpace(explicitExe))
             return (explicitExe, explicitArgs ?? []);
@@ -90,8 +90,15 @@ public sealed class CrossPlatformPtyEngine : IPtyEngine
             var nsenter = File.Exists("/usr/bin/nsenter") ? "/usr/bin/nsenter" : (File.Exists("/bin/nsenter") ? "/bin/nsenter" : null);
             if (nsenter != null && Directory.Exists("/proc/1/ns"))
             {
+                var targetCwd = !string.IsNullOrWhiteSpace(workingDirectory) ? workingDirectory : "/root";
                 var envExe = File.Exists("/usr/bin/env") ? "/usr/bin/env" : "/bin/env";
-                return (nsenter, ["-t", "1", "-m", "-u", "-i", "-n", "-p", "--wd=/root", "--", envExe, "-u", "LC_ALL", "LANG=C.UTF-8", "/bin/bash", "--login"]);
+                return (nsenter, [
+                    "-t", "1", "-m", "-u", "-i", "-n", "-p", "--",
+                    envExe, "-u", "LC_ALL", "LANG=C.UTF-8",
+                    "/bin/sh", "-c", "cd \"$1\" 2>/dev/null || cd /root 2>/dev/null || cd /; exec /bin/bash --login",
+                    "sh",
+                    targetCwd
+                ]);
             }
         }
 

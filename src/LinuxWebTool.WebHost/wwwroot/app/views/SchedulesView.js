@@ -351,7 +351,7 @@ export default defineComponent({
               <th class="w-8 whitespace-nowrap"></th>
               <th class="whitespace-nowrap">任务名称</th>
               <th class="whitespace-nowrap">目标对象</th>
-              <th class="whitespace-nowrap">执行节点</th>
+              <th class="whitespace-nowrap">执行目标</th>
               <th class="whitespace-nowrap">Cron 计划</th>
               <th class="whitespace-nowrap">分组</th>
               <th class="whitespace-nowrap">状态</th>
@@ -386,7 +386,7 @@ export default defineComponent({
                 </template>
                 <template v-else>
                   <span v-if="task.executionTarget === 'host'" class="badge border-amber-500/50 text-amber-300">🖥️ 宿主主机</span>
-                  <span v-else class="badge border-slate-600/50 text-slate-400">🖥️ 本地执行</span>
+                  <span v-else class="badge border-slate-600/50 text-slate-400">📦 当前容器</span>
                 </template>
               </td>
               <td><span class="badge border-violet-500/50 text-violet-300 font-mono">{{ task.cronExpression }}</span></td>
@@ -457,16 +457,21 @@ export default defineComponent({
                   <button class="btn btn-xs flex-1" :class="Number(form.targetHostMode) === 1 ? 'btn-primary' : ''" @click="form.targetHostMode = 1">🌐 远端单主机</button>
                   <button class="btn btn-xs flex-1" :class="Number(form.targetHostMode) === 2 ? 'btn-primary' : ''" @click="form.targetHostMode = 2">🌐 多主机分发</button>
                 </div>
-                <div v-if="Number(form.targetHostMode) === 0 && isPrivilegedContainer" class="flex items-center gap-4 mt-1.5 p-2 rounded bg-slate-950/60 border border-cyber-line/40 text-xs">
-                  <span class="text-slate-400">穿透目标:</span>
-                  <label class="flex items-center gap-1.5 cursor-pointer text-slate-300">
-                    <input type="radio" v-model="form.executionTarget" value="container" class="accent-cyan-400" />
-                    <span>📦 当前容器</span>
-                  </label>
-                  <label class="flex items-center gap-1.5 cursor-pointer text-slate-300">
-                    <input type="radio" v-model="form.executionTarget" value="host" class="accent-cyan-400" />
-                    <span>🖥️ 宿主主机 (nsenter穿透)</span>
-                  </label>
+                <div v-if="Number(form.targetHostMode) === 0 && isPrivilegedContainer" class="flex flex-col gap-1 p-2 rounded bg-slate-950/60 border border-cyber-line/40 text-xs">
+                  <div class="flex items-center justify-between">
+                    <span class="text-slate-400 font-medium">执行目标 (Target):</span>
+                    <span class="text-[10px] text-cyan-400 font-mono">特权容器穿透</span>
+                  </div>
+                  <div class="flex items-center gap-4 mt-0.5">
+                    <label class="flex items-center gap-1.5 cursor-pointer text-slate-300">
+                      <input type="radio" v-model="form.executionTarget" value="container" class="accent-cyan-400" />
+                      <span>📦 当前容器</span>
+                    </label>
+                    <label class="flex items-center gap-1.5 cursor-pointer text-slate-300">
+                      <input type="radio" v-model="form.executionTarget" value="host" class="accent-cyan-400" />
+                      <span>🖥️ 宿主主机 (nsenter穿透)</span>
+                    </label>
+                  </div>
                 </div>
                 <div v-if="Number(form.targetHostMode) === 1" class="mt-1">
                   <select class="input text-xs" v-model="form.targetHostId">
