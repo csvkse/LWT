@@ -124,6 +124,8 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<ExecutionStrategyResolver>();
         builder.Services.AddSingleton<IWorkflowActivity, ShellCommandActivity>();
         builder.Services.AddSingleton<IWorkflowActivity, HttpWebhookActivity>();
+        builder.Services.AddSingleton<IWorkflowActivity, ExtensionActionActivity>();
+        builder.Services.AddSingleton<IWorkflowActivity, WorkerServiceActivity>();
         builder.Services.AddSingleton<ActivityRegistry>();
         builder.Services.AddSingleton<IUnifiedExecutionEngine, UnifiedExecutionEngine>();
 
@@ -214,6 +216,8 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<IMcpToolProvider, TranscodeMcpToolProvider>();
         builder.Services.AddSingleton<IMcpToolProvider, GatewayMcpToolProvider>();
         builder.Services.AddSingleton<IMcpToolProvider, RemoteHostMcpToolProvider>();
+        builder.Services.AddSingleton<IMcpToolProvider, ServicesMcpToolProvider>();
+        builder.Services.AddSingleton<IMcpToolProvider, WorkersMcpToolProvider>();
         builder.Services.AddSingleton<McpServerEngine>();
 
         // EasyTier 虚拟组网管理器与内核宿主

@@ -59,6 +59,14 @@ public sealed partial class WorkersManager
             // 拷贝全部文件至目标目录
             CopyDirectory(sourceDir, targetDir, overwrite: true);
 
+            var sourceMeta = new WorkerSourceMetadata
+            {
+                SourceType = "zip",
+                InstalledVersion = manifest.Version,
+                InstalledAt = DateTime.UtcNow
+            };
+            await File.WriteAllTextAsync(Path.Combine(targetDir, "source.json"), JsonSerializer.Serialize(sourceMeta, WorkerJsonContext.Default.WorkerSourceMetadata), ct);
+
             return BuildDto(manifest, targetDir);
         }
         finally
@@ -74,8 +82,18 @@ public sealed partial class WorkersManager
         }
     }
 
-    public async ValueTask<WorkerRepoScanResult> ScanRepoAsync(string repoUrl, CancellationToken ct = default)
+    public async ValueTask<WorkerRepoScanResult> ScanRepoAsync(string repoUrl, string? targetType = null, CancellationToken ct = default)
     {
+        if (string.Equals(targetType, "extension", StringComparison.OrdinalIgnoreCase))
+        {
+            return new WorkerRepoScanResult
+            {
+                RepoUrl = repoUrl,
+                TempDirectory = string.Empty,
+                Modules = []
+            };
+        }
+
         var tempDir = Path.Combine(Path.GetTempPath(), "lwt_worker_repo_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
 
@@ -87,6 +105,8 @@ public sealed partial class WorkersManager
             {
                 throw new InvalidOperationException($"无法拉取或克隆 Git 仓库: {repoUrl}，请检查网络或仓库地址有效性。");
             }
+
+            await File.WriteAllTextAsync(Path.Combine(tempDir, ".lwt_scan_meta.json"), repoUrl, ct);
 
             var manifestFiles = Directory.GetFiles(tempDir, "worker.json", SearchOption.AllDirectories);
             var items = new List<WorkerRepoScanItem>();
@@ -141,6 +161,9 @@ public sealed partial class WorkersManager
         var count = 0;
         try
         {
+            var metaFile = Path.Combine(request.TempDirectory, ".lwt_scan_meta.json");
+            var repoUrl = request.RepoUrl ?? (File.Exists(metaFile) ? File.ReadAllText(metaFile).Trim() : null);
+
             var manifestFiles = Directory.GetFiles(request.TempDirectory, "worker.json", SearchOption.AllDirectories);
             foreach (var mf in manifestFiles)
             {
@@ -154,6 +177,7 @@ public sealed partial class WorkersManager
                     }
 
                     var sourceDir = Path.GetDirectoryName(mf)!;
+                    var relPath = Path.GetRelativePath(request.TempDirectory, sourceDir).Replace('\\', '/');
                     var targetDir = Path.Combine(_workersRoot, manifest.Id);
 
                     if (Directory.Exists(targetDir) && !request.OverwriteExisting)
@@ -163,6 +187,19 @@ public sealed partial class WorkersManager
 
                     Directory.CreateDirectory(targetDir);
                     CopyDirectory(sourceDir, targetDir, overwrite: true);
+
+                    if (!string.IsNullOrWhiteSpace(repoUrl))
+                    {
+                        var sourceMeta = new WorkerSourceMetadata
+                        {
+                            SourceType = "git",
+                            RepoUrl = repoUrl,
+                            SubDirectory = relPath,
+                            InstalledVersion = manifest.Version,
+                            InstalledAt = DateTime.UtcNow
+                        };
+                        File.WriteAllText(Path.Combine(targetDir, "source.json"), JsonSerializer.Serialize(sourceMeta, WorkerJsonContext.Default.WorkerSourceMetadata));
+                    }
                     count++;
                 }
                 catch (Exception ex)

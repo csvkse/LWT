@@ -100,6 +100,13 @@ public static class PipelineExtensions
             IHttpClientFactory httpClientFactory) =>
         {
             var worker = await workersManager.GetByIdAsync(workerId, context.RequestAborted);
+            if (worker != null && !worker.IsEnabled)
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                context.Response.ContentType = "application/json; charset=utf-8";
+                await context.Response.WriteAsync($"{{\"code\":503,\"message\":\"Service Disabled: Worker '{workerId}' is explicitly disabled.\"}}");
+                return;
+            }
             if (worker == null || !worker.BoundPort.HasValue || worker.State != LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerState.Running)
             {
                 context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;

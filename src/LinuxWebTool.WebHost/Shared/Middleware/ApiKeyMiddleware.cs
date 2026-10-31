@@ -132,11 +132,20 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
         if (path.StartsWith("/api/Auth", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/api/ApiKeys", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/api/FrpTunnel", StringComparison.OrdinalIgnoreCase) ||
-            path.StartsWith("/api/EasyTier", StringComparison.OrdinalIgnoreCase) ||
-            path.StartsWith("/api/Services", StringComparison.OrdinalIgnoreCase) ||
-            path.StartsWith("/api/Workers", StringComparison.OrdinalIgnoreCase))
+            path.StartsWith("/api/EasyTier", StringComparison.OrdinalIgnoreCase))
         {
             return false;
+        }
+
+        // 1.1 服务与函数服务模块
+        if (path.StartsWith("/api/Services", StringComparison.OrdinalIgnoreCase))
+        {
+            return entity.AllowServices;
+        }
+
+        if (path.StartsWith("/api/Workers", StringComparison.OrdinalIgnoreCase))
+        {
+            return entity.AllowWorkers;
         }
 
         // 2. 指令与终端模块

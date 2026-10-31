@@ -38,12 +38,12 @@ public sealed class McpTwoLevelTreeAndDispatchUnitTests : IDisposable
     }
 
     [Fact]
-    public void McpCatalogRegistry_ContainsAllEightCategoriesWithValidRiskLevels()
+    public void McpCatalogRegistry_ContainsAllTenCategoriesWithValidRiskLevels()
     {
         var catalog = McpCatalogRegistry.GetCatalog();
-        Assert.Equal(8, catalog.Count);
+        Assert.Equal(10, catalog.Count);
 
-        var expectedCategories = new[] { "commands", "workflows", "schedules", "terminal", "remote_hosts", "files", "transcode", "gateway" };
+        var expectedCategories = new[] { "commands", "workflows", "schedules", "terminal", "remote_hosts", "files", "transcode", "gateway", "services", "workers" };
         var actualKeys = catalog.Select(c => c.Key).ToList();
         foreach (var exp in expectedCategories)
         {
@@ -83,7 +83,7 @@ public sealed class McpTwoLevelTreeAndDispatchUnitTests : IDisposable
         // 验证反序列化恢复
         var restored = JsonSerializer.Deserialize(json, LinuxWebTool.WebHost.Composition.AppJsonSerializerContext.Default.ListMcpCategoryCatalog);
         Assert.NotNull(restored);
-        Assert.Equal(8, restored.Count);
+        Assert.Equal(10, restored.Count);
         Assert.All(restored, c => Assert.IsType<List<McpToolCatalogItem>>(c.Tools));
     }
 

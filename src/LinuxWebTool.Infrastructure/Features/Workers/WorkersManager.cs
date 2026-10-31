@@ -114,6 +114,12 @@ public sealed partial class WorkersManager : IWorkersManager, IHostedService
         var manifest = JsonSerializer.Deserialize(json, WorkerJsonContext.Default.WorkerManifest);
         if (manifest == null) return false;
 
+        if (!manifest.IsEnabled || File.Exists(Path.Combine(dir, ".disabled")))
+        {
+            _logger.LogWarning("Worker {Id} 已被显式禁用，无法启动。", id);
+            return false;
+        }
+
         var sm = _stateMachines.GetOrAdd(id, _ => new WorkerStateMachine(id, manifest.Supervision));
         sm.Reset();
         return StartProcessInternal(manifest, dir, sm);
@@ -303,6 +309,12 @@ public sealed partial class WorkersManager : IWorkersManager, IHostedService
 
         if (sm.State == WorkerState.Stopped) return; // 用户主动停止
 
+        if (!manifest.IsEnabled || File.Exists(Path.Combine(dir, ".disabled")))
+        {
+            logBuffer.AppendLine("Worker 已被显式禁用，取消自动拉起守护。");
+            return;
+        }
+
         var (shouldRestart, delay, nextState) = sm.RecordExit(exitCode);
         if (!manifest.Supervision.AutoRestart || !shouldRestart)
         {
@@ -336,6 +348,19 @@ public sealed partial class WorkersManager : IWorkersManager, IHostedService
         var sqlitePath = Path.Combine(dir, "data.db");
         var kvPath = Path.Combine(dir, "kv.db");
 
+        var isEnabled = manifest.IsEnabled && !File.Exists(Path.Combine(dir, ".disabled"));
+        WorkerSourceMetadata? source = null;
+        var sourceFile = Path.Combine(dir, "source.json");
+        if (File.Exists(sourceFile))
+        {
+            try
+            {
+                var sJson = File.ReadAllText(sourceFile);
+                source = JsonSerializer.Deserialize(sJson, WorkerJsonContext.Default.WorkerSourceMetadata);
+            }
+            catch { }
+        }
+
         return new WorkerInstanceDto
         {
             Id = manifest.Id,
@@ -346,7 +371,7 @@ public sealed partial class WorkersManager : IWorkersManager, IHostedService
             Mode = manifest.Mode,
             Runtime = manifest.Runtime,
             Entrypoint = manifest.Entrypoint,
-            State = state,
+            State = isEnabled ? state : WorkerState.Stopped,
             ProcessId = isAlive ? ctx!.Process.Id : null,
             BoundPort = boundPort,
             AccessUrl = accessUrl,
@@ -359,7 +384,9 @@ public sealed partial class WorkersManager : IWorkersManager, IHostedService
             EnableKv = manifest.Storage.EnableKv,
             SqliteSizeBytes = File.Exists(sqlitePath) ? new FileInfo(sqlitePath).Length : 0,
             KvSizeBytes = File.Exists(kvPath) ? new FileInfo(kvPath).Length : 0,
-            DataDirectory = dir
+            DataDirectory = dir,
+            IsEnabled = isEnabled,
+            Source = source
         };
     }
 

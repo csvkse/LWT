@@ -17,7 +17,11 @@ public interface IWorkersManager
     ValueTask<IReadOnlyList<WorkerKvItem>> GetKvListAsync(string id, CancellationToken ct = default);
     ValueTask<bool> SetKvAsync(string id, WorkerKvItem item, CancellationToken ct = default);
     ValueTask<bool> DeleteKvAsync(string id, string key, CancellationToken ct = default);
-    ValueTask<WorkerRepoScanResult> ScanRepoAsync(string repoUrl, CancellationToken ct = default);
+    ValueTask<WorkerRepoScanResult> ScanRepoAsync(string repoUrl, string? targetType = null, CancellationToken ct = default);
     ValueTask<int> ApplyRepoModulesAsync(WorkerRepoApplyRequest request, CancellationToken ct = default);
     ValueTask<WorkerInstanceDto> ImportZipAsync(Stream zipStream, CancellationToken ct = default);
+    ValueTask<bool> SetEnabledAsync(string id, bool enabled, CancellationToken ct = default);
+    ValueTask<WorkerUpdateCheckResponse> CheckUpdateAsync(string id, CancellationToken ct = default);
+    ValueTask<WorkerHotUpdateResponse> HotUpdateAsync(string id, WorkerHotUpdateRequest request, CancellationToken ct = default);
+    ValueTask<WorkerSourceMetadata?> GetSourceMetadataAsync(string id, CancellationToken ct = default);
 }

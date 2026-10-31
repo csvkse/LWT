@@ -27,6 +27,8 @@ public class ApiKeysController(
             k.AllowTranscode,
             k.AllowGateway,
             k.AllowRemoteHosts,
+            k.AllowServices,
+            k.AllowWorkers,
             k.AllowedPaths,
             k.AllowedHostIds,
             k.CreatedAt,
@@ -61,6 +63,8 @@ public class ApiKeysController(
             entity.AllowTranscode,
             entity.AllowGateway,
             entity.AllowRemoteHosts,
+            entity.AllowServices,
+            entity.AllowWorkers,
             entity.AllowedPaths,
             entity.AllowedHostIds,
             entity.CreatedAt,
@@ -89,6 +93,8 @@ public class ApiKeysController(
         entity.AllowTranscode = request.AllowTranscode;
         entity.AllowGateway = request.AllowGateway;
         entity.AllowRemoteHosts = request.AllowRemoteHosts;
+        entity.AllowServices = request.AllowServices;
+        entity.AllowWorkers = request.AllowWorkers;
         entity.AllowedPaths = string.IsNullOrWhiteSpace(request.AllowedPaths) ? null : request.AllowedPaths.Trim();
         entity.AllowedHostIds = string.IsNullOrWhiteSpace(request.AllowedHostIds) ? null : request.AllowedHostIds.Trim();
         entity.AllowedTools = request.AllowedTools != null && request.AllowedTools.Count > 0 ? string.Join(",", request.AllowedTools) : null;
@@ -157,6 +163,8 @@ public class ApiKeysController(
             source.AllowTranscode,
             source.AllowGateway,
             source.AllowRemoteHosts,
+            source.AllowServices,
+            source.AllowWorkers,
             source.AllowedPaths,
             source.AllowedHostIds,
             request?.ExpiresAt ?? source.ExpiresAt,
@@ -178,6 +186,8 @@ public class ApiKeysController(
             entity.AllowTranscode,
             entity.AllowGateway,
             entity.AllowRemoteHosts,
+            entity.AllowServices,
+            entity.AllowWorkers,
             entity.AllowedPaths,
             entity.AllowedHostIds,
             entity.CreatedAt,

@@ -36,6 +36,34 @@ public sealed class ApiKeyPermissionMatrixTests
     }
 
     [Theory]
+    [InlineData("services", true, false, true)]
+    [InlineData("services", false, false, false)]
+    [InlineData("service", true, false, true)]
+    [InlineData("workers", false, true, true)]
+    [InlineData("workers", false, false, false)]
+    [InlineData("worker", false, true, true)]
+    public void CanExecuteModule_ServicesAndWorkers_EvaluatesAccurately(
+        string module, bool allowServices, bool allowWorkers, bool expected)
+    {
+        var result = ApiKeyPermissionMatrix.CanExecuteModule(
+            false, false, false, false, false, false, allowServices, allowWorkers, module);
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("services_list_extensions", true, false, true)]
+    [InlineData("services_list_extensions", false, false, false)]
+    [InlineData("workers_list", false, true, true)]
+    [InlineData("workers_start", false, false, false)]
+    public void IsMcpToolPermitted_ServicesAndWorkers_EvaluatesAccurately(
+        string tool, bool allowServices, bool allowWorkers, bool expected)
+    {
+        var result = ApiKeyPermissionMatrix.IsMcpToolPermitted(
+            tool, false, false, false, false, false, false, allowServices, allowWorkers);
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
     [InlineData("terminal_create", true, false, false, false, false, false, true)]
     [InlineData("terminal_create", false, false, false, false, false, false, false)]
     [InlineData("command_run", true, false, false, false, false, false, true)]

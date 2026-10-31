@@ -16,6 +16,8 @@ public class ApiKeyEntity
     public bool AllowTranscode { get; set; } = false;
     public bool AllowGateway { get; set; } = false;
     public bool AllowRemoteHosts { get; set; } = false;
+    public bool AllowServices { get; set; } = false;
+    public bool AllowWorkers { get; set; } = false;
     public string? AllowedPaths { get; set; }
     public string? AllowedHostIds { get; set; }
     public string? AllowedTools { get; set; }
