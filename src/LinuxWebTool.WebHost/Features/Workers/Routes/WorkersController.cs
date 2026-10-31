@@ -29,8 +29,10 @@ public class WorkersController(IWorkersManager workersManager) : MinimalApi.Cont
     [HttpPost("{id}/Start")]
     public async Task<IResult> Start(string id, CancellationToken ct)
     {
-        var success = await workersManager.StartAsync(id, ct);
-        return success ? Ok(new WorkerOperationResponse(true)) : BadRequest(new WorkerOperationResponse(false, $"启动 Worker '{id}' 失败，请检查日志。"));
+        var (success, errorMsg) = await workersManager.StartWithResultAsync(id, ct);
+        return success
+            ? Ok(new WorkerOperationResponse(true))
+            : BadRequest(new WorkerOperationResponse(false, $"启动 Worker '{id}' 失败: {errorMsg ?? "请检查日志。"}"));
     }
 
     [HttpPost("{id}/Stop")]

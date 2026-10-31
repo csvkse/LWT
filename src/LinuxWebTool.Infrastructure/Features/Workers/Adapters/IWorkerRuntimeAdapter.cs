@@ -22,9 +22,29 @@ public interface IWorkerRuntimeAdapter
     WorkerRuntimeType RuntimeType { get; }
     
     /// <summary>
+    /// 主可执行文件名称。
+    /// </summary>
+    string PrimaryExecutable { get; }
+
+    /// <summary>
+    /// 候选可执行文件名称列表。
+    /// </summary>
+    IReadOnlyList<string> CandidateExecutables { get; }
+
+    /// <summary>
     /// 环境自检：检查当前系统是否安装对应解释器或编译器。
     /// </summary>
     bool CheckAvailable(out string? missingReason);
+
+    /// <summary>
+    /// 环境自检：检查当前系统是否安装对应解释器或编译器，并返回缺失的可执行程序。
+    /// </summary>
+    bool CheckAvailable(out string? missingReason, out IReadOnlyList<string> missingRunners);
+
+    /// <summary>
+    /// 根据当前操作系统发行版解析安装命令指引。
+    /// </summary>
+    string ResolveInstallGuide(string distroKey);
 
     /// <summary>
     /// 构造底层启动参数。

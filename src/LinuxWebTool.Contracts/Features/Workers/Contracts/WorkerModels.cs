@@ -39,7 +39,8 @@ public enum WorkerState
     Running,
     Crashed,
     Backoff,
-    Degraded
+    Degraded,
+    MissingRuntime
 }
 
 /// <summary>
@@ -194,5 +195,6 @@ public sealed record WorkerInstanceDto
     public bool IsEnabled { get; init; } = true;
     public WorkerSourceMetadata? Source { get; init; }
     public IReadOnlyList<string> MissingDependencies { get; init; } = [];
+    public string? InstallGuideText { get; init; }
 }
 

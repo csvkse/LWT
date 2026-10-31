@@ -4,11 +4,13 @@ import { http } from '../api/client.js';
 import { API } from '../config.js';
 import { toast } from '../store/toast.js';
 import WorkerUpdateModal from '../components/workers/WorkerUpdateModal.js';
+import WorkerInstallGuideModal from '../components/workers/WorkerInstallGuideModal.js';
 
 export default defineComponent({
   name: 'WorkersView',
   components: {
     WorkerUpdateModal,
+    WorkerInstallGuideModal,
   },
   setup() {
     const router = useRouter();
@@ -434,6 +436,19 @@ export default defineComponent({
       isUpdateModalOpen.value = true;
     }
 
+    const isInstallGuideModalOpen = ref(false);
+    const selectedGuideWorker = ref(null);
+
+    function openInstallGuideModal(w) {
+      selectedGuideWorker.value = w;
+      isInstallGuideModalOpen.value = true;
+    }
+
+    function closeInstallGuideModal() {
+      isInstallGuideModalOpen.value = false;
+      selectedGuideWorker.value = null;
+    }
+
     async function toggleWorkerEnabled(w) {
       const next = !w.isEnabled;
       try {
@@ -511,6 +526,10 @@ export default defineComponent({
       currentWorkerForUpdate,
       openUpdateModal,
       toggleWorkerEnabled,
+      isInstallGuideModalOpen,
+      selectedGuideWorker,
+      openInstallGuideModal,
+      closeInstallGuideModal,
     };
   },
   template: `
@@ -744,6 +763,13 @@ export default defineComponent({
                   ⏳ 退避重试中
                 </span>
                 <span
+                  v-else-if="w.state === 6 || (w.missingDependencies && w.missingDependencies.length > 0)"
+                  class="badge border-amber-500/50 bg-amber-500/10 text-amber-300 text-xs flex items-center gap-1"
+                  :title="w.lastError || ('缺少运行依赖: ' + (w.missingDependencies || []).join(', '))"
+                >
+                  <span>⚠️ 缺少运行时</span>
+                </span>
+                <span
                   v-else-if="w.state === 5"
                   class="badge border-rose-500/50 bg-rose-500/10 text-rose-300 text-xs flex items-center gap-1"
                   :title="w.lastError"
@@ -858,6 +884,15 @@ export default defineComponent({
                 ⏹ 停止
               </button>
               <button
+                v-else-if="w.state === 6 || (w.missingDependencies && w.missingDependencies.length > 0)"
+                type="button"
+                class="btn btn-xs border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
+                title="查看运行环境依赖安装指引"
+                @click="openInstallGuideModal(w)"
+              >
+                🛠️ 安装引导
+              </button>
+              <button
                 v-else
                 type="button"
                 class="btn btn-xs btn-primary"
@@ -870,7 +905,7 @@ export default defineComponent({
               <button
                 type="button"
                 class="btn btn-xs border-slate-700 hover:border-slate-600 text-slate-300"
-                :disabled="w.isEnabled === false"
+                :disabled="w.isEnabled === false || w.state === 6 || (w.missingDependencies && w.missingDependencies.length > 0)"
                 @click="restartWorker(w)"
               >
                 🔄 重启
@@ -1222,6 +1257,13 @@ export default defineComponent({
         :worker="currentWorkerForUpdate"
         @close="isUpdateModalOpen = false"
         @updated="loadWorkers()"
+      />
+
+      <!-- 弹窗 6：运行环境依赖安装引导 -->
+      <WorkerInstallGuideModal
+        :show="isInstallGuideModalOpen"
+        :worker="selectedGuideWorker"
+        @close="closeInstallGuideModal()"
       />
     </div>
   `,
