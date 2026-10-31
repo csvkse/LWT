@@ -21,7 +21,7 @@ func buildMinimalEnv(userEnv map[string]string) []string {
 	if runtime.GOOS == "windows" {
 		allowedBase = []string{"PATH", "SYSTEMROOT", "COMSPEC", "TEMP", "TMP", "PATHEXT", "USERPROFILE"}
 	} else {
-		allowedBase = []string{"PATH", "HOME", "USER", "TMPDIR", "LANG"}
+		allowedBase = []string{"PATH", "HOME", "USER", "TMPDIR", "LANG", "LD_LIBRARY_PATH"}
 	}
 
 	for _, key := range allowedBase {
@@ -43,6 +43,7 @@ func buildMinimalEnv(userEnv map[string]string) []string {
 func connectStdio(ctx context.Context, spec *config.BackendSpec) (Session, error) {
 	cmd := exec.Command(spec.Command, spec.Args...)
 	cmd.Env = buildMinimalEnv(spec.Env)
+	cmd.Stderr = os.Stderr
 	if spec.Cwd != "" {
 		cmd.Dir = spec.Cwd
 	}

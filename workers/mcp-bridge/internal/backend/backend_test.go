@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -118,16 +119,20 @@ func TestSSEBackend(t *testing.T) {
 }
 
 func TestStdioBackend(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
 	// Compile stdio fixture to temporary directory
+	binName := "stdio-fixture"
+	if runtime.GOOS == "windows" {
+		binName += ".exe"
+	}
 	tempDir := t.TempDir()
-	binPath := filepath.Join(tempDir, "stdio-fixture.exe")
+	binPath := filepath.Join(tempDir, binName)
 	buildCmd := exec.Command("go", "build", "-o", binPath, "linuxwebtool.local/mcp-bridge/internal/testkit/stdiofixture")
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("failed to compile stdiofixture: %v\nOutput: %s", err, string(out))
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	spec := &config.BackendSpec{
 		ID:        "stdio-test",

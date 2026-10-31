@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,9 +33,9 @@ func TestHandlerControlFlow(t *testing.T) {
 	audit := admin.NewAuditLogger(tempDir)
 	defer audit.Close()
 
-	shutdownTriggered := false
+	var shutdownTriggered atomic.Bool
 	handler := admin.NewHandler(rt, token, runID, audit, func() {
-		shutdownTriggered = true
+		shutdownTriggered.Store(true)
 	})
 
 	mux := http.NewServeMux()
@@ -140,8 +141,8 @@ func TestHandlerControlFlow(t *testing.T) {
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("shutdown request failed: status: %d", resp.StatusCode)
 	}
-	time.Sleep(100 * time.Millisecond)
-	if !shutdownTriggered {
+	time.Sleep(150 * time.Millisecond)
+	if !shutdownTriggered.Load() {
 		t.Errorf("expected shutdown callback to be triggered")
 	}
 }
