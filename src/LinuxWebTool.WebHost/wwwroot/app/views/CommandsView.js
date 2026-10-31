@@ -450,9 +450,9 @@ export default defineComponent({
               <option value="">🖥️ 本地主机</option>
               <option v-for="h in remoteHosts" :key="h.id" :value="h.id">🌐 {{ h.name || h.host }}</option>
             </select>
-            <select v-if="!quickTargetHostId && isPrivilegedContainer" class="input !w-28 !py-1 text-xs text-amber-300 border-amber-500/40" v-model="quickExecutionTarget">
-              <option value="container">📦 容器</option>
-              <option value="host">🖥️ 宿主</option>
+            <select v-if="!quickTargetHostId && isPrivilegedContainer" class="input !w-32 !py-1 text-xs text-amber-300 border-amber-500/40" v-model="quickExecutionTarget">
+              <option value="container">📦 当前容器</option>
+              <option value="host">🖥️ 宿主主机</option>
             </select>
             <label class="text-xs text-slate-500">超时(秒)</label>
             <input class="input !w-20 !py-1" type="number" min="1" max="86400" v-model="quickTimeout" />
@@ -496,8 +496,8 @@ export default defineComponent({
                     {{ getHostLabel(command.defaultTargetHostId) }}
                   </span>
                   <template v-else>
-                    <span v-if="command.executionTarget === 'host'" class="badge border-amber-500/50 text-amber-300 !text-[0.625rem]">🖥️ 宿主</span>
-                    <span v-else class="badge border-slate-600/50 text-slate-400 !text-[0.625rem]">📦 容器</span>
+                    <span v-if="command.executionTarget === 'host'" class="badge border-amber-500/50 text-amber-300 !text-[0.625rem]">🖥️ 宿主主机</span>
+                    <span v-else class="badge border-slate-600/50 text-slate-400 !text-[0.625rem]">📦 当前容器</span>
                   </template>
                 </div>
                 <div class="font-mono text-xs text-cyan-300/80 break-all mt-0.5"

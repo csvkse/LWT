@@ -143,4 +143,16 @@ public class HostTargetAndPrivilegedExecutionTests
 
         Assert.Equal("host", resp.ExecutionTarget);
     }
+
+    [Fact]
+    public void CrossPlatformPtyEngine_HostTarget_BuildsDanglingFreeShellArgs()
+    {
+        var resolveShellMethod = typeof(LinuxWebTool.Infrastructure.Features.Terminal.Platform.CrossPlatformPtyEngine)
+            .GetMethod("ResolveShell", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(resolveShellMethod);
+
+        var result = resolveShellMethod.Invoke(null, [null, null, "host", "/var/log"]);
+        Assert.NotNull(result);
+        Assert.True(result is ValueTuple<string, IReadOnlyList<string>>);
+    }
 }

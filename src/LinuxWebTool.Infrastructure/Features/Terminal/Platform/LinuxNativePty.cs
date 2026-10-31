@@ -32,7 +32,10 @@ internal static class LinuxNativePty
             foreach (var (key, value) in options.EnvironmentVariables) environment[key] = value;
         using var argv = new NativeStrings(new[] { path }.Concat(args));
         using var envp = new NativeStrings(environment.Select(entry => entry.Key + "=" + entry.Value));
-        var pid = StartNative(path, argv.Pointer, envp.Pointer, options.WorkingDirectory,
+        var effectiveCwd = string.Equals(options.Target, "host", StringComparison.OrdinalIgnoreCase)
+            ? "/"
+            : options.WorkingDirectory;
+        var pid = StartNative(path, argv.Pointer, envp.Pointer, effectiveCwd,
             Math.Clamp(options.Columns, 1, 500), Math.Clamp(options.Rows, 1, 200), out var fd);
         if (pid < 0) throw new Win32Exception(-pid, "无法启动 Linux PTY");
         return new LinuxPtySession(id, pid, fd);
