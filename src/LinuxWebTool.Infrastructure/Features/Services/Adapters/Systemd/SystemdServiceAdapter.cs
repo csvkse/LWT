@@ -16,15 +16,18 @@ public sealed class SystemdServiceAdapter : ISystemdServiceAdapter
 {
     private readonly IShellExecutor _shellExecutor;
     private readonly IServiceEnvironmentDetector _envDetector;
+    private readonly ISystemdUnitCategorizer _categorizer;
     private readonly ILogger<SystemdServiceAdapter> _logger;
 
     public SystemdServiceAdapter(
         IShellExecutor shellExecutor,
         IServiceEnvironmentDetector envDetector,
+        ISystemdUnitCategorizer categorizer,
         ILogger<SystemdServiceAdapter> logger)
     {
         _shellExecutor = shellExecutor;
         _envDetector = envDetector;
+        _categorizer = categorizer;
         _logger = logger;
     }
 
@@ -83,10 +86,26 @@ public sealed class SystemdServiceAdapter : ISystemdServiceAdapter
             var sub = parts[3];
             var desc = parts.Length > 4 ? string.Join(' ', parts.Skip(4)) : "";
 
+            var (category, scope) = _categorizer.Categorize(unit, desc);
+
             // 过滤匹配
             if (!string.IsNullOrWhiteSpace(criteria.ActiveState) &&
                 !criteria.ActiveState.Equals("all", StringComparison.OrdinalIgnoreCase) &&
                 !active.Equals(criteria.ActiveState, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(criteria.Category) &&
+                !criteria.Category.Equals("all", StringComparison.OrdinalIgnoreCase) &&
+                !category.Equals(criteria.Category, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(criteria.Scope) &&
+                !criteria.Scope.Equals("all", StringComparison.OrdinalIgnoreCase) &&
+                !scope.Equals(criteria.Scope, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -107,7 +126,9 @@ public sealed class SystemdServiceAdapter : ISystemdServiceAdapter
                 LoadState = load,
                 ActiveState = active,
                 SubState = sub,
-                Description = desc
+                Description = desc,
+                Category = category,
+                Scope = scope
             });
         }
 
@@ -251,6 +272,29 @@ public sealed class SystemdServiceAdapter : ISystemdServiceAdapter
                 var statusStr = statusNum == 4 ? "running" : (statusNum == 1 ? "stopped" : "paused");
                 var activeStr = statusNum == 4 ? "active" : "inactive";
 
+                var (category, scope) = _categorizer.Categorize(name, displayName);
+
+                if (!string.IsNullOrWhiteSpace(criteria.ActiveState) &&
+                    !criteria.ActiveState.Equals("all", StringComparison.OrdinalIgnoreCase) &&
+                    !activeStr.Equals(criteria.ActiveState, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(criteria.Category) &&
+                    !criteria.Category.Equals("all", StringComparison.OrdinalIgnoreCase) &&
+                    !category.Equals(criteria.Category, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(criteria.Scope) &&
+                    !criteria.Scope.Equals("all", StringComparison.OrdinalIgnoreCase) &&
+                    !scope.Equals(criteria.Scope, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 if (!string.IsNullOrWhiteSpace(criteria.FilterKeyword))
                 {
                     var kw = criteria.FilterKeyword.Trim();
@@ -267,7 +311,9 @@ public sealed class SystemdServiceAdapter : ISystemdServiceAdapter
                     LoadState = "loaded",
                     ActiveState = activeStr,
                     SubState = statusStr,
-                    Description = displayName
+                    Description = displayName,
+                    Category = category,
+                    Scope = scope
                 });
             }
 

@@ -199,11 +199,13 @@ export const API = {
   },
   services: {
     environment: '/Services/Environment',
-    systemdUnits: (keyword, state, type) => {
+    systemdUnits: (keyword, state, type, category, scope) => {
       const params = new URLSearchParams();
       if (keyword) params.set('keyword', keyword);
       if (state && state !== 'all') params.set('state', state);
       if (type && type !== 'all') params.set('type', type);
+      if (category && category !== 'all') params.set('category', category);
+      if (scope && scope !== 'all') params.set('scope', scope);
       const qs = params.toString();
       return `/Services/Systemd/Units${qs ? '?' + qs : ''}`;
     },

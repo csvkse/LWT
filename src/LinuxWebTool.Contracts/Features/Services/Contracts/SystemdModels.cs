@@ -12,6 +12,8 @@ public sealed record SystemdUnitItem
     public string? UnitFileState { get; init; }
     public string? Description { get; init; }
     public int? MainPid { get; init; }
+    public string Category { get; init; } = "other";
+    public string Scope { get; init; } = "system";
 }
 
 /// <summary>
@@ -22,6 +24,8 @@ public sealed record SystemdQueryCriteria
     public string? FilterKeyword { get; init; }
     public string? ActiveState { get; init; } // active, inactive, failed, all
     public string? UnitType { get; init; } // service, timer, socket, etc.
+    public string? Category { get; init; } // all, app, system, network, storage, other
+    public string? Scope { get; init; } // all, system, user
 }
 
 /// <summary>

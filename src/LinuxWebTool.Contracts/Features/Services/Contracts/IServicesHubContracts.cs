@@ -9,6 +9,14 @@ public interface IServiceEnvironmentDetector
 }
 
 /// <summary>
+/// Systemd 单元智能分类器接口（微秒级内存启发式规则引擎）。
+/// </summary>
+public interface ISystemdUnitCategorizer
+{
+    (string Category, string Scope) Categorize(string unitName, string? description = null);
+}
+
+/// <summary>
 /// Systemd 服务适配器接口（双模：本地原生 Linux + 特权容器 nsenter 宿主穿透 + Windows 降级）。
 /// </summary>
 public interface ISystemdServiceAdapter

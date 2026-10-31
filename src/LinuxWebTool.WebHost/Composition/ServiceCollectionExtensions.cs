@@ -98,6 +98,7 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<IShellExecutor, ShellExecutor>();
 
         // 系统与服务管理中枢 (Services Hub)
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.ISystemdUnitCategorizer, LinuxWebTool.Infrastructure.Features.Services.Adapters.Systemd.SystemdUnitCategorizer>();
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IServiceEnvironmentDetector, LinuxWebTool.Infrastructure.Features.Services.Detectors.ServiceEnvironmentDetector>();
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.ISystemdServiceAdapter, LinuxWebTool.Infrastructure.Features.Services.Adapters.Systemd.SystemdServiceAdapter>();
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IDockerEngineAdapter, LinuxWebTool.Infrastructure.Features.Services.Adapters.Docker.DockerEngineAdapter>();
