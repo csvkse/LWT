@@ -5,12 +5,14 @@ import { API } from '../config.js';
 import { toast } from '../store/toast.js';
 import WorkerUpdateModal from '../components/workers/WorkerUpdateModal.js';
 import WorkerInstallGuideModal from '../components/workers/WorkerInstallGuideModal.js';
+import WorkerCodeModal from '../components/workers/WorkerCodeModal.js';
 
 export default defineComponent({
   name: 'WorkersView',
   components: {
     WorkerUpdateModal,
     WorkerInstallGuideModal,
+    WorkerCodeModal,
   },
   setup() {
     const router = useRouter();
@@ -436,6 +438,14 @@ export default defineComponent({
       isUpdateModalOpen.value = true;
     }
 
+    const isCodeModalOpen = ref(false);
+    const currentWorkerForCode = ref(null);
+
+    function openCodeModal(w) {
+      currentWorkerForCode.value = w;
+      isCodeModalOpen.value = true;
+    }
+
     const isInstallGuideModalOpen = ref(false);
     const selectedGuideWorker = ref(null);
 
@@ -530,6 +540,9 @@ export default defineComponent({
       selectedGuideWorker,
       openInstallGuideModal,
       closeInstallGuideModal,
+      isCodeModalOpen,
+      currentWorkerForCode,
+      openCodeModal,
     };
   },
   template: `
@@ -932,6 +945,14 @@ export default defineComponent({
               </button>
               <button
                 type="button"
+                class="btn btn-xs hover:border-amber-500/30 text-amber-300"
+                title="在线编辑代码与调试运行"
+                @click="openCodeModal(w)"
+              >
+                📝 代码
+              </button>
+              <button
+                type="button"
                 class="btn btn-xs border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/10"
                 @click="openLogsDrawer(w)"
               >
@@ -1264,6 +1285,14 @@ export default defineComponent({
         :show="isInstallGuideModalOpen"
         :worker="selectedGuideWorker"
         @close="closeInstallGuideModal()"
+      />
+
+      <!-- 弹窗 7：在线代码编辑与调试运行 -->
+      <WorkerCodeModal
+        :show="isCodeModalOpen"
+        :worker="currentWorkerForCode"
+        @close="isCodeModalOpen = false"
+        @saved="loadWorkers()"
       />
     </div>
   `,

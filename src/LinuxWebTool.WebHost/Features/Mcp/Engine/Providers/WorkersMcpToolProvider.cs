@@ -10,97 +10,11 @@ namespace LinuxWebTool.WebHost.Features.Mcp.Engine.Providers;
 /// <summary>
 /// SaaS 函数微服务与常驻守护平台 (Workers) MCP 工具提供者
 /// </summary>
-public sealed class WorkersMcpToolProvider(
+public sealed partial class WorkersMcpToolProvider(
     IWorkersManager workersManager,
     IHttpClientFactory httpClientFactory,
     IOperationLogger operationLogger) : IMcpToolProvider
 {
-    private static JsonElement Schema(string json) => JsonDocument.Parse(json).RootElement.Clone();
-
-    private static readonly JsonElement EmptyObjectSchema = Schema("""{"type":"object","properties":{}}""");
-
-    private static readonly JsonElement WorkerControlSchema = Schema("""
-    {
-        "type": "object",
-        "properties": {
-            "worker_id": { "type": "string", "description": "Worker 唯一标识 ID" },
-            "action": { "type": "string", "description": "控制动作：start | stop | restart", "enum": ["start", "stop", "restart"] }
-        },
-        "required": ["worker_id", "action"]
-    }
-    """);
-
-    private static readonly JsonElement WorkerInvokeSchema = Schema("""
-    {
-        "type": "object",
-        "properties": {
-            "worker_id": { "type": "string", "description": "Worker 唯一标识 ID" },
-            "sub_path": { "type": "string", "description": "请求子路径，如 api/v1/data，默认为根路径" },
-            "method": { "type": "string", "description": "HTTP 请求方法，如 GET, POST, PUT, DELETE（默认 GET）" },
-            "body": { "type": "string", "description": "请求体 JSON 或文本内容（可选）" }
-        },
-        "required": ["worker_id"]
-    }
-    """);
-
-    private static readonly JsonElement WorkerGetLogsSchema = Schema("""
-    {
-        "type": "object",
-        "properties": {
-            "worker_id": { "type": "string", "description": "Worker 唯一标识 ID" },
-            "lines": { "type": "integer", "description": "读取最新日志行数（默认 50，最大 500）" }
-        },
-        "required": ["worker_id"]
-    }
-    """);
-
-    private static readonly JsonElement WorkerImportSchema = Schema("""
-    {
-        "type": "object",
-        "properties": {
-            "repo_url": { "type": "string", "description": "Git 仓库克隆地址" },
-            "module_ids": {
-                "type": "array",
-                "items": { "type": "string" },
-                "description": "待导入的 Worker 模块 ID 列表"
-            },
-            "overwrite": { "type": "boolean", "description": "若已存在是否覆盖（默认 true）" }
-        },
-        "required": ["repo_url", "module_ids"]
-    }
-    """);
-
-    private static readonly JsonElement WorkerSetEnabledSchema = Schema("""
-    {
-        "type": "object",
-        "properties": {
-            "worker_id": { "type": "string", "description": "Worker 唯一标识 ID" },
-            "enabled": { "type": "boolean", "description": "true 为启用，false 为禁用（禁用时停止进程并暂停守护）" }
-        },
-        "required": ["worker_id", "enabled"]
-    }
-    """);
-
-    private static readonly JsonElement WorkerCheckUpdateSchema = Schema("""
-    {
-        "type": "object",
-        "properties": {
-            "worker_id": { "type": "string", "description": "Worker ID（可选，为空则检查全部）" }
-        }
-    }
-    """);
-
-    private static readonly JsonElement WorkerHotUpdateSchema = Schema("""
-    {
-        "type": "object",
-        "properties": {
-            "worker_id": { "type": "string", "description": "Worker ID" },
-            "force": { "type": "boolean", "description": "是否强制覆盖（默认 false）" }
-        },
-        "required": ["worker_id"]
-    }
-    """);
-
     public string ModuleName => "workers";
 
     public bool IsPermitted(ApiKeyEntity? callerKey) => callerKey == null || callerKey.AllowWorkers;
@@ -116,7 +30,11 @@ public sealed class WorkersMcpToolProvider(
             new McpToolDefinition("worker_import", "从 GitHub/Git 仓库批量导入函数微服务或后台长时守护", WorkerImportSchema),
             new McpToolDefinition("worker_set_enabled", "启用或禁用指定 Worker（禁用时终止进程、关闭网关并暂停自愈）", WorkerSetEnabledSchema),
             new McpToolDefinition("worker_check_update", "检查指定 Worker 或全部 Worker 的最新远程发布版本", WorkerCheckUpdateSchema),
-            new McpToolDefinition("worker_hot_update", "对指定 Worker 执行安全在线热更新（保护 SQLite/KV 数据并带瞬退回滚）", WorkerHotUpdateSchema)
+            new McpToolDefinition("worker_hot_update", "对指定 Worker 执行安全在线热更新（保护 SQLite/KV 数据并带瞬退回滚）", WorkerHotUpdateSchema),
+            new McpToolDefinition("worker_get_code", "查询 Worker 的指定代码文件内容与文件目录列表", WorkerGetCodeSchema),
+            new McpToolDefinition("worker_edit_code", "在线编辑 Worker 代码/配置文件（自动备份快照，可选项保存后自动重启）", WorkerEditCodeSchema),
+            new McpToolDefinition("worker_create", "快速创建全新的 SaaS 函数微服务或常驻后台守护", WorkerCreateSchema),
+            new McpToolDefinition("worker_debug_run", "瞬态沙箱调试执行 Worker，捕获实时标准输出、标准错误与耗时（不干扰生产守护）", WorkerDebugRunSchema)
         ];
     }
 
@@ -152,6 +70,18 @@ public sealed class WorkersMcpToolProvider(
 
             case "worker_hot_update":
                 return await HandleWorkerHotUpdateAsync(args, context);
+
+            case "worker_get_code":
+                return await HandleWorkerGetCodeAsync(args);
+
+            case "worker_edit_code":
+                return await HandleWorkerEditCodeAsync(args, context);
+
+            case "worker_create":
+                return await HandleWorkerCreateAsync(args, context);
+
+            case "worker_debug_run":
+                return await HandleWorkerDebugRunAsync(args);
 
             default:
                 return null;

@@ -31,7 +31,12 @@ public sealed partial class ServicesMcpToolProvider(
             new McpToolDefinition("extension_import", "从 Git 仓库批量导入一个或多个运维扩展服务", ExtensionImportSchema),
             new McpToolDefinition("extension_set_enabled", "启用或禁用指定的运维扩展服务（禁用后拦截动作执行）", ExtensionSetEnabledSchema),
             new McpToolDefinition("extension_check_update", "检查指定或全部运维扩展服务的远程发布版本", ExtensionCheckUpdateSchema),
-            new McpToolDefinition("extension_hot_update", "对指定运维扩展服务执行安全在线热更新（带备份与自动回滚）", ExtensionHotUpdateSchema)
+            new McpToolDefinition("extension_hot_update", "对指定运维扩展服务执行安全在线热更新（带备份与自动回滚）", ExtensionHotUpdateSchema),
+            new McpToolDefinition("extension_get_code", "查询运维扩展的代码脚本与文件目录列表", ExtensionGetCodeSchema),
+            new McpToolDefinition("extension_edit_code", "在线编辑运维扩展代码/配置文件（自动备份快照，安全沙箱限制）", ExtensionEditCodeSchema),
+            new McpToolDefinition("extension_create", "快速创建全新的运维扩展模块（自动生成 manifest.json 与 hooks 目录）", ExtensionCreateSchema),
+            new McpToolDefinition("extension_get_logs", "获取运维扩展服务的持久化或实时执行日志", ExtensionGetLogsSchema),
+            new McpToolDefinition("extension_debug_run", "瞬态沙箱调试执行扩展动作钩子，捕获完整标准输出、标准错误与耗时", ExtensionDebugRunSchema)
         ];
     }
 
@@ -67,6 +72,21 @@ public sealed partial class ServicesMcpToolProvider(
 
             case "extension_hot_update":
                 return await HandleExtensionHotUpdateAsync(args, context);
+
+            case "extension_get_code":
+                return await HandleExtensionGetCodeAsync(args);
+
+            case "extension_edit_code":
+                return await HandleExtensionEditCodeAsync(args, context);
+
+            case "extension_create":
+                return await HandleExtensionCreateAsync(args, context);
+
+            case "extension_get_logs":
+                return await HandleExtensionGetLogsAsync(args);
+
+            case "extension_debug_run":
+                return await HandleExtensionDebugRunAsync(args);
 
             default:
                 return null;

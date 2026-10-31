@@ -99,4 +99,69 @@ public sealed partial class ServicesMcpToolProvider
         "required": ["extension_id"]
     }
     """);
+
+    private static readonly JsonElement ExtensionGetCodeSchema = Schema("""
+    {
+        "type": "object",
+        "properties": {
+            "extension_id": { "type": "string", "description": "扩展服务唯一标识 ID" },
+            "file": { "type": "string", "description": "目标文件相对路径（如 manifest.json, hooks/start.sh, hooks/start.ps1）" }
+        },
+        "required": ["extension_id"]
+    }
+    """);
+
+    private static readonly JsonElement ExtensionEditCodeSchema = Schema("""
+    {
+        "type": "object",
+        "properties": {
+            "extension_id": { "type": "string", "description": "扩展服务唯一标识 ID" },
+            "file": { "type": "string", "description": "目标文件相对路径（如 manifest.json, hooks/start.sh）" },
+            "content": { "type": "string", "description": "待写入的新代码或配置文本" }
+        },
+        "required": ["extension_id", "content"]
+    }
+    """);
+
+    private static readonly JsonElement ExtensionCreateSchema = Schema("""
+    {
+        "type": "object",
+        "properties": {
+            "extension_id": { "type": "string", "description": "扩展服务唯一标识 ID（纯英文字符、数字、连字符）" },
+            "name": { "type": "string", "description": "扩展服务显示名称" },
+            "description": { "type": "string", "description": "扩展服务功能说明" },
+            "runner": { "type": "string", "description": "解释器类型：bash | pwsh | python3 | node", "enum": ["bash", "pwsh", "python3", "node"] },
+            "start_script": { "type": "string", "description": "初始启动钩子脚本内容（可选）" }
+        },
+        "required": ["extension_id", "name"]
+    }
+    """);
+
+    private static readonly JsonElement ExtensionGetLogsSchema = Schema("""
+    {
+        "type": "object",
+        "properties": {
+            "extension_id": { "type": "string", "description": "扩展服务唯一标识 ID" },
+            "lines": { "type": "integer", "description": "读取最新日志行数（默认 100）" }
+        },
+        "required": ["extension_id"]
+    }
+    """);
+
+    private static readonly JsonElement ExtensionDebugRunSchema = Schema("""
+    {
+        "type": "object",
+        "properties": {
+            "extension_id": { "type": "string", "description": "扩展服务唯一标识 ID" },
+            "hook_name": { "type": "string", "description": "钩子动作名称，如 status, start, logs, records（默认 status）" },
+            "params": {
+                "type": "object",
+                "description": "动作参数字典键值对（可选）",
+                "additionalProperties": { "type": "string" }
+            },
+            "timeout_seconds": { "type": "integer", "description": "超时秒数（默认 8 秒，最大 30 秒）" }
+        },
+        "required": ["extension_id"]
+    }
+    """);
 }

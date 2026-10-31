@@ -401,6 +401,15 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerUpdateCheckResponse))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerHotUpdateRequest))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerHotUpdateResponse))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Services.Contracts.ExtensionCodeDto))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Services.Contracts.ExtensionCodeSaveRequest))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Services.Contracts.ExtensionDebugRunRequest))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Services.Contracts.ExtensionCreateRequest))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Services.Contracts.ExtensionDebugRunResultDto))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerCodeDto))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerCodeSaveRequest))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerDebugRunRequest))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerDebugRunResultDto))]
 
 public partial class AppJsonSerializerContext
  : JsonSerializerContext

@@ -128,3 +128,47 @@ public sealed record WorkerRepoScanRequest
     public required string RepoUrl { get; init; }
     public string? TargetType { get; init; } // worker, extension, all
 }
+
+/// <summary>
+/// Worker 代码与文件结构 DTO。
+/// </summary>
+public sealed record WorkerCodeDto
+{
+    public required string WorkerId { get; init; }
+    public required string SelectedFile { get; init; }
+    public required string Content { get; init; }
+    public required IReadOnlyList<string> AvailableFiles { get; init; }
+    public required IReadOnlyList<string> Backups { get; init; }
+}
+
+/// <summary>
+/// Worker 代码保存请求。
+/// </summary>
+public sealed record WorkerCodeSaveRequest
+{
+    public string? FilePath { get; init; }
+    public required string Content { get; init; }
+    public bool RestartAfterSave { get; init; } = true;
+}
+
+/// <summary>
+/// Worker 调试运行请求。
+/// </summary>
+public sealed record WorkerDebugRunRequest
+{
+    public string? Args { get; init; }
+    public int TimeoutSeconds { get; init; } = 8;
+}
+
+/// <summary>
+/// Worker 调试运行结果 DTO。
+/// </summary>
+public sealed record WorkerDebugRunResultDto
+{
+    public required bool Success { get; init; }
+    public required int ExitCode { get; init; }
+    public required string StandardOutput { get; init; }
+    public required string StandardError { get; init; }
+    public required long ElapsedMilliseconds { get; init; }
+}
+

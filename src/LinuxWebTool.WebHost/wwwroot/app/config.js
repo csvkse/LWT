@@ -229,6 +229,10 @@ export const API = {
     extensionCheckUpdate: (id) => `/Services/Extensions/${id}/CheckUpdate`,
     extensionHotUpdate: (id) => `/Services/Extensions/${id}/HotUpdate`,
     extensionSource: (id) => `/Services/Extensions/${id}/Source`,
+    extensionImportZip: '/Services/Extensions/Import/Zip',
+    extensionCode: (id, file) => (file ? `/Services/Extensions/${id}/Code?file=${encodeURIComponent(file)}` : `/Services/Extensions/${id}/Code`),
+    extensionDebug: (id) => `/Services/Extensions/${id}/Debug`,
+    extensionCreate: '/Services/Extensions/Create',
   },
   workers: {
     list: '/Workers',
@@ -249,5 +253,7 @@ export const API = {
     checkUpdate: (id) => `/Workers/${id}/CheckUpdate`,
     hotUpdate: (id) => `/Workers/${id}/HotUpdate`,
     source: (id) => `/Workers/${id}/Source`,
+    code: (id, file) => (file ? `/Workers/${id}/Code?file=${encodeURIComponent(file)}` : `/Workers/${id}/Code`),
+    debug: (id) => `/Workers/${id}/Debug`,
   },
 };

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO.Compression;
 using System.Text.Json;
 using LinuxWebTool.Contracts.Features.Services.Contracts;
 using Microsoft.Extensions.Logging;
@@ -207,6 +208,126 @@ public sealed partial class ScriptExtensionManager
             ImportedExtensionIds = importedIds,
             Errors = errors
         };
+    }
+
+    public async Task<BatchImportModulesResult> ImportZipAsync(Stream zipStream, CancellationToken cancellationToken = default)
+    {
+        var tempExtractDir = Path.Combine(Path.GetTempPath(), "lwt_ext_zip_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempExtractDir);
+
+        var importedIds = new List<string>();
+        var errors = new List<string>();
+
+        try
+        {
+            using (var archive = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Read, leaveOpen: false))
+            {
+                foreach (var entry in archive.Entries)
+                {
+                    if (string.IsNullOrEmpty(entry.Name) && entry.FullName.EndsWith('/'))
+                    {
+                        continue;
+                    }
+
+                    var destinationPath = Path.GetFullPath(Path.Combine(tempExtractDir, entry.FullName));
+                    if (!destinationPath.StartsWith(tempExtractDir, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new System.Security.SecurityException("非法压缩包：检测到潜在的 Zip Slip 路径穿越安全风险！");
+                    }
+
+                    var parentDir = Path.GetDirectoryName(destinationPath);
+                    if (!string.IsNullOrEmpty(parentDir))
+                    {
+                        Directory.CreateDirectory(parentDir);
+                    }
+
+                    entry.ExtractToFile(destinationPath, overwrite: true);
+                }
+            }
+
+            var manifestFiles = Directory.GetFiles(tempExtractDir, "manifest.json", SearchOption.AllDirectories);
+            if (manifestFiles.Length == 0)
+            {
+                return new BatchImportModulesResult
+                {
+                    Success = false,
+                    Message = "导入失败：Zip 压缩包内未找到有效的 manifest.json 清单配置文件。",
+                    Errors = ["未找到 manifest.json"]
+                };
+            }
+
+            foreach (var mFile in manifestFiles)
+            {
+                var sourceDir = Path.GetDirectoryName(mFile)!;
+                try
+                {
+                    var json = await File.ReadAllTextAsync(mFile, cancellationToken);
+                    var manifest = ParseManifest(json, sourceDir);
+                    if (manifest == null || string.IsNullOrWhiteSpace(manifest.Id))
+                    {
+                        errors.Add($"manifest.json 格式无效: {mFile}");
+                        continue;
+                    }
+
+                    var targetDir = Path.Combine(_baseExtensionsDir, manifest.Id);
+
+                    // 保护已有用户的 config.json
+                    string? existingConfigJson = null;
+                    var existingConfigFile = Path.Combine(targetDir, "config.json");
+                    if (File.Exists(existingConfigFile))
+                    {
+                        try { existingConfigJson = await File.ReadAllTextAsync(existingConfigFile, cancellationToken); } catch { }
+                    }
+
+                    if (Directory.Exists(targetDir))
+                    {
+                        Directory.Delete(targetDir, recursive: true);
+                    }
+
+                    Directory.CreateDirectory(targetDir);
+                    CopyDirectoryRecursive(sourceDir, targetDir);
+
+                    if (!string.IsNullOrEmpty(existingConfigJson))
+                    {
+                        await File.WriteAllTextAsync(existingConfigFile, existingConfigJson, cancellationToken);
+                    }
+
+                    var sourceMeta = new ExtensionSourceMetadata
+                    {
+                        SourceType = "zip",
+                        InstalledVersion = manifest.Version,
+                        InstalledAt = DateTime.UtcNow
+                    };
+                    var sourceMetaFile = Path.Combine(targetDir, "source.json");
+                    await File.WriteAllTextAsync(sourceMetaFile, JsonSerializer.Serialize(sourceMeta, ServiceJsonContext.Default.ExtensionSourceMetadata), cancellationToken);
+
+                    importedIds.Add(manifest.Id);
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"导入扩展模块失败 ({Path.GetFileName(sourceDir)}): {ex.Message}");
+                }
+            }
+
+            return new BatchImportModulesResult
+            {
+                Success = importedIds.Count > 0,
+                Message = importedIds.Count > 0 ? $"成功导入 {importedIds.Count} 个扩展" : "未能成功导入任何扩展",
+                ImportedExtensionIds = importedIds,
+                Errors = errors
+            };
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(tempExtractDir))
+                {
+                    Directory.Delete(tempExtractDir, recursive: true);
+                }
+            }
+            catch { }
+        }
     }
     #endregion
 }
