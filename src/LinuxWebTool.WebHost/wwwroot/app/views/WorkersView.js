@@ -307,7 +307,7 @@ export default defineComponent({
         createForm.value.scriptContent = "import os, json\nfrom http.server import HTTPServer, BaseHTTPRequestHandler\nPORT = int(os.environ.get('PORT', 8080))\nclass H(BaseHTTPRequestHandler):\n    def do_GET(self):\n        self.send_response(200)\n        self.end_headers()\n        self.wfile.write(b'{\"status\":\"ok\"}')\nHTTPServer(('0.0.0.0', PORT), H).serve_forever()";
       } else if (r === 2) {
         createForm.value.entrypoint = 'Program.cs';
-        createForm.value.scriptContent = "using System;\nusing System.Net;\nvar p = Environment.GetEnvironmentVariable(\"PORT\") ?? \"8080\";\nvar l = new HttpListener();\nl.Prefixes.Add($\"http://*:{p}/\");\nl.Start();\nwhile(true) {\n  var c = await l.GetContextAsync();\n  c.Response.Close();\n}";
+        createForm.value.scriptContent = "using System;\nusing System.Net;\nvar p = Environment.GetEnvironmentVariable(\"PORT\") ?? \"8080\";\nvar l = new HttpListener();\ntry { l.Prefixes.Add($\"http://*:{p}/\"); l.Start(); }\ncatch (HttpListenerException) { l = new HttpListener(); l.Prefixes.Add($\"http://localhost:{p}/\"); l.Prefixes.Add($\"http://127.0.0.1:{p}/\"); l.Start(); }\nwhile(true) {\n  var c = await l.GetContextAsync();\n  c.Response.Close();\n}";
       } else if (r === 3) {
         createForm.value.mode = 1; // Daemon
         createForm.value.entrypoint = 'worker.sh';

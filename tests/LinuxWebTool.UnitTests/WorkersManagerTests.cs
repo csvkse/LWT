@@ -120,6 +120,57 @@ public class WorkersManagerTests : IDisposable
     }
 
     [Fact]
+    public void DotNetRuntimeAdapter_ShouldBuildCorrectArguments_ForCsAndCsproj()
+    {
+        var csManifest = new WorkerManifest
+        {
+            Id = "cs-worker",
+            Name = "CS Worker",
+            Runtime = WorkerRuntimeType.DotNet,
+            Entrypoint = "Program.cs"
+        };
+        var projManifest = new WorkerManifest
+        {
+            Id = "proj-worker",
+            Name = "Proj Worker",
+            Runtime = WorkerRuntimeType.DotNet,
+            Entrypoint = "MyWorker.csproj"
+        };
+
+        var adapter = new DotNetRuntimeAdapter();
+        var csSpec = adapter.BuildStartSpec(csManifest, "C:\\mock\\path", 18060);
+        var projSpec = adapter.BuildStartSpec(projManifest, "C:\\mock\\path", 18061);
+
+        Assert.Contains("run \"C:\\mock\\path\\Program.cs\"", csSpec.Arguments);
+        Assert.Contains("run --project \"C:\\mock\\path\\MyWorker.csproj\"", projSpec.Arguments);
+        Assert.Equal("1", csSpec.EnvironmentVariables["DOTNET_NOLOGO"]);
+        Assert.Equal("1", csSpec.EnvironmentVariables["DOTNET_CLI_TELEMETRY_OPTOUT"]);
+    }
+
+    [Fact]
+    public async Task EnsureDemoDotNetCreated_ShouldSelfHealLegacyWildcardProgramCs()
+    {
+        var dotNetDir = Path.Combine(_tempRoot, "data", "workers", "demo-dotnet-service");
+        Directory.CreateDirectory(dotNetDir);
+        var oldScript = @"using System;
+using System.Net;
+var port = Environment.GetEnvironmentVariable(""PORT"") ?? ""8080"";
+var listener = new HttpListener();
+listener.Prefixes.Add($""http://*:{port}/"");
+listener.Start();
+";
+        var file = Path.Combine(dotNetDir, "Program.cs");
+        await File.WriteAllTextAsync(file, oldScript);
+
+        // 调用 GetAllAsync 触发种子自愈检查
+        await _manager.GetAllAsync();
+
+        var healedContent = await File.ReadAllTextAsync(file);
+        Assert.Contains("HttpListenerException", healedContent);
+        Assert.Contains("http://localhost:{port}/", healedContent);
+    }
+
+    [Fact]
     public async Task ImportZipAsync_ShouldThrowSecurityException_OnZipSlipPathTraversal()
     {
         using var ms = new MemoryStream();

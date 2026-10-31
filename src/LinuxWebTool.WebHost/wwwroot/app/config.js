@@ -199,13 +199,20 @@ export const API = {
   },
   services: {
     environment: '/Services/Environment',
-    systemdUnits: '/Services/Systemd/Units',
+    systemdUnits: (keyword, state, type) => {
+      const params = new URLSearchParams();
+      if (keyword) params.set('keyword', keyword);
+      if (state && state !== 'all') params.set('state', state);
+      if (type && type !== 'all') params.set('type', type);
+      const qs = params.toString();
+      return `/Services/Systemd/Units${qs ? '?' + qs : ''}`;
+    },
     systemdAction: '/Services/Systemd/Action',
-    systemdJournal: '/Services/Systemd/Journal',
-    systemdUnitFile: '/Services/Systemd/UnitFile',
-    dockerContainers: '/Services/Docker/Containers',
+    systemdJournal: (unit, lines = 100) => `/Services/Systemd/Journal?unit=${encodeURIComponent(unit || '')}&lines=${lines || 100}`,
+    systemdUnitFile: (unit) => `/Services/Systemd/UnitFile?unit=${encodeURIComponent(unit || '')}`,
+    dockerContainers: (all = true) => `/Services/Docker/Containers?all=${Boolean(all)}`,
     dockerAction: '/Services/Docker/Action',
-    dockerLogs: '/Services/Docker/Logs',
+    dockerLogs: (containerId, tail = 200) => `/Services/Docker/Logs?containerId=${encodeURIComponent(containerId || '')}&tail=${tail || 200}`,
     dockerImages: '/Services/Docker/Images',
     sshConfig: '/Services/Config/Ssh',
     sambaConfig: '/Services/Config/Samba',
@@ -215,7 +222,7 @@ export const API = {
     firewallRule: '/Services/Config/Firewall/Rule',
     extensions: '/Services/Extensions',
     extensionAction: '/Services/Extensions/Action',
-    extensionLogs: '/Services/Extensions/Logs',
+    extensionLogs: (id, lines = 150) => (id ? `/Services/Extensions/Logs?id=${encodeURIComponent(id)}&lines=${lines || 150}` : '/Services/Extensions/Logs'),
     extensionRepoInspect: '/Services/Extensions/Repo/Inspect',
     extensionRepoImport: '/Services/Extensions/Repo/Import',
     extensionSetEnabled: (id) => `/Services/Extensions/${id}/SetEnabled`,
