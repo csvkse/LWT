@@ -274,4 +274,48 @@ listener.Start();
         Assert.NotNull(customMeta);
         Assert.Equal("custom", customMeta.SourceType);
     }
+
+    [Fact]
+    public void WorkerStateMachine_ShouldNotTriggerBackoff_WhenMarkedMissingRuntime()
+    {
+        var sm = new WorkerStateMachine("test-worker");
+        sm.MarkMissingRuntime("未检测到运行时: dotnet");
+
+        Assert.Equal(WorkerState.MissingRuntime, sm.State);
+        Assert.Equal("未检测到运行时: dotnet", sm.LastError);
+
+        var (shouldRestart, delay, nextState) = sm.RecordExit(-1, "Crash");
+        Assert.False(shouldRestart);
+        Assert.Equal(TimeSpan.Zero, delay);
+        Assert.Equal(WorkerState.MissingRuntime, nextState);
+
+        sm.Reset();
+        Assert.Equal(WorkerState.Stopped, sm.State);
+        Assert.Null(sm.LastError);
+    }
+
+    [Fact]
+    public void WorkerRuntimeAdapters_ShouldProvidePrimaryExecutable_AndInstallGuides()
+    {
+        var nodeAdapter = new NodeRuntimeAdapter();
+        Assert.Equal("node", nodeAdapter.PrimaryExecutable);
+        Assert.Contains("apk add --no-cache nodejs", nodeAdapter.ResolveInstallGuide("alpine"));
+        Assert.Contains("apt update", nodeAdapter.ResolveInstallGuide("debian"));
+
+        var pyAdapter = new PythonRuntimeAdapter();
+        Assert.Contains("python", pyAdapter.PrimaryExecutable);
+        Assert.Contains("apk add --no-cache python3", pyAdapter.ResolveInstallGuide("alpine"));
+
+        var dotnetAdapter = new DotNetRuntimeAdapter();
+        Assert.Equal("dotnet", dotnetAdapter.PrimaryExecutable);
+        Assert.Contains("apk add --no-cache dotnet8-sdk", dotnetAdapter.ResolveInstallGuide("alpine"));
+        Assert.Contains("apt update && apt install -y dotnet-sdk-8.0", dotnetAdapter.ResolveInstallGuide("debian"));
+
+        var shellAdapter = new ShellRuntimeAdapter();
+        Assert.Equal("bash", shellAdapter.PrimaryExecutable);
+        Assert.Contains("apk add --no-cache bash", shellAdapter.ResolveInstallGuide("alpine"));
+
+        var psAdapter = new PowerShellRuntimeAdapter();
+        Assert.Contains("apk add --no-cache powershell", psAdapter.ResolveInstallGuide("alpine"));
+    }
 }

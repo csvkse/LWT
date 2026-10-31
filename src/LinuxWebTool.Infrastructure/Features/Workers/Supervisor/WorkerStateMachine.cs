@@ -68,12 +68,30 @@ public sealed class WorkerStateMachine
     }
 
     /// <summary>
+    /// 环境自检失败（缺少必需运行时），直接标记为 MissingRuntime 终态，避免误触发崩溃退避与循环重启。
+    /// </summary>
+    public void MarkMissingRuntime(string missingReason)
+    {
+        lock (_lock)
+        {
+            State = WorkerState.MissingRuntime;
+            StartedAt = null;
+            LastError = missingReason;
+        }
+    }
+
+    /// <summary>
     /// 进程异常退出时调用，返回是否应自动重启以及下一次重试前的等待延迟。
     /// </summary>
     public (bool ShouldRestart, TimeSpan Delay, WorkerState NextState) RecordExit(int exitCode, string? errorReason = null)
     {
         lock (_lock)
         {
+            if (State == WorkerState.MissingRuntime)
+            {
+                return (false, TimeSpan.Zero, WorkerState.MissingRuntime);
+            }
+
             var now = DateTime.UtcNow;
             var uptime = StartedAt.HasValue ? (now - StartedAt.Value).TotalSeconds : 0;
             LastError = errorReason ?? $"进程异常退出，ExitCode: {exitCode}";
@@ -117,7 +135,7 @@ public sealed class WorkerStateMachine
         {
             FastCrashCount = 0;
             LastError = null;
-            if (State == WorkerState.Degraded || State == WorkerState.Backoff)
+            if (State == WorkerState.Degraded || State == WorkerState.Backoff || State == WorkerState.MissingRuntime)
             {
                 State = WorkerState.Stopped;
             }

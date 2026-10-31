@@ -151,10 +151,12 @@ public static class PipelineExtensions
                 context.Response.StatusCode = (int)respMsg.StatusCode;
                 foreach (var h in respMsg.Headers)
                 {
+                    if (IsHopByHopHeader(h.Key)) continue;
                     context.Response.Headers[h.Key] = h.Value.ToArray();
                 }
                 foreach (var h in respMsg.Content.Headers)
                 {
+                    if (IsHopByHopHeader(h.Key)) continue;
                     context.Response.Headers[h.Key] = h.Value.ToArray();
                 }
                 await respMsg.Content.CopyToAsync(context.Response.Body, context.RequestAborted);
@@ -179,4 +181,14 @@ public static class PipelineExtensions
         app.MapFallbackToFile("app/index.html");
         return app;
     }
+
+    private static bool IsHopByHopHeader(string header) =>
+        header.Equals("Connection", StringComparison.OrdinalIgnoreCase) ||
+        header.Equals("Keep-Alive", StringComparison.OrdinalIgnoreCase) ||
+        header.Equals("Proxy-Authenticate", StringComparison.OrdinalIgnoreCase) ||
+        header.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase) ||
+        header.Equals("TE", StringComparison.OrdinalIgnoreCase) ||
+        header.Equals("Trailer", StringComparison.OrdinalIgnoreCase) ||
+        header.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase) ||
+        header.Equals("Upgrade", StringComparison.OrdinalIgnoreCase);
 }

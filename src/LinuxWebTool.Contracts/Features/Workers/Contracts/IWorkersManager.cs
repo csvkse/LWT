@@ -8,6 +8,7 @@ public interface IWorkersManager
     ValueTask<IReadOnlyList<WorkerInstanceDto>> GetAllAsync(CancellationToken ct = default);
     ValueTask<WorkerInstanceDto?> GetByIdAsync(string id, CancellationToken ct = default);
     ValueTask<bool> StartAsync(string id, CancellationToken ct = default);
+    ValueTask<(bool Success, string? ErrorMessage)> StartWithResultAsync(string id, CancellationToken ct = default);
     ValueTask<bool> StopAsync(string id, CancellationToken ct = default);
     ValueTask<bool> RestartAsync(string id, CancellationToken ct = default);
     ValueTask<bool> DeleteAsync(string id, CancellationToken ct = default);

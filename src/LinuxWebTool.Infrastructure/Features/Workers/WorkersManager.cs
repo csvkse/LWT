@@ -21,6 +21,7 @@ public sealed partial class WorkersManager : IWorkersManager, IHostedService
     private readonly ConcurrentDictionary<string, WorkerStateMachine> _stateMachines = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, WorkerProcessRingBuffer> _logBuffers = new(StringComparer.OrdinalIgnoreCase);
     private readonly IReadOnlyDictionary<WorkerRuntimeType, IWorkerRuntimeAdapter> _adapters;
+    private readonly ConcurrentDictionary<WorkerRuntimeType, (bool Available, string? Reason, IReadOnlyList<string> Missing, DateTime ExpireAt)> _runtimeProbeCache = new();
     private readonly ILogger<WorkersManager> _logger;
     private CancellationTokenSource? _stoppingCts;
 
@@ -106,18 +107,24 @@ public sealed partial class WorkersManager : IWorkersManager, IHostedService
 
     public async ValueTask<bool> StartAsync(string id, CancellationToken ct = default)
     {
+        var (success, _) = await StartWithResultAsync(id, ct);
+        return success;
+    }
+
+    public async ValueTask<(bool Success, string? ErrorMessage)> StartWithResultAsync(string id, CancellationToken ct = default)
+    {
         var dir = Path.Combine(_workersRoot, id);
         var manifestFile = Path.Combine(dir, "worker.json");
-        if (!File.Exists(manifestFile)) return false;
+        if (!File.Exists(manifestFile)) return (false, $"Worker '{id}' 不存在。");
 
         var json = await File.ReadAllTextAsync(manifestFile, ct);
         var manifest = JsonSerializer.Deserialize(json, WorkerJsonContext.Default.WorkerManifest);
-        if (manifest == null) return false;
+        if (manifest == null) return (false, "清单文件损坏或格式无效。");
 
         if (!manifest.IsEnabled || File.Exists(Path.Combine(dir, ".disabled")))
         {
             _logger.LogWarning("Worker {Id} 已被显式禁用，无法启动。", id);
-            return false;
+            return (false, $"Worker '{id}' 已被显式禁用，请先启用。");
         }
 
         var sm = _stateMachines.GetOrAdd(id, _ => new WorkerStateMachine(id, manifest.Supervision));
@@ -205,26 +212,30 @@ public sealed partial class WorkersManager : IWorkersManager, IHostedService
         return ValueTask.FromResult(buffer.GetRecentLines(limit));
     }
 
-    private bool StartProcessInternal(WorkerManifest manifest, string dir, WorkerStateMachine sm)
+    private (bool Success, string? ErrorMessage) StartProcessInternal(WorkerManifest manifest, string dir, WorkerStateMachine sm)
     {
         if (_activeProcesses.TryGetValue(manifest.Id, out var existing))
         {
-            if (!existing.Process.HasExited) return true;
+            if (!existing.Process.HasExited) return (true, null);
             _activeProcesses.TryRemove(manifest.Id, out _);
         }
 
         if (!_adapters.TryGetValue(manifest.Runtime, out var adapter))
         {
-            sm.RecordExit(-1, $"未支持的运行时: {manifest.Runtime}");
-            return false;
+            var err = $"未支持的运行时: {manifest.Runtime}";
+            sm.RecordExit(-1, err);
+            return (false, err);
         }
 
-        if (!adapter.CheckAvailable(out var missingReason))
+        if (!adapter.CheckAvailable(out var missingReason, out var missingRunners))
         {
-            sm.RecordExit(-1, missingReason);
+            _runtimeProbeCache[manifest.Runtime] = (false, missingReason, missingRunners, DateTime.UtcNow.AddSeconds(60));
+            sm.MarkMissingRuntime(missingReason ?? "缺少必需运行时");
             GetLogBuffer(manifest.Id).AppendLine($"[ERROR] 环境检查失败: {missingReason}");
-            return false;
+            return (false, missingReason);
         }
+
+        _runtimeProbeCache[manifest.Runtime] = (true, null, [], DateTime.UtcNow.AddMinutes(5));
 
         int? port = null;
         if (manifest.Mode == WorkerServiceMode.Service)
@@ -288,14 +299,14 @@ public sealed partial class WorkersManager : IWorkersManager, IHostedService
                 }
             });
 
-            return true;
+            return (true, null);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "启动 Worker 失败: {Id}", manifest.Id);
             sm.RecordExit(-1, ex.Message);
             logBuffer.AppendLine($"[FATAL] 启动异常: {ex.Message}");
-            return false;
+            return (false, ex.Message);
         }
     }
 
@@ -342,13 +353,26 @@ public sealed partial class WorkersManager : IWorkersManager, IHostedService
         var sm = _stateMachines.GetOrAdd(manifest.Id, _ => new WorkerStateMachine(manifest.Id, manifest.Supervision));
         var state = isAlive ? (sm.State == WorkerState.Starting ? WorkerState.Starting : WorkerState.Running) : sm.State;
 
+        var isEnabled = manifest.IsEnabled && !File.Exists(Path.Combine(dir, ".disabled"));
+        var (isAvailable, missingReason, missingRunners) = CheckRuntimeAvailability(manifest.Runtime);
+        var missingDependencies = isAvailable ? [] : missingRunners;
+        string? installGuideText = null;
+        if (!isAvailable && _adapters.TryGetValue(manifest.Runtime, out var currentAdapter))
+        {
+            var distroKey = ResolveCurrentDistroKey();
+            installGuideText = currentAdapter.ResolveInstallGuide(distroKey);
+            if (!isAlive && isEnabled && state != WorkerState.Degraded)
+            {
+                state = WorkerState.MissingRuntime;
+            }
+        }
+
         int? boundPort = ctx?.BoundPort ?? _portManager.GetPort(manifest.Id);
         string? accessUrl = manifest.Mode == WorkerServiceMode.Service ? $"/w/{manifest.Id}/" : null;
 
         var sqlitePath = Path.Combine(dir, "data.db");
         var kvPath = Path.Combine(dir, "kv.db");
 
-        var isEnabled = manifest.IsEnabled && !File.Exists(Path.Combine(dir, ".disabled"));
         WorkerSourceMetadata? source = null;
         var sourceFile = Path.Combine(dir, "source.json");
         if (File.Exists(sourceFile))
@@ -386,8 +410,39 @@ public sealed partial class WorkersManager : IWorkersManager, IHostedService
             KvSizeBytes = File.Exists(kvPath) ? new FileInfo(kvPath).Length : 0,
             DataDirectory = dir,
             IsEnabled = isEnabled,
-            Source = source
+            Source = source,
+            MissingDependencies = missingDependencies,
+            InstallGuideText = installGuideText
         };
+    }
+
+    private (bool Available, string? Reason, IReadOnlyList<string> Missing) CheckRuntimeAvailability(WorkerRuntimeType runtime)
+    {
+        var now = DateTime.UtcNow;
+        if (_runtimeProbeCache.TryGetValue(runtime, out var cached) && now < cached.ExpireAt)
+        {
+            return (cached.Available, cached.Reason, cached.Missing);
+        }
+
+        if (!_adapters.TryGetValue(runtime, out var adapter))
+        {
+            var res = (false, $"未支持的运行时: {runtime}", (IReadOnlyList<string>)[runtime.ToString()]);
+            _runtimeProbeCache[runtime] = (res.Item1, res.Item2, res.Item3, now.AddMinutes(5));
+            return res;
+        }
+
+        var available = adapter.CheckAvailable(out var reason, out var missing);
+        var entry = (available, reason, missing, now.AddSeconds(60));
+        _runtimeProbeCache[runtime] = entry;
+        return (entry.available, entry.reason, entry.missing);
+    }
+
+    private static string ResolveCurrentDistroKey()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return "windows";
+        if (File.Exists("/etc/alpine-release")) return "alpine";
+        if (File.Exists("/etc/redhat-release")) return "rhel";
+        return "debian";
     }
 
     private WorkerProcessRingBuffer GetLogBuffer(string id)
