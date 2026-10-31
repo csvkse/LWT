@@ -58,6 +58,10 @@ public interface IScriptExtensionManager
     Task<string> GetExtensionLogsAsync(string extensionId, int lines = 100, CancellationToken cancellationToken = default);
     Task<InspectRepoModulesResponse> InspectRepositoryModulesAsync(InspectRepoModulesRequest request, CancellationToken cancellationToken = default);
     Task<BatchImportModulesResult> BatchImportModulesAsync(BatchImportModulesRequest request, CancellationToken cancellationToken = default);
+    Task<bool> SetEnabledAsync(string extensionId, bool enabled, CancellationToken cancellationToken = default);
+    Task<ExtensionUpdateCheckResponse> CheckUpdateAsync(string extensionId, CancellationToken cancellationToken = default);
+    Task<ExtensionHotUpdateResponse> HotUpdateAsync(string extensionId, ExtensionHotUpdateRequest request, CancellationToken cancellationToken = default);
+    Task<ExtensionSourceMetadata?> GetSourceMetadataAsync(string extensionId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

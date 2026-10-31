@@ -165,4 +165,62 @@ public class WorkersManagerTests : IDisposable
         var listAfter = await _manager.GetKvListAsync(workerId);
         Assert.DoesNotContain(listAfter, x => x.Key == "test_key");
     }
+
+    [Fact]
+    public async Task SetEnabledAsync_ShouldToggleDisabledMarker_AndReflectInWorkerDto()
+    {
+        var workerId = "demo-js-webhook";
+        await _manager.GetAllAsync(); // 确保目录存在
+
+        // 默认应当为启用
+        var initial = await _manager.GetByIdAsync(workerId);
+        Assert.NotNull(initial);
+        Assert.True(initial.IsEnabled);
+
+        // 设置禁用
+        var setDisabled = await _manager.SetEnabledAsync(workerId, false);
+        Assert.True(setDisabled);
+
+        var disabledWorker = await _manager.GetByIdAsync(workerId);
+        Assert.NotNull(disabledWorker);
+        Assert.False(disabledWorker.IsEnabled);
+
+        // 禁用状态下无法启动
+        var startResult = await _manager.StartAsync(workerId);
+        Assert.False(startResult);
+
+        // 恢复启用
+        var setEnabled = await _manager.SetEnabledAsync(workerId, true);
+        Assert.True(setEnabled);
+
+        var enabledWorker = await _manager.GetByIdAsync(workerId);
+        Assert.NotNull(enabledWorker);
+        Assert.True(enabledWorker.IsEnabled);
+    }
+
+    [Fact]
+    public async Task GetSourceMetadataAsync_ShouldReturnFallbackLocal_WhenNoSourceJson()
+    {
+        var workerId = "demo-js-webhook";
+        await _manager.GetAllAsync();
+
+        var meta = await _manager.GetSourceMetadataAsync(workerId);
+        Assert.NotNull(meta);
+        Assert.Equal("builtin", meta.SourceType);
+        Assert.Equal("1.0.0", meta.InstalledVersion);
+
+        // 创建自定义 worker
+        await _manager.CreateOrUpdateAsync(new WorkerCreateOrUpdateRequest
+        {
+            Id = "custom-test-worker",
+            Name = "Custom Test Worker",
+            Runtime = WorkerRuntimeType.Python,
+            Entrypoint = "worker.py",
+            ScriptContent = "print('hello')"
+        });
+
+        var customMeta = await _manager.GetSourceMetadataAsync("custom-test-worker");
+        Assert.NotNull(customMeta);
+        Assert.Equal("custom", customMeta.SourceType);
+    }
 }

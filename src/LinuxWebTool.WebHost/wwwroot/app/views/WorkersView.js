@@ -3,9 +3,13 @@ import { useRouter } from 'vue-router';
 import { http } from '../api/client.js';
 import { API } from '../config.js';
 import { toast } from '../store/toast.js';
+import WorkerUpdateModal from '../components/workers/WorkerUpdateModal.js';
 
 export default defineComponent({
   name: 'WorkersView',
+  components: {
+    WorkerUpdateModal,
+  },
   setup() {
     const router = useRouter();
     const workers = ref([]);
@@ -49,6 +53,10 @@ export default defineComponent({
     const isRepoScanning = ref(false);
     const repoScanResult = ref(null);
     const selectedRepoModuleIds = ref([]);
+
+    // 更新与治理弹窗
+    const isUpdateModalOpen = ref(false);
+    const currentWorkerForUpdate = ref(null);
 
     // Zip 文件上传引用
     const zipFileInput = ref(null);
@@ -374,7 +382,10 @@ export default defineComponent({
       try {
         const res = await http(API.workers.importRepoScan, {
           method: 'POST',
-          body: { repoUrl: repoUrlInput.value.trim() },
+          body: {
+            repoUrl: repoUrlInput.value.trim(),
+            targetType: 'worker',
+          },
         });
         if (res.ok) {
           repoScanResult.value = res.data;
@@ -400,6 +411,7 @@ export default defineComponent({
           method: 'POST',
           body: {
             tempDirectory: repoScanResult.value.tempDirectory,
+            repoUrl: repoUrlInput.value.trim(),
             moduleIds: selectedRepoModuleIds.value,
             overwriteExisting: true,
           },
@@ -414,6 +426,28 @@ export default defineComponent({
         }
       } catch (err) {
         toast.error('应用异常: ' + err.message);
+      }
+    }
+
+    function openUpdateModal(w) {
+      currentWorkerForUpdate.value = w;
+      isUpdateModalOpen.value = true;
+    }
+
+    async function toggleWorkerEnabled(w) {
+      const next = !w.isEnabled;
+      try {
+        const res = await http(API.workers.setEnabled(w.id) + `?enabled=${next}`, {
+          method: 'POST',
+        });
+        if (res.ok) {
+          toast.success(`函数服务 [${w.name}] 已${next ? '启用' : '禁用'}`);
+          await loadWorkers();
+        } else {
+          toast.error(res.message || '更新状态失败');
+        }
+      } catch (err) {
+        toast.error('操作异常: ' + err.message);
       }
     }
 
@@ -473,6 +507,10 @@ export default defineComponent({
       onZipFileSelected,
       scanGitRepo,
       applyRepoImport,
+      isUpdateModalOpen,
+      currentWorkerForUpdate,
+      openUpdateModal,
+      toggleWorkerEnabled,
     };
   },
   template: `
@@ -650,9 +688,12 @@ export default defineComponent({
           v-for="w in filteredWorkers"
           :key="w.id"
           class="panel p-4 flex flex-col justify-between transition-all border"
-          :class="w.state === 2
-            ? 'border-cyan-500/40 shadow-[0_0_12px_rgba(34,211,238,0.08)]'
-            : (w.state === 5 ? 'border-rose-500/50 bg-rose-950/10' : 'border-cyber-line/40')"
+          :class="[
+            w.isEnabled === false ? 'opacity-65 border-slate-700/80' :
+            (w.state === 2
+              ? 'border-cyan-500/40 shadow-[0_0_12px_rgba(34,211,238,0.08)]'
+              : (w.state === 5 ? 'border-rose-500/50 bg-rose-950/10' : 'border-cyber-line/40'))
+          ]"
         >
           <!-- 头部：名称、运行时图标、形态与状态徽标 -->
           <div>
@@ -665,6 +706,8 @@ export default defineComponent({
                   <div class="flex items-center gap-2">
                     <span class="font-bold text-slate-100 text-sm truncate" :title="w.name">{{ w.name }}</span>
                     <span class="text-[10px] font-mono text-slate-500 truncate">#{{ w.id }}</span>
+                    <span v-if="w.isEnabled === false" class="badge text-[10px] border-slate-700 text-slate-400">已禁用</span>
+                    <span v-else-if="w.version" class="text-[10px] font-mono text-cyan-400">v{{ w.version }}</span>
                   </div>
                   <div class="text-[11px] text-slate-400 truncate mt-0.5" :title="w.description || '无详细描述'">
                     {{ w.description || '无详细描述' }}
@@ -675,7 +718,13 @@ export default defineComponent({
               <!-- 状态 Badge -->
               <div class="shrink-0 flex items-center gap-1.5">
                 <span
-                  v-if="w.state === 2"
+                  v-if="w.isEnabled === false"
+                  class="badge border-slate-800 bg-slate-900/60 text-slate-500 text-xs"
+                >
+                  已禁用
+                </span>
+                <span
+                  v-else-if="w.state === 2"
                   class="badge border-emerald-500/50 bg-emerald-500/10 text-emerald-300 text-xs flex items-center gap-1"
                 >
                   <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -812,6 +861,7 @@ export default defineComponent({
                 v-else
                 type="button"
                 class="btn btn-xs btn-primary"
+                :disabled="w.isEnabled === false"
                 @click="startWorker(w)"
               >
                 ▶ 启动
@@ -820,6 +870,7 @@ export default defineComponent({
               <button
                 type="button"
                 class="btn btn-xs border-slate-700 hover:border-slate-600 text-slate-300"
+                :disabled="w.isEnabled === false"
                 @click="restartWorker(w)"
               >
                 🔄 重启
@@ -829,10 +880,27 @@ export default defineComponent({
             <div class="flex items-center gap-1.5">
               <button
                 type="button"
+                class="btn btn-xs hover:border-cyan-500/30"
+                :class="w.isEnabled === false ? 'text-emerald-400' : 'text-slate-400'"
+                :title="w.isEnabled === false ? '点击启用该服务' : '点击禁用该服务'"
+                @click="toggleWorkerEnabled(w)"
+              >
+                {{ w.isEnabled === false ? '启用' : '禁用' }}
+              </button>
+              <button
+                type="button"
+                class="btn btn-xs hover:border-cyan-500/30 text-cyan-300"
+                title="查看来源、版本与安全热更新"
+                @click="openUpdateModal(w)"
+              >
+                更新
+              </button>
+              <button
+                type="button"
                 class="btn btn-xs border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/10"
                 @click="openLogsDrawer(w)"
               >
-                📋 终端日志
+                📋 日志
               </button>
               <button
                 type="button"
@@ -1147,6 +1215,14 @@ export default defineComponent({
           </div>
         </div>
       </div>
+
+      <!-- 弹窗 5：函数服务治理与版本更新向导 -->
+      <WorkerUpdateModal
+        :show="isUpdateModalOpen"
+        :worker="currentWorkerForUpdate"
+        @close="isUpdateModalOpen = false"
+        @updated="loadWorkers()"
+      />
     </div>
   `,
 });

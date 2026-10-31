@@ -71,6 +71,7 @@ export default defineComponent({
             repositoryUrl: form.repoUrl.trim(),
             proxyPrefix: form.proxyPrefix || null,
             branch: form.branch.trim() || 'main',
+            targetType: 'extension',
           },
         });
 
@@ -110,6 +111,7 @@ export default defineComponent({
             repositoryUrl: form.repoUrl.trim(),
             proxyPrefix: form.proxyPrefix || null,
             branch: form.branch.trim() || 'main',
+            targetType: 'extension',
             selectedModulePaths: selectedPaths.value,
             overwriteExisting: form.overwrite,
           },

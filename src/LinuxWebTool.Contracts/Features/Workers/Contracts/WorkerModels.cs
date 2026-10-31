@@ -126,6 +126,7 @@ public sealed record WorkerManifest
     public string? Description { get; init; }
     public string? Author { get; init; }
     public string Category { get; init; } = "Workers";
+    public bool IsEnabled { get; init; } = true;
 
     /// <summary>
     /// 运行形态：Service (有请求微服务) | Daemon (无请求后台守护)。
@@ -190,85 +191,8 @@ public sealed record WorkerInstanceDto
     public long SqliteSizeBytes { get; init; }
     public long KvSizeBytes { get; init; }
     public string DataDirectory { get; init; } = "";
+    public bool IsEnabled { get; init; } = true;
+    public WorkerSourceMetadata? Source { get; init; }
     public IReadOnlyList<string> MissingDependencies { get; init; } = [];
 }
-
-/// <summary>
-/// 创建/更新 Worker 请求。
-/// </summary>
-public sealed record WorkerCreateOrUpdateRequest
-{
-    public required string Id { get; init; }
-    public required string Name { get; init; }
-    public string? Description { get; init; }
-    public WorkerServiceMode Mode { get; init; } = WorkerServiceMode.Service;
-    public WorkerRuntimeType Runtime { get; init; } = WorkerRuntimeType.Python;
-    public string Entrypoint { get; init; } = "worker.py";
-    public string? ScriptContent { get; init; }
-    public bool AutoRestart { get; init; } = true;
-    public bool EnableSqlite { get; init; } = true;
-    public bool EnableKv { get; init; } = true;
-    public Dictionary<string, string>? EnvironmentVariables { get; init; }
-}
-
-/// <summary>
-/// Git 仓库扫描多服务结果项。
-/// </summary>
-public sealed record WorkerRepoScanItem
-{
-    public required string Id { get; init; }
-    public required string Name { get; init; }
-    public string? Description { get; init; }
-    public WorkerServiceMode Mode { get; init; }
-    public WorkerRuntimeType Runtime { get; init; }
-    public string RelativePath { get; init; } = "";
-    public bool AlreadyInstalled { get; init; }
-}
-
-/// <summary>
-/// Git 仓库扫描响应。
-/// </summary>
-public sealed record WorkerRepoScanResult
-{
-    public string RepoUrl { get; init; } = "";
-    public string TempDirectory { get; init; } = "";
-    public IReadOnlyList<WorkerRepoScanItem> Modules { get; init; } = [];
-}
-
-/// <summary>
-/// 批量导入仓库模块请求。
-/// </summary>
-public sealed record WorkerRepoApplyRequest
-{
-    public required string TempDirectory { get; init; }
-    public IReadOnlyList<string> ModuleIds { get; init; } = [];
-    public bool OverwriteExisting { get; init; } = true;
-}
-
-/// <summary>
-/// 专属 KV 键值对条目。
-/// </summary>
-public sealed record WorkerKvItem
-{
-    public required string Key { get; init; }
-    public required string Value { get; init; }
-    public long? ExpireAtTimestamp { get; init; }
-    public string? UpdatedAt { get; init; }
-}
-
-/// <summary>
-/// 专属 SQLite 概要信息。
-/// </summary>
-public sealed record WorkerSqliteInfo
-{
-    public bool Exists { get; init; }
-    public long SizeBytes { get; init; }
-    public string AbsolutePath { get; init; } = "";
-    public IReadOnlyList<string> Tables { get; init; } = [];
-}
-
-/// <summary>
-/// Worker 通用操作响应 DTO。
-/// </summary>
-public sealed record WorkerOperationResponse(bool Success, string? Message = null, int Count = 0);
 

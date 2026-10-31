@@ -61,6 +61,7 @@ public sealed record ExtensionManifest
     public required string Id { get; init; }
     public required string Name { get; init; }
     public string Category { get; init; } = "custom";
+    public bool IsEnabled { get; init; } = true;
     public string Version { get; init; } = "1.0.0";
     public string? Author { get; init; }
     public string? Description { get; init; }
@@ -86,6 +87,8 @@ public sealed record ExtensionInstance
     public IReadOnlyList<string> MissingRunners { get; init; } = [];
     public IReadOnlyList<string> MissingBinaries { get; init; } = [];
     public string? InstallGuideText { get; init; }
+    public bool IsEnabled { get; init; } = true;
+    public ExtensionSourceMetadata? Source { get; init; }
 }
 
 /// <summary>
@@ -121,6 +124,7 @@ public sealed record InspectRepoModulesRequest
     public required string RepositoryUrl { get; init; }
     public string? ProxyPrefix { get; init; }
     public string? Branch { get; init; }
+    public string? TargetType { get; init; } // extension, worker, all
 }
 
 /// <summary>
@@ -156,4 +160,44 @@ public sealed record BatchImportModulesResult
     public IReadOnlyList<string> ImportedExtensionIds { get; init; } = [];
     public IReadOnlyList<string> Errors { get; init; } = [];
 }
+
+/// <summary>
+/// 扩展来源溯源元数据 (source.json)。
+/// </summary>
+public sealed record ExtensionSourceMetadata
+{
+    public string SourceType { get; init; } = "builtin";
+    public string? RepoUrl { get; init; }
+    public string? SubDirectory { get; init; }
+    public string InstalledVersion { get; init; } = "1.0.0";
+    public string? InstalledCommitHash { get; init; }
+    public DateTime InstalledAt { get; init; } = DateTime.UtcNow;
+    public DateTime? LastCheckedAt { get; init; }
+    public string? RemoteVersion { get; init; }
+    public bool HasUpdate { get; init; }
+}
+
+/// <summary>
+/// 扩展检查更新响应。
+/// </summary>
+public sealed record ExtensionUpdateCheckResponse(
+    bool HasUpdate,
+    string CurrentVersion,
+    string? RemoteVersion,
+    string? ReleaseNotes = null);
+
+/// <summary>
+/// 扩展在线热更新请求。
+/// </summary>
+public sealed record ExtensionHotUpdateRequest(bool Force = false);
+
+/// <summary>
+/// 扩展在线热更新响应。
+/// </summary>
+public sealed record ExtensionHotUpdateResponse(
+    bool Success,
+    string OldVersion,
+    string NewVersion,
+    string? Message = null,
+    bool RollbackPerformed = false);
 #endregion

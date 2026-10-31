@@ -127,7 +127,7 @@ public class WorkersController(IWorkersManager workersManager) : MinimalApi.Cont
     public async Task<IResult> ScanRepo([FromBody] WorkerRepoScanRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.RepoUrl)) return BadRequest(new WorkerOperationResponse(false, "Git 仓库地址不能为空。"));
-        var result = await workersManager.ScanRepoAsync(request.RepoUrl, ct);
+        var result = await workersManager.ScanRepoAsync(request.RepoUrl, request.TargetType, ct);
         return Ok(result);
     }
 
@@ -141,9 +141,32 @@ public class WorkersController(IWorkersManager workersManager) : MinimalApi.Cont
         var count = await workersManager.ApplyRepoModulesAsync(request, ct);
         return Ok(new WorkerOperationResponse(true, Count: count));
     }
-}
 
-public sealed record WorkerRepoScanRequest
-{
-    public required string RepoUrl { get; init; }
+    [HttpPost("{id}/SetEnabled")]
+    public async Task<IResult> SetEnabled(string id, [FromQuery] bool enabled, CancellationToken ct)
+    {
+        var success = await workersManager.SetEnabledAsync(id, enabled, ct);
+        return Ok(new WorkerOperationResponse(success));
+    }
+
+    [HttpPost("{id}/CheckUpdate")]
+    public async Task<IResult> CheckUpdate(string id, CancellationToken ct)
+    {
+        var result = await workersManager.CheckUpdateAsync(id, ct);
+        return Ok(result);
+    }
+
+    [HttpPost("{id}/HotUpdate")]
+    public async Task<IResult> HotUpdate(string id, [FromBody] WorkerHotUpdateRequest request, CancellationToken ct)
+    {
+        var result = await workersManager.HotUpdateAsync(id, request, ct);
+        return Ok(result);
+    }
+
+    [HttpGet("{id}/Source")]
+    public async Task<IResult> GetSource(string id, CancellationToken ct)
+    {
+        var meta = await workersManager.GetSourceMetadataAsync(id, ct);
+        return meta != null ? Ok(meta) : NotFound(new WorkerOperationResponse(false, "未找到来源元数据"));
+    }
 }

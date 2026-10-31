@@ -75,11 +75,17 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
                 var missingRunners = ProbeMissingRunners(manifest.Dependencies.Runners);
                 var missingBinaries = ProbeMissingBinaries(manifest.Dependencies.Binaries);
 
+                var isEnabled = manifest.IsEnabled && !File.Exists(Path.Combine(dir, ".disabled"));
                 string status;
                 string? statusMsg;
                 int? pid = null;
 
-                if (missingRunners.Count > 0)
+                if (!isEnabled)
+                {
+                    status = "Disabled";
+                    statusMsg = "扩展服务已被显式禁用";
+                }
+                else if (missingRunners.Count > 0)
                 {
                     status = "MissingRuntime";
                     statusMsg = $"缺少执行运行时: {string.Join(", ", missingRunners)}";
@@ -96,6 +102,7 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
 
                 var installGuideText = ResolveInstallGuide(manifest, missingRunners, missingBinaries);
                 var configDict = ReadExtensionConfig(dir);
+                var source = await GetSourceMetadataAsync(manifest.Id, cancellationToken);
 
                 list.Add(new ExtensionInstance
                 {
@@ -106,7 +113,9 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
                     CurrentConfig = configDict,
                     MissingRunners = missingRunners,
                     MissingBinaries = missingBinaries,
-                    InstallGuideText = installGuideText
+                    InstallGuideText = installGuideText,
+                    IsEnabled = isEnabled,
+                    Source = source
                 });
             }
             catch (Exception ex)
@@ -124,6 +133,11 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
         if (!Directory.Exists(dir))
         {
             return new ServiceActionResult { Success = false, Message = $"未找到扩展包: {request.ExtensionId}" };
+        }
+
+        if (File.Exists(Path.Combine(dir, ".disabled")))
+        {
+            return new ServiceActionResult { Success = false, Message = $"扩展服务 '{request.ExtensionId}' 已被显式禁用，禁止执行任何操作。" };
         }
 
         if (request.Action.Equals("config_set", StringComparison.OrdinalIgnoreCase))

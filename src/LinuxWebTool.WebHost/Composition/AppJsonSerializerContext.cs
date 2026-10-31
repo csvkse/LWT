@@ -386,13 +386,21 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(List<LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerRepoScanItem>))]
 [JsonSerializable(typeof(IReadOnlyList<LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerRepoScanItem>))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerRepoScanResult))]
-[JsonSerializable(typeof(LinuxWebTool.WebHost.Features.Workers.Routes.WorkerRepoScanRequest))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerRepoScanRequest))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerRepoApplyRequest))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerKvItem))]
 [JsonSerializable(typeof(List<LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerKvItem>))]
 [JsonSerializable(typeof(IReadOnlyList<LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerKvItem>))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerSqliteInfo))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerOperationResponse))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Services.Contracts.ExtensionSourceMetadata))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Services.Contracts.ExtensionUpdateCheckResponse))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Services.Contracts.ExtensionHotUpdateRequest))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Services.Contracts.ExtensionHotUpdateResponse))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerSourceMetadata))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerUpdateCheckResponse))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerHotUpdateRequest))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerHotUpdateResponse))]
 
 public partial class AppJsonSerializerContext
  : JsonSerializerContext

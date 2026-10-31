@@ -297,6 +297,8 @@ CREATE TABLE IF NOT EXISTS api_key (
   AllowGateway INTEGER NOT NULL DEFAULT 0,
   AllowedPaths TEXT,
   AllowRemoteHosts INTEGER NOT NULL DEFAULT 0,
+  AllowServices INTEGER NOT NULL DEFAULT 0,
+  AllowWorkers INTEGER NOT NULL DEFAULT 0,
   AllowedHostIds TEXT,
   AllowedTools TEXT,
   CreatedAt TEXT NOT NULL,
@@ -502,6 +504,8 @@ CREATE INDEX IF NOT EXISTS idx_backup_sync_record_time ON backup_sync_record(Sta
         EnsureColumnExists(db, "gateway_website", "AuthSecret", "TEXT");
         EnsureColumnExists(db, "api_key", "AllowedPaths", "TEXT");
         EnsureColumnExists(db, "api_key", "AllowRemoteHosts", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumnExists(db, "api_key", "AllowServices", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumnExists(db, "api_key", "AllowWorkers", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumnExists(db, "api_key", "AllowedHostIds", "TEXT");
         EnsureColumnExists(db, "api_key", "AllowedTools", "TEXT");
         EnsureColumnExists(db, "backup_sync_task", "ConsecutiveFailures", "INTEGER NOT NULL DEFAULT 0");

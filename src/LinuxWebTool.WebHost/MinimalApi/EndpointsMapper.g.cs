@@ -373,6 +373,10 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_ServicesController.MapGet("Extensions/Logs", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromQuery] string id, [FromQuery] int lines = 100, CancellationToken ct = default) => { ctrl.HttpContext = ctx; return await ctrl.GetExtensionLogs(id, lines, ct); });
             group_ServicesController.MapPost("Extensions/Repo/Inspect", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromBody] InspectRepoModulesRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.InspectRepositoryModules(request, ct); });
             group_ServicesController.MapPost("Extensions/Repo/Import", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromBody] BatchImportModulesRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.BatchImportModules(request, ct); });
+            group_ServicesController.MapPost("Extensions/{id}/SetEnabled", async ([FromServices] ServicesController ctrl, HttpContext ctx, string id, [FromQuery] bool enabled, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.SetExtensionEnabled(id, enabled, ct); });
+            group_ServicesController.MapPost("Extensions/{id}/CheckUpdate", async ([FromServices] ServicesController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.CheckExtensionUpdate(id, ct); });
+            group_ServicesController.MapPost("Extensions/{id}/HotUpdate", async ([FromServices] ServicesController ctrl, HttpContext ctx, string id, [FromBody] ExtensionHotUpdateRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.HotUpdateExtension(id, request, ct); });
+            group_ServicesController.MapGet("Extensions/{id}/Source", async ([FromServices] ServicesController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetExtensionSource(id, ct); });
             var group_WorkersController = app.MapGroup("/api/Workers");
             group_WorkersController.RequireAuthorization();
             group_WorkersController.MapGet("", async ([FromServices] WorkersController ctrl, HttpContext ctx, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetAll(ct); });
@@ -391,6 +395,10 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_WorkersController.MapPost("Import/Zip", async ([FromServices] WorkersController ctrl, HttpContext ctx, IFormFile file, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.ImportZip(file, ct); });
             group_WorkersController.MapPost("Import/Repo/Scan", async ([FromServices] WorkersController ctrl, HttpContext ctx, [FromBody] WorkerRepoScanRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.ScanRepo(request, ct); });
             group_WorkersController.MapPost("Import/Repo/Apply", async ([FromServices] WorkersController ctrl, HttpContext ctx, [FromBody] WorkerRepoApplyRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.ApplyRepoModules(request, ct); });
+            group_WorkersController.MapPost("{id}/SetEnabled", async ([FromServices] WorkersController ctrl, HttpContext ctx, string id, [FromQuery] bool enabled, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.SetEnabled(id, enabled, ct); });
+            group_WorkersController.MapPost("{id}/CheckUpdate", async ([FromServices] WorkersController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.CheckUpdate(id, ct); });
+            group_WorkersController.MapPost("{id}/HotUpdate", async ([FromServices] WorkersController ctrl, HttpContext ctx, string id, [FromBody] WorkerHotUpdateRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.HotUpdate(id, request, ct); });
+            group_WorkersController.MapGet("{id}/Source", async ([FromServices] WorkersController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetSource(id, ct); });
         }
     }
 }

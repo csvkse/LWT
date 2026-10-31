@@ -218,6 +218,10 @@ export const API = {
     extensionLogs: '/Services/Extensions/Logs',
     extensionRepoInspect: '/Services/Extensions/Repo/Inspect',
     extensionRepoImport: '/Services/Extensions/Repo/Import',
+    extensionSetEnabled: (id) => `/Services/Extensions/${id}/SetEnabled`,
+    extensionCheckUpdate: (id) => `/Services/Extensions/${id}/CheckUpdate`,
+    extensionHotUpdate: (id) => `/Services/Extensions/${id}/HotUpdate`,
+    extensionSource: (id) => `/Services/Extensions/${id}/Source`,
   },
   workers: {
     list: '/Workers',
@@ -234,5 +238,9 @@ export const API = {
     importZip: '/Workers/Import/Zip',
     importRepoScan: '/Workers/Import/Repo/Scan',
     importRepoApply: '/Workers/Import/Repo/Apply',
+    setEnabled: (id) => `/Workers/${id}/SetEnabled`,
+    checkUpdate: (id) => `/Workers/${id}/CheckUpdate`,
+    hotUpdate: (id) => `/Workers/${id}/HotUpdate`,
+    source: (id) => `/Workers/${id}/Source`,
   },
 };

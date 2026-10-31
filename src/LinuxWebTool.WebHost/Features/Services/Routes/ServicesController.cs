@@ -195,5 +195,33 @@ public class ServicesController(
         var result = await extensionManager.BatchImportModulesAsync(request, cancellationToken);
         return result.Success ? Ok(result) : BadRequest(result);
     }
+
+    [HttpPost("Extensions/{id}/SetEnabled")]
+    public async Task<IResult> SetExtensionEnabled(string id, [FromQuery] bool enabled, CancellationToken cancellationToken)
+    {
+        var success = await extensionManager.SetEnabledAsync(id, enabled, cancellationToken);
+        return Ok(new ServiceActionResult { Success = success, Message = success ? (enabled ? "扩展已启用" : "扩展已禁用") : "更新状态失败" });
+    }
+
+    [HttpPost("Extensions/{id}/CheckUpdate")]
+    public async Task<IResult> CheckExtensionUpdate(string id, CancellationToken cancellationToken)
+    {
+        var result = await extensionManager.CheckUpdateAsync(id, cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpPost("Extensions/{id}/HotUpdate")]
+    public async Task<IResult> HotUpdateExtension(string id, [FromBody] ExtensionHotUpdateRequest request, CancellationToken cancellationToken)
+    {
+        var result = await extensionManager.HotUpdateAsync(id, request, cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("Extensions/{id}/Source")]
+    public async Task<IResult> GetExtensionSource(string id, CancellationToken cancellationToken)
+    {
+        var meta = await extensionManager.GetSourceMetadataAsync(id, cancellationToken);
+        return meta != null ? Ok(meta) : NotFound(new ServiceActionResult { Success = false, Message = "未找到来源元数据" });
+    }
     #endregion
 }

@@ -135,6 +135,44 @@ public static class McpCatalogRegistry
             },
             ModuleCode: "gateway",
             SupportsApi: true,
+            SupportsMcp: true),
+
+        new McpCategoryCatalog(
+            "services",
+            "系统服务与运维扩展 (Services)",
+            "Systemd 单元、Docker 容器与脚本扩展全生命周期治理",
+            new List<McpToolCatalogItem>
+            {
+                new("services_list", "查询宿主 Systemd 服务、Docker 容器及运维扩展状态与启用状态", "Read", "services"),
+                new("systemd_action", "执行 Systemd 服务启停、重载与状态查询", "Execute", "services"),
+                new("docker_action", "执行 Docker 容器生命周期启停、重启或暂停", "Execute", "services"),
+                new("extension_execute_action", "执行指定运维扩展自定义钩子动作", "Execute", "services"),
+                new("extension_import", "从 Git 仓库批量导入一个或多个运维扩展服务", "Dangerous", "services"),
+                new("extension_set_enabled", "启用或禁用指定的运维扩展服务", "Execute", "services"),
+                new("extension_check_update", "检查指定或全部运维扩展服务的远程发布版本", "Read", "services"),
+                new("extension_hot_update", "对指定运维扩展服务执行安全在线热更新", "Dangerous", "services")
+            },
+            ModuleCode: "services",
+            SupportsApi: true,
+            SupportsMcp: true),
+
+        new McpCategoryCatalog(
+            "workers",
+            "SaaS 函数微服务与守护 (Workers)",
+            "函数微服务与长时守护进程治理、端口转发与热更新",
+            new List<McpToolCatalogItem>
+            {
+                new("workers_list", "列出所有 SaaS 函数微服务与长时守护进程的状态、端口、指标与启用状态", "Read", "workers"),
+                new("worker_control", "启动、停止或重启指定的函数微服务或常驻守护", "Execute", "workers"),
+                new("worker_invoke", "向指定的 HTTP 函数微服务发起内部调用并返回响应结果", "Execute", "workers"),
+                new("worker_get_logs", "获取指定 Worker 进程最新的标准输出与异常错误日志", "Read", "workers"),
+                new("worker_import", "从 GitHub/Git 仓库批量导入函数微服务或后台长时守护", "Dangerous", "workers"),
+                new("worker_set_enabled", "启用或禁用指定 Worker（禁用时终止进程、关闭网关并暂停自愈）", "Execute", "workers"),
+                new("worker_check_update", "检查指定 Worker 或全部 Worker 的最新远程发布版本", "Read", "workers"),
+                new("worker_hot_update", "对指定 Worker 执行安全在线热更新（保护 SQLite/KV 数据并带瞬退回滚）", "Dangerous", "workers")
+            },
+            ModuleCode: "workers",
+            SupportsApi: true,
             SupportsMcp: true)
     };
 

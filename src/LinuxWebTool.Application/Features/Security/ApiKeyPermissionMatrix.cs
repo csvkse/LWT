@@ -40,6 +40,20 @@ public static class ApiKeyPermissionMatrix
         bool allowRemoteHosts,
         string moduleName)
     {
+        return CanExecuteModule(allowTerminal, allowSchedules, allowFiles, allowTranscode, allowGateway, allowRemoteHosts, false, false, moduleName);
+    }
+
+    public static bool CanExecuteModule(
+        bool allowTerminal,
+        bool allowSchedules,
+        bool allowFiles,
+        bool allowTranscode,
+        bool allowGateway,
+        bool allowRemoteHosts,
+        bool allowServices,
+        bool allowWorkers,
+        string moduleName)
+    {
         return moduleName.ToLowerInvariant() switch
         {
             "terminal" => allowTerminal,
@@ -48,6 +62,8 @@ public static class ApiKeyPermissionMatrix
             "transcode" => allowTranscode,
             "gateway" => allowGateway,
             "remotehosts" or "remotehost" or "remote" => allowRemoteHosts,
+            "services" or "service" => allowServices,
+            "workers" or "worker" => allowWorkers,
             _ => false
         };
     }
@@ -92,7 +108,9 @@ public static class ApiKeyPermissionMatrix
         bool allowFiles,
         bool allowTranscode,
         bool allowGateway,
-        bool allowRemoteHosts = false)
+        bool allowRemoteHosts = false,
+        bool allowServices = false,
+        bool allowWorkers = false)
     {
         if (toolName.StartsWith("terminal_", StringComparison.OrdinalIgnoreCase) ||
             toolName.StartsWith("command_", StringComparison.OrdinalIgnoreCase))
@@ -108,6 +126,12 @@ public static class ApiKeyPermissionMatrix
             return allowGateway;
         if (toolName.StartsWith("remote_", StringComparison.OrdinalIgnoreCase))
             return allowRemoteHosts;
+        if (toolName.StartsWith("services_", StringComparison.OrdinalIgnoreCase) ||
+            toolName.StartsWith("service_", StringComparison.OrdinalIgnoreCase))
+            return allowServices;
+        if (toolName.StartsWith("workers_", StringComparison.OrdinalIgnoreCase) ||
+            toolName.StartsWith("worker_", StringComparison.OrdinalIgnoreCase))
+            return allowWorkers;
 
         // 通用健康探测与基础信息工具默认允许
         return true;
@@ -181,6 +205,24 @@ public static class ApiKeyPermissionMatrix
         string toolName,
         string moduleName)
     {
+        return IsToolPermitted(
+            allowTerminal, allowSchedules, allowFiles, allowTranscode, allowGateway, allowRemoteHosts,
+            false, false, allowedTools, toolName, moduleName);
+    }
+
+    public static bool IsToolPermitted(
+        bool allowTerminal,
+        bool allowSchedules,
+        bool allowFiles,
+        bool allowTranscode,
+        bool allowGateway,
+        bool allowRemoteHosts,
+        bool allowServices,
+        bool allowWorkers,
+        string? allowedTools,
+        string toolName,
+        string moduleName)
+    {
         var moduleAllowed = moduleName.ToLowerInvariant() switch
         {
             "commands" or "terminal" => allowTerminal,
@@ -189,6 +231,8 @@ public static class ApiKeyPermissionMatrix
             "transcode" => allowTranscode,
             "gateway" => allowGateway,
             "remote_hosts" or "remote" or "remotehosts" => allowRemoteHosts,
+            "services" or "service" => allowServices,
+            "workers" or "worker" => allowWorkers,
             _ => true
         };
 

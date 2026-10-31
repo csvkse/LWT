@@ -5,7 +5,9 @@ import { toast } from '../../store/toast.js';
 import ExtensionActionModal from './ExtensionActionModal.js';
 import ExtensionConfigModal from './ExtensionConfigModal.js';
 import ExtensionInstallGuideModal from './ExtensionInstallGuideModal.js';
+import ExtensionLogsModal from './ExtensionLogsModal.js';
 import ExtensionRepoImportModal from './ExtensionRepoImportModal.js';
+import ExtensionUpdateModal from './ExtensionUpdateModal.js';
 
 export default defineComponent({
   name: 'ExtensionsSubmodule',
@@ -14,6 +16,8 @@ export default defineComponent({
     ExtensionActionModal,
     ExtensionRepoImportModal,
     ExtensionConfigModal,
+    ExtensionUpdateModal,
+    ExtensionLogsModal,
   },
   setup() {
     const loading = ref(false);
@@ -25,11 +29,12 @@ export default defineComponent({
     const configFormValues = reactive({});
     const savingConfig = ref(false);
 
-    // 日志弹窗
+    // 日志与更新
     const showLogsModal = ref(false);
     const logsExtId = ref('');
     const logsContent = ref('');
-    const logsLoading = ref(false);
+    const showUpdateModal = ref(false);
+    const activeUpdateExt = ref(null);
 
     // 引导与操作弹窗
     const showGuideModal = ref(false);
@@ -112,35 +117,35 @@ export default defineComponent({
     async function viewLogs(extId) {
       logsExtId.value = extId;
       logsContent.value = '正在拉取扩展运行日志...';
-      logsLoading.value = true;
       showLogsModal.value = true;
       try {
         const res = await http(`${API.services.extensionLogs}?id=${encodeURIComponent(extId)}&lines=150`);
-        if (res.ok && res.data?.logs) {
-          logsContent.value = res.data.logs;
-        } else {
-          logsContent.value = '获取日志失败: ' + (res.message || '未知错误');
-        }
+        logsContent.value = res.ok && res.data?.logs ? res.data.logs : ('获取日志失败: ' + (res.message || '未知错误'));
       } catch (err) {
         logsContent.value = '获取异常: ' + err.message;
-      } finally {
-        logsLoading.value = false;
       }
     }
 
-    function openInstallGuide(ext) {
-      activeGuideExt.value = ext;
-      showGuideModal.value = true;
+    async function toggleEnabled(ext) {
+      const next = !ext.isEnabled;
+      try {
+        const res = await http(API.services.extensionSetEnabled(ext.manifest.id) + `?enabled=${next}`, {
+          method: 'POST',
+        });
+        if (res.ok) {
+          toast.success(`扩展 [${ext.manifest.name}] 已${next ? '启用' : '禁用'}`);
+          await loadExtensions();
+        } else {
+          toast.error(res.message || '切换状态失败');
+        }
+      } catch (err) {
+        toast.error('操作异常: ' + err.message);
+      }
     }
 
-    function openCustomAction(ext, actDef) {
-      activeActionExt.value = ext;
-      activeActionDef.value = actDef;
-      showActionModal.value = true;
-    }
-
-    function openRepoImport() {
-      showRepoModal.value = true;
+    function openUpdate(ext) {
+      activeUpdateExt.value = ext;
+      showUpdateModal.value = true;
     }
 
     onMounted(() => {
@@ -157,21 +162,24 @@ export default defineComponent({
       showLogsModal,
       logsExtId,
       logsContent,
-      logsLoading,
       showGuideModal,
       activeGuideExt,
       showActionModal,
       activeActionExt,
       activeActionDef,
       showRepoModal,
+      showUpdateModal,
+      activeUpdateExt,
       loadExtensions,
       executeAction,
       openConfig,
       saveConfig,
       viewLogs,
-      openInstallGuide,
-      openCustomAction,
-      openRepoImport,
+      openUpdate,
+      toggleEnabled,
+      openInstallGuide: (ext) => { activeGuideExt.value = ext; showGuideModal.value = true; },
+      openCustomAction: (ext, actDef) => { activeActionExt.value = ext; activeActionDef.value = actDef; showActionModal.value = true; },
+      openRepoImport: () => { showRepoModal.value = true; },
     };
   },
   template: `
@@ -186,7 +194,7 @@ export default defineComponent({
               <span class="badge border-cyan-500/40 text-cyan-300">契约驱动</span>
             </div>
             <div class="text-xs text-slate-400 mt-0.5">
-              内置 SSH 访问安全守卫 (.sh) 与 Caddy Web 管理 (.js)，支持环境自检与 GitHub Mono-repo 导入
+              内置 SSH 安全守卫 (.sh) 与 Caddy 管理 (.js)，支持环境自检、热更新回滚与 GitHub Mono-repo 隔离导入
             </div>
           </div>
         </div>
@@ -201,9 +209,7 @@ export default defineComponent({
       </div>
 
       <!-- 扩展卡片流 -->
-      <div v-if="loading" class="panel p-8 text-center text-slate-500 text-xs">
-        正在扫描与探测动态扩展服务...
-      </div>
+      <div v-if="loading" class="panel p-8 text-center text-slate-500 text-xs">正在扫描与探测动态扩展服务...</div>
       <div v-else-if="extensions.length === 0" class="panel p-8 text-center text-slate-500 text-xs">
         当前无可用扩展插件。请在 <code class="font-mono">data/services/extensions/</code> 放置包含 <code class="font-mono">manifest.json</code> 的插件包，或点击上方「从 GitHub 导入」。
       </div>
@@ -212,7 +218,7 @@ export default defineComponent({
           v-for="ext in extensions"
           :key="ext.manifest.id"
           class="panel p-4 flex flex-col justify-between gap-3 border-cyber-line/50 hover:border-cyan-500/40 transition-colors"
-          :class="{ 'opacity-90 border-amber-500/30': ext.status.startsWith('Missing') }"
+          :class="{ 'opacity-60 border-slate-700': ext.isEnabled === false, 'border-amber-500/30': ext.status.startsWith('Missing') }"
         >
           <div>
             <!-- 卡片头部 -->
@@ -220,8 +226,11 @@ export default defineComponent({
               <div class="flex items-center gap-2 min-w-0">
                 <span class="text-xl">{{ ext.manifest.icon || '🔌' }}</span>
                 <div class="min-w-0">
-                  <div class="font-display font-semibold text-slate-200 text-sm truncate" :title="ext.manifest.name">
-                    {{ ext.manifest.name }}
+                  <div class="flex items-center gap-1.5">
+                    <span class="font-display font-semibold text-slate-200 text-sm truncate" :title="ext.manifest.name">
+                      {{ ext.manifest.name }}
+                    </span>
+                    <span v-if="ext.isEnabled === false" class="badge text-[10px] border-slate-700 text-slate-400">已禁用</span>
                   </div>
                   <div class="text-[11px] text-slate-500 font-mono">v{{ ext.manifest.version }} · {{ ext.manifest.id }}</div>
                 </div>
@@ -229,14 +238,16 @@ export default defineComponent({
               <span
                 class="badge text-[11px] shrink-0"
                 :class="[
-                  ext.status === 'Running' ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10' : '',
-                  ext.status === 'Stopped' ? 'border-slate-700 text-slate-500' : '',
-                  ext.status === 'MissingRuntime' ? 'border-amber-500/50 text-amber-300 bg-amber-500/10' : '',
-                  ext.status === 'MissingBinary' ? 'border-amber-500/50 text-amber-300 bg-amber-500/10' : '',
+                  ext.isEnabled === false ? 'border-slate-800 text-slate-500' :
+                  ext.status === 'Running' ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10' :
+                  ext.status === 'Stopped' ? 'border-slate-700 text-slate-500' :
+                  ext.status === 'MissingRuntime' ? 'border-amber-500/50 text-amber-300 bg-amber-500/10' :
+                  ext.status === 'MissingBinary' ? 'border-amber-500/50 text-amber-300 bg-amber-500/10' :
                   ext.status === 'Degraded' ? 'border-rose-500/40 text-rose-300 bg-rose-500/10' : ''
                 ]"
               >
                 {{
+                  ext.isEnabled === false ? '已禁用' :
                   ext.status === 'Running' ? '运行中' :
                   ext.status === 'MissingRuntime' ? '⚠️ 缺少运行时' :
                   ext.status === 'MissingBinary' ? '⚠️ 缺少目标程序' :
@@ -249,16 +260,10 @@ export default defineComponent({
               {{ ext.manifest.description || '无详细描述' }}
             </div>
 
-            <!-- 缺失依赖置灰引导 -->
+            <!-- 缺失依赖引导 -->
             <div v-if="ext.status.startsWith('Missing')" class="mt-2.5 p-2 rounded bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2">
-              <div class="text-[11px] text-amber-300 font-mono truncate">
-                {{ ext.statusMessage || '环境依赖不满足' }}
-              </div>
-              <button
-                type="button"
-                class="text-[11px] text-cyan-400 hover:text-cyan-300 shrink-0 underline"
-                @click="openInstallGuide(ext)"
-              >
+              <div class="text-[11px] text-amber-300 font-mono truncate">{{ ext.statusMessage || '环境依赖不满足' }}</div>
+              <button type="button" class="text-[11px] text-cyan-400 hover:text-cyan-300 shrink-0 underline" @click="openInstallGuide(ext)">
                 🛠️ 安装引导
               </button>
             </div>
@@ -266,8 +271,8 @@ export default defineComponent({
               提示: {{ ext.statusMessage }}
             </div>
 
-            <!-- 自定义 Actions 快速操作条 -->
-            <div v-if="ext.manifest.customActions && ext.manifest.customActions.length > 0 && !ext.status.startsWith('Missing')" class="mt-2.5 pt-2 border-t border-cyber-line/30 flex flex-wrap gap-1.5">
+            <!-- 自定义 Actions -->
+            <div v-if="ext.manifest.customActions?.length && !ext.status.startsWith('Missing') && ext.isEnabled !== false" class="mt-2.5 pt-2 border-t border-cyber-line/30 flex flex-wrap gap-1.5">
               <button
                 v-for="act in ext.manifest.customActions"
                 :key="act.action"
@@ -288,7 +293,7 @@ export default defineComponent({
                 v-if="ext.status !== 'Running'"
                 type="button"
                 class="btn btn-xs border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/20"
-                :disabled="ext.status.startsWith('Missing')"
+                :disabled="ext.status.startsWith('Missing') || ext.isEnabled === false"
                 @click="executeAction(ext.manifest.id, 'start', '启动')"
               >
                 启动
@@ -304,7 +309,7 @@ export default defineComponent({
               <button
                 type="button"
                 class="btn btn-xs hover:border-cyan-500/40"
-                :disabled="ext.status.startsWith('Missing')"
+                :disabled="ext.status.startsWith('Missing') || ext.isEnabled === false"
                 @click="executeAction(ext.manifest.id, 'restart', '重启')"
               >
                 重启
@@ -313,7 +318,24 @@ export default defineComponent({
 
             <div class="flex items-center gap-1">
               <button
-                v-if="ext.manifest.configForm && ext.manifest.configForm.length > 0"
+                type="button"
+                class="btn btn-xs hover:border-cyan-500/40"
+                :class="ext.isEnabled === false ? 'text-emerald-400' : 'text-slate-400'"
+                :title="ext.isEnabled === false ? '点击启用该扩展' : '点击禁用该扩展'"
+                @click="toggleEnabled(ext)"
+              >
+                {{ ext.isEnabled === false ? '启用' : '禁用' }}
+              </button>
+              <button
+                type="button"
+                class="btn btn-xs hover:border-cyan-500/40 text-cyan-300"
+                title="检查版本与安全热更新"
+                @click="openUpdate(ext)"
+              >
+                更新
+              </button>
+              <button
+                v-if="ext.manifest.configForm?.length"
                 type="button"
                 class="btn btn-xs hover:border-cyan-500/40"
                 :disabled="ext.status.startsWith('Missing')"
@@ -334,54 +356,12 @@ export default defineComponent({
         </div>
       </div>
 
-      <!-- 配置编辑弹窗组件 -->
-      <ExtensionConfigModal
-        :show="showConfigModal"
-        :ext="editingExt"
-        :form-values="configFormValues"
-        :saving="savingConfig"
-        @close="showConfigModal = false"
-        @save="saveConfig()"
-      />
-
-      <!-- 日志弹窗 -->
-      <div v-if="showLogsModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-        <div class="panel max-w-3xl w-full p-5 flex flex-col gap-3 border-cyan-500/40 animate-fade-in max-h-[85vh]">
-          <div class="flex items-center justify-between border-b border-cyber-line/50 pb-2.5">
-            <div class="font-display font-semibold text-slate-100 text-sm">
-              运行日志: <span class="font-mono text-cyan-400">{{ logsExtId }}</span>
-            </div>
-            <button type="button" class="btn btn-xs hover:border-slate-500" @click="showLogsModal = false">✕</button>
-          </div>
-          <pre class="p-3 bg-cyber-bg/95 rounded border border-cyber-line/70 font-mono text-xs text-slate-300 flex-1 overflow-y-auto whitespace-pre-wrap select-all leading-relaxed">{{ logsContent }}</pre>
-          <div class="flex justify-end">
-            <button type="button" class="btn btn-xs hover:border-slate-500" @click="showLogsModal = false">关闭</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 安装引导弹窗组件 -->
-      <ExtensionInstallGuideModal
-        :show="showGuideModal"
-        :ext="activeGuideExt"
-        @close="showGuideModal = false"
-      />
-
-      <!-- 自定义动作弹窗组件 -->
-      <ExtensionActionModal
-        :show="showActionModal"
-        :ext="activeActionExt"
-        :action-def="activeActionDef"
-        @close="showActionModal = false"
-        @refresh="loadExtensions()"
-      />
-
-      <!-- GitHub 仓库多模块导入弹窗组件 -->
-      <ExtensionRepoImportModal
-        :show="showRepoModal"
-        @close="showRepoModal = false"
-        @imported="loadExtensions()"
-      />
+      <ExtensionConfigModal :show="showConfigModal" :ext="editingExt" :form-values="configFormValues" :saving="savingConfig" @close="showConfigModal = false" @save="saveConfig()" />
+      <ExtensionLogsModal :show="showLogsModal" :ext-id="logsExtId" :logs="logsContent" @close="showLogsModal = false" />
+      <ExtensionInstallGuideModal :show="showGuideModal" :ext="activeGuideExt" @close="showGuideModal = false" />
+      <ExtensionActionModal :show="showActionModal" :ext="activeActionExt" :action-def="activeActionDef" @close="showActionModal = false" @refresh="loadExtensions()" />
+      <ExtensionRepoImportModal :show="showRepoModal" @close="showRepoModal = false" @imported="loadExtensions()" />
+      <ExtensionUpdateModal :show="showUpdateModal" :ext="activeUpdateExt" @close="showUpdateModal = false" @updated="loadExtensions()" />
     </div>
   `,
 });

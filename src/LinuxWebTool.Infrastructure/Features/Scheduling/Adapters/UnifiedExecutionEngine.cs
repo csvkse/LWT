@@ -250,9 +250,11 @@ public sealed class UnifiedExecutionEngine(
         }
 
         sw.Stop();
-        var overallStatus = results.Any(r => r.Status == ExecutionStatus.Failure)
+        var overallStatus = results.Any(r => r.Status == ExecutionStatus.Paused)
+            ? ExecutionStatus.Paused
+            : (results.Any(r => r.Status == ExecutionStatus.Failure)
             ? ExecutionStatus.Failure
-            : (results.All(r => r.Status == ExecutionStatus.Skipped) ? ExecutionStatus.Skipped : ExecutionStatus.Success);
+            : (results.All(r => r.Status == ExecutionStatus.Skipped) ? ExecutionStatus.Skipped : ExecutionStatus.Success));
 
         return new BatchExecutionResponse(batchId, results, overallStatus, sw.ElapsedMilliseconds);
     }
@@ -303,7 +305,8 @@ public sealed class UnifiedExecutionEngine(
                     {
                         var order = Interlocked.Increment(ref globalStepOrder);
                         var now = DateTime.Now;
-                        var skipReason = "前序工作流步骤失败，已熔断跳过后续步骤";
+                        var isPaused = results.Any(r => r.Status == ExecutionStatus.Paused);
+                        var skipReason = isPaused ? "工作流步骤执行异常，已触发安全自动暂停 (Auto-Paused)，保留现场等待人工恢复" : "前序工作流步骤失败，已熔断跳过后续步骤";
                         var effectiveTarget = !string.IsNullOrWhiteSpace(step.TargetHostId)
                             ? ExecutionTarget.Remote(step.TargetHostId)
                             : defaultTarget;
@@ -366,7 +369,7 @@ public sealed class UnifiedExecutionEngine(
                 var stageResults = await Task.WhenAll(tasks);
                 results.AddRange(stageResults.OrderBy(r => r.StepOrder));
 
-                if (stageResults.Any(r => r.Status == ExecutionStatus.Failure))
+                if (stageResults.Any(r => r.Status == ExecutionStatus.Failure || r.Status == ExecutionStatus.Paused))
                 {
                     abortPipeline = true;
                 }
@@ -379,7 +382,8 @@ public sealed class UnifiedExecutionEngine(
                     if (abortPipeline && (stage.FailurePolicy == FailurePolicy.FailFast || (FailurePolicy)workflow.FailurePolicy == FailurePolicy.FailFast))
                     {
                         var now = DateTime.Now;
-                        var skipReason = "前序工作流步骤失败，已熔断跳过后续步骤";
+                        var isPaused = results.Any(r => r.Status == ExecutionStatus.Paused);
+                        var skipReason = isPaused ? "工作流步骤执行异常，已触发安全自动暂停 (Auto-Paused)，保留现场等待人工恢复" : "前序工作流步骤失败，已熔断跳过后续步骤";
                         var effectiveTarget = !string.IsNullOrWhiteSpace(step.TargetHostId)
                             ? ExecutionTarget.Remote(step.TargetHostId)
                             : defaultTarget;
@@ -434,7 +438,7 @@ public sealed class UnifiedExecutionEngine(
                     var stepRes = await ExecuteWorkflowStepAsync(step, stepTarget, triggerBy, batchId, globalStepOrder, workflowId, pipelineContext, cancellationToken);
                     results.Add(stepRes);
 
-                    if (stepRes.Status == ExecutionStatus.Failure)
+                    if (stepRes.Status == ExecutionStatus.Failure || stepRes.Status == ExecutionStatus.Paused)
                     {
                         abortPipeline = true;
                     }
@@ -445,9 +449,11 @@ public sealed class UnifiedExecutionEngine(
         sw.Stop();
         await workflowStore.UpdateLastRunTimeAsync(workflowId);
 
-        var overallStatus = results.Any(r => r.Status == ExecutionStatus.Failure)
+        var overallStatus = results.Any(r => r.Status == ExecutionStatus.Paused)
+            ? ExecutionStatus.Paused
+            : (results.Any(r => r.Status == ExecutionStatus.Failure)
             ? ExecutionStatus.Failure
-            : (results.All(r => r.Status == ExecutionStatus.Skipped) ? ExecutionStatus.Skipped : ExecutionStatus.Success);
+            : (results.All(r => r.Status == ExecutionStatus.Skipped) ? ExecutionStatus.Skipped : ExecutionStatus.Success));
 
         return new BatchExecutionResponse(batchId, results, overallStatus, sw.ElapsedMilliseconds);
     }

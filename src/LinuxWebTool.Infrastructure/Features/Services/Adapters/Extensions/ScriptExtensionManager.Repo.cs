@@ -12,6 +12,17 @@ public sealed partial class ScriptExtensionManager
     #region Mono-repo & GitHub 仓库扫描与批量导入
     public async Task<InspectRepoModulesResponse> InspectRepositoryModulesAsync(InspectRepoModulesRequest request, CancellationToken cancellationToken = default)
     {
+        if (string.Equals(request.TargetType, "worker", StringComparison.OrdinalIgnoreCase))
+        {
+            return new InspectRepoModulesResponse
+            {
+                RepositoryUrl = request.RepositoryUrl,
+                Branch = request.Branch ?? "main",
+                CommitHash = null,
+                Modules = []
+            };
+        }
+
         var (fetchSuccess, fetchMsg, repoDir) = await _repoFetcher.FetchRepositoryAsync(
             request.RepositoryUrl,
             request.Branch,
@@ -164,9 +175,22 @@ public sealed partial class ScriptExtensionManager
                     await File.WriteAllTextAsync(existingConfigFile, existingConfigJson, cancellationToken);
                 }
 
-                var sourceMetaFile = Path.Combine(targetDir, ".lwt-source.json");
-                var sourceMeta = $"{{\"repo\":\"{EscapeJson(request.RepositoryUrl)}\",\"branch\":\"{EscapeJson(request.Branch ?? "main")}\",\"importedAt\":\"{DateTime.UtcNow:O}\"}}";
-                await File.WriteAllTextAsync(sourceMetaFile, sourceMeta, cancellationToken);
+                var sourceMeta = new ExtensionSourceMetadata
+                {
+                    SourceType = "git",
+                    RepoUrl = request.RepositoryUrl,
+                    SubDirectory = relPath,
+                    InstalledVersion = manifest.Version,
+                    InstalledCommitHash = "HEAD",
+                    InstalledAt = DateTime.UtcNow
+                };
+                var sourceMetaFile = Path.Combine(targetDir, "source.json");
+                await File.WriteAllTextAsync(sourceMetaFile, JsonSerializer.Serialize(sourceMeta, ServiceJsonContext.Default.ExtensionSourceMetadata), cancellationToken);
+
+                // 兼容旧版 .lwt-source.json
+                var legacySourceMetaFile = Path.Combine(targetDir, ".lwt-source.json");
+                var legacyMeta = $"{{\"repo\":\"{EscapeJson(request.RepositoryUrl)}\",\"branch\":\"{EscapeJson(request.Branch ?? "main")}\",\"importedAt\":\"{DateTime.UtcNow:O}\"}}";
+                await File.WriteAllTextAsync(legacySourceMetaFile, legacyMeta, cancellationToken);
 
                 importedIds.Add(manifest.Id);
             }

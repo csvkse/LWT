@@ -19,6 +19,7 @@ public enum ExecutionStatus
     Timeout = 2,
     Cancelled = 3,
     Skipped = 4,
+    Paused = 5,
 }
 
 /// <summary>目标环境类型。</summary>
