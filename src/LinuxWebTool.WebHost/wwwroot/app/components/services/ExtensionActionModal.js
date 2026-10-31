@@ -1,4 +1,4 @@
-import { defineComponent, ref } from 'vue';
+import { defineComponent, ref, watch } from 'vue';
 import { http } from '../../api/client.js';
 import { API } from '../../config.js';
 import { toast } from '../../store/toast.js';
@@ -9,12 +9,20 @@ export default defineComponent({
     show: { type: Boolean, default: false },
     ext: { type: Object, default: () => ({}) },
     actionDef: { type: Object, default: () => ({}) },
+    env: { type: Object, default: () => ({}) },
   },
   emits: ['close', 'refresh'],
   setup(props, { emit }) {
     const inputParam = ref('');
     const executing = ref(false);
     const actionResult = ref(null);
+    const selectedTarget = ref('container');
+
+    watch(() => props.show, (val) => {
+      if (val) {
+        selectedTarget.value = props.ext?.target || props.ext?.manifest?.target || (props.ext?.manifest?.id === 'ssh-access-guard' ? 'host' : 'container');
+      }
+    }, { immediate: true });
 
     function closeModal() {
       inputParam.value = '';
@@ -35,6 +43,7 @@ export default defineComponent({
         const body = {
           extensionId: props.ext?.manifest?.id,
           action: props.actionDef?.action,
+          target: selectedTarget.value,
         };
         if (props.actionDef?.requireParam) {
           body.actionParams = {
@@ -69,6 +78,7 @@ export default defineComponent({
       inputParam,
       executing,
       actionResult,
+      selectedTarget,
       closeModal,
       submitAction,
     };
@@ -93,6 +103,24 @@ export default defineComponent({
 
         <div v-if="actionDef?.description" class="text-xs text-slate-300">
           {{ actionDef.description }}
+        </div>
+
+        <!-- 执行目标切换 (特权容器下可见) -->
+        <div v-if="env?.isPrivilegedContainer" class="p-2.5 rounded bg-slate-900/60 border border-cyber-line/50 text-xs flex flex-col gap-1.5">
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400 font-medium">执行目标 (Target):</span>
+            <span class="text-[10px] text-cyan-400 font-mono">特权模式透明穿透</span>
+          </div>
+          <div class="flex items-center gap-4">
+            <label class="flex items-center gap-1.5 cursor-pointer text-slate-300">
+              <input type="radio" v-model="selectedTarget" value="container" class="accent-cyan-400" />
+              <span>📦 当前容器</span>
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer text-slate-300">
+              <input type="radio" v-model="selectedTarget" value="host" class="accent-cyan-400" />
+              <span>🖥️ 宿主主机 (nsenter穿透)</span>
+            </label>
+          </div>
         </div>
 
         <!-- 参数输入项 -->

@@ -61,7 +61,24 @@ public sealed partial class ScriptExtensionManager
         try
         {
             var dir = Path.Combine(_baseExtensionsDir, "ssh-access-guard");
-            if (Directory.Exists(dir)) return;
+            var manifestPath = Path.Combine(dir, "manifest.json");
+            if (Directory.Exists(dir))
+            {
+                if (File.Exists(manifestPath))
+                {
+                    try
+                    {
+                        var mText = File.ReadAllText(manifestPath);
+                        if (!mText.Contains("\"target\"", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var patched = mText.Replace("\"supportedPlatforms\": [\"linux\", \"windows\"],", "\"supportedPlatforms\": [\"linux\", \"windows\"],\n  \"target\": \"host\",");
+                            File.WriteAllText(manifestPath, patched);
+                        }
+                    }
+                    catch { }
+                }
+                return;
+            }
             Directory.CreateDirectory(dir);
             var hooksDir = Path.Combine(dir, "hooks");
             Directory.CreateDirectory(hooksDir);
@@ -75,6 +92,7 @@ public sealed partial class ScriptExtensionManager
   "description": "实时监控 SSH 成功与失败登录轨迹，支持恶意 IP/网段一键封禁与解封",
   "icon": "🛡️",
   "supportedPlatforms": ["linux", "windows"],
+  "target": "host",
   "dependencies": {
     "runners": ["sh"],
     "binaries": ["last", "who"]
@@ -113,7 +131,17 @@ echo "=== 最近成功登录记录 (TOP 15) ==="
 last -n 15 2>/dev/null || echo "无法读取 last 历史"
 echo ""
 echo "=== 最近登录失败与密码错误尝试 (TOP 15) ==="
-lastb -n 15 2>/dev/null || grep "Failed password" /var/log/auth.log 2>/dev/null | tail -n 15 || echo "无失败记录或无权限读取"
+if [ -s /var/log/btmp ] && command -v lastb >/dev/null 2>&1; then
+    lastb -n 15 2>/dev/null
+elif [ -f /var/log/auth.log ]; then
+    grep -E "Failed password|authentication failure" /var/log/auth.log 2>/dev/null | tail -n 15 || echo "无失败记录或无权限读取"
+elif [ -f /var/log/secure ]; then
+    grep -E "Failed password|authentication failure" /var/log/secure 2>/dev/null | tail -n 15 || echo "无失败记录或无权限读取"
+elif command -v journalctl >/dev/null 2>&1; then
+    journalctl -u ssh -u sshd --no-pager -n 15 2>/dev/null | grep -E "Failed|failure|error" || echo "无失败记录或系统日志未发现近期失败尝试"
+else
+    echo "无失败记录或无权限读取"
+fi
 echo ""
 echo "=== 当前活跃在线会话 ==="
 who -u 2>/dev/null || echo "无在线用户"

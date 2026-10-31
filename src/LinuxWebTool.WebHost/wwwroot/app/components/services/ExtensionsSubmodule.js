@@ -66,11 +66,13 @@ export default defineComponent({
       }
     }
 
-    async function executeAction(extId, actionVerb, desc) {
+    async function executeAction(extId, actionVerb, desc, target) {
       try {
+        const payload = { extensionId: extId, action: actionVerb };
+        if (target) payload.target = target;
         const res = await http(API.services.extensionAction, {
           method: 'POST',
-          body: { extensionId: extId, action: actionVerb },
+          body: payload,
         });
         if (res.ok && res.data?.success) {
           toast.success(`扩展服务 [${extId}] ${desc} 成功`);
@@ -230,7 +232,7 @@ export default defineComponent({
         <div
           v-for="ext in extensions"
           :key="ext.manifest.id"
-          class="panel p-4 flex flex-col justify-between gap-3 border-cyber-line/50 hover:border-cyan-500/40 transition-colors"
+          class="panel p-4 flex flex-col justify-between gap-3 border-cyber-line/50 hover:border-cyan-500/40 transition-colors overflow-hidden min-w-0"
           :class="{ 'opacity-60 border-slate-700': ext.isEnabled === false, 'border-amber-500/30': ext.status.startsWith('Missing') }"
         >
           <div>
@@ -300,14 +302,14 @@ export default defineComponent({
           </div>
 
           <!-- 底部操作按钮 -->
-          <div class="flex items-center justify-between border-t border-cyber-line/40 pt-2.5 gap-1.5">
-            <div class="flex items-center gap-1">
+          <div class="flex flex-wrap items-center justify-between border-t border-cyber-line/40 pt-2.5 gap-y-2 gap-x-1">
+            <div class="flex flex-wrap items-center gap-1">
               <button
                 v-if="ext.status !== 'Running'"
                 type="button"
                 class="btn btn-xs border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/20"
                 :disabled="ext.status.startsWith('Missing') || ext.isEnabled === false"
-                @click="executeAction(ext.manifest.id, 'start', '启动')"
+                @click="executeAction(ext.manifest.id, 'start', '启动', ext.manifest?.target || ext.target)"
               >
                 启动
               </button>
@@ -315,7 +317,7 @@ export default defineComponent({
                 v-else
                 type="button"
                 class="btn btn-xs border-rose-500/40 text-rose-300 hover:bg-rose-500/20"
-                @click="executeAction(ext.manifest.id, 'stop', '停止')"
+                @click="executeAction(ext.manifest.id, 'stop', '停止', ext.manifest?.target || ext.target)"
               >
                 停止
               </button>
@@ -323,13 +325,13 @@ export default defineComponent({
                 type="button"
                 class="btn btn-xs hover:border-cyan-500/40"
                 :disabled="ext.status.startsWith('Missing') || ext.isEnabled === false"
-                @click="executeAction(ext.manifest.id, 'restart', '重启')"
+                @click="executeAction(ext.manifest.id, 'restart', '重启', ext.manifest?.target || ext.target)"
               >
                 重启
               </button>
             </div>
 
-            <div class="flex items-center gap-1">
+            <div class="flex flex-wrap items-center gap-1 justify-end">
               <button
                 type="button"
                 class="btn btn-xs hover:border-cyan-500/40"
@@ -380,7 +382,7 @@ export default defineComponent({
       <ExtensionConfigModal :show="showConfigModal" :ext="editingExt" :form-values="configFormValues" :saving="savingConfig" @close="showConfigModal = false" @save="saveConfig()" />
       <ExtensionLogsModal :show="showLogsModal" :ext-id="logsExtId" :logs="logsContent" @close="showLogsModal = false" />
       <ExtensionInstallGuideModal :show="showGuideModal" :ext="activeGuideExt" :env="env" @close="showGuideModal = false" />
-      <ExtensionActionModal :show="showActionModal" :ext="activeActionExt" :action-def="activeActionDef" @close="showActionModal = false" @refresh="loadExtensions()" />
+      <ExtensionActionModal :show="showActionModal" :ext="activeActionExt" :action-def="activeActionDef" :env="env" @close="showActionModal = false" @refresh="loadExtensions()" />
       <ExtensionRepoImportModal :show="showRepoModal" @close="showRepoModal = false" @imported="loadExtensions()" />
       <ExtensionUpdateModal :show="showUpdateModal" :ext="activeUpdateExt" @close="showUpdateModal = false" @updated="loadExtensions()" />
       <ExtensionZipImportModal :show="showZipModal" @close="showZipModal = false" @imported="loadExtensions()" />
