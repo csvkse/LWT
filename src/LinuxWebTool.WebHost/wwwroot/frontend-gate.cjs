@@ -9,6 +9,7 @@
  *  FE-NO-RAW-DOWNLOAD 禁止在业务组件中创建 <a> 标签绕过认证下载，统一使用 api/client.js 的 httpDownload
  *  FE-STORAGE         localStorage / sessionStorage 只允许出现在 api/client.js 与 store/auth.js
  *  FE-IMPORT-BOUNDARY 跨层 import 限制（store→views 禁止、api→views/components 禁止、views 互引禁止）
+ *  FE-IMPORT-EXPORT   ESM 模块导入导出完整性检查（禁止导入目标模块未导出的符号）
  *  FE-TEMPLATE-REF    模板事件绑定必须使用内联调用（method()），避免运行时编译提升裸标识符导致 handler 丢失
  *  FE-API-METHOD      前端 HTTP 动词必须匹配 EndpointsMapper.g.cs 声明的后端路由
  *  FE-TAILWIND-CLASS  禁止使用非标 Tailwind 边距/尺寸类名（如 p-4.5、gap-4.5），防止 padding 归零导致元素贴边与圆角内容剪切
@@ -52,6 +53,41 @@ function readBaseline() {
   } catch {
     return {};
   }
+}
+
+const exportCache = new Map();
+function getExportsOfFile(filePath) {
+  if (exportCache.has(filePath)) return exportCache.get(filePath);
+  const exported = new Set();
+  if (!fs.existsSync(filePath)) {
+    exportCache.set(filePath, exported);
+    return exported;
+  }
+  const code = fs.readFileSync(filePath, 'utf8');
+  // 1. export function / class / const / let / var
+  const declMatches = code.matchAll(/export\s+(?:async\s+)?(?:function\*?|class|const|let|var)\s+([A-Za-z0-9_$]+)/g);
+  for (const [, name] of declMatches) exported.add(name);
+
+  // 2. export { a, b as c, d }
+  const blockMatches = code.matchAll(/export\s*\{([\s\S]*?)\}(?:\s*from\s*["'][^"']+["'])?/g);
+  for (const [, block] of blockMatches) {
+    const items = block.split(',');
+    for (let item of items) {
+      item = item.trim();
+      if (!item) continue;
+      const parts = item.split(/\s+as\s+/);
+      const exportedName = parts[parts.length - 1].trim();
+      if (exportedName) exported.add(exportedName);
+    }
+  }
+
+  // 3. export default
+  if (/export\s+default\b/.test(code)) {
+    exported.add('default');
+  }
+
+  exportCache.set(filePath, exported);
+  return exported;
 }
 
 function findCallEnd(source, start) {
@@ -238,6 +274,38 @@ for (const file of files) {
       }
       if (rel.startsWith('components/') && /\/views\//.test(`/${targetRel}`)) {
         add('FE-IMPORT-BOUNDARY', file, `components 禁止 import views（${targetRel}）`);
+      }
+    }
+    // FE-IMPORT-EXPORT: 校验本模块从相对路径模块导入的命名符号在目标模块中是否真实导出
+    const namedImportMatches = content.matchAll(/import\s*\{([^{};]*?)\}\s*from\s*["'](\.[^"']+)["']/g);
+    for (const [, namesBlock, spec] of namedImportMatches) {
+      const target = path.normalize(path.join(path.dirname(file), spec));
+      if (!fs.existsSync(target)) {
+        add('FE-IMPORT-EXPORT', file, `导入的文件不存在: ${spec}`);
+        continue;
+      }
+      const targetExports = getExportsOfFile(target);
+      const rawNames = namesBlock.split(',');
+      for (let rawName of rawNames) {
+        rawName = rawName.trim();
+        if (!rawName) continue;
+        const originalName = rawName.split(/\s+as\s+/)[0].trim();
+        if (originalName && !targetExports.has(originalName)) {
+          add('FE-IMPORT-EXPORT', file, `目标模块 ${spec} 未导出符号 "${originalName}"`);
+        }
+      }
+    }
+
+    // 校验默认导入 (import X from './...')
+    const defaultImportMatches = content.matchAll(/import\s+([A-Za-z0-9_$]+)\s+from\s*["'](\.[^"']+)["']/g);
+    for (const [, defaultName, spec] of defaultImportMatches) {
+      if (defaultName === 'type' || defaultName === '{') continue;
+      const target = path.normalize(path.join(path.dirname(file), spec));
+      if (fs.existsSync(target)) {
+        const targetExports = getExportsOfFile(target);
+        if (!targetExports.has('default')) {
+          add('FE-IMPORT-EXPORT', file, `目标模块 ${spec} 未提供默认导出 (export default)，无法默认导入 "${defaultName}"`);
+        }
       }
     }
     // FE-TEMPLATE-REF：模板事件绑定禁止裸标识符（运行时编译会错误提升导致 handler 丢失）
@@ -442,4 +510,14 @@ if (apiSigResult.error || apiSigResult.status !== 0) {
   process.exit(1);
 }
 console.log('✅ FE-API-SIGNATURE：API 签名与 callable 契约行为门禁通过');
+const esmIntegrityTests = path.resolve(__dirname, '../../../tests/frontend/esm-import-integrity.test.mjs');
+const esmIntegrityResult = spawnSync(process.execPath, ['--test', esmIntegrityTests], {
+  encoding: 'utf8', timeout: 30000, windowsHide: true,
+});
+if (esmIntegrityResult.error || esmIntegrityResult.status !== 0) {
+  console.error('[FE-IMPORT-EXPORT] ESM 导入导出符号完整性门禁失败');
+  console.error(esmIntegrityResult.stdout || esmIntegrityResult.stderr || esmIntegrityResult.error?.message);
+  process.exit(1);
+}
+console.log('✅ FE-IMPORT-EXPORT：ESM 导入导出符号完整性门禁通过');
 console.log('✅ 前端架构门禁通过');

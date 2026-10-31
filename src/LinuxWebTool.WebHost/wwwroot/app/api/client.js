@@ -128,6 +128,14 @@ export async function http(url, { method = 'GET', params, body, timeoutMs = 0 } 
   return { ok: true, status: response.status, data };
 }
 
+export async function httpGet(url, options = {}) {
+  return http(url, { ...options, method: 'GET' });
+}
+
+export async function httpPost(url, body = undefined, options = {}) {
+  return http(url, { ...options, method: 'POST', body });
+}
+
 /// 上传文件（multipart/form-data）。路径经 params 传入；文件走 form，不在 headers。返回与 http 一致的 { ok, data, status, message }。
 export async function httpUpload(url, { params, file } = {}) {
   const headers = { Accept: 'application/json' };

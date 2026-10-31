@@ -1,6 +1,6 @@
 import { defineComponent, ref, watch } from 'vue';
 import { API } from '../../config.js';
-import { httpGet, httpPost } from '../../api/client.js';
+import { http } from '../../api/client.js';
 import { toast } from '../../store/toast.js';
 
 export default defineComponent({
@@ -29,7 +29,7 @@ export default defineComponent({
       loading.value = true;
       try {
         const url = API.services.extensionCode(props.extensionId, file || selectedFile.value);
-        const res = await httpGet(url);
+        const res = await http(url);
         if (res.ok && res.data) {
           selectedFile.value = res.data.selectedFile || '';
           codeContent.value = res.data.content || '';
@@ -65,9 +65,12 @@ export default defineComponent({
       saving.value = true;
       try {
         const url = API.services.extensionCode(props.extensionId);
-        const res = await httpPost(url, {
-          filePath: selectedFile.value,
-          content: codeContent.value,
+        const res = await http(url, {
+          method: 'POST',
+          body: {
+            filePath: selectedFile.value,
+            content: codeContent.value,
+          },
         });
         if (res.ok) {
           toast.success(`文件 ${selectedFile.value} 保存成功 (已生成备忘录快照)`);
@@ -90,9 +93,12 @@ export default defineComponent({
       try {
         toast.info(`正在执行钩子 [${debugHook.value}] 调试...`);
         const url = API.services.extensionDebug(props.extensionId);
-        const res = await httpPost(url, {
-          hookName: debugHook.value,
-          timeoutSeconds: 8,
+        const res = await http(url, {
+          method: 'POST',
+          body: {
+            hookName: debugHook.value,
+            timeoutSeconds: 8,
+          },
         });
         if (res.ok && res.data) {
           debugResult.value = res.data;
