@@ -119,7 +119,7 @@ export default defineComponent({
       logsContent.value = '正在拉取扩展运行日志...';
       showLogsModal.value = true;
       try {
-        const res = await http(`${API.services.extensionLogs}?id=${encodeURIComponent(extId)}&lines=150`);
+        const res = await http(API.services.extensionLogs(extId, 150));
         logsContent.value = res.ok && res.data?.logs ? res.data.logs : ('获取日志失败: ' + (res.message || '未知错误'));
       } catch (err) {
         logsContent.value = '获取异常: ' + err.message;

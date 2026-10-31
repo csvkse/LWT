@@ -134,7 +134,56 @@ if __name__ == '__main__':
     {
         var id = "demo-dotnet-service";
         var dir = Path.Combine(_workersRoot, id);
-        if (Directory.Exists(dir)) return;
+
+        var script = @"using System;
+using System.IO;
+using System.Net;
+using System.Text;
+
+var port = Environment.GetEnvironmentVariable(""PORT"") ?? ""8080"";
+var listener = new HttpListener();
+try
+{
+    listener.Prefixes.Add($""http://*:{port}/"");
+    listener.Start();
+}
+catch (HttpListenerException)
+{
+    // 非管理员权限下在 Windows 上监听通配符会抛出拒绝访问，安全自愈降级至 localhost 与 127.0.0.1
+    listener = new HttpListener();
+    listener.Prefixes.Add($""http://localhost:{port}/"");
+    listener.Prefixes.Add($""http://127.0.0.1:{port}/"");
+    listener.Start();
+}
+
+Console.WriteLine($""[.NET-Worker] Listening on http://localhost:{port}/"");
+
+while (true)
+{
+    var context = await listener.GetContextAsync();
+    var response = context.Response;
+    var json = ""{\""message\"":\""Hello from .NET Core C# Top-Level Worker!\"",\""timestamp\"":\"""" + DateTime.UtcNow.ToString(""o"") + ""\""}"";
+    var buffer = Encoding.UTF8.GetBytes(json);
+    response.ContentType = ""application/json; charset=utf-8"";
+    response.ContentLength64 = buffer.Length;
+    await response.OutputStream.WriteAsync(buffer);
+    response.OutputStream.Close();
+}
+";
+
+        if (Directory.Exists(dir))
+        {
+            var existingCs = Path.Combine(dir, "Program.cs");
+            if (File.Exists(existingCs))
+            {
+                var content = File.ReadAllText(existingCs);
+                if (content.Contains("http://*:{port}/") && !content.Contains("HttpListenerException"))
+                {
+                    File.WriteAllText(existingCs, script);
+                }
+            }
+            return;
+        }
 
         Directory.CreateDirectory(dir);
         var manifest = new WorkerManifest
@@ -152,30 +201,6 @@ if __name__ == '__main__':
             Supervision = new WorkerSupervisionConfig { AutoRestart = true }
         };
         File.WriteAllText(Path.Combine(dir, "worker.json"), JsonSerializer.Serialize(manifest, WorkerJsonContext.Default.WorkerManifest));
-
-        var script = @"using System;
-using System.IO;
-using System.Net;
-using System.Text;
-
-var port = Environment.GetEnvironmentVariable(""PORT"") ?? ""8080"";
-var listener = new HttpListener();
-listener.Prefixes.Add($""http://*:{port}/"");
-listener.Start();
-Console.WriteLine($""[.NET-Worker] Listening on http://0.0.0.0:{port}/"");
-
-while (true)
-{
-    var context = await listener.GetContextAsync();
-    var response = context.Response;
-    var json = ""{\""message\"":\""Hello from .NET Core C# Top-Level Worker!\"",\""timestamp\"":\"""" + DateTime.UtcNow.ToString(""o"") + ""\""}"";
-    var buffer = Encoding.UTF8.GetBytes(json);
-    response.ContentType = ""application/json; charset=utf-8"";
-    response.ContentLength64 = buffer.Length;
-    await response.OutputStream.WriteAsync(buffer);
-    response.OutputStream.Close();
-}
-";
         File.WriteAllText(Path.Combine(dir, "Program.cs"), script);
     }
 

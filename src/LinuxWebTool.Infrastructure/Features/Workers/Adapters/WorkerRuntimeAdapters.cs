@@ -200,10 +200,14 @@ public sealed class DotNetRuntimeAdapter : IWorkerRuntimeAdapter
     public WorkerStartSpec BuildStartSpec(WorkerManifest manifest, string workerDir, int? port, IReadOnlyDictionary<string, string>? extraEnv = null)
     {
         var env = NodeRuntimeAdapter.BuildStandardEnv(manifest, workerDir, port, extraEnv);
+        env["DOTNET_NOLOGO"] = "1";
+        env["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
+
         var entry = Path.Combine(workerDir, manifest.Entrypoint);
         var isDll = manifest.Entrypoint.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
+        var isProject = manifest.Entrypoint.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase);
 
-        var args = isDll ? $"\"{entry}\"" : $"run \"{entry}\"";
+        var args = isDll ? $"\"{entry}\"" : (isProject ? $"run --project \"{entry}\"" : $"run \"{entry}\"");
         return new WorkerStartSpec
         {
             FileName = "dotnet",

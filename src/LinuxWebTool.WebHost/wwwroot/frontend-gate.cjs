@@ -17,6 +17,7 @@
  *  FE-TEMPLATE-VALUE-REF Vue 模板禁止访问 setup 暴露变量的 .value（模板自动解包，写 .value 为反模式）
  *  FE-TEMPLATE-TAG-BALANCE Vue 组件模板关键结构标签（div/table/thead/tbody/section/aside）必须严格开闭平衡
  *  FE-TERMINAL-SESSION-HEAL TerminalView 必须具备失效会话自动重置与新建降级机制，防止服务重启后前端卡死
+ *  FE-API-SIGNATURE   API 调用签名严格校验（禁止对字符串进行函数调用、禁止对函数作为纯值无参传递）
  *  FE-EASYTIER-IP-MODE EasyTier 新建/编辑提交必须保证静态 IPv4 优先于 DHCP（组件行为测试）
  *  FE-FILE-SIZE-LIMIT 单文件代码行数与单一职责门禁（views <= 2000 行，非 views <= 400 行）
  *
@@ -95,6 +96,7 @@ function findCallEnd(source, start) {
 function normalizeRoute(pathValue) {
   return pathValue
     .replace(/^\/api(?=\/)/, '')
+    .split('?')[0]
     .split('/')
     .filter(Boolean)
     .map((segment) => (segment.startsWith('{') || segment.startsWith(':') || /^%3a/i.test(segment) ? '*' : segment))
@@ -103,10 +105,23 @@ function normalizeRoute(pathValue) {
 
 function loadApiConfig(configFile) {
   const source = fs.readFileSync(configFile, 'utf8').replace(/\bexport\s+const\s+/g, 'const ');
-  const sandbox = { window: { location: { origin: 'http://frontend-gate.local' } } };
+  const sandbox = {
+    window: {
+      location: {
+        origin: 'http://frontend-gate.local',
+        host: 'frontend-gate.local',
+        protocol: 'http:',
+      },
+    },
+    URLSearchParams: globalThis.URLSearchParams,
+    encodeURIComponent: globalThis.encodeURIComponent,
+    Boolean: globalThis.Boolean,
+  };
   const result = new vm.Script(`${source}; ({ API });`).runInNewContext(sandbox);
   return result.API;
 }
+
+const globalApi = loadApiConfig(path.join(__dirname, 'app', 'config.js'));
 
 function resolveApiPath(api, expression) {
   const match = expression.match(/^API\.([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)/);
@@ -169,6 +184,31 @@ for (const file of files) {
     // FE-API-OWNERSHIP
     if (!rel.endsWith('config.js') && /["'`]\/api\//.test(content)) {
       add('FE-API-OWNERSHIP', file, 'API 路径字符串只能出现在 config.js');
+    }
+    // FE-API-SIGNATURE：严格校验 API 调用签名与 callable 契约
+    if (!rel.endsWith('config.js') && !rel.endsWith('client.js')) {
+      const apiMatches = content.matchAll(/\bAPI\.([A-Za-z0-9_$]+(?:\.[A-Za-z0-9_$]+)+)(\s*\()?/g);
+      for (const [, fullPath, isCall] of apiMatches) {
+        const segments = fullPath.split('.');
+        let val = globalApi;
+        let valid = true;
+        for (const seg of segments) {
+          if (val === undefined || val === null) {
+            valid = false;
+            break;
+          }
+          val = val[seg];
+        }
+        if (!valid || val === undefined) {
+          add('FE-API-SIGNATURE', file, `API 端点不存在: API.${fullPath}`);
+          continue;
+        }
+
+        const isFuncInConfig = typeof val === 'function';
+        if (isCall && !isFuncInConfig) {
+          add('FE-API-SIGNATURE', file, `API.${fullPath} 在 config.js 中为 ${typeof val}，但代码中作为函数调用 API.${fullPath}(...)`);
+        }
+      }
     }
     // FE-NO-FETCH
     if (!rel.endsWith('client.js') && /\bfetch\s*\(/.test(content)) {
@@ -392,4 +432,14 @@ if (refreshResult.error || refreshResult.status !== 0) {
   process.exit(1);
 }
 console.log('✅ FE-EASYTIER-REFRESH：EasyTier 单次在途轮询行为门禁通过');
+const apiSigTests = path.resolve(__dirname, '../../../tests/frontend/api-signatures-and-callability.test.mjs');
+const apiSigResult = spawnSync(process.execPath, ['--test', apiSigTests], {
+  encoding: 'utf8', timeout: 30000, windowsHide: true,
+});
+if (apiSigResult.error || apiSigResult.status !== 0) {
+  console.error('[FE-API-SIGNATURE] API 签名与 callable 契约行为门禁失败');
+  console.error(apiSigResult.stdout || apiSigResult.stderr || apiSigResult.error?.message);
+  process.exit(1);
+}
+console.log('✅ FE-API-SIGNATURE：API 签名与 callable 契约行为门禁通过');
 console.log('✅ 前端架构门禁通过');
