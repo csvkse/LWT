@@ -137,15 +137,16 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
             return false;
         }
 
-        // 1.1 服务与函数服务模块
+        // 1.1 服务与插件模块
         if (path.StartsWith("/api/Services", StringComparison.OrdinalIgnoreCase))
         {
             return entity.AllowServices;
         }
 
-        if (path.StartsWith("/api/Workers", StringComparison.OrdinalIgnoreCase))
+        if (path.StartsWith("/api/Plugins", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/api/Workers", StringComparison.OrdinalIgnoreCase))
         {
-            return entity.AllowWorkers;
+            return entity.AllowPlugins;
         }
 
         if (path.StartsWith("/api/McpBridge", StringComparison.OrdinalIgnoreCase))
@@ -156,7 +157,7 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
 
         if (path.StartsWith("/api/PluginOperations", StringComparison.OrdinalIgnoreCase))
         {
-            return entity.AllowServices || entity.AllowWorkers;
+            return entity.AllowServices || entity.AllowPlugins;
         }
 
         // 2. 指令与终端模块（支持自定义指令白名单 Resource Scoping）

@@ -92,31 +92,31 @@ public static class PipelineExtensions
         app.MapMcpEndpoints();
         app.MapReverseProxy();
 
-        // SaaS 函数微服务 (Workers) 动态路径反向代理转发
-        app.Map("/w/{workerId}/{**catch-all}", async (
-            string workerId,
+        // 统一插件平台 (Plugins) HTTP 网关反向代理转发 (/plugins/{pluginId}/*)
+        app.Map("/plugins/{pluginId}/{**catch-all}", async (
+            string pluginId,
             HttpContext context,
-            LinuxWebTool.Contracts.Features.Workers.Contracts.IWorkersManager workersManager,
+            LinuxWebTool.Contracts.Features.Plugins.Contracts.IPluginManager pluginManager,
             IHttpClientFactory httpClientFactory) =>
         {
-            var worker = await workersManager.GetByIdAsync(workerId, context.RequestAborted);
-            if (worker != null && !worker.IsEnabled)
+            var plugin = await pluginManager.GetByIdAsync(pluginId, context.RequestAborted);
+            if (plugin != null && plugin.State == LinuxWebTool.Contracts.Features.Plugins.Contracts.PluginState.Disabled)
             {
                 context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
                 context.Response.ContentType = "application/json; charset=utf-8";
-                await context.Response.WriteAsync($"{{\"code\":503,\"message\":\"Service Disabled: Worker '{workerId}' is explicitly disabled.\"}}");
+                await context.Response.WriteAsync($"{{\"code\":503,\"message\":\"Service Disabled: Plugin '{pluginId}' is explicitly disabled.\"}}");
                 return;
             }
-            if (worker == null || !worker.BoundPort.HasValue || worker.State != LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerState.Running)
+            if (plugin == null || !plugin.AllocatedPort.HasValue || plugin.AllocatedPort.Value <= 0)
             {
                 context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
                 context.Response.ContentType = "application/json; charset=utf-8";
-                await context.Response.WriteAsync($"{{\"code\":503,\"message\":\"Worker '{workerId}' is not running or has no listening port.\"}}");
+                await context.Response.WriteAsync($"{{\"code\":503,\"message\":\"Plugin '{pluginId}' is not running or has no declared HTTP port.\"}}");
                 return;
             }
 
             var client = httpClientFactory.CreateClient();
-            var port = worker.BoundPort.Value;
+            var port = plugin.AllocatedPort.Value;
             var subPath = context.Request.RouteValues["catch-all"]?.ToString() ?? "";
             var queryString = context.Request.QueryString.Value ?? "";
             var targetUri = $"http://127.0.0.1:{port}/{subPath}{queryString}";
@@ -131,8 +131,8 @@ public static class PipelineExtensions
 
             reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-For", context.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1");
             reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-Host", context.Request.Host.Value);
-            reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-Prefix", $"/w/{workerId}");
-            reqMsg.Headers.TryAddWithoutValidation("X-LWT-Worker-Id", workerId);
+            reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-Prefix", $"/plugins/{pluginId}");
+            reqMsg.Headers.TryAddWithoutValidation("X-LWT-Plugin-Id", pluginId);
 
             if (HttpMethods.IsPost(context.Request.Method) ||
                 HttpMethods.IsPut(context.Request.Method) ||
@@ -165,84 +165,7 @@ public static class PipelineExtensions
             {
                 context.Response.StatusCode = StatusCodes.Status502BadGateway;
                 context.Response.ContentType = "application/json; charset=utf-8";
-                await context.Response.WriteAsync($"{{\"code\":502,\"message\":\"Failed to reach worker backend: {ex.Message}\"}}");
-            }
-        }).AllowAnonymous();
-
-        // 动态脚本扩展 (Script Extensions) HTTP 网关反向代理转发 (/ext/{extensionId}/*)
-        app.Map("/ext/{extensionId}/{**catch-all}", async (
-            string extensionId,
-            HttpContext context,
-            LinuxWebTool.Contracts.Features.Services.Contracts.IScriptExtensionManager extensionManager,
-            IHttpClientFactory httpClientFactory) =>
-        {
-            var ext = await extensionManager.GetExtensionAsync(extensionId, context.RequestAborted);
-            if (ext != null && !ext.IsEnabled)
-            {
-                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-                context.Response.ContentType = "application/json; charset=utf-8";
-                await context.Response.WriteAsync($"{{\"code\":503,\"message\":\"Service Disabled: Extension '{extensionId}' is explicitly disabled.\"}}");
-                return;
-            }
-            if (ext == null || !ext.Port.HasValue || ext.Port.Value <= 0)
-            {
-                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-                context.Response.ContentType = "application/json; charset=utf-8";
-                await context.Response.WriteAsync($"{{\"code\":503,\"message\":\"Extension '{extensionId}' is not running or has no declared HTTP port.\"}}");
-                return;
-            }
-
-            var client = httpClientFactory.CreateClient();
-            var port = ext.Port.Value;
-            var subPath = context.Request.RouteValues["catch-all"]?.ToString() ?? "";
-            var queryString = context.Request.QueryString.Value ?? "";
-            var targetUri = $"http://127.0.0.1:{port}/{subPath}{queryString}";
-
-            using var reqMsg = new HttpRequestMessage(new HttpMethod(context.Request.Method), targetUri);
-
-            foreach (var h in context.Request.Headers)
-            {
-                if (h.Key.Equals("Host", StringComparison.OrdinalIgnoreCase)) continue;
-                reqMsg.Headers.TryAddWithoutValidation(h.Key, h.Value.ToArray());
-            }
-
-            reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-For", context.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1");
-            reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-Host", context.Request.Host.Value);
-            reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-Prefix", $"/ext/{extensionId}");
-            reqMsg.Headers.TryAddWithoutValidation("X-LWT-Extension-Id", extensionId);
-
-            if (HttpMethods.IsPost(context.Request.Method) ||
-                HttpMethods.IsPut(context.Request.Method) ||
-                HttpMethods.IsPatch(context.Request.Method))
-            {
-                reqMsg.Content = new StreamContent(context.Request.Body);
-                if (context.Request.ContentType != null)
-                {
-                    reqMsg.Content.Headers.TryAddWithoutValidation("Content-Type", context.Request.ContentType);
-                }
-            }
-
-            try
-            {
-                using var respMsg = await client.SendAsync(reqMsg, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
-                context.Response.StatusCode = (int)respMsg.StatusCode;
-                foreach (var h in respMsg.Headers)
-                {
-                    if (IsHopByHopHeader(h.Key)) continue;
-                    context.Response.Headers[h.Key] = h.Value.ToArray();
-                }
-                foreach (var h in respMsg.Content.Headers)
-                {
-                    if (IsHopByHopHeader(h.Key)) continue;
-                    context.Response.Headers[h.Key] = h.Value.ToArray();
-                }
-                await respMsg.Content.CopyToAsync(context.Response.Body, context.RequestAborted);
-            }
-            catch (Exception ex)
-            {
-                context.Response.StatusCode = StatusCodes.Status502BadGateway;
-                context.Response.ContentType = "application/json; charset=utf-8";
-                await context.Response.WriteAsync($"{{\"code\":502,\"message\":\"Failed to reach extension backend: {ex.Message}\"}}");
+                await context.Response.WriteAsync($"{{\"code\":502,\"message\":\"Failed to reach plugin backend: {ex.Message}\"}}");
             }
         }).AllowAnonymous();
 

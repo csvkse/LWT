@@ -10,7 +10,6 @@ import DockerSubmodule from '../components/services/DockerSubmodule.js';
 import SshSubmodule from '../components/services/SshSubmodule.js';
 import SambaSubmodule from '../components/services/SambaSubmodule.js';
 import NetworkFirewallSubmodule from '../components/services/NetworkFirewallSubmodule.js';
-import ExtensionsSubmodule from '../components/services/ExtensionsSubmodule.js';
 
 // 子模块元数据定义清单
 const MODULE_CATALOG = [
@@ -29,12 +28,6 @@ const MODULE_CATALOG = [
       { id: 'network', name: '网络网卡与防火墙', icon: '🌐', desc: 'IP 拓扑、DNS 与 UFW 端口规则放行' },
     ],
   },
-  {
-    group: '动态扩展',
-    items: [
-      { id: 'extensions', name: '脚本扩展服务', icon: '🔌', desc: '基于契约脚本的动态自定义服务' },
-    ],
-  },
 ];
 
 export default defineComponent({
@@ -46,7 +39,6 @@ export default defineComponent({
     SshSubmodule,
     SambaSubmodule,
     NetworkFirewallSubmodule,
-    ExtensionsSubmodule,
   },
   setup() {
     const route = useRoute();
@@ -209,11 +201,6 @@ export default defineComponent({
 
           <NetworkFirewallSubmodule
             v-else-if="activeModuleId === 'network'"
-          />
-
-          <ExtensionsSubmodule
-            v-else-if="activeModuleId === 'extensions'"
-            :env="envInfo"
           />
         </div>
       </div>

@@ -43,6 +43,7 @@ public sealed record OperationAccepted
 public sealed record PluginActionResult
 {
     public string Status { get; init; } = "succeeded"; // accepted, succeeded, failed, cancelled, timedOut, unknown
+    public bool Success { get => Status == "succeeded" || Status == "accepted"; init { if (!value && Status == "succeeded") Status = "failed"; } }
     public int? ExitCode { get; init; }
     public System.Text.Json.JsonElement? Data { get; init; }
     public string? Message { get; init; }

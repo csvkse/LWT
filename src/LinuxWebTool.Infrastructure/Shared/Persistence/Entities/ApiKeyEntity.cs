@@ -17,7 +17,8 @@ public class ApiKeyEntity
     public bool AllowGateway { get; set; } = false;
     public bool AllowRemoteHosts { get; set; } = false;
     public bool AllowServices { get; set; } = false;
-    public bool AllowWorkers { get; set; } = false;
+    public bool AllowPlugins { get; set; } = false;
+    public bool AllowWorkers { get => AllowPlugins; set => AllowPlugins = value; }
     public string? AllowedPaths { get; set; }
     public string? AllowedHostIds { get; set; }
     public string? AllowedTools { get; set; }

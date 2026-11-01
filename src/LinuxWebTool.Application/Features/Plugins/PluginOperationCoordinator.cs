@@ -28,7 +28,7 @@ public sealed class PluginOperationCoordinator : IPluginOperationCoordinator
     private readonly IPluginArtifactStore _artifactStore;
     private readonly INativeCommandExecutor _commandExecutor;
     private readonly Func<string, string?> _pluginDirResolver;
-    private readonly Func<string, string, ExtensionCustomAction?>? _actionResolver;
+    private readonly Func<string, string, PluginCustomAction?>? _actionResolver;
 
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeCts = new();
 
@@ -37,7 +37,7 @@ public sealed class PluginOperationCoordinator : IPluginOperationCoordinator
         IPluginArtifactStore artifactStore,
         INativeCommandExecutor commandExecutor,
         Func<string, string?> pluginDirResolver,
-        Func<string, string, ExtensionCustomAction?>? actionResolver = null)
+        Func<string, string, PluginCustomAction?>? actionResolver = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _artifactStore = artifactStore ?? throw new ArgumentNullException(nameof(artifactStore));

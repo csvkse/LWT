@@ -1,6 +1,5 @@
 using LinuxWebTool.Contracts.Features.McpBridge.Contracts;
 using LinuxWebTool.Contracts.Features.Plugins.Contracts;
-using LinuxWebTool.Contracts.Features.Workers.Contracts;
 
 namespace LinuxWebTool.Application.Features.McpBridge;
 
@@ -14,42 +13,42 @@ public sealed class McpBridgeOrchestrator : IMcpBridgeOrchestrator
 {
     public const string BridgeWorkerId = "mcp-bridge";
 
-    private readonly IWorkersManager _workersManager;
+    private readonly IPluginManager _pluginManager;
     private readonly IMcpBridgeControlActions _controlActions;
 
     public McpBridgeOrchestrator(
-        IWorkersManager workersManager,
+        IPluginManager pluginManager,
         IMcpBridgeControlActions controlActions)
     {
-        _workersManager = workersManager ?? throw new ArgumentNullException(nameof(workersManager));
+        _pluginManager = pluginManager ?? throw new ArgumentNullException(nameof(pluginManager));
         _controlActions = controlActions ?? throw new ArgumentNullException(nameof(controlActions));
     }
 
     private async ValueTask<(ResidentControlSpec? Spec, string RunId, string? Error)> ResolveBridgeContextAsync(CancellationToken ct)
     {
-        var worker = await _workersManager.GetByIdAsync(BridgeWorkerId, ct).ConfigureAwait(false);
-        if (worker == null)
+        var plugin = await _pluginManager.GetByIdAsync(BridgeWorkerId, ct).ConfigureAwait(false);
+        if (plugin == null)
         {
             return (null, "0", $"服务 '{BridgeWorkerId}' 尚未部署或安装。");
         }
 
-        if (worker.State != WorkerState.Running)
+        if (plugin.State != PluginState.Running)
         {
-            return (null, "0", $"Bridge 服务当前未处于运行状态 (当前状态: {worker.State})，请先启动服务。");
+            return (null, "0", $"Bridge 服务当前未处于运行状态 (当前状态: {plugin.State})，请先启动服务。");
         }
 
-        if (worker.BoundPort is null or <= 0)
+        if (plugin.AllocatedPort is null or <= 0)
         {
             return (null, "0", "Bridge 服务未声明或分配回环端口。");
         }
 
         var spec = new ResidentControlSpec
         {
-            Port = worker.BoundPort,
-            BaseUrl = worker.AccessUrl ?? $"http://127.0.0.1:{worker.BoundPort}"
+            Port = plugin.AllocatedPort,
+            BaseUrl = plugin.AccessUrl ?? $"http://127.0.0.1:{plugin.AllocatedPort}"
         };
 
-        var runId = worker.ProcessId.HasValue ? $"run-{worker.ProcessId.Value}" : "0";
+        var runId = plugin.ProcessId.HasValue ? $"run-{plugin.ProcessId.Value}" : "0";
         return (spec, runId, null);
     }
 

@@ -1,12 +1,12 @@
 using LinuxWebTool.Contracts.Features.Services.Contracts;
-using LinuxWebTool.Contracts.Shared.Support;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LinuxWebTool.WebHost.Features.Services.Routes;
 
 /// <summary>
-/// 系统与服务管理中枢 (Services Hub) REST 控制器。
+/// 系统与基础设施运维中枢 (Services Hub) REST 控制器。
+/// 专职负责 Linux 宿主系统级设施：Systemd、Docker 容器引擎、SSH、Samba、网络与防火墙。
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
@@ -15,9 +15,7 @@ public class ServicesController(
     IServicesHubOrchestrator orchestrator,
     ISystemdServiceAdapter systemdAdapter,
     IDockerEngineAdapter dockerAdapter,
-    ISystemServiceConfigAdapter configAdapter,
-    IScriptExtensionManager extensionManager,
-    LinuxWebTool.Contracts.Features.Plugins.Contracts.IPluginOperationCoordinator? pluginCoordinator = null) : MinimalApi.ControllerBase
+    ISystemServiceConfigAdapter configAdapter) : MinimalApi.ControllerBase
 {
     [HttpGet("Environment")]
     public async Task<IResult> GetEnvironment(CancellationToken cancellationToken)
@@ -155,198 +153,6 @@ public class ServicesController(
     {
         var res = await configAdapter.UpdateFirewallRuleAsync(request, cancellationToken);
         return res.Success ? Ok(res) : BadRequest(res);
-    }
-    #endregion
-
-    #region Extensions
-    [HttpGet("Extensions")]
-    public async Task<IResult> GetExtensions(CancellationToken cancellationToken)
-    {
-        var exts = await extensionManager.ListExtensionsAsync(cancellationToken);
-        return Ok(exts);
-    }
-
-    [HttpPost("Extensions/Action")]
-    public async Task<IResult> ExecuteExtensionAction([FromBody] ExtensionActionRequest request, CancellationToken cancellationToken)
-    {
-        if (request.Action.Equals("ban_ip", StringComparison.OrdinalIgnoreCase) &&
-            request.ActionParams != null &&
-            request.ActionParams.TryGetValue("ip", out var banIp) &&
-            !string.IsNullOrWhiteSpace(banIp))
-        {
-            var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
-            if (!string.IsNullOrEmpty(clientIp) && (clientIp.Equals(banIp.Trim(), StringComparison.OrdinalIgnoreCase) || clientIp.Contains(banIp.Trim())))
-            {
-                return BadRequest(new ServiceActionResult { Success = false, Message = $"安全拦截：不能封禁当前客户端正在连接的 IP ({clientIp})" });
-            }
-        }
-
-        if (pluginCoordinator != null)
-        {
-            var exts = await extensionManager.ListExtensionsAsync(cancellationToken);
-            var targetExt = exts.FirstOrDefault(e => e.Manifest.Id.Equals(request.ExtensionId, StringComparison.OrdinalIgnoreCase));
-            var customAct = targetExt?.Manifest.CustomActions.FirstOrDefault(a => a.Action.Equals(request.Action, StringComparison.OrdinalIgnoreCase));
-            if (customAct?.Executor.Equals("command", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                var caller = User.Identity?.Name ?? "web";
-                var inputJson = System.Text.Json.JsonSerializer.SerializeToElement(request.ActionParams ?? new Dictionary<string, string>(), Composition.AppJsonSerializerContext.Default.DictionaryStringString);
-                var accepted = await pluginCoordinator.SubmitAsync(new LinuxWebTool.Contracts.Features.Plugins.Contracts.CommandInvocation
-                {
-                    Caller = caller,
-                    PluginIdentity = request.ExtensionId,
-                    Action = request.Action,
-                    Input = inputJson
-                }, cancellationToken);
-
-                return Accepted(accepted);
-            }
-        }
-
-        var res = await extensionManager.ExecuteExtensionActionAsync(request, cancellationToken);
-        return res.Success ? Ok(res) : BadRequest(res);
-    }
-
-    [HttpGet("Extensions/Logs")]
-    public async Task<IResult> GetExtensionLogs([FromQuery] string id, [FromQuery] int lines = 100, CancellationToken cancellationToken = default)
-    {
-        var logs = await extensionManager.GetExtensionLogsAsync(id, lines, cancellationToken);
-        return Ok(new ExtensionLogsResponse { ExtensionId = id, Logs = logs });
-    }
-
-    [HttpPost("Extensions/Repo/Inspect")]
-    public async Task<IResult> InspectRepositoryModules([FromBody] InspectRepoModulesRequest request, CancellationToken cancellationToken)
-    {
-        var resp = await extensionManager.InspectRepositoryModulesAsync(request, cancellationToken);
-        return Ok(resp);
-    }
-
-    [HttpPost("Extensions/Repo/Import")]
-    public async Task<IResult> BatchImportModules([FromBody] BatchImportModulesRequest request, CancellationToken cancellationToken)
-    {
-        var result = await extensionManager.BatchImportModulesAsync(request, cancellationToken);
-        return result.Success ? Ok(result) : BadRequest(result);
-    }
-
-    [HttpPost("Extensions/{id}/SetEnabled")]
-    public async Task<IResult> SetExtensionEnabled(string id, [FromQuery] bool enabled, CancellationToken cancellationToken)
-    {
-        var success = await extensionManager.SetEnabledAsync(id, enabled, cancellationToken);
-        return Ok(new ServiceActionResult { Success = success, Message = success ? (enabled ? "扩展已启用" : "扩展已禁用") : "更新状态失败" });
-    }
-
-    [HttpPost("Extensions/{id}/CheckUpdate")]
-    public async Task<IResult> CheckExtensionUpdate(string id, CancellationToken cancellationToken)
-    {
-        var result = await extensionManager.CheckUpdateAsync(id, cancellationToken);
-        return Ok(result);
-    }
-
-    [HttpPost("Extensions/{id}/HotUpdate")]
-    public async Task<IResult> HotUpdateExtension(string id, [FromBody] ExtensionHotUpdateRequest request, CancellationToken cancellationToken)
-    {
-        var result = await extensionManager.HotUpdateAsync(id, request, cancellationToken);
-        return Ok(result);
-    }
-
-    [HttpGet("Extensions/{id}/Source")]
-    public async Task<IResult> GetExtensionSource(string id, CancellationToken cancellationToken)
-    {
-        var meta = await extensionManager.GetSourceMetadataAsync(id, cancellationToken);
-        return meta != null ? Ok(meta) : NotFound(new ServiceActionResult { Success = false, Message = "未找到来源元数据" });
-    }
-
-    [HttpGet("Extensions/{id}/Assets")]
-    [HttpGet("Extensions/{id}/Assets/{**filePath}")]
-    public async Task<IResult> GetExtensionAsset(string id, string? filePath = null, CancellationToken cancellationToken = default)
-    {
-        if (!PluginSecurityGuard.IsValidPluginId(id))
-        {
-            return NotFound(new MessageResponse("非法扩展 ID"));
-        }
-
-        var assetPath = extensionManager.ResolveExtensionAssetPath(id, filePath);
-        if (string.IsNullOrEmpty(assetPath) || !System.IO.File.Exists(assetPath))
-        {
-            return NotFound(new MessageResponse("未找到请求的静态扩展资产文件"));
-        }
-
-        var ext = Path.GetExtension(assetPath)?.ToLowerInvariant() ?? string.Empty;
-        var contentType = ext switch
-        {
-            ".html" or ".htm" => "text/html; charset=utf-8",
-            ".js" or ".mjs" => "application/javascript; charset=utf-8",
-            ".css" => "text/css; charset=utf-8",
-            ".json" => "application/json; charset=utf-8",
-            ".svg" => "image/svg+xml",
-            ".png" => "image/png",
-            ".jpg" or ".jpeg" => "image/jpeg",
-            ".gif" => "image/gif",
-            ".ico" => "image/x-icon",
-            ".woff" => "font/woff",
-            ".woff2" => "font/woff2",
-            ".ttf" => "font/ttf",
-            ".txt" or ".log" => "text/plain; charset=utf-8",
-            _ => "application/octet-stream"
-        };
-
-        var bytes = await System.IO.File.ReadAllBytesAsync(assetPath, cancellationToken);
-        return Results.File(bytes, contentType, enableRangeProcessing: true);
-    }
-
-    [HttpPost("Extensions/Import/Zip")]
-    [Consumes("multipart/form-data")]
-    public async Task<IResult> ImportZip(IFormFile file, CancellationToken cancellationToken)
-    {
-        if (file == null || file.Length == 0) return BadRequest(new BatchImportModulesResult { Success = false, Message = "请选择有效的 Zip 文件上传。" });
-        using var stream = file.OpenReadStream();
-        var result = await extensionManager.ImportZipAsync(stream, cancellationToken);
-        return result.Success ? Ok(result) : BadRequest(result);
-    }
-
-    [HttpGet("Extensions/{id}/Code")]
-    public async Task<IResult> GetExtensionCode(string id, [FromQuery] string? file, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var code = await extensionManager.GetCodeAsync(id, file, cancellationToken);
-            return Ok(code);
-        }
-        catch (DirectoryNotFoundException)
-        {
-            return NotFound(new ServiceActionResult { Success = false, Message = $"未找到扩展服务: {id}" });
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new ServiceActionResult { Success = false, Message = ex.Message });
-        }
-    }
-
-    [HttpPost("Extensions/{id}/Code")]
-    public async Task<IResult> SaveExtensionCode(string id, [FromBody] ExtensionCodeSaveRequest request, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var success = await extensionManager.SaveCodeAsync(id, request, cancellationToken);
-            return Ok(new ServiceActionResult { Success = success, Message = success ? "代码保存成功" : "代码保存失败" });
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new ServiceActionResult { Success = false, Message = ex.Message });
-        }
-    }
-
-    [HttpPost("Extensions/{id}/Debug")]
-    public async Task<IResult> DebugRunExtension(string id, [FromBody] ExtensionDebugRunRequest request, CancellationToken cancellationToken)
-    {
-        var result = await extensionManager.DebugRunAsync(id, request, cancellationToken);
-        return Ok(result);
-    }
-
-    [HttpPost("Extensions/Create")]
-    public async Task<IResult> CreateExtension([FromBody] ExtensionCreateRequest request, CancellationToken cancellationToken)
-    {
-        var result = await extensionManager.CreateExtensionAsync(request, cancellationToken);
-        return result.Success ? Ok(result) : BadRequest(result);
     }
     #endregion
 }

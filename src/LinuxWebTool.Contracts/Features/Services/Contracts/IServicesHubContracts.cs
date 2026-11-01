@@ -57,29 +57,6 @@ public interface ISystemServiceConfigAdapter
 }
 
 /// <summary>
-/// 动态脚本扩展管理器接口。
-/// </summary>
-public interface IScriptExtensionManager
-{
-    Task<IReadOnlyList<ExtensionInstance>> ListExtensionsAsync(CancellationToken cancellationToken = default);
-    Task<ServiceActionResult> ExecuteExtensionActionAsync(ExtensionActionRequest request, CancellationToken cancellationToken = default);
-    Task<string> GetExtensionLogsAsync(string extensionId, int lines = 100, CancellationToken cancellationToken = default);
-    Task<InspectRepoModulesResponse> InspectRepositoryModulesAsync(InspectRepoModulesRequest request, CancellationToken cancellationToken = default);
-    Task<BatchImportModulesResult> BatchImportModulesAsync(BatchImportModulesRequest request, CancellationToken cancellationToken = default);
-    Task<bool> SetEnabledAsync(string extensionId, bool enabled, CancellationToken cancellationToken = default);
-    Task<ExtensionUpdateCheckResponse> CheckUpdateAsync(string extensionId, CancellationToken cancellationToken = default);
-    Task<ExtensionHotUpdateResponse> HotUpdateAsync(string extensionId, ExtensionHotUpdateRequest request, CancellationToken cancellationToken = default);
-    Task<ExtensionSourceMetadata?> GetSourceMetadataAsync(string extensionId, CancellationToken cancellationToken = default);
-    Task<BatchImportModulesResult> ImportZipAsync(Stream zipStream, CancellationToken cancellationToken = default);
-    Task<ExtensionCodeDto> GetCodeAsync(string extensionId, string? filePath = null, CancellationToken cancellationToken = default);
-    Task<bool> SaveCodeAsync(string extensionId, ExtensionCodeSaveRequest request, CancellationToken cancellationToken = default);
-    Task<ExtensionDebugRunResultDto> DebugRunAsync(string extensionId, ExtensionDebugRunRequest request, CancellationToken cancellationToken = default);
-    Task<ServiceActionResult> CreateExtensionAsync(ExtensionCreateRequest request, CancellationToken cancellationToken = default);
-    Task<ExtensionInstance?> GetExtensionAsync(string extensionId, CancellationToken cancellationToken = default);
-    string? ResolveExtensionAssetPath(string extensionId, string? relativePath);
-}
-
-/// <summary>
 /// 服务管理中枢统一编排器门面。
 /// </summary>
 public interface IServicesHubOrchestrator

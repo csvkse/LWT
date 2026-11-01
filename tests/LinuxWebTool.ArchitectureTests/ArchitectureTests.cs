@@ -1051,43 +1051,34 @@ public class ArchitectureTests
     }
 
     [Fact]
-    public void LinuxArch035_扩展与函数服务三套UI模式对称性与资产防逃逸门禁()
+    public void LinuxArch035_插件平台统一契约与纯粹服务运维架构门禁()
     {
         var servicesController = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "Services", "Routes", "ServicesController.cs");
-        var workersController = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "Workers", "Routes", "WorkersController.cs");
+        var pluginsController = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "Plugins", "Routes", "PluginsController.cs");
         var endpointsFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "MinimalApi", "EndpointsMapper.g.cs");
         var pipelineFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Composition", "PipelineExtensions.cs");
-        var workerContracts = Path.Combine(RepoRoot, "src", "LinuxWebTool.Contracts", "Features", "Workers", "Contracts", "WorkerModels.cs");
-        var extensionContracts = Path.Combine(RepoRoot, "src", "LinuxWebTool.Contracts", "Features", "Services", "Contracts", "ScriptExtensionModels.cs");
+        var pluginContracts = Path.Combine(RepoRoot, "src", "LinuxWebTool.Contracts", "Features", "Plugins", "Contracts", "PluginModels.cs");
 
         var servicesContent = File.ReadAllText(servicesController);
-        var workersContent = File.ReadAllText(workersController);
+        var pluginsContent = File.ReadAllText(pluginsController);
         var endpointsContent = File.ReadAllText(endpointsFile);
         var pipelineContent = File.ReadAllText(pipelineFile);
-        var workerContractsContent = File.ReadAllText(workerContracts);
-        var extensionContractsContent = File.ReadAllText(extensionContracts);
+        var pluginContractsContent = File.ReadAllText(pluginContracts);
 
-        // 1. 模式 3 (Webview 沙箱资产) 对称性：双边控制器均暴露 Assets 端点
-        Assert.Contains("[HttpGet(\"Extensions/{id}/Assets\")]", servicesContent);
-        Assert.Contains("[HttpGet(\"{id}/Assets\")]", workersContent);
-        Assert.Contains("group_ServicesController.MapGet(\"Extensions/{id}/Assets\"", endpointsContent);
-        Assert.Contains("group_WorkersController.MapGet(\"{id}/Assets\"", endpointsContent);
+        // 1. 服务运维页面纯粹化：ServicesController 绝不包含任何 Extensions 端点
+        Assert.DoesNotContain("Extensions", servicesContent);
 
-        // 2. 模式 1 (声明式动作与表单) 对称性：双边清单均声明 CustomActions/ConfigForm，控制器均暴露 Action 端点
-        Assert.Contains("[HttpPost(\"Extensions/Action\")]", servicesContent);
-        Assert.Contains("[HttpPost(\"Action\")]", workersContent);
-        Assert.Contains("group_ServicesController.MapPost(\"Extensions/Action\"", endpointsContent);
-        Assert.Contains("group_WorkersController.MapPost(\"Action\"", endpointsContent);
-        Assert.Contains("public ExtensionUiConfig? Ui { get; init; }", workerContractsContent);
-        Assert.Contains("public ExtensionUiConfig? Ui { get; init; }", extensionContractsContent);
-        Assert.Contains("CustomActions", workerContractsContent);
-        Assert.Contains("CustomActions", extensionContractsContent);
+        // 2. 模式 3 (Webview 沙箱资产) 与 模式 1 (声明式动作与表单)：统一由 PluginsController 暴露
+        Assert.Contains("[HttpGet(\"{id}/Assets/{**filePath}\")]", pluginsContent);
+        Assert.Contains("[HttpPost(\"Action\")]", pluginsContent);
+        Assert.Contains("group_PluginsController.MapGet(\"{id}/Assets\"", endpointsContent);
+        Assert.Contains("group_PluginsController.MapPost(\"Action\"", endpointsContent);
+        Assert.Contains("public PluginUiConfig? Ui { get; init; }", pluginContractsContent);
+        Assert.Contains("public IReadOnlyList<PluginCustomAction> CustomActions", pluginContractsContent);
 
-        // 3. 模式 2 (HTTP 网关反代) 对称性：双边实例 DTO 均具备 AccessUrl，管道均配置动态网关反代
-        Assert.Contains("public string? AccessUrl { get; init; }", workerContractsContent);
-        Assert.Contains("public string? AccessUrl { get; init; }", extensionContractsContent);
-        Assert.Contains("app.Map(\"/w/{workerId}/{**catch-all}\"", pipelineContent);
-        Assert.Contains("app.Map(\"/ext/{extensionId}/{**catch-all}\"", pipelineContent);
+        // 3. 模式 2 (HTTP 网关反代)：统一路由为 /plugins/{pluginId}/{**catch-all}
+        Assert.Contains("public string? GatewayUrl => AccessUrl;", pluginContractsContent);
+        Assert.Contains("app.Map(\"/plugins/{pluginId}/{**catch-all}\"", pipelineContent);
     }
 }
 

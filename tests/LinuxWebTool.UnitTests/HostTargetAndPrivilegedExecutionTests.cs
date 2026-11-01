@@ -1,7 +1,7 @@
 using LinuxWebTool.Contracts.Features.Commands.Contracts;
+using LinuxWebTool.Contracts.Features.Plugins.Contracts;
 using LinuxWebTool.Contracts.Features.Services.Contracts;
 using LinuxWebTool.Contracts.Features.Terminal.Contracts;
-using LinuxWebTool.Contracts.Features.Workers.Contracts;
 using LinuxWebTool.Contracts.Shared.Contracts;
 using Xunit;
 
@@ -45,40 +45,45 @@ public class HostTargetAndPrivilegedExecutionTests
     }
 
     [Fact]
-    public void ExtensionManifest_And_Instance_SupportTarget()
+    public void PluginManifest_And_Instance_SupportTarget()
     {
-        var manifest = new ExtensionManifest
+        var manifest = new PluginManifest
         {
             Id = "ssh-access-guard",
             Name = "SSH 访问安全卫士",
-            Target = "host"
+            Target = "host",
+            Profile = PluginProfile.OneShot,
+            Runtime = PluginRuntime.Bash,
+            Entrypoint = "guard.sh"
         };
         Assert.Equal("host", manifest.Target);
 
-        var instance = new ExtensionInstance
+        var instance = new PluginInstanceDto
         {
             Manifest = manifest,
-            Status = "Running",
-            Target = "host"
+            State = PluginState.Running
         };
-        Assert.Equal("host", instance.Target);
+        Assert.Equal("host", instance.Manifest.Target);
     }
 
     [Fact]
-    public void WorkerQuickDeployRequest_HoldsRequiredFields()
+    public void PluginCreateOrUpdateRequest_HoldsRequiredFields()
     {
-        var req = new WorkerQuickDeployRequest
+        var req = new PluginCreateOrUpdateRequest
         {
-            FileName = "worker.js",
-            Content = "console.log('hi');",
-            Target = "host",
-            AutoStart = true
+            Manifest = new PluginManifest
+            {
+                Id = "custom-worker",
+                Name = "Custom Worker",
+                Profile = PluginProfile.Resident,
+                Runtime = PluginRuntime.Node,
+                Entrypoint = "worker.js",
+                Target = "host"
+            }
         };
 
-        Assert.Equal("worker.js", req.FileName);
-        Assert.Equal("console.log('hi');", req.Content);
-        Assert.Equal("host", req.Target);
-        Assert.True(req.AutoStart);
+        Assert.Equal("worker.js", req.Manifest.Entrypoint);
+        Assert.Equal("host", req.Manifest.Target);
     }
 
     [Fact]

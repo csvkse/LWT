@@ -57,7 +57,7 @@ public sealed class PluginOperationCoordinatorTests
             artifactStore,
             executor,
             _ => Path.GetTempPath(),
-            (_, _) => new ExtensionCustomAction
+            (_, _) => new PluginCustomAction
             {
                 Action = "test-act",
                 Label = "Test Act",
@@ -93,7 +93,7 @@ public sealed class PluginOperationCoordinatorTests
             artifactStore,
             executor,
             _ => Path.GetTempPath(),
-            (_, _) => new ExtensionCustomAction
+            (_, _) => new PluginCustomAction
             {
                 Action = "test-act",
                 Label = "Test Act",
@@ -136,7 +136,7 @@ public sealed class PluginOperationCoordinatorTests
             artifactStore,
             executor,
             _ => Path.GetTempPath(),
-            (_, _) => new ExtensionCustomAction
+            (_, _) => new PluginCustomAction
             {
                 Action = "test-act",
                 Label = "Test Act",
@@ -209,7 +209,7 @@ public sealed class PluginOperationCoordinatorTests
             artifactStore,
             executor,
             _ => Path.GetTempPath(),
-            (_, _) => new ExtensionCustomAction
+            (_, _) => new PluginCustomAction
             {
                 Action = "test-act",
                 Label = "Test Act",

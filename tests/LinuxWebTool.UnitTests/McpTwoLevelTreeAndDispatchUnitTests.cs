@@ -43,7 +43,7 @@ public sealed class McpTwoLevelTreeAndDispatchUnitTests : IDisposable
         var catalog = McpCatalogRegistry.GetCatalog();
         Assert.Equal(10, catalog.Count);
 
-        var expectedCategories = new[] { "commands", "workflows", "schedules", "terminal", "remote_hosts", "files", "transcode", "gateway", "services", "workers" };
+        var expectedCategories = new[] { "commands", "workflows", "schedules", "terminal", "remote_hosts", "files", "transcode", "gateway", "services", "plugins" };
         var actualKeys = catalog.Select(c => c.Key).ToList();
         foreach (var exp in expectedCategories)
         {

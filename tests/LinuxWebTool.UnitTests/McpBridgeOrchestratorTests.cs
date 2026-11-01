@@ -1,46 +1,42 @@
 using LinuxWebTool.Application.Features.McpBridge;
 using LinuxWebTool.Contracts.Features.McpBridge.Contracts;
 using LinuxWebTool.Contracts.Features.Plugins.Contracts;
-using LinuxWebTool.Contracts.Features.Workers.Contracts;
 using Xunit;
 
 namespace LinuxWebTool.UnitTests;
 
 public sealed class McpBridgeOrchestratorTests
 {
-    private sealed class StubWorkersManager : IWorkersManager
+    private sealed class StubPluginManager : IPluginManager
     {
-        public WorkerInstanceDto? WorkerToReturn { get; set; }
+        public PluginInstanceDto? PluginToReturn { get; set; }
 
-        public ValueTask<WorkerInstanceDto?> GetByIdAsync(string id, CancellationToken ct = default) =>
-            ValueTask.FromResult(WorkerToReturn);
+        public ValueTask<PluginInstanceDto?> GetByIdAsync(string id, CancellationToken ct = default) =>
+            ValueTask.FromResult(PluginToReturn);
 
-        public ValueTask<IReadOnlyList<WorkerInstanceDto>> GetAllAsync(CancellationToken ct = default) =>
-            ValueTask.FromResult<IReadOnlyList<WorkerInstanceDto>>([]);
+        public ValueTask<IReadOnlyList<PluginInstanceDto>> GetAllAsync(PluginProfile? profileFilter = null, CancellationToken ct = default) =>
+            ValueTask.FromResult<IReadOnlyList<PluginInstanceDto>>([]);
         public ValueTask<bool> StartAsync(string id, CancellationToken ct = default) => ValueTask.FromResult(true);
         public ValueTask<(bool Success, string? ErrorMessage)> StartWithResultAsync(string id, CancellationToken ct = default) => ValueTask.FromResult((true, (string?)null));
         public ValueTask<bool> StopAsync(string id, CancellationToken ct = default) => ValueTask.FromResult(true);
         public ValueTask<bool> RestartAsync(string id, CancellationToken ct = default) => ValueTask.FromResult(true);
         public ValueTask<bool> DeleteAsync(string id, CancellationToken ct = default) => ValueTask.FromResult(true);
-        public ValueTask<WorkerInstanceDto> CreateOrUpdateAsync(WorkerCreateOrUpdateRequest request, CancellationToken ct = default) => throw new NotImplementedException();
-        public ValueTask<IReadOnlyList<string>> GetLogsAsync(string id, int limit = 200, CancellationToken ct = default) => ValueTask.FromResult<IReadOnlyList<string>>([]);
-        public ValueTask<WorkerSqliteInfo> GetSqliteInfoAsync(string id, CancellationToken ct = default) => throw new NotImplementedException();
-        public ValueTask<IReadOnlyList<WorkerKvItem>> GetKvListAsync(string id, CancellationToken ct = default) => ValueTask.FromResult<IReadOnlyList<WorkerKvItem>>([]);
-        public ValueTask<bool> SetKvAsync(string id, WorkerKvItem item, CancellationToken ct = default) => ValueTask.FromResult(true);
-        public ValueTask<bool> DeleteKvAsync(string id, string key, CancellationToken ct = default) => ValueTask.FromResult(true);
-        public ValueTask<WorkerRepoScanResult> ScanRepoAsync(string repoUrl, string? targetType = null, CancellationToken ct = default) => throw new NotImplementedException();
-        public ValueTask<int> ApplyRepoModulesAsync(WorkerRepoApplyRequest request, CancellationToken ct = default) => ValueTask.FromResult(0);
-        public ValueTask<WorkerInstanceDto> ImportZipAsync(Stream zipStream, CancellationToken ct = default) => throw new NotImplementedException();
+        public ValueTask<PluginInstanceDto> CreateOrUpdateAsync(PluginCreateOrUpdateRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public ValueTask<bool> SetEnabledAsync(string id, bool enabled, CancellationToken ct = default) => ValueTask.FromResult(true);
-        public ValueTask<WorkerUpdateCheckResponse> CheckUpdateAsync(string id, CancellationToken ct = default) => throw new NotImplementedException();
-        public ValueTask<WorkerHotUpdateResponse> HotUpdateAsync(string id, WorkerHotUpdateRequest request, CancellationToken ct = default) => throw new NotImplementedException();
-        public ValueTask<WorkerSourceMetadata?> GetSourceMetadataAsync(string id, CancellationToken ct = default) => ValueTask.FromResult<WorkerSourceMetadata?>(null);
-        public ValueTask<WorkerCodeDto> GetCodeAsync(string id, string? filePath = null, CancellationToken ct = default) => throw new NotImplementedException();
-        public ValueTask<bool> SaveCodeAsync(string id, WorkerCodeSaveRequest request, CancellationToken ct = default) => ValueTask.FromResult(true);
-        public ValueTask<WorkerDebugRunResultDto> DebugRunAsync(string id, WorkerDebugRunRequest request, CancellationToken ct = default) => throw new NotImplementedException();
-        public ValueTask<WorkerInstanceDto> DeploySingleFileAsync(WorkerQuickDeployRequest request, CancellationToken ct = default) => throw new NotImplementedException();
-        public string? ResolveWorkerAssetPath(string id, string? relativePath) => null;
-        public ValueTask<WorkerActionResult> ExecuteActionAsync(WorkerActionRequest request, CancellationToken ct = default) => ValueTask.FromResult(new WorkerActionResult { Success = true });
+        public ValueTask<IReadOnlyList<string>> GetLogsAsync(string id, int limit = 200, CancellationToken ct = default) => ValueTask.FromResult<IReadOnlyList<string>>([]);
+        public ValueTask<PluginActionResult> ExecuteActionAsync(PluginActionRequest request, CancellationToken ct = default) => ValueTask.FromResult(new PluginActionResult { Success = true });
+        public ValueTask<PluginCodeDto> GetCodeAsync(string id, string? filePath = null, CancellationToken ct = default) => throw new NotImplementedException();
+        public ValueTask<bool> SaveCodeAsync(string id, PluginCodeSaveRequest request, CancellationToken ct = default) => ValueTask.FromResult(true);
+        public ValueTask<PluginDebugRunResultDto> DebugRunAsync(string id, PluginDebugRunRequest request, CancellationToken ct = default) => throw new NotImplementedException();
+        public ValueTask<PluginInstanceDto> ImportZipAsync(Stream zipStream, CancellationToken ct = default) => throw new NotImplementedException();
+        public ValueTask<PluginRepoScanResult> ScanRepoAsync(string repoUrl, CancellationToken ct = default) => throw new NotImplementedException();
+        public ValueTask<PluginBatchImportResult> ApplyRepoModulesAsync(PluginRepoApplyRequest request, CancellationToken ct = default) => ValueTask.FromResult(new PluginBatchImportResult());
+        public ValueTask<PluginSourceMetadata?> GetSourceMetadataAsync(string id, CancellationToken ct = default) => ValueTask.FromResult<PluginSourceMetadata?>(null);
+        public ValueTask<PluginSqliteInfo> GetSqliteInfoAsync(string id, CancellationToken ct = default) => throw new NotImplementedException();
+        public ValueTask<IReadOnlyList<PluginKvItem>> GetKvListAsync(string id, CancellationToken ct = default) => ValueTask.FromResult<IReadOnlyList<PluginKvItem>>([]);
+        public ValueTask<bool> SetKvAsync(string id, PluginKvItem item, CancellationToken ct = default) => ValueTask.FromResult(true);
+        public ValueTask<bool> DeleteKvAsync(string id, string key, CancellationToken ct = default) => ValueTask.FromResult(true);
+        public string? ResolvePluginAssetPath(string id, string? relativePath) => null;
     }
 
     private sealed class StubControlActions : IMcpBridgeControlActions
@@ -92,11 +88,11 @@ public sealed class McpBridgeOrchestratorTests
     }
 
     [Fact]
-    public async Task GetStatusAsync_WorkerNotInstalled_ReturnsStoppedWithFriendlyError()
+    public async Task GetStatusAsync_PluginNotInstalled_ReturnsStoppedWithFriendlyError()
     {
-        var wm = new StubWorkersManager { WorkerToReturn = null };
+        var pm = new StubPluginManager { PluginToReturn = null };
         var actions = new StubControlActions();
-        var orch = new McpBridgeOrchestrator(wm, actions);
+        var orch = new McpBridgeOrchestrator(pm, actions);
 
         var status = await orch.GetStatusAsync(CancellationToken.None);
 
@@ -108,20 +104,25 @@ public sealed class McpBridgeOrchestratorTests
     }
 
     [Fact]
-    public async Task GetStatusAsync_WorkerNotRunning_ReturnsStoppedError()
+    public async Task GetStatusAsync_PluginNotRunning_ReturnsStoppedError()
     {
-        var wm = new StubWorkersManager
+        var pm = new StubPluginManager
         {
-            WorkerToReturn = new WorkerInstanceDto
+            PluginToReturn = new PluginInstanceDto
             {
-                Id = "mcp-bridge",
-                Name = "MCP Bridge",
-                State = WorkerState.Stopped,
-                Runtime = WorkerRuntimeType.Native
+                Manifest = new PluginManifest
+                {
+                    Id = "mcp-bridge",
+                    Name = "MCP Bridge",
+                    Profile = PluginProfile.Resident,
+                    Runtime = PluginRuntime.Native,
+                    Entrypoint = "bin/mcp-bridge"
+                },
+                State = PluginState.Stopped
             }
         };
         var actions = new StubControlActions();
-        var orch = new McpBridgeOrchestrator(wm, actions);
+        var orch = new McpBridgeOrchestrator(pm, actions);
 
         var status = await orch.GetStatusAsync(CancellationToken.None);
 
@@ -130,22 +131,28 @@ public sealed class McpBridgeOrchestratorTests
     }
 
     [Fact]
-    public async Task GetStatusAsync_WorkerRunningWithControl_DelegatesToControlActions()
+    public async Task GetStatusAsync_PluginRunningWithControl_DelegatesToControlActions()
     {
-        var wm = new StubWorkersManager
+        var pm = new StubPluginManager
         {
-            WorkerToReturn = new WorkerInstanceDto
+            PluginToReturn = new PluginInstanceDto
             {
-                Id = "mcp-bridge",
-                Name = "MCP Bridge",
-                State = WorkerState.Running,
-                Runtime = WorkerRuntimeType.Native,
+                Manifest = new PluginManifest
+                {
+                    Id = "mcp-bridge",
+                    Name = "MCP Bridge",
+                    Profile = PluginProfile.Resident,
+                    Runtime = PluginRuntime.Native,
+                    Entrypoint = "bin/mcp-bridge",
+                    Network = new PluginNetworkConfig { SupportHttp = true, Port = 18888 }
+                },
+                State = PluginState.Running,
                 ProcessId = 999,
-                BoundPort = 18888
+                AllocatedPort = 18888
             }
         };
         var actions = new StubControlActions();
-        var orch = new McpBridgeOrchestrator(wm, actions);
+        var orch = new McpBridgeOrchestrator(pm, actions);
 
         var status = await orch.GetStatusAsync(CancellationToken.None);
 

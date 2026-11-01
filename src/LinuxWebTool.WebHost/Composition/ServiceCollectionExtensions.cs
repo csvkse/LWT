@@ -103,25 +103,17 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.ISystemdServiceAdapter, LinuxWebTool.Infrastructure.Features.Services.Adapters.Systemd.SystemdServiceAdapter>();
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IDockerEngineAdapter, LinuxWebTool.Infrastructure.Features.Services.Adapters.Docker.DockerEngineAdapter>();
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.ISystemServiceConfigAdapter, LinuxWebTool.Infrastructure.Features.Services.Adapters.Config.SystemServiceConfigAdapter>();
-        builder.Services.AddSingleton<LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.IExtensionRepoFetcher, LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.CompositeExtensionRepoFetcher>();
-        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IScriptExtensionManager>(sp =>
-            new LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.ScriptExtensionManager(
-                sp.GetRequiredService<IShellExecutor>(),
-                sp.GetRequiredService<LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.IExtensionRepoFetcher>(),
-                sp.GetRequiredService<ILogger<LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.ScriptExtensionManager>>(),
-                dataPaths.PathFor(Path.Combine("services", "extensions")),
-                contentRoot));
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IServicesHubOrchestrator, LinuxWebTool.Application.Features.Services.ServicesHubOrchestrator>();
 
-        // SaaS 函数微服务与长时守护平台 (Workers & Daemons)
-        builder.Services.AddSingleton<LinuxWebTool.Infrastructure.Features.Workers.WorkersManager>(sp =>
-            new LinuxWebTool.Infrastructure.Features.Workers.WorkersManager(
-                sp.GetRequiredService<ILogger<LinuxWebTool.Infrastructure.Features.Workers.WorkersManager>>(),
-                contentRoot));
-        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Workers.Contracts.IWorkersManager>(sp =>
-            sp.GetRequiredService<LinuxWebTool.Infrastructure.Features.Workers.WorkersManager>());
+        // 统一插件平台中枢 (Plugin Platform: Resident Services & OneShot Extensions)
+        builder.Services.AddSingleton<LinuxWebTool.Infrastructure.Features.Plugins.PluginManager>(sp =>
+            new LinuxWebTool.Infrastructure.Features.Plugins.PluginManager(
+                contentRoot,
+                sp.GetRequiredService<ILogger<LinuxWebTool.Infrastructure.Features.Plugins.PluginManager>>()));
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Plugins.Contracts.IPluginManager>(sp =>
+            sp.GetRequiredService<LinuxWebTool.Infrastructure.Features.Plugins.PluginManager>());
         builder.Services.AddHostedService(sp =>
-            sp.GetRequiredService<LinuxWebTool.Infrastructure.Features.Workers.WorkersManager>());
+            sp.GetRequiredService<LinuxWebTool.Infrastructure.Features.Plugins.PluginManager>());
 
         // 原生工具服务化与插件异步操作支持 (Native Tool Services & Plugins)
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Plugins.Contracts.INativeProgramResolver, LinuxWebTool.Infrastructure.Features.Plugins.Adapters.NativeProgramResolver>();
@@ -137,7 +129,7 @@ public static class ServiceCollectionExtensions
             var store = sp.GetRequiredService<LinuxWebTool.Contracts.Features.Plugins.Contracts.IPluginOperationStore>();
             var artifactStore = sp.GetRequiredService<LinuxWebTool.Contracts.Features.Plugins.Contracts.IPluginArtifactStore>();
             var executor = sp.GetRequiredService<LinuxWebTool.Contracts.Features.Plugins.Contracts.INativeCommandExecutor>();
-            var extMgr = sp.GetRequiredService<LinuxWebTool.Contracts.Features.Services.Contracts.IScriptExtensionManager>();
+            var pluginMgr = sp.GetRequiredService<LinuxWebTool.Contracts.Features.Plugins.Contracts.IPluginManager>();
 
             return new LinuxWebTool.Application.Features.Plugins.PluginOperationCoordinator(
                 store,
@@ -145,18 +137,15 @@ public static class ServiceCollectionExtensions
                 executor,
                 pluginIdentity =>
                 {
-                    var extDir = Path.Combine(contentRoot, "extensions", pluginIdentity);
-                    if (Directory.Exists(extDir)) return extDir;
-                    var workerDir = Path.Combine(contentRoot, "data", "workers", pluginIdentity);
-                    if (Directory.Exists(workerDir)) return workerDir;
-                    return null;
+                    var pluginDir = Path.Combine(contentRoot, "data", "plugins", pluginIdentity);
+                    return Directory.Exists(pluginDir) ? pluginDir : null;
                 },
                 (pluginIdentity, actionName) =>
                 {
                     try
                     {
-                        var ext = extMgr.ListExtensionsAsync().GetAwaiter().GetResult().FirstOrDefault(e => e.Manifest.Id == pluginIdentity);
-                        return ext?.Manifest.CustomActions.FirstOrDefault(a => a.Action == actionName);
+                        var plugin = pluginMgr.GetByIdAsync(pluginIdentity).GetAwaiter().GetResult();
+                        return plugin?.Manifest.CustomActions.FirstOrDefault(a => a.Action == actionName);
                     }
                     catch
                     {
@@ -270,7 +259,7 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<IMcpToolProvider, GatewayMcpToolProvider>();
         builder.Services.AddSingleton<IMcpToolProvider, RemoteHostMcpToolProvider>();
         builder.Services.AddSingleton<IMcpToolProvider, ServicesMcpToolProvider>();
-        builder.Services.AddSingleton<IMcpToolProvider, WorkersMcpToolProvider>();
+        builder.Services.AddSingleton<IMcpToolProvider, PluginsMcpToolProvider>();
         builder.Services.AddSingleton<McpServerEngine>();
 
         // EasyTier 虚拟组网管理器与内核宿主
