@@ -115,6 +115,7 @@ export function flattenFileTree(rootNode, expandedSet, depth = 0) {
       depth,
       isExpanded,
       icon: getFileIcon(child.name, child.isDir, isExpanded),
+      childCount: child.isDir && child.sortedChildren ? child.sortedChildren.length : 0,
     });
 
     if (child.isDir && isExpanded) {
