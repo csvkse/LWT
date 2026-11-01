@@ -3,8 +3,8 @@ param(
     [ValidateSet("Official", "Dev")]
     [string]$Mode = "Official",
 
-    [ValidateSet("Direct", "GitArchive", "GitPull")]
-    [string]$SyncMethod = "Direct",
+    [ValidateSet("Auto", "Direct", "GitArchive", "GitPull")]
+    [string]$SyncMethod = "Auto",
 
     [switch]$FrontendOnly,
 
@@ -209,8 +209,28 @@ try {
     }
 
     if ($Mode -eq "Dev") {
-        # 1/4 Code Sync (Strategy Pattern: Direct vs GitArchive vs GitPull)
-        if ($SyncMethod -eq "Direct") {
+        # 1/4 Code Sync (Adaptive Strategy Pattern: Auto -> GitArchive (if clean) vs Direct (if dirty) vs GitPull)
+        $effectiveSync = $SyncMethod
+        if ($SyncMethod -eq "Auto") {
+            $hasGit = Test-Path ".git"
+            if ($hasGit) {
+                $gitStatus = (& git status --porcelain 2>&1)
+                if ([string]::IsNullOrWhiteSpace($gitStatus)) {
+                    $effectiveSync = "GitArchive"
+                    $commitHash = (& git rev-parse --short HEAD 2>&1)
+                    Write-Success "Adaptive Strategy: Git tree clean -> selected [GitArchive] ($commitHash) for maximum purity."
+                } else {
+                    $effectiveSync = "Direct"
+                    $dirtyLines = $gitStatus -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+                    Write-Warn "Adaptive Strategy: Detected $($dirtyLines.Count) uncommitted changes -> selected [Direct] to include live edits."
+                }
+            } else {
+                $effectiveSync = "Direct"
+                Write-Success "Adaptive Strategy: Non-git workspace -> selected [Direct]."
+            }
+        }
+
+        if ($effectiveSync -eq "Direct") {
             Write-Step "1/4 [Dev - Direct Sync] Packaging live working tree via native tar (decoupled from Git)..."
             $localBundle = "dev-bundle.tar.gz"
             try {
@@ -240,7 +260,7 @@ try {
                 if (Test-Path $localBundle) { Remove-Item $localBundle -Force -ErrorAction SilentlyContinue }
             }
         }
-        elseif ($SyncMethod -eq "GitArchive") {
+        elseif ($effectiveSync -eq "GitArchive") {
             Write-Step "1/4 [Dev - GitArchive Sync] Bundling local git HEAD commit..."
             $localBundle = "dev-bundle.tar.gz"
             try {
@@ -270,7 +290,7 @@ try {
                 if (Test-Path $localBundle) { Remove-Item $localBundle -Force -ErrorAction SilentlyContinue }
             }
         }
-        elseif ($SyncMethod -eq "GitPull") {
+        elseif ($effectiveSync -eq "GitPull") {
             Write-Step "1/4 [Dev - GitPull Sync] Pulling remote git repository from GitHub on host..."
             $gitSyncScript = @"
 if [ ! -d "$devWorkdir/.git" ]; then

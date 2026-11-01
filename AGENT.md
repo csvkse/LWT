@@ -38,23 +38,28 @@
 
 ### 方案 A：Linux 极速本地开发验证管线
 
-#### 1. 全量工作区快速验证（默认推荐：完全解耦 Git）
-无需执行 `git commit`，直接将本地当前工作区（包括所有未提交的代码、修改中的文件）推送到远程主机并启动快速 JIT 容器：
+#### 1. 全量工作区快速验证（默认推荐：Auto 智能自适应）
+直接执行开发部署，无需手动指定参数：
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/deploy-remote.ps1 -Mode Dev
 ```
-> **原理**：调用本地原生 `tar.exe` 排除无关文件（`.git`, `bin`, `obj`, `env`, `node_modules`）生成轻量包（~1.8MB），通过 SSH Stdin 管道秒级传输并在远程内存解压，完全免疫 GitHub 跨国网络抖动与 Git 脏分支限制。
+> **自适应行为 (Auto)**：
+> - **若 Git 工作区干净（Clean）**：自动选用 `GitArchive` 策略，打包最新的 HEAD Commit，享受 100% 纯净度与版本溯源标签。
+> - **若存在未提交/未暂存修改（Dirty）**：自动切换为 `Direct` 策略，使用原生 `tar.exe` 毫秒级打包当前实时工作区（严格排除 `.git`、`bin`、`obj`、`env`、`node_modules`），确保本地刚刚修改的实时代码立即生效。
 
-#### 2. 代码同步策略切换（备选方案）
-脚本支持使用 `-SyncMethod` 策略参数自由切换代码来源：
+#### 2. 代码同步策略显式指定（备选方案）
+支持通过 `-SyncMethod` 参数显式覆盖自适应逻辑：
 ```powershell
-# 策略 1 (默认): Direct - 本地工作区直推，解耦 Git，包含未提交修改
+# 策略 1: Auto (默认) - 干净则 GitArchive，脏工作区则 Direct
+powershell -ExecutionPolicy Bypass -File scripts/deploy-remote.ps1 -Mode Dev -SyncMethod Auto
+
+# 策略 2: Direct - 强制直推本地工作区（完全解耦 Git，包含未提交代码）
 powershell -ExecutionPolicy Bypass -File scripts/deploy-remote.ps1 -Mode Dev -SyncMethod Direct
 
-# 策略 2: GitArchive - 仅打包本地最新的已提交 HEAD 节点
+# 策略 3: GitArchive - 强制仅打包本地最新的 Git 已提交 HEAD 节点
 powershell -ExecutionPolicy Bypass -File scripts/deploy-remote.ps1 -Mode Dev -SyncMethod GitArchive
 
-# 策略 3: GitPull - 远程 Linux 主机直接从 GitHub 执行 git fetch & reset
+# 策略 4: GitPull - 远程 Linux 主机直接从 GitHub 执行 git fetch & reset
 powershell -ExecutionPolicy Bypass -File scripts/deploy-remote.ps1 -Mode Dev -SyncMethod GitPull
 ```
 
