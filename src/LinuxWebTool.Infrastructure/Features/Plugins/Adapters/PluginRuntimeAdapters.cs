@@ -244,6 +244,24 @@ public sealed class DotNetRuntimeAdapter : IRuntimeAdapter
         else
         {
             var proj = Directory.GetFiles(pluginDir, "*.csproj").FirstOrDefault();
+            if (proj == null && entry.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+            {
+                var autoProj = Path.Combine(pluginDir, "App.csproj");
+                if (!File.Exists(autoProj))
+                {
+                    File.WriteAllText(autoProj, """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>
+""");
+                }
+                proj = autoProj;
+            }
             args = proj != null ? $"run --project \"{proj}\"" : $"run --project \"{pluginDir}\"";
         }
 

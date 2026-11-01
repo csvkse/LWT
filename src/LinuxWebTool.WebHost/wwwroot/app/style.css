@@ -13,7 +13,8 @@ body {
   border-radius: 0.75rem;
 }
 
-.input {
+.input,
+.input-base {
   width: 100%;
   background: rgba(7, 11, 20, 0.7);
   border: 1px solid #1d2c4a;
@@ -24,12 +25,15 @@ body {
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-.input:focus {
+.input:focus,
+.input-base:focus {
   border-color: #22d3ee;
   box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.15);
 }
-.input::placeholder { color: #475569; }
-select.input option { background: #0d1526; }
+.input::placeholder,
+.input-base::placeholder { color: #475569; }
+select.input option,
+select.input-base option { background: #0d1526; }
 
 .btn {
   display: inline-flex;

@@ -163,7 +163,15 @@ public sealed partial class PluginManager
     {
         var id = "native-command-demo";
         var dir = Path.Combine(_pluginsRoot, id);
-        if (Directory.Exists(dir)) return;
+        if (Directory.Exists(dir))
+        {
+            var existingInfo = Path.Combine(dir, "hooks", "info.sh");
+            if (File.Exists(existingInfo) && File.ReadAllText(existingInfo).Contains("''}'"))
+            {
+                File.WriteAllText(existingInfo, "echo \"{\\\"os\\\":\\\"Linux\\\",\\\"message\\\":\\\"Kernel: $(uname -r)\\\"}\"");
+            }
+            return;
+        }
 
         Directory.CreateDirectory(dir);
         var hooksDir = Path.Combine(dir, "hooks");
@@ -185,8 +193,8 @@ public sealed partial class PluginManager
         };
 
         File.WriteAllText(Path.Combine(dir, "plugin.json"), JsonSerializer.Serialize(manifest, PluginJsonContext.Default.PluginManifest));
-        File.WriteAllText(Path.Combine(hooksDir, "info.ps1"), "Write-Output '{\"os\":\"' [System.Environment]::OSVersion.ToString() '\",\"cores\":' [System.Environment]::ProcessorCount '}'");
-        File.WriteAllText(Path.Combine(hooksDir, "info.sh"), "echo '{\"os\":\"Linux\",\"message\":\"Kernel: '\"$(uname -r)\"''}'");
+        File.WriteAllText(Path.Combine(hooksDir, "info.ps1"), "Write-Output ('{\"os\":\"' + [System.Environment]::OSVersion.ToString() + '\",\"cores\":' + [System.Environment]::ProcessorCount + '}')");
+        File.WriteAllText(Path.Combine(hooksDir, "info.sh"), "echo \"{\\\"os\\\":\\\"Linux\\\",\\\"message\\\":\\\"Kernel: $(uname -r)\\\"}\"");
     }
 
     private void EnsureJsWebhookCreated()
@@ -273,7 +281,24 @@ httpd.serve_forever()
     {
         var id = "demo-dotnet-service";
         var dir = Path.Combine(_pluginsRoot, id);
-        if (Directory.Exists(dir)) return;
+        if (Directory.Exists(dir))
+        {
+            var existingProj = Path.Combine(dir, "demo-dotnet-service.csproj");
+            if (!File.Exists(existingProj))
+            {
+                File.WriteAllText(existingProj, """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>
+""");
+            }
+            return;
+        }
 
         Directory.CreateDirectory(dir);
         var manifest = new PluginManifest
