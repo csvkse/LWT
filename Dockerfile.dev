@@ -1,0 +1,69 @@
+# -----------------------------------------------------------------------------
+# LinuxWebTool 极速开发与测试镜像 (Dockerfile.dev)
+# 特点：
+#   1. 使用 JIT 模式编译（跳过 Native AOT 的 clang 分析与慢速链接，构建耗时由 4 分钟缩短至 15 秒）
+#   2. 预置国内镜像源加速 (mirrors.ustc.edu.cn)，预装全量多语言运行时与工具
+#   3. 支持作为独立容器运行在 5271 端口，与生产容器 (5270) 并行不冲突
+# -----------------------------------------------------------------------------
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS base
+WORKDIR /app
+EXPOSE 5270
+
+ENV TZ=Asia/Shanghai \
+    LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8 \
+    DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
+
+# 配置中科大源并预装基础运维工具与全量插件运行时（Node, Python, .NET 8, PowerShell, Caddy）
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
+    apk update && \
+    apk add --no-cache \
+      bash procps usbutils pciutils kmod util-linux-misc cifs-utils rclone fuse3 nethogs findutils openssh-client \
+      ffmpeg libva libva-utils tzdata icu-libs \
+      caddy nodejs python3 py3-pip dotnet8-sdk powershell && \
+    cp /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone
+
+# ---------- 阶段 2：极速 JIT 构建 ----------
+FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
+WORKDIR /src
+
+# 配置中科大源并安装编译 PTY 必需的 build-base
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
+    apk update && apk add --no-cache build-base
+
+# 缓存依赖还原层
+COPY ["Directory.Build.props", "Directory.Packages.props", "./"]
+COPY ["src/LinuxWebTool.Contracts/LinuxWebTool.Contracts.csproj", "src/LinuxWebTool.Contracts/"]
+COPY ["src/LinuxWebTool.Infrastructure/LinuxWebTool.Infrastructure.csproj", "src/LinuxWebTool.Infrastructure/"]
+COPY ["src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj", "src/LinuxWebTool.WebHost/"]
+
+RUN dotnet restore "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj"
+
+COPY src ./src
+
+# 编译 PTY 原生动态库
+RUN cc -shared -fPIC -O2 -Wall -Wextra -Werror src/LinuxWebTool.Infrastructure/Features/Terminal/Platform/native/linuxwebtool_pty.c -o /tmp/liblinuxwebtool_pty.so -lutil
+
+# 标准 JIT 快速发布（禁用 PublishAot，约 10-15 秒完成）
+RUN dotnet publish "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj" \
+    -c Release \
+    -o /app/publish \
+    /p:PublishAot=false
+
+RUN cp /tmp/liblinuxwebtool_pty.so /app/publish/liblinuxwebtool_pty.so
+
+# ---------- 阶段 3：开发测试镜像运行 ----------
+FROM base AS final
+WORKDIR /app
+
+COPY --from=build /app/publish .
+COPY extensions ./extensions
+
+VOLUME ["/app/data"]
+
+HEALTHCHECK --interval=20s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -q --spider http://127.0.0.1:5270/health || exit 1
+
+ENTRYPOINT ["dotnet", "LinuxWebTool.WebHost.dll"]

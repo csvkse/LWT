@@ -1,5 +1,8 @@
 [CmdletBinding()]
 param(
+    [ValidateSet("Official", "Dev")]
+    [string]$Mode = "Official",
+
     [string]$EnvFile = "env/.envdev",
     [switch]$SkipDeps,
     [switch]$CheckOnly
@@ -25,7 +28,7 @@ if (-not $resolvedEnvPath -or -not (Test-Path $resolvedEnvPath)) {
     throw "Env config not found: $EnvFile. Please ensure env/.envdev exists."
 }
 
-Write-Step "Loading deployment config from $EnvFile..."
+Write-Step "Loading deployment config ($Mode mode) from $EnvFile..."
 
 # 2. Parse config file
 $rawContent = Get-Content $resolvedEnvPath -Raw -Encoding UTF8
@@ -80,7 +83,17 @@ if (-not $deployHost) {
     throw "Missing DEPLOY_HOST configuration"
 }
 
-Write-Success "Config loaded: target $deployUser@$deployHost`:$deployPort, container $containerName, image $dockerImage"
+# Mode-specific adjustments (Adapter Pattern)
+if ($Mode -eq "Dev") {
+    $containerName = "${containerName}-dev"
+    $devPort = "5271"
+    $devImage = "lwt:dev"
+    $devWorkdir = "/opt/lwt-dev"
+    $devWebUrl = "http://${deployHost}:${devPort}/"
+    Write-Success "Adapter [LinuxFastDevAdapter] selected: Target $deployUser@$deployHost`:$deployPort, container $containerName (Port $devPort)"
+} else {
+    Write-Success "Adapter [OfficialGithubAotAdapter] selected: Target $deployUser@$deployHost`:$deployPort, container $containerName (Port $webPort), image $dockerImage"
+}
 
 # 3. Setup temporary SSH key file
 $tempKeyPath = [System.IO.Path]::GetTempFileName()
@@ -109,24 +122,81 @@ try {
     if ($CheckOnly) {
         Write-Step "Checking remote host connectivity and container status..."
         $uptime = Invoke-RemoteSsh "uptime"
-        $ps = Invoke-RemoteSsh "docker ps --filter name=$containerName"
+        $ps = Invoke-RemoteSsh "docker ps -a --filter name=$containerName"
         Write-Host $uptime
         Write-Host $ps
         Write-Success "Host check passed!"
         return
     }
 
-    # 4. Pull image and restart container
-    Write-Step "1/4 Pulling latest Docker image ($dockerImage)..."
+    # =========================================================================
+    # Strategy A: Linux Fast Dev Pipeline (Git Pull + Local Fast JIT Docker Build)
+    # =========================================================================
+    if ($Mode -eq "Dev") {
+        Write-Step "1/4 [Dev] Syncing repository to $devWorkdir on remote host..."
+        $gitSyncScript = @"
+if [ ! -d "$devWorkdir/.git" ]; then
+    mkdir -p "$devWorkdir"
+    git clone https://github.com/csvkse/LWT.git "$devWorkdir"
+else
+    git -C "$devWorkdir" fetch origin main
+    git -C "$devWorkdir" reset --hard origin/main
+fi
+git -C "$devWorkdir" log -1 --oneline
+"@
+        $gitOutput = Invoke-RemoteSsh $gitSyncScript
+        Write-Host $gitOutput -ForegroundColor DarkCyan
+        Write-Success "Source code synchronized!"
+
+        Write-Step "2/4 [Dev] Building fast development image ($devImage) via Dockerfile.dev..."
+        Invoke-RemoteSsh "docker build -f $devWorkdir/Dockerfile.dev -t $devImage $devWorkdir"
+        Write-Success "Fast dev image built successfully!"
+
+        Write-Step "3/4 [Dev] Launching development container ($containerName on port $devPort)..."
+        $devRunCmd = @"
+docker rm -f $containerName 2>/dev/null || true
+docker run -d \
+  --name $containerName \
+  --restart unless-stopped \
+  --privileged \
+  --pid=host \
+  --user root \
+  --device /dev/fuse \
+  --device=/dev/net/tun \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -p ${devPort}:5270 \
+  -v ${containerName}-data:/app/data \
+  -v /lwt:/lwt:rshared \
+  -v /var/docker:/var/docker:rshared \
+  -v /usr/local/bin:/usr/local/bin:ro \
+  $devImage
+"@
+        Invoke-RemoteSsh $devRunCmd
+        Write-Success "Dev container launched!"
+
+        Write-Step "4/4 [Dev] Waiting for dev container health..."
+        Start-Sleep -Seconds 3
+        $ps = Invoke-RemoteSsh "docker ps --filter name=$containerName"
+        Write-Host $ps -ForegroundColor Green
+
+        Write-Step "Fast dev deployment finished successfully!"
+        Write-Host "Dev Web URL: $devWebUrl" -ForegroundColor Green
+        Write-Host "Notice: Production container ($webBaseUrl) remains untouched and fully operational!" -ForegroundColor Cyan
+        return
+    }
+
+    # =========================================================================
+    # Strategy B: Official Production Pipeline (GHCR Multi-Arch AOT Image Pull)
+    # =========================================================================
+    Write-Step "1/4 Pulling official Docker image ($dockerImage)..."
     Invoke-RemoteSsh "docker pull $dockerImage"
     Write-Success "Docker pull finished!"
 
-    Write-Step "2/4 Recreating container with privileged and host network mode..."
+    Write-Step "2/4 Recreating production container with privileged and host network mode..."
     $dockerRunCmd = "docker rm -f $containerName 2>/dev/null || true; docker run -d --name $containerName --restart unless-stopped --privileged --pid=host --user root --device /dev/fuse --device=/dev/net/tun -v /var/run/docker.sock:/var/run/docker.sock -p ${webPort}:${webPort} --net=host -v linuxwebtool-data:/app/data -v /lwt:/lwt:rshared -v /var/docker:/var/docker:rshared -v /usr/local/bin:/usr/local/bin:ro $dockerImage"
     Invoke-RemoteSsh $dockerRunCmd
     Write-Success "Container recreated!"
 
-    # 5. Wait for healthy
     Write-Step "3/4 Waiting for container to report healthy..."
     $maxWaitSec = 45
     $waited = 0
@@ -151,7 +221,6 @@ try {
         Write-Success "Container is healthy!"
     }
 
-    # 6. Check dependencies
     if (-not $SkipDeps) {
         Write-Step "4/4 Checking runtime dependencies in container..."
         $depCheck = Invoke-RemoteSsh "docker exec $containerName sh -c 'which node python3 dotnet pwsh caddy 2>/dev/null | wc -l'"
@@ -170,7 +239,7 @@ try {
         Write-Host $versions -ForegroundColor DarkCyan
     }
 
-    Write-Step "Deployment finished successfully!"
+    Write-Step "Official deployment finished successfully!"
     Write-Host "Web URL: $webBaseUrl" -ForegroundColor Green
 }
 finally {
