@@ -151,6 +151,7 @@ try {
             }
 
             # 通过 SSH/SCP 高速推送至远程主机（免疫 GitHub GFW 网络抖动）
+            $remoteTarget = "{0}@{1}:/tmp/{2}" -f $deployUser, $deployHost, $localBundle
             $scpArgs = @(
                 "-i", $tempKeyPath,
                 "-P", $deployPort,
@@ -158,7 +159,7 @@ try {
                 "-o", "UserKnownHostsFile=/dev/null",
                 "-o", "LogLevel=ERROR",
                 $localBundle,
-                "${deployUser}@${deployHost}:/tmp/${localBundle}"
+                $remoteTarget
             )
             & scp @scpArgs
             if ($LASTEXITCODE -ne 0) {
