@@ -2,8 +2,11 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using LinuxWebTool.Application.Features.Security;
+using LinuxWebTool.Application.Features.Security.Policies;
 using LinuxWebTool.Contracts.Features.Mcp.Contracts;
+using LinuxWebTool.Contracts.Features.Security.Contracts;
 using LinuxWebTool.Infrastructure.Features.RemoteHost.Adapters;
+using LinuxWebTool.Infrastructure.Features.Security.Adapters;
 using LinuxWebTool.Infrastructure.Shared.Persistence;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 using LinuxWebTool.Infrastructure.Shared.Support;
@@ -18,67 +21,17 @@ public sealed class RemoteHostMcpToolProvider(
     RemoteHostStore remoteHostStore,
     RemoteHostClientFactory remoteHostFactory,
     IOperationLogger operationLogger,
-    ILogger<RemoteHostMcpToolProvider> logger) : IMcpToolProvider
+    ILogger<RemoteHostMcpToolProvider> logger,
+    ISecurityPolicyEngine policyEngine) : IMcpToolProvider
 {
     private static JsonElement Schema(string json) => JsonDocument.Parse(json).RootElement.Clone();
     private static readonly JsonElement EmptyObjectSchema = Schema("""{"type":"object","properties":{}}""");
 
-    private static readonly JsonElement RemoteHostIdRequiredSchema = Schema("""
-    {
-        "type": "object",
-        "properties": {
-            "host_id": { "type": "string", "description": "受控主机 ID" }
-        },
-        "required": ["host_id"]
-    }
-    """);
-
-    private static readonly JsonElement RemoteExecuteCommandSchema = Schema("""
-    {
-        "type": "object",
-        "properties": {
-            "host_id": { "type": "string", "description": "受控主机 ID" },
-            "command": { "type": "string", "description": "要在远程受控主机上执行的 Shell 命令行或脚本" },
-            "timeout_seconds": { "type": "integer", "description": "执行超时秒数，默认 30，上限 300" }
-        },
-        "required": ["host_id", "command"]
-    }
-    """);
-
-    private static readonly JsonElement RemoteListDirectorySchema = Schema("""
-    {
-        "type": "object",
-        "properties": {
-            "host_id": { "type": "string", "description": "受控主机 ID" },
-            "path": { "type": "string", "description": "远程目录绝对路径，默认 /" }
-        },
-        "required": ["host_id"]
-    }
-    """);
-
-    private static readonly JsonElement RemoteReadFileSchema = Schema("""
-    {
-        "type": "object",
-        "properties": {
-            "host_id": { "type": "string", "description": "受控主机 ID" },
-            "path": { "type": "string", "description": "远程文件绝对路径" },
-            "max_bytes": { "type": "integer", "description": "最大读取字节数，默认 2097152 (2MB)" }
-        },
-        "required": ["host_id", "path"]
-    }
-    """);
-
-    private static readonly JsonElement RemoteWriteFileSchema = Schema("""
-    {
-        "type": "object",
-        "properties": {
-            "host_id": { "type": "string", "description": "受控主机 ID" },
-            "path": { "type": "string", "description": "远程文件绝对路径" },
-            "content": { "type": "string", "description": "待写入的文本内容" }
-        },
-        "required": ["host_id", "path", "content"]
-    }
-    """);
+    private static readonly JsonElement RemoteHostIdRequiredSchema = Schema("""{"type":"object","properties":{"host_id":{"type":"string","description":"受控主机 ID"}},"required":["host_id"]}""");
+    private static readonly JsonElement RemoteExecuteCommandSchema = Schema("""{"type":"object","properties":{"host_id":{"type":"string","description":"受控主机 ID"},"command":{"type":"string","description":"要在远程受控主机上执行的 Shell 命令行或脚本"},"timeout_seconds":{"type":"integer","description":"执行超时秒数，默认 30，上限 300"}},"required":["host_id","command"]}""");
+    private static readonly JsonElement RemoteListDirectorySchema = Schema("""{"type":"object","properties":{"host_id":{"type":"string","description":"受控主机 ID"},"path":{"type":"string","description":"远程目录绝对路径，默认 /"}},"required":["host_id"]}""");
+    private static readonly JsonElement RemoteReadFileSchema = Schema("""{"type":"object","properties":{"host_id":{"type":"string","description":"受控主机 ID"},"path":{"type":"string","description":"远程文件绝对路径"},"max_bytes":{"type":"integer","description":"最大读取字节数，默认 2097152 (2MB)"}},"required":["host_id","path"]}""");
+    private static readonly JsonElement RemoteWriteFileSchema = Schema("""{"type":"object","properties":{"host_id":{"type":"string","description":"受控主机 ID"},"path":{"type":"string","description":"远程文件绝对路径"},"content":{"type":"string","description":"待写入的文本内容"}},"required":["host_id","path","content"]}""");
 
     public string ModuleName => "remote";
 
@@ -168,10 +121,8 @@ public sealed class RemoteHostMcpToolProvider(
                     return McpToolExecutionResult.Error("Missing host_id parameter");
 
                 var hostId = hProp.GetString()!;
-                if (context.CallerKey != null && !ApiKeyPermissionMatrix.CanAccessRemoteHost(context.CallerKey.AllowRemoteHosts, context.CallerKey.AllowedHostIds, hostId))
-                {
+                if (DeniedHost(context, hostId))
                     return McpToolExecutionResult.Error($"Permission Denied: API Key is not authorized to access host '{hostId}'.");
-                }
 
                 var entity = await remoteHostStore.GetByIdAsync(hostId);
                 if (entity == null) return McpToolExecutionResult.Error($"Remote host not found: '{hostId}'.");
@@ -209,15 +160,16 @@ public sealed class RemoteHostMcpToolProvider(
                     return McpToolExecutionResult.Error("Missing host_id or command parameter");
 
                 var hostId = hProp.GetString()!;
-                if (context.CallerKey != null && !ApiKeyPermissionMatrix.CanAccessRemoteHost(context.CallerKey.AllowRemoteHosts, context.CallerKey.AllowedHostIds, hostId))
-                {
+                if (DeniedHost(context, hostId))
                     return McpToolExecutionResult.Error($"Permission Denied: API Key is not authorized to access host '{hostId}'.");
-                }
 
                 var entity = await remoteHostStore.GetByIdAsync(hostId);
                 if (entity == null) return McpToolExecutionResult.Error($"Remote host not found: '{hostId}'.");
 
                 var command = cProp.GetString() ?? string.Empty;
+                if (await CheckPolicyAsync(context, hostId, SecurityTargetDomain.RemoteCommand, "Execute", command) is { } denied)
+                    return McpToolExecutionResult.Error($"Security Policy Denied: {denied}");
+
                 var timeout = args.TryGetProperty("timeout_seconds", out var tP) ? tP.GetInt32() : 30;
                 timeout = Math.Clamp(timeout, 1, 300);
 
@@ -253,16 +205,17 @@ public sealed class RemoteHostMcpToolProvider(
                     return McpToolExecutionResult.Error("Missing host_id parameter");
 
                 var hostId = hProp.GetString()!;
-                if (context.CallerKey != null && !ApiKeyPermissionMatrix.CanAccessRemoteHost(context.CallerKey.AllowRemoteHosts, context.CallerKey.AllowedHostIds, hostId))
-                {
+                if (DeniedHost(context, hostId))
                     return McpToolExecutionResult.Error($"Permission Denied: API Key is not authorized to access host '{hostId}'.");
-                }
 
                 var entity = await remoteHostStore.GetByIdAsync(hostId);
                 if (entity == null) return McpToolExecutionResult.Error($"Remote host not found: '{hostId}'.");
 
                 var path = args.TryGetProperty("path", out var pP) ? pP.GetString() : "/";
                 path = string.IsNullOrWhiteSpace(path) ? "/" : path.Trim();
+
+                if (await CheckPolicyAsync(context, hostId, SecurityTargetDomain.RemoteFile, "Read", path) is { } denied)
+                    return McpToolExecutionResult.Error($"Security Policy Denied: {denied}");
 
                 try
                 {
@@ -306,16 +259,17 @@ public sealed class RemoteHostMcpToolProvider(
                     return McpToolExecutionResult.Error("Missing host_id or path parameter");
 
                 var hostId = hProp.GetString()!;
-                if (context.CallerKey != null && !ApiKeyPermissionMatrix.CanAccessRemoteHost(context.CallerKey.AllowRemoteHosts, context.CallerKey.AllowedHostIds, hostId))
-                {
+                if (DeniedHost(context, hostId))
                     return McpToolExecutionResult.Error($"Permission Denied: API Key is not authorized to access host '{hostId}'.");
-                }
 
                 var entity = await remoteHostStore.GetByIdAsync(hostId);
                 if (entity == null) return McpToolExecutionResult.Error($"Remote host not found: '{hostId}'.");
 
                 var path = pProp.GetString()!;
                 if (string.IsNullOrWhiteSpace(path)) return McpToolExecutionResult.Error("Path cannot be empty.");
+
+                if (await CheckPolicyAsync(context, hostId, SecurityTargetDomain.RemoteFile, "Read", path.Trim()) is { } denied)
+                    return McpToolExecutionResult.Error($"Security Policy Denied: {denied}");
 
                 try
                 {
@@ -348,16 +302,17 @@ public sealed class RemoteHostMcpToolProvider(
                     return McpToolExecutionResult.Error("Missing host_id, path, or content parameter");
 
                 var hostId = hProp.GetString()!;
-                if (context.CallerKey != null && !ApiKeyPermissionMatrix.CanAccessRemoteHost(context.CallerKey.AllowRemoteHosts, context.CallerKey.AllowedHostIds, hostId))
-                {
+                if (DeniedHost(context, hostId))
                     return McpToolExecutionResult.Error($"Permission Denied: API Key is not authorized to access host '{hostId}'.");
-                }
 
                 var entity = await remoteHostStore.GetByIdAsync(hostId);
                 if (entity == null) return McpToolExecutionResult.Error($"Remote host not found: '{hostId}'.");
 
                 var path = pProp.GetString()!;
                 if (string.IsNullOrWhiteSpace(path)) return McpToolExecutionResult.Error("Path cannot be empty.");
+
+                if (await CheckPolicyAsync(context, hostId, SecurityTargetDomain.RemoteFile, "Write", path.Trim()) is { } denied)
+                    return McpToolExecutionResult.Error($"Security Policy Denied: {denied}");
 
                 var content = cProp.GetString() ?? string.Empty;
 
@@ -390,5 +345,16 @@ public sealed class RemoteHostMcpToolProvider(
             default:
                 return null;
         }
+    }
+
+    private static bool DeniedHost(McpRequestContext ctx, string hostId) =>
+        ctx.CallerKey != null && !ApiKeyPermissionMatrix.CanAccessRemoteHost(ctx.CallerKey.AllowRemoteHosts, ctx.CallerKey.AllowedHostIds, hostId);
+
+    private async ValueTask<string?> CheckPolicyAsync(McpRequestContext ctx, string hostId, SecurityTargetDomain domain, string verb, string payload)
+    {
+        if (ctx.CallerKey is null) return null;
+        var decision = await policyEngine.EvaluateAsync(new SecurityEvaluationContext(
+            ctx.CallerKey.Id, ctx.CallerKey.Name, domain, verb, hostId, payload, ctx.ClientIp ?? "mcp"));
+        return decision.IsAllowed ? null : decision.DeniedReason;
     }
 }

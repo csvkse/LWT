@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using LinuxWebTool.Infrastructure.Features.Security.Policies;
 using Microsoft.Extensions.Logging;
 namespace LinuxWebTool.Infrastructure.Features.Security.Adapters;
 
@@ -44,6 +46,7 @@ public class ApiKeyService(ApiKeyStore store, ILogger<ApiKeyService> logger)
             AllowedHostIds = string.IsNullOrWhiteSpace(request.AllowedHostIds) ? null : request.AllowedHostIds.Trim(),
             AllowedTools = request.AllowedTools != null && request.AllowedTools.Count > 0 ? string.Join(",", request.AllowedTools) : null,
             AllowedCommandIds = string.IsNullOrWhiteSpace(request.AllowedCommandIds) ? null : request.AllowedCommandIds.Trim(),
+            PolicyTemplateIds = SerializePolicyTemplateIds(request.PolicyTemplateIds),
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = request.ExpiresAt
         };
@@ -145,5 +148,39 @@ public class ApiKeyService(ApiKeyStore store, ILogger<ApiKeyService> logger)
             }
         }
         return list.Count > 0 ? list : null;
+    }
+
+    public static List<string>? ParsePolicyTemplateIds(string? policyTemplateIds)
+    {
+        if (string.IsNullOrWhiteSpace(policyTemplateIds) || policyTemplateIds.Trim() == "*")
+            return null;
+        try
+        {
+            if (policyTemplateIds.TrimStart().StartsWith('['))
+            {
+                var parsed = JsonSerializer.Deserialize(policyTemplateIds, SecurityJsonContext.Default.ListString);
+                if (parsed != null && parsed.Count > 0) return parsed;
+            }
+        }
+        catch { }
+
+        var tokens = policyTemplateIds.Split(new[] { ',', ';', ' ', '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        var list = new List<string>();
+        foreach (var token in tokens)
+        {
+            var cleaned = token.Trim().Trim('"', '[', ']', '\'', ',');
+            if (!string.IsNullOrEmpty(cleaned) && !list.Contains(cleaned, StringComparer.OrdinalIgnoreCase))
+            {
+                list.Add(cleaned);
+            }
+        }
+        return list.Count > 0 ? list : null;
+    }
+
+    public static string? SerializePolicyTemplateIds(IReadOnlyList<string>? ids)
+    {
+        if (ids == null || ids.Count == 0) return null;
+        var filtered = ids.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return filtered.Count > 0 ? JsonSerializer.Serialize(filtered, SecurityJsonContext.Default.ListString) : null;
     }
 }

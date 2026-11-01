@@ -1,6 +1,9 @@
 using System.Text;
 using System.IO.Compression;
 using Directory = System.IO.Directory;
+using LinuxWebTool.Application.Features.Security.Policies;
+using LinuxWebTool.Contracts.Features.Security.Contracts;
+using LinuxWebTool.Infrastructure.Features.Security.Adapters;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 using LinuxWebTool.Infrastructure.Shared.Support;
 namespace LinuxWebTool.WebHost.Features.Files.Routes;
@@ -18,11 +21,40 @@ public class FilesController(
     IOperationLogger operationLogger,
     MountStateMachineService mountHealth,
     SmbDirectoryReader smbDirectoryReader,
-    SmbMountStore smbMountStore) : MinimalApi.ControllerBase
+    SmbMountStore smbMountStore,
+    ISecurityPolicyEngine policyEngine) : MinimalApi.ControllerBase
 {
     /// <summary>文本查看 / 编辑上限（2MB），超限提示下载而不是误读大文件。</summary>
     private const long MaxTextBytes = 2 * 1024 * 1024;
     private ApiKeyEntity? CurrentApiKey => HttpContext?.Items["CurrentApiKey"] as ApiKeyEntity;
+
+    private async ValueTask<(bool Allowed, string? Error)> CheckFileAccessAsync(string normalizedPath, bool isWrite)
+    {
+        var apiKey = CurrentApiKey;
+        if (apiKey is null) return (true, null);
+
+        if (!PathScopeGuard.IsAllowed(normalizedPath, apiKey.AllowedPaths, out var scopeErr))
+        {
+            return (false, scopeErr);
+        }
+
+        var evalCtx = new SecurityEvaluationContext(
+            ApiKeyId: apiKey.Id,
+            ApiKeyName: apiKey.Name,
+            Domain: SecurityTargetDomain.LocalFile,
+            ActionVerb: isWrite ? "Write" : "Read",
+            TargetResource: "localhost",
+            RawCommandOrPath: normalizedPath,
+            ClientIp: HttpContext.GetClientIp());
+
+        var decision = await policyEngine.EvaluateAsync(evalCtx);
+        if (!decision.IsAllowed)
+        {
+            return (false, decision.DeniedReason ?? "安全策略拦截此文件操作");
+        }
+
+        return (true, null);
+    }
 
     // ---------- 目录列表 ----------
 
@@ -50,7 +82,8 @@ public class FilesController(
                 return Ok(new FileListResponse("/", null, "工作空间", true, rootEntries, true));
             }
 
-            if (!PathScopeGuard.IsAllowed(normalized, apiKey.AllowedPaths, out var failureReason))
+            var (allowed, failureReason) = await CheckFileAccessAsync(normalized, isWrite: false);
+            if (!allowed)
             {
                 return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(failureReason ?? "无权限访问该路径"));
             }
@@ -134,7 +167,8 @@ public class FilesController(
     public async Task<IResult> ReadContent([FromQuery] string path)
     {
         if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
-        if (!PathScopeGuard.IsAllowed(normalized, CurrentApiKey?.AllowedPaths, out var scopeErr))
+        var (allowed, scopeErr) = await CheckFileAccessAsync(normalized, isWrite: false);
+        if (!allowed)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
         }
@@ -169,7 +203,8 @@ public class FilesController(
     public async Task<IResult> WriteContent([FromBody] SaveTextRequest request)
     {
         if (!TryNormalize(request.Path, out var normalized, out var failure)) return failure!;
-        if (!PathScopeGuard.IsAllowed(normalized, CurrentApiKey?.AllowedPaths, out var scopeErr))
+        var (allowed, scopeErr) = await CheckFileAccessAsync(normalized, isWrite: true);
+        if (!allowed)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
         }
@@ -199,7 +234,8 @@ public class FilesController(
     public async Task<IResult> Mkdir([FromBody] PathRequest request)
     {
         if (!TryNormalize(request.Path, out var normalized, out var failure)) return failure!;
-        if (!PathScopeGuard.IsAllowed(normalized, CurrentApiKey?.AllowedPaths, out var scopeErr))
+        var (allowed, scopeErr) = await CheckFileAccessAsync(normalized, isWrite: true);
+        if (!allowed)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
         }
@@ -230,11 +266,13 @@ public class FilesController(
     {
         if (!TryNormalize(request.From, out var from, out var failure)) return failure!;
         if (!TryNormalize(request.To, out var to, out failure)) return failure!;
-        if (!PathScopeGuard.IsAllowed(from, CurrentApiKey?.AllowedPaths, out var scopeErrFrom))
+        var (allowedFrom, scopeErrFrom) = await CheckFileAccessAsync(from, isWrite: true);
+        if (!allowedFrom)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErrFrom!));
         }
-        if (!PathScopeGuard.IsAllowed(to, CurrentApiKey?.AllowedPaths, out var scopeErrTo))
+        var (allowedTo, scopeErrTo) = await CheckFileAccessAsync(to, isWrite: true);
+        if (!allowedTo)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErrTo!));
         }
@@ -270,7 +308,8 @@ public class FilesController(
     public async Task<IResult> Delete([FromQuery] string path, [FromQuery] bool recursive = false)
     {
         if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
-        if (!PathScopeGuard.IsAllowed(normalized, CurrentApiKey?.AllowedPaths, out var scopeErr))
+        var (allowed, scopeErr) = await CheckFileAccessAsync(normalized, isWrite: true);
+        if (!allowed)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
         }
@@ -308,7 +347,8 @@ public class FilesController(
     public async Task<IResult> Upload([FromQuery] string path, IFormFile? file)
     {
         if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
-        if (!PathScopeGuard.IsAllowed(normalized, CurrentApiKey?.AllowedPaths, out var scopeErr))
+        var (allowed, scopeErr) = await CheckFileAccessAsync(normalized, isWrite: true);
+        if (!allowed)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
         }
@@ -344,7 +384,8 @@ public class FilesController(
     public async Task<IResult> Download([FromQuery] string path)
     {
         if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
-        if (!PathScopeGuard.IsAllowed(normalized, CurrentApiKey?.AllowedPaths, out var scopeErr))
+        var (allowed, scopeErr) = await CheckFileAccessAsync(normalized, isWrite: false);
+        if (!allowed)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
         }

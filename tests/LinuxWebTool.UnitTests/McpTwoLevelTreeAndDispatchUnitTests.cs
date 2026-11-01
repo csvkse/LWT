@@ -2,6 +2,7 @@ using System.Text.Json;
 using LinuxWebTool.Application.Features.Security;
 using LinuxWebTool.Contracts.Features.Commands.Contracts;
 using LinuxWebTool.Contracts.Features.Mcp.Contracts;
+using LinuxWebTool.Contracts.Features.Security.Contracts;
 using LinuxWebTool.Infrastructure.Features.Scheduling.Adapters;
 using LinuxWebTool.Infrastructure.Shared.Persistence;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
@@ -94,7 +95,7 @@ public sealed class McpTwoLevelTreeAndDispatchUnitTests : IDisposable
         var execStore = new ExecutionStore(_factory);
         var opLogger = CreateOpLogger();
 
-        var cmdProvider = new CommandMcpToolProvider(cmdStore, new DummyExecutionEngine(), opLogger);
+        var cmdProvider = new CommandMcpToolProvider(cmdStore, new DummyExecutionEngine(), opLogger, new DummyPolicyEngine());
         var providers = new List<IMcpToolProvider> { cmdProvider };
         var engine = new McpServerEngine(providers, NullLogger<McpServerEngine>.Instance);
 
@@ -143,7 +144,7 @@ public sealed class McpTwoLevelTreeAndDispatchUnitTests : IDisposable
     {
         var cmdStore = new CommandStore(_factory);
         var opLogger = CreateOpLogger();
-        var cmdProvider = new CommandMcpToolProvider(cmdStore, new DummyExecutionEngine(), opLogger);
+        var cmdProvider = new CommandMcpToolProvider(cmdStore, new DummyExecutionEngine(), opLogger, new DummyPolicyEngine());
         var engine = new McpServerEngine([cmdProvider], NullLogger<McpServerEngine>.Instance);
         var httpContext = new DefaultHttpContext();
 
@@ -178,7 +179,7 @@ public sealed class McpTwoLevelTreeAndDispatchUnitTests : IDisposable
     {
         var cmdStore = new CommandStore(_factory);
         var opLogger = CreateOpLogger();
-        var provider = new CommandMcpToolProvider(cmdStore, new DummyExecutionEngine(), opLogger);
+        var provider = new CommandMcpToolProvider(cmdStore, new DummyExecutionEngine(), opLogger, new DummyPolicyEngine());
         var context = new McpRequestContext(null, new DefaultHttpContext(), "127.0.0.1", CancellationToken.None);
 
         // 1. 创建指令
@@ -298,5 +299,12 @@ public sealed class McpTwoLevelTreeAndDispatchUnitTests : IDisposable
                 ExecutionStatus.Success,
                 35));
         }
+    }
+
+    private sealed class DummyPolicyEngine : ISecurityPolicyEngine
+    {
+        public ValueTask<PolicyDecision> EvaluateAsync(SecurityEvaluationContext context) => ValueTask.FromResult(PolicyDecision.Allow());
+        public void InvalidateCache(string? apiKeyId = null) { }
+        public PolicyDecision Simulate(IReadOnlyList<SecurityPolicyRule> rules, SecurityEvaluationContext context) => PolicyDecision.Allow();
     }
 }

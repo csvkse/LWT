@@ -5,6 +5,7 @@ using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 using LinuxWebTool.Infrastructure.Shared.Persistence;
 using LinuxWebTool.Contracts.Features.BackupSync.Contracts;
 using LinuxWebTool.Contracts.Features.Services.Contracts;
+using LinuxWebTool.Contracts.Features.Security.Contracts;
 
 namespace LinuxWebTool.WebHost.Composition;
 
@@ -149,6 +150,20 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(List<ApiKeyItemResponse>))]
 [JsonSerializable(typeof(ApiKeyEntity))]
 [JsonSerializable(typeof(List<ApiKeyEntity>))]
+
+// Security Policy Models
+[JsonSerializable(typeof(SecurityPolicyRule))]
+[JsonSerializable(typeof(List<SecurityPolicyRule>))]
+[JsonSerializable(typeof(SecurityPolicyTemplateItemResponse))]
+[JsonSerializable(typeof(List<SecurityPolicyTemplateItemResponse>))]
+[JsonSerializable(typeof(CreateSecurityPolicyTemplateRequest))]
+[JsonSerializable(typeof(UpdateSecurityPolicyTemplateRequest))]
+[JsonSerializable(typeof(SimulatePolicyRequest))]
+[JsonSerializable(typeof(SimulatePolicyResponse))]
+[JsonSerializable(typeof(ModuleCapabilityItem))]
+[JsonSerializable(typeof(List<ModuleCapabilityItem>))]
+[JsonSerializable(typeof(SecurityPolicyTemplateEntity))]
+[JsonSerializable(typeof(List<SecurityPolicyTemplateEntity>))]
 
 // FRP Tunnel Models
 [JsonSerializable(typeof(UpdateFrpConfigRequest))]

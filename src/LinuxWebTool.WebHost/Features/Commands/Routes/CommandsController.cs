@@ -1,4 +1,7 @@
+using LinuxWebTool.Application.Features.Security.Policies;
 using LinuxWebTool.Contracts.Features.Commands.Contracts;
+using LinuxWebTool.Contracts.Features.Security.Contracts;
+using LinuxWebTool.Infrastructure.Features.Security.Adapters;
 using LinuxWebTool.Contracts.Shared.Contracts;
 using LinuxWebTool.Infrastructure.Features.Scheduling.Adapters;
 using LinuxWebTool.Infrastructure.Shared.Persistence;
@@ -16,8 +19,11 @@ public class CommandsController(
     GroupStore groupStore,
     ExecutionStore executionStore,
     IUnifiedExecutionEngine executionEngine,
-    IOperationLogger operationLogger) : MinimalApi.ControllerBase
+    IOperationLogger operationLogger,
+    ISecurityPolicyEngine policyEngine) : MinimalApi.ControllerBase
 {
+    private ApiKeyEntity? CurrentApiKey => HttpContext?.Items["CurrentApiKey"] as ApiKeyEntity;
+
     [HttpGet]
     public async Task<IResult> GetAll([FromQuery] Guid? groupId, [FromQuery] string? keyword)
     {
@@ -131,6 +137,25 @@ public class CommandsController(
             ? ExecutionTarget.Remote(targetHostId)
             : ExecutionTarget.Local;
 
+        if (CurrentApiKey is { } apiKey)
+        {
+            var isRemote = target.TargetType == TargetType.RemoteHost;
+            var domain = isRemote ? SecurityTargetDomain.RemoteCommand : SecurityTargetDomain.LocalCommand;
+            var evalCtx = new SecurityEvaluationContext(
+                ApiKeyId: apiKey.Id,
+                ApiKeyName: apiKey.Name,
+                Domain: domain,
+                ActionVerb: "Execute",
+                TargetResource: target.HostId ?? "localhost",
+                RawCommandOrPath: command.CommandText,
+                ClientIp: HttpContext.GetClientIp());
+            var decision = await policyEngine.EvaluateAsync(evalCtx);
+            if (!decision.IsAllowed)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(decision.DeniedReason ?? "安全策略拦截此指令执行"));
+            }
+        }
+
         var triggerBy = User.Identity?.Name ?? "admin";
         var context = new CommandExecutionContext(
             CommandText: command.CommandText,
@@ -184,6 +209,25 @@ public class CommandsController(
         var target = !string.IsNullOrWhiteSpace(request.TargetHostId)
             ? ExecutionTarget.Remote(request.TargetHostId)
             : ExecutionTarget.Local;
+
+        if (CurrentApiKey is { } apiKey)
+        {
+            var isRemote = target.TargetType == TargetType.RemoteHost;
+            var domain = isRemote ? SecurityTargetDomain.RemoteCommand : SecurityTargetDomain.LocalCommand;
+            var evalCtx = new SecurityEvaluationContext(
+                ApiKeyId: apiKey.Id,
+                ApiKeyName: apiKey.Name,
+                Domain: domain,
+                ActionVerb: "Execute",
+                TargetResource: target.HostId ?? "localhost",
+                RawCommandOrPath: request.CommandText.Trim(),
+                ClientIp: HttpContext.GetClientIp());
+            var decision = await policyEngine.EvaluateAsync(evalCtx);
+            if (!decision.IsAllowed)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(decision.DeniedReason ?? "安全策略拦截此指令执行"));
+            }
+        }
 
         var triggerBy = User.Identity?.Name ?? "admin";
         var context = new CommandExecutionContext(

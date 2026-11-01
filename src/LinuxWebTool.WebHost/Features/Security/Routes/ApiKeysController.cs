@@ -35,7 +35,8 @@ public class ApiKeysController(
             k.LastUsedAt,
             k.ExpiresAt,
             ApiKeyService.ParseToolsList(k.AllowedTools),
-            k.AllowedCommandIds
+            k.AllowedCommandIds,
+            ApiKeyService.ParsePolicyTemplateIds(k.PolicyTemplateIds)
         )).ToList();
         return Ok(dtos);
     }
@@ -71,7 +72,8 @@ public class ApiKeysController(
             entity.CreatedAt,
             entity.ExpiresAt,
             ApiKeyService.ParseToolsList(entity.AllowedTools),
-            entity.AllowedCommandIds);
+            entity.AllowedCommandIds,
+            ApiKeyService.ParsePolicyTemplateIds(entity.PolicyTemplateIds));
 
         return Ok(response);
     }
@@ -101,6 +103,7 @@ public class ApiKeysController(
         entity.AllowedHostIds = string.IsNullOrWhiteSpace(request.AllowedHostIds) ? null : request.AllowedHostIds.Trim();
         entity.AllowedTools = request.AllowedTools != null && request.AllowedTools.Count > 0 ? string.Join(",", request.AllowedTools) : null;
         entity.AllowedCommandIds = string.IsNullOrWhiteSpace(request.AllowedCommandIds) ? null : request.AllowedCommandIds.Trim();
+        entity.PolicyTemplateIds = ApiKeyService.SerializePolicyTemplateIds(request.PolicyTemplateIds);
         entity.ExpiresAt = request.ExpiresAt;
 
         await store.UpdateAsync(entity);
@@ -172,7 +175,8 @@ public class ApiKeysController(
             source.AllowedHostIds,
             request?.ExpiresAt ?? source.ExpiresAt,
             ApiKeyService.ParseToolsList(source.AllowedTools),
-            source.AllowedCommandIds);
+            source.AllowedCommandIds,
+            ApiKeyService.ParsePolicyTemplateIds(source.PolicyTemplateIds));
 
         var (rawKey, entity) = await service.CreateAsync(createReq);
         await operationLogger.LogAsync("克隆 API Key", "安全凭据", entity.Name, $"克隆自={source.Name}, 前缀={entity.KeyPrefix}", clientIp: HttpContext.GetClientIp());
@@ -197,7 +201,8 @@ public class ApiKeysController(
             entity.CreatedAt,
             entity.ExpiresAt,
             ApiKeyService.ParseToolsList(entity.AllowedTools),
-            entity.AllowedCommandIds);
+            entity.AllowedCommandIds,
+            ApiKeyService.ParsePolicyTemplateIds(entity.PolicyTemplateIds));
 
         return Ok(response);
     }

@@ -27,6 +27,8 @@ using LinuxWebTool.WebHost.Features.Plugins.Routes;
 using LinuxWebTool.Contracts.Features.Plugins.Contracts;
 using LinuxWebTool.WebHost.Features.McpBridge.Routes;
 using LinuxWebTool.Contracts.Features.McpBridge.Contracts;
+using LinuxWebTool.WebHost.Features.Security.Routes;
+using LinuxWebTool.Contracts.Features.Security.Contracts;
 
 namespace LinuxWebTool.WebHost.MinimalApi
 {
@@ -50,6 +52,7 @@ namespace LinuxWebTool.WebHost.MinimalApi
             services.AddScoped<TranscodeController>();
             services.AddScoped<TerminalController>();
             services.AddScoped<ApiKeysController>();
+            services.AddScoped<SecurityPoliciesController>();
             services.AddScoped<FrpTunnelController>();
             services.AddScoped<GatewayController>();
             services.AddScoped<EasyTierController>();
@@ -235,6 +238,15 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_ApiKeysController.MapPost("{id}/Toggle", async ([FromServices] ApiKeysController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; return await ctrl.Toggle(id); });
             group_ApiKeysController.MapPost("{id}/Clone", async ([FromServices] ApiKeysController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; CloneApiKeyRequest? req = null; if (ctx.Request.HasJsonContentType()) { req = await ctx.Request.ReadFromJsonAsync(LinuxWebTool.WebHost.Composition.AppJsonSerializerContext.Default.CloneApiKeyRequest); } return await ctrl.Clone(id, req); });
             group_ApiKeysController.MapGet("McpCatalog", ([FromServices] ApiKeysController ctrl, [FromServices] LinuxWebTool.WebHost.Features.Mcp.Engine.McpServerEngine engine, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.GetMcpCatalog(engine); });
+
+            var group_SecurityPoliciesController = app.MapGroup("/api/SecurityPolicies");
+            group_SecurityPoliciesController.RequireAuthorization();
+            group_SecurityPoliciesController.MapGet("Templates", async ([FromServices] SecurityPoliciesController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return await ctrl.GetTemplates(); });
+            group_SecurityPoliciesController.MapPost("Templates", async ([FromServices] SecurityPoliciesController ctrl, HttpContext ctx, [FromBody] CreateSecurityPolicyTemplateRequest request) => { ctrl.HttpContext = ctx; return await ctrl.CreateTemplate(request); });
+            group_SecurityPoliciesController.MapPut("Templates/{id}", async ([FromServices] SecurityPoliciesController ctrl, HttpContext ctx, string id, [FromBody] UpdateSecurityPolicyTemplateRequest request) => { ctrl.HttpContext = ctx; return await ctrl.UpdateTemplate(id, request); });
+            group_SecurityPoliciesController.MapDelete("Templates/{id}", async ([FromServices] SecurityPoliciesController ctrl, HttpContext ctx, string id) => { ctrl.HttpContext = ctx; return await ctrl.DeleteTemplate(id); });
+            group_SecurityPoliciesController.MapPost("Simulate", ([FromServices] SecurityPoliciesController ctrl, HttpContext ctx, [FromBody] SimulatePolicyRequest request) => { ctrl.HttpContext = ctx; return ctrl.Simulate(request); });
+            group_SecurityPoliciesController.MapGet("Capabilities", ([FromServices] SecurityPoliciesController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.GetCapabilities(); });
 
             var group_FrpTunnelController = app.MapGroup("/api/FrpTunnel");
             group_FrpTunnelController.RequireAuthorization();

@@ -47,8 +47,42 @@ export default defineComponent({
       selectedCommandIds: [],  // string[]
       mcpFilterMode: 'all', // 'all' | 'custom'
       allowedTools: [],     // string[]
+      policyTemplateIds: [], // string[] (安全策略模板 ID)
       expiresAt: '',
     });
+
+    const policyTemplates = ref([]);
+
+    // 模板库管理弹窗
+    const showTemplateModal = ref(false);
+
+    // 自定义策略模板弹窗
+    const showCustomPolicyModal = ref(false);
+    const customPolicyForm = reactive({
+      id: null,
+      name: '',
+      description: '',
+      domainLocalCommand: true,
+      domainRemoteCommand: true,
+      domainLocalFile: false,
+      domainRemoteFile: false,
+      commandPatterns: '',
+      disallowSubshells: true,
+      disallowCommandChaining: true,
+      blockHighRiskFlags: true,
+      pathPatterns: '',
+      readOnlyOnly: false,
+    });
+
+    // 策略模拟沙箱弹窗
+    const showSimulateModal = ref(false);
+    const simForm = reactive({
+      domain: 1,
+      actionVerb: 'Execute',
+      testPayload: 'docker run --privileged -v /:/host ubuntu',
+    });
+    const simResult = ref(null);
+    const isSimulating = ref(false);
 
     // 新建成功明文密钥弹窗（仅展示一次）
     const showSecretModal = ref(false);
@@ -356,12 +390,13 @@ export default defineComponent({
 
     async function load() {
       loading.value = true;
-      const [resKeys, resHosts, resCatalog, resCommands, resGroups] = await Promise.all([
+      const [resKeys, resHosts, resCatalog, resCommands, resGroups, resTemplates] = await Promise.all([
         http(API.apiKeys.list, { method: 'GET' }),
         http(API.remoteHosts.list, { method: 'GET' }),
         http(API.apiKeys.mcpCatalog, { method: 'GET' }),
         http(API.commands.list, { method: 'GET' }),
         http(API.groups.list, { method: 'GET' }),
+        http(API.securityPolicies.templates, { method: 'GET' }),
       ]);
       loading.value = false;
       if (resKeys.ok) {
@@ -378,6 +413,9 @@ export default defineComponent({
       }
       if (resGroups.ok) {
         availableGroups.value = resGroups.data || [];
+      }
+      if (resTemplates.ok) {
+        policyTemplates.value = resTemplates.data || [];
       }
     }
 
@@ -406,6 +444,7 @@ export default defineComponent({
         selectedCommandIds: [],
         mcpFilterMode: 'all',
         allowedTools: getAllCatalogToolNames(),
+        policyTemplateIds: ['tpl_safe_base'],
         expiresAt: '',
       });
       showModal.value = true;
@@ -439,6 +478,7 @@ export default defineComponent({
         selectedCommandIds: cmdIds,
         mcpFilterMode: hasCustomTools ? 'custom' : 'all',
         allowedTools: hasCustomTools ? [...key.allowedTools] : getAllCatalogToolNames(),
+        policyTemplateIds: key.policyTemplateIds ? [...key.policyTemplateIds] : ['tpl_safe_base'],
         expiresAt: key.expiresAt ? key.expiresAt.slice(0, 16) : '',
       });
       showModal.value = true;
@@ -472,6 +512,7 @@ export default defineComponent({
         selectedCommandIds: cmdIds,
         mcpFilterMode: hasCustomTools ? 'custom' : 'all',
         allowedTools: hasCustomTools ? [...key.allowedTools] : getAllCatalogToolNames(),
+        policyTemplateIds: key.policyTemplateIds ? [...key.policyTemplateIds] : ['tpl_safe_base'],
         expiresAt: key.expiresAt ? key.expiresAt.slice(0, 16) : '',
       });
       showModal.value = true;
@@ -529,6 +570,7 @@ export default defineComponent({
         allowedHostIds: allowedHostIds,
         allowedCommandIds: allowedCommandIds,
         allowedTools: allowedTools,
+        policyTemplateIds: form.policyTemplateIds,
         expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : null,
       };
 
@@ -554,6 +596,193 @@ export default defineComponent({
           showSecretModal.value = true;
           load();
         }
+      }
+    }
+
+    function getTemplate(id) {
+      return (policyTemplates.value || []).find(t => t.id === id);
+    }
+
+    function getTemplateName(id) {
+      const t = getTemplate(id);
+      return t ? t.name : id;
+    }
+
+    function getTemplateDescription(id) {
+      const t = getTemplate(id);
+      return t ? (t.description || '') : '';
+    }
+
+    function getParsedRules(tpl) {
+      if (!tpl || !tpl.rulesJson) return [];
+      try {
+        const p = JSON.parse(tpl.rulesJson);
+        return Array.isArray(p) ? p : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function getTemplateTags(tpl) {
+      const tags = [];
+      const rules = getParsedRules(tpl);
+      for (const r of rules) {
+        if (r.commandPatterns) tags.push(`命令限制: ${r.commandPatterns}`);
+        if (r.pathPatterns) tags.push(`路径: ${r.pathPatterns}`);
+        if (r.disallowSubshells) tags.push('禁子Shell');
+        if (r.disallowCommandChaining) tags.push('禁命令串联');
+        if (r.blockHighRiskFlags) tags.push('拦截特权容器');
+        if (r.readOnlyOnly) tags.push('只读文件');
+      }
+      return tags.length > 0 ? tags : ['全局放行'];
+    }
+
+    async function loadTemplates() {
+      const res = await http(API.securityPolicies.templates, { method: 'GET' });
+      if (res.ok) {
+        policyTemplates.value = res.data || [];
+      }
+    }
+
+    function openCustomPolicyModal() {
+      Object.assign(customPolicyForm, {
+        id: null,
+        name: '',
+        description: '',
+        domainLocalCommand: true,
+        domainRemoteCommand: true,
+        domainLocalFile: false,
+        domainRemoteFile: false,
+        commandPatterns: '',
+        disallowSubshells: true,
+        disallowCommandChaining: true,
+        blockHighRiskFlags: true,
+        pathPatterns: '',
+        readOnlyOnly: false,
+      });
+      showCustomPolicyModal.value = true;
+    }
+
+    async function saveCustomPolicy() {
+      if (!customPolicyForm.name.trim()) return toast.error('请输入策略模板名称');
+
+      let domainMask = 0;
+      if (customPolicyForm.domainLocalCommand) domainMask |= 1;
+      if (customPolicyForm.domainRemoteCommand) domainMask |= 2;
+      if (customPolicyForm.domainLocalFile) domainMask |= 4;
+      if (customPolicyForm.domainRemoteFile) domainMask |= 8;
+      if (domainMask === 0) domainMask = 1;
+
+      const rule = {
+        ruleId: `r_${Date.now()}`,
+        name: `${customPolicyForm.name.trim()} 核心规则`,
+        domain: domainMask,
+        effect: 1,
+        commandPatterns: customPolicyForm.commandPatterns.trim() || null,
+        pathPatterns: customPolicyForm.pathPatterns.trim() || null,
+        disallowSubshells: Boolean(customPolicyForm.disallowSubshells),
+        disallowCommandChaining: Boolean(customPolicyForm.disallowCommandChaining),
+        blockHighRiskFlags: Boolean(customPolicyForm.blockHighRiskFlags),
+        readOnlyOnly: Boolean(customPolicyForm.readOnlyOnly),
+      };
+
+      const res = await http(API.securityPolicies.templates, {
+        method: 'POST',
+        body: {
+          name: customPolicyForm.name.trim(),
+          description: customPolicyForm.description.trim() || null,
+          rulesJson: JSON.stringify([rule]),
+        },
+      });
+
+      if (res.ok) {
+        toast.success('自定义安全策略模板创建成功');
+        showCustomPolicyModal.value = false;
+        await loadTemplates();
+        if (res.data?.id && !form.policyTemplateIds.includes(res.data.id)) {
+          form.policyTemplateIds.push(res.data.id);
+        }
+      }
+    }
+
+    function openTemplateManager() {
+      showTemplateModal.value = true;
+    }
+
+    async function deleteTemplate(tpl) {
+      if (tpl.isBuiltin) return toast.error('官方内置策略模板不可删除');
+      if (!confirm(`确定要永久删除安全策略模板 "${tpl.name}" 吗？该操作不可撤销！`)) return;
+
+      const res = await http(API.securityPolicies.templateItem(tpl.id), {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        toast.success('策略模板已删除');
+        form.policyTemplateIds = form.policyTemplateIds.filter(id => id !== tpl.id);
+        await loadTemplates();
+      }
+    }
+
+    function openSimulateModal() {
+      simForm.domain = 1;
+      simForm.actionVerb = 'Execute';
+      simForm.testPayload = 'docker run --privileged -v /:/host ubuntu';
+      simResult.value = null;
+      showSimulateModal.value = true;
+    }
+
+    function setSimPreset(type) {
+      if (type === 'privileged') {
+        simForm.domain = 1;
+        simForm.actionVerb = 'Execute';
+        simForm.testPayload = 'docker run --privileged -v /:/host ubuntu';
+      } else if (type === 'chaining') {
+        simForm.domain = 1;
+        simForm.actionVerb = 'Execute';
+        simForm.testPayload = 'cat /etc/passwd; rm -rf /tmp/data';
+      } else if (type === 'subshell') {
+        simForm.domain = 1;
+        simForm.actionVerb = 'Execute';
+        simForm.testPayload = 'echo $(whoami) > /tmp/out';
+      } else if (type === 'safe') {
+        simForm.domain = 1;
+        simForm.actionVerb = 'Execute';
+        simForm.testPayload = 'docker ps';
+      } else if (type === 'sensitive_file') {
+        simForm.domain = 4;
+        simForm.actionVerb = 'Read';
+        simForm.testPayload = '/etc/shadow';
+      }
+      simResult.value = null;
+    }
+
+    async function runSimulation() {
+      if (!simForm.testPayload.trim()) return toast.error('请输入待测试的命令或路径');
+      isSimulating.value = true;
+      simResult.value = null;
+
+      const selectedTpls = (policyTemplates.value || []).filter(t => form.policyTemplateIds.includes(t.id));
+      let rules = [];
+      for (const t of selectedTpls) {
+        try {
+          const parsed = JSON.parse(t.rulesJson);
+          if (Array.isArray(parsed)) rules.push(...parsed);
+        } catch {}
+      }
+
+      const res = await http(API.securityPolicies.simulate, {
+        method: 'POST',
+        body: {
+          domain: Number(simForm.domain),
+          actionVerb: simForm.actionVerb,
+          testPayload: simForm.testPayload.trim(),
+          rulesJson: JSON.stringify(rules),
+        },
+      });
+
+      isSimulating.value = false;
+      if (res.ok) {
+        simResult.value = res.data;
       }
     }
 
@@ -705,6 +934,25 @@ export default defineComponent({
       openGuide,
       formatTime,
       getHostScopeLabel,
+      policyTemplates,
+      showTemplateModal,
+      showCustomPolicyModal,
+      customPolicyForm,
+      showSimulateModal,
+      simForm,
+      simResult,
+      isSimulating,
+      getTemplate,
+      getTemplateName,
+      getTemplateDescription,
+      getTemplateTags,
+      openCustomPolicyModal,
+      saveCustomPolicy,
+      openTemplateManager,
+      deleteTemplate,
+      openSimulateModal,
+      setSimPreset,
+      runSimulation,
     };
   },
   template: `
@@ -720,6 +968,9 @@ export default defineComponent({
           </p>
         </div>
         <div class="flex items-center gap-2">
+          <button class="btn btn-secondary" @click="openTemplateManager()">
+            <span>🛡️ 策略模板库 ({{ policyTemplates.length }})</span>
+          </button>
           <button class="btn btn-secondary" @click="openGuide(null)">
             <span>客户端集成指引</span>
           </button>
@@ -744,6 +995,7 @@ export default defineComponent({
                 <th class="py-2.5 px-3 whitespace-nowrap">名称</th>
                 <th class="py-2.5 px-3 whitespace-nowrap">前缀 / 标识</th>
                 <th class="py-2.5 px-3 whitespace-nowrap">通道权限</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">安全策略防护</th>
                 <th class="py-2.5 px-3 whitespace-nowrap">业务模块权限</th>
                 <th class="py-2.5 px-3 whitespace-nowrap">MCP 工具范围</th>
                 <th class="py-2.5 px-3 whitespace-nowrap">状态</th>
@@ -767,6 +1019,16 @@ export default defineComponent({
                     <span v-if="k.allowApi" class="badge border-cyan-500/40 text-cyan-300 bg-cyan-950/30">API</span>
                     <span v-if="k.allowMcp" class="badge border-purple-500/40 text-purple-300 bg-purple-950/30">MCP</span>
                   </div>
+                </td>
+                <td class="py-2.5 px-3">
+                  <div v-if="k.policyTemplateIds && k.policyTemplateIds.length > 0" class="flex flex-wrap items-center gap-1">
+                    <span v-for="tid in k.policyTemplateIds" :key="tid"
+                          class="badge border-cyan-500/40 text-cyan-300 bg-cyan-950/40 font-mono text-[11px]"
+                          :title="getTemplateDescription(tid)">
+                      🛡️ {{ getTemplateName(tid) }}
+                    </span>
+                  </div>
+                  <span v-else class="text-slate-500 text-[11px]">未挂载</span>
                 </td>
                 <td class="py-2.5 px-3">
                   <div class="flex flex-wrap items-center gap-1">
@@ -875,6 +1137,54 @@ export default defineComponent({
                   <div>
                     <span class="text-slate-200 font-medium">允许 MCP 协议访问</span>
                     <span class="text-slate-500 text-[11px] block">用于 Claude / Cursor / AI Agent 工具调用</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- 统一安全策略组模板挂载 (Security Policy Firewalls) -->
+            <div class="border-t border-slate-800/80 pt-3 flex flex-col gap-2.5">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <label class="block font-medium text-slate-200 text-sm flex items-center gap-2">
+                    <span>🛡️ 安全策略组与防护盾 (Security Policies)</span>
+                    <span class="badge border-cyan-500/40 text-cyan-400 bg-cyan-950/30">Tier 4 防护</span>
+                  </label>
+                  <p class="text-[11px] text-slate-400 mt-0.5">
+                    采用类云防火墙/安全组模板机制，对执行指令白名单、子 Shell、命令拼接及高危容器特权进行零信任防御。支持多选组合生效。
+                  </p>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button type="button" class="btn btn-xs hover:border-cyan-500/50 text-cyan-300" @click="openCustomPolicyModal()">
+                    + 新建自定义策略
+                  </button>
+                  <button type="button" class="btn btn-xs hover:border-purple-500/50 text-purple-300" @click="openSimulateModal()">
+                    🧪 策略模拟沙箱
+                  </button>
+                </div>
+              </div>
+
+              <div v-if="policyTemplates.length === 0" class="text-xs text-slate-500 py-2">
+                暂无策略模板
+              </div>
+              <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
+                <label v-for="tpl in policyTemplates" :key="tpl.id"
+                       class="flex items-start gap-2.5 p-2.5 rounded border transition-colors cursor-pointer select-none text-xs"
+                       :class="form.policyTemplateIds.includes(tpl.id) ? 'bg-cyan-950/25 border-cyan-500/50' : 'bg-slate-900/40 border-slate-800 hover:border-slate-700'">
+                  <input type="checkbox" :value="tpl.id" v-model="form.policyTemplateIds" class="accent-cyan-500 mt-0.5 cursor-pointer" />
+                  <div class="flex flex-col gap-1 flex-1 min-w-0">
+                    <div class="flex items-center justify-between gap-1.5">
+                      <span class="font-medium text-slate-200 truncate">{{ tpl.name }}</span>
+                      <span class="badge text-[10px] py-0 px-1" :class="tpl.isBuiltin ? 'border-blue-500/40 text-blue-300 bg-blue-950/30' : 'border-amber-500/40 text-amber-300 bg-amber-950/30'">
+                        {{ tpl.isBuiltin ? '官方内置' : '自定义' }}
+                      </span>
+                    </div>
+                    <p class="text-[11px] text-slate-400 line-clamp-2">{{ tpl.description || '暂无描述' }}</p>
+                    <div class="flex flex-wrap items-center gap-1 mt-0.5">
+                      <span v-for="(ruleTag, idx) in getTemplateTags(tpl)" :key="idx" class="badge text-[10px] py-0 px-1 border-slate-700 text-slate-300 bg-slate-800/60 font-mono">
+                        {{ ruleTag }}
+                      </span>
+                    </div>
                   </div>
                 </label>
               </div>
@@ -1186,6 +1496,218 @@ export default defineComponent({
 
           <div class="flex justify-end pt-2 border-t border-slate-700/60">
             <button class="btn" @click="showGuideModal = false">关闭</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 策略模板库管理弹窗 -->
+      <div v-if="showTemplateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div class="panel w-full max-w-3xl p-5 flex flex-col gap-4 border-slate-700 max-h-[90vh] overflow-y-auto">
+          <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
+            <h3 class="font-semibold text-slate-100 text-base flex items-center gap-2">
+              <span>🛡️ 安全策略模板库 (Security Policy Firewall Templates)</span>
+            </h3>
+            <button class="text-slate-400 hover:text-slate-200" @click="showTemplateModal = false">✕</button>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <p class="text-xs text-slate-400">
+              集中维护可复用的安全防护模板，包括执行命令白名单、禁止子Shell、禁止命令拼接、容器提权拦截等。
+            </p>
+            <button class="btn btn-sm btn-primary" @click="openCustomPolicyModal()">
+              + 新建自定义策略模板
+            </button>
+          </div>
+
+          <div class="flex flex-col gap-2.5 max-h-[60vh] overflow-y-auto pr-1">
+            <div v-for="tpl in policyTemplates" :key="tpl.id"
+                 class="p-3 rounded bg-slate-900/60 border border-slate-800 flex flex-col gap-2">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="font-semibold text-slate-200 text-sm">{{ tpl.name }}</span>
+                  <span class="badge text-[10px]" :class="tpl.isBuiltin ? 'border-blue-500/40 text-blue-300 bg-blue-950/30' : 'border-amber-500/40 text-amber-300 bg-amber-950/30'">
+                    {{ tpl.isBuiltin ? '官方内置' : '自定义' }}
+                  </span>
+                  <span class="text-[11px] text-slate-500 font-mono">引用数: {{ tpl.usageCount || 0 }}</span>
+                </div>
+                <div>
+                  <button v-if="!tpl.isBuiltin" class="btn btn-xs text-rose-400 hover:text-rose-300" @click="deleteTemplate(tpl)">
+                    删除
+                  </button>
+                  <span v-else class="text-[11px] text-slate-500">内置锁定</span>
+                </div>
+              </div>
+              <p class="text-xs text-slate-400">{{ tpl.description || '暂无描述' }}</p>
+              <div class="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-800/60">
+                <span v-for="(tag, idx) in getTemplateTags(tpl)" :key="idx" class="badge text-[10px] py-0.5 px-1.5 border-slate-700 text-slate-300 bg-slate-800/80 font-mono">
+                  {{ tag }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex justify-end pt-2 border-t border-slate-700/60">
+            <button class="btn" @click="showTemplateModal = false">关闭</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 新建自定义策略模板弹窗 -->
+      <div v-if="showCustomPolicyModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div class="panel w-full max-w-xl p-5 flex flex-col gap-4 border-slate-700 max-h-[90vh] overflow-y-auto">
+          <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
+            <h3 class="font-semibold text-slate-100 text-base flex items-center gap-2">
+              新建自定义安全策略模板
+            </h3>
+            <button class="text-slate-400 hover:text-slate-200" @click="showCustomPolicyModal = false">✕</button>
+          </div>
+
+          <div class="flex flex-col gap-3 text-xs">
+            <div>
+              <label class="block text-slate-400 mb-1">模板名称 <span class="text-rose-400">*</span></label>
+              <input v-model="customPolicyForm.name" class="input" placeholder="例如：Docker 基础管理只读策略" />
+            </div>
+
+            <div>
+              <label class="block text-slate-400 mb-1">策略描述</label>
+              <input v-model="customPolicyForm.description" class="input" placeholder="例如：仅允许查看容器状态与日志，严禁特权与修改" />
+            </div>
+
+            <div class="border-t border-slate-800/80 pt-2.5">
+              <label class="block text-slate-300 font-medium mb-1.5">作用领域 (Domain Scope)</label>
+              <div class="grid grid-cols-2 gap-2">
+                <label class="flex items-center gap-2 p-2 rounded bg-slate-900 border border-slate-800 cursor-pointer">
+                  <input type="checkbox" v-model="customPolicyForm.domainLocalCommand" class="accent-cyan-500" />
+                  <span class="text-slate-200">本地命令 (Local Command)</span>
+                </label>
+                <label class="flex items-center gap-2 p-2 rounded bg-slate-900 border border-slate-800 cursor-pointer">
+                  <input type="checkbox" v-model="customPolicyForm.domainRemoteCommand" class="accent-cyan-500" />
+                  <span class="text-slate-200">远程命令 (Remote Command)</span>
+                </label>
+                <label class="flex items-center gap-2 p-2 rounded bg-slate-900 border border-slate-800 cursor-pointer">
+                  <input type="checkbox" v-model="customPolicyForm.domainLocalFile" class="accent-cyan-500" />
+                  <span class="text-slate-200">本地文件 (Local File)</span>
+                </label>
+                <label class="flex items-center gap-2 p-2 rounded bg-slate-900 border border-slate-800 cursor-pointer">
+                  <input type="checkbox" v-model="customPolicyForm.domainRemoteFile" class="accent-cyan-500" />
+                  <span class="text-slate-200">远程文件 (Remote File)</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- 命令安全防御 -->
+            <div class="border-t border-slate-800/80 pt-2.5 flex flex-col gap-2">
+              <label class="block text-slate-300 font-medium">💻 命令安全防护 (Command Guard)</label>
+              <div>
+                <label class="block text-slate-400 mb-1">命令对象白名单 (分号分隔，为空则允许任意命令)</label>
+                <input v-model="customPolicyForm.commandPatterns" class="input font-mono" placeholder="例如: docker ps; docker logs; git status; systemctl status" />
+              </div>
+              <div class="flex flex-col gap-1.5 mt-1">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" v-model="customPolicyForm.disallowSubshells" class="accent-cyan-500" />
+                  <span class="text-slate-300">严禁子 Shell 嵌套调用 (拦截 $(...) 与反引号)</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" v-model="customPolicyForm.disallowCommandChaining" class="accent-cyan-500" />
+                  <span class="text-slate-300">严禁命令串联与管道逃逸 (拦截 ;、&&、||、|)</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" v-model="customPolicyForm.blockHighRiskFlags" class="accent-cyan-500" />
+                  <span class="text-slate-300">拦截高危特权容器逃逸 (拦截 --privileged、-v /:、docker.sock)</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- 文件安全防御 -->
+            <div class="border-t border-slate-800/80 pt-2.5 flex flex-col gap-2">
+              <label class="block text-slate-300 font-medium">📁 文件安全防护 (File Guard)</label>
+              <div>
+                <label class="block text-slate-400 mb-1">允许访问路径白名单 (分号分隔，支持通配符)</label>
+                <input v-model="customPolicyForm.pathPatterns" class="input font-mono" placeholder="例如: /home/user;/var/log;/tmp" />
+              </div>
+              <div>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" v-model="customPolicyForm.readOnlyOnly" class="accent-cyan-500" />
+                  <span class="text-slate-300">仅允许只读操作 (禁止写入、删除、创建、重命名)</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex justify-end gap-2 pt-3 border-t border-slate-700/60">
+            <button class="btn" @click="showCustomPolicyModal = false">取消</button>
+            <button class="btn btn-primary" @click="saveCustomPolicy()">创建模板并应用</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 策略模拟沙箱弹窗 (Dry-Run Simulator) -->
+      <div v-if="showSimulateModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div class="panel w-full max-w-xl p-5 flex flex-col gap-4 border-purple-500/50 max-h-[90vh] overflow-y-auto">
+          <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
+            <h3 class="font-semibold text-purple-300 text-base flex items-center gap-2">
+              🧪 策略模拟沙箱 (Dry-Run Simulator)
+            </h3>
+            <button class="text-slate-400 hover:text-slate-200" @click="showSimulateModal = false">✕</button>
+          </div>
+
+          <div class="flex flex-col gap-3 text-xs">
+            <div class="p-2.5 rounded bg-slate-900 border border-slate-800 text-slate-400 leading-relaxed">
+              <span>当前测试挂载: </span>
+              <span v-if="form.policyTemplateIds.length > 0" class="text-cyan-300 font-medium">
+                {{ form.policyTemplateIds.map(getTemplateName).join(', ') }}
+              </span>
+              <span v-else class="text-amber-400">未选择任何策略模板（默认全局放行）</span>
+            </div>
+
+            <div>
+              <label class="block text-slate-400 mb-1">测试领域</label>
+              <select v-model="simForm.domain" class="input">
+                <option :value="1">本地命令 (Local Command)</option>
+                <option :value="2">远程命令 (Remote Command)</option>
+                <option :value="4">本地文件 (Local File)</option>
+                <option :value="8">远程文件 (Remote File)</option>
+              </select>
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-slate-400">测试载荷 (Shell 命令行或文件路径)</label>
+                <div class="flex items-center gap-1 text-[10px]">
+                  <button type="button" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-rose-300" @click="setSimPreset('privileged')">特权容器</button>
+                  <button type="button" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300" @click="setSimPreset('chaining')">命令串联</button>
+                  <button type="button" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-purple-300" @click="setSimPreset('subshell')">子Shell</button>
+                  <button type="button" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300" @click="setSimPreset('safe')">安全命令</button>
+                  <button type="button" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-300" @click="setSimPreset('sensitive_file')">敏感文件</button>
+                </div>
+              </div>
+              <input v-model="simForm.testPayload" class="input font-mono text-cyan-200" placeholder="例如: docker run --privileged ubuntu" />
+            </div>
+
+            <div class="flex justify-end pt-1">
+              <button class="btn btn-primary" :disabled="isSimulating" @click="runSimulation()">
+                <span>{{ isSimulating ? '模拟评估中...' : '▶️ 立即运行沙箱探测' }}</span>
+              </button>
+            </div>
+
+            <!-- 测试结果展示卡片 -->
+            <div v-if="simResult" class="p-3 rounded border mt-2 flex flex-col gap-2"
+                 :class="simResult.isAllowed ? 'bg-emerald-950/30 border-emerald-500/50 text-emerald-200' : 'bg-rose-950/30 border-rose-500/50 text-rose-200'">
+              <div class="flex items-center justify-between font-semibold">
+                <span class="flex items-center gap-1.5">
+                  <span>{{ simResult.isAllowed ? '✅ 放行通行 (ALLOW)' : '🚫 拦截阻断 (DENY)' }}</span>
+                </span>
+                <span class="text-xs font-mono opacity-80">规则: {{ simResult.ruleTriggered || '默认规则' }}</span>
+              </div>
+              <div v-if="!simResult.isAllowed" class="flex flex-col gap-1 text-[11px] text-slate-300 pt-1 border-t border-rose-800/40">
+                <div><strong class="text-rose-400">拦截原因:</strong> {{ simResult.deniedReason }}</div>
+                <div v-if="simResult.suggestion"><strong class="text-cyan-400">改进建议:</strong> {{ simResult.suggestion }}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex justify-end pt-2 border-t border-slate-700/60">
+            <button class="btn" @click="showSimulateModal = false">关闭</button>
           </div>
         </div>
       </div>

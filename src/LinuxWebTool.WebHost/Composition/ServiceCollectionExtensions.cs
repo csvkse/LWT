@@ -239,9 +239,11 @@ public static class ServiceCollectionExtensions
         builder.Services.AddAuthorization();
         builder.Services.AddAntiforgery();
 
-        // APIKey 认证与权限矩阵
+        // APIKey 认证与权限矩阵 & 安全策略引擎
         builder.Services.AddSingleton<ApiKeyStore>();
         builder.Services.AddSingleton<ApiKeyService>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Security.Contracts.ISecurityPolicyTemplateStore, LinuxWebTool.Infrastructure.Features.Security.Policies.SecurityPolicyTemplateStore>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Security.Contracts.ISecurityPolicyEngine, LinuxWebTool.Infrastructure.Features.Security.Policies.SecurityPolicyEngine>();
 
         // FRP 内网穿透反向隧道（HTTP-over-WebSocket，统一由 FrpTunnelManager 调度管理）
         builder.Services.AddSingleton<FrpTunnelConfigStore>();

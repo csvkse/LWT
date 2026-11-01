@@ -27,8 +27,8 @@ public partial class ApiKeyStore(DbConnectionFactory factory)
     {
         using var db = factory.CreateConnection();
         const string sql = @"
-            INSERT INTO api_key (Id, Name, KeyPrefix, KeyHash, IsEnabled, AllowApi, AllowMcp, AllowTerminal, AllowSchedules, AllowFiles, AllowTranscode, AllowGateway, AllowRemoteHosts, AllowServices, AllowWorkers, AllowedPaths, AllowedHostIds, AllowedTools, AllowedCommandIds, CreatedAt, LastUsedAt, ExpiresAt)
-            VALUES (@Id, @Name, @KeyPrefix, @KeyHash, @IsEnabled, @AllowApi, @AllowMcp, @AllowTerminal, @AllowSchedules, @AllowFiles, @AllowTranscode, @AllowGateway, @AllowRemoteHosts, @AllowServices, @AllowWorkers, @AllowedPaths, @AllowedHostIds, @AllowedTools, @AllowedCommandIds, @CreatedAt, @LastUsedAt, @ExpiresAt)";
+            INSERT INTO api_key (Id, Name, KeyPrefix, KeyHash, IsEnabled, AllowApi, AllowMcp, AllowTerminal, AllowSchedules, AllowFiles, AllowTranscode, AllowGateway, AllowRemoteHosts, AllowServices, AllowWorkers, AllowedPaths, AllowedHostIds, AllowedTools, AllowedCommandIds, PolicyTemplateIds, CreatedAt, LastUsedAt, ExpiresAt)
+            VALUES (@Id, @Name, @KeyPrefix, @KeyHash, @IsEnabled, @AllowApi, @AllowMcp, @AllowTerminal, @AllowSchedules, @AllowFiles, @AllowTranscode, @AllowGateway, @AllowRemoteHosts, @AllowServices, @AllowWorkers, @AllowedPaths, @AllowedHostIds, @AllowedTools, @AllowedCommandIds, @PolicyTemplateIds, @CreatedAt, @LastUsedAt, @ExpiresAt)";
         await db.ExecuteAsync(sql, entity);
     }
 
@@ -42,7 +42,7 @@ public partial class ApiKeyStore(DbConnectionFactory factory)
                 AllowTranscode = @AllowTranscode, AllowGateway = @AllowGateway, AllowRemoteHosts = @AllowRemoteHosts,
                 AllowServices = @AllowServices, AllowWorkers = @AllowWorkers,
                 AllowedPaths = @AllowedPaths, AllowedHostIds = @AllowedHostIds, AllowedTools = @AllowedTools,
-                AllowedCommandIds = @AllowedCommandIds, ExpiresAt = @ExpiresAt
+                AllowedCommandIds = @AllowedCommandIds, PolicyTemplateIds = @PolicyTemplateIds, ExpiresAt = @ExpiresAt
             WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, entity);
     }

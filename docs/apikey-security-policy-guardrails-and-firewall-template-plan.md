@@ -20,7 +20,7 @@
 5. [五、 数据库迁移设计与出厂模板播种 (DDL & Migrations)](#五-数据库迁移设计与出厂模板播种-ddl--migrations)
 6. [六、 统一核心实现：能力模型、零分配分词状态机与策略引擎](#六-统一核心实现能力模型零分配分词状态机与策略引擎)
 7. [七、 系统唯一门禁切面装配 (全控制器与 MCP 统一替换)](#七-系统唯一门禁切面装配-全控制器与-mcp-统一替换)
-8. [八、 前端交互重塑：树状层级控制台原型设计](#八-前端交互重塑树状层级控制台原型设计)
+8. [八、 前端交互重塑：树状控制台与自定义策略配置向导](#八-前端交互重塑树状控制台与自定义策略配置向导)
 9. [九、 渗透测试集、AOT 编译门禁与实施计划](#九-渗透测试集aot-编译门禁与实施计划)
 
 ---
@@ -706,9 +706,11 @@ if (!decision.IsAllowed)
 
 ---
 
-## 八、 前端交互重塑：树状层级控制台原型设计
+## 八、 前端交互重塑：树状控制台与自定义策略配置向导
 
-在 `src/LinuxWebTool.WebHost/wwwroot/app/views/ApiKeysView.js` 中重塑界面结构，消除一切字段重叠：
+在 `src/LinuxWebTool.WebHost/wwwroot/app/views/ApiKeysView.js` 中重塑界面结构，消除一切字段重叠，提供“API Key 四层编辑控制台”与“自定义策略向导”完整闭环：
+
+### 8.1 API Key 编辑主弹窗（四层树状层级控制台）
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -743,10 +745,11 @@ if (!decision.IsAllowed)
 │ 指令资源: (•) 全部已录入指令   ( ) 仅限特定指令 [未受限]                        │
 │                                                                                 │
 │ 🛡️ 【Tier 4: 统一安全策略组挂载 (Security Guardrails - 类似安全组)】            │
-│ ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│ ┌─────────────────────────────────────────────────────────────[+ 新建自定义策略]─┐ │
 │ │ [√] 🐳 Docker 容器运维防护模板 (仅允许 docker 动词，严禁 --privileged 提权) │ │
 │ │ [√] 📁 专属工作区目录限制模板 (限定远程与本地文件读写在 /home 目录内)       │ │
 │ │ [ ] 🔒 生产环境只读防护模板 (禁止任何写入和删除，仅放行只读状态探针)         │ │
+│ │ [ ] ⚡ Nginx 站点运维策略 (自定义模板 - 仅放行 reload 与 /etc/nginx)          │ │
 │ └─────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                 │
 │ 💡 已选策略效果实时计算:                                                        │
@@ -758,6 +761,158 @@ if (!decision.IsAllowed)
 │   测试命令: [ docker run -v /:/host alpine ]  ──>[ 立即测试 ]                   │
 │   判定结果: 🔴 策略阻断 (命中规则: 🐳 Docker 容器运维白名单 - 严禁宿主机根挂载)  │
 └─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 8.2 自定义策略模板的新增与管理（双入口流转设计）
+
+为了让用户在添加自定义策略时体验极致丝滑，系统设计了**“双入口流转”**机制：
+
+```mermaid
+flowchart TD
+    subgraph FlowA["入口 A: API Key 表单内【就地快捷新建】(最常用，流转不中断)"]
+        K1["管理员正在配置某 API Key"] --> K2["翻到【Tier 4: 安全策略组挂载】区域"]
+        K2 --> K3["点击右上角 [+ 新建自定义策略] 按钮"]
+        K3 --> M1["就地唤起【自定义策略配置抽屉/模态框】"]
+        M1 --> M2["填写规则并完成即时沙盒试运行测试"]
+        M2 --> M3["点击保存并应用"]
+        M3 --> K4["策略抽屉关闭，新策略自动呈现在复选列表，并【自动勾选】！"]
+    end
+
+    subgraph FlowB["入口 B: 页面顶部【策略模板库】(全局集中管理)"]
+        T1["点击页面右上角 [🛡️ 安全策略模板库] 按钮"] --> T2["展开全局模板库列表抽屉 (查看全部内置/自定义策略)"]
+        T2 --> T3["支持操作: [+ 创建新模板] / [编辑现有模板] / [克隆复制] / [删除]"]
+        T3 --> T4["支持查看该模板正被哪些具体的 API Key 挂载使用"]
+    end
+```
+
+---
+
+### 8.3 可视化向导配置表单原型设计（免手写复杂 JSON）
+
+当点击 `[+ 新建自定义策略]` 时，弹出的配置窗口采用**“面向普通用户的可视化卡片向导”**，用户只需填写命令/路径与勾选开关，无需编写底层复杂的规则 JSON：
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│ 🛡️ 新建 / 编辑自定义安全策略模板                                                 │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│ 策略名称: [ Nginx 站点运维策略            ]  (必填，如: Python脚本沙箱 / 生产只读) │
+│ 策略描述: [ 仅允许重载 Nginx，限制在 /etc/nginx 与 /var/www 目录               ]│
+│                                                                                 │
+│ ┌─ 模式切换: (•) 🎨 可视化配置向导           ( ) ⚙️ 专家 JSON 源码模式 ─────────┐ │
+│ │                                                                             │ │
+│ │ 💻 【终端与命令执行防护规则 (Command Guardrails)】                           │ │
+│ │   允许命令动词白名单:                                                       │ │
+│ │   [ nginx -t, systemctl reload nginx, git pull                             ]│ │
+│ │   💡 提示: 多个动词用逗号分隔，支持子命令 (如 docker ps) 或通配符 (如 systemctl status *) │ │
+│ │                                                                             │ │
+│ │   防逃逸高危拦截开关:                                                       │ │
+│ │   [x] 严禁反引号与 $(...) 子 Shell 动态展开 (阻断隐藏命令探测与注入)        │ │
+│ │   [x] 严禁 ;, &&, || 复合多命令连接 (强制拆分为单指令依次调用，阻断注入)     │ │
+│ │   [x] 容器特权提权拦截 (强制阻断 --privileged 与宿主机根目录挂载 -v /:)     │ │
+│ │                                                                             │ │
+│ │ 📁 【文件与目录路径防护规则 (Path Guardrails)】                              │ │
+│ │   允许路径范围白名单:                                                       │ │
+│ │   [ /var/www/html;/etc/nginx;/data/logs                                    ]│ │
+│ │   💡 提示: 多条路径用分号或换行分隔，系统自动规范化并防御 ../ 相对穿越与软链接逃逸│ │
+│ │                                                                             │ │
+│ │   文件只读安全开关:                                                         │ │
+│ │   [ ] 强制只读保护 (严格禁止写/改/删/上传，仅允许读取与下载浏览)           │ │
+│ └─────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                 │
+│ 🧪 【策略即时试运行模拟器 (Policy Dry-Run Simulator)】                          │
+│ ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│ │ 输入测试命令: [ systemctl reload nginx ]    ──>[ 试运行 ] -> 🟢 放行通过    │ │
+│ │ 输入测试命令: [ rm -rf /var/www        ]    ──>[ 试运行 ] -> 🔴 策略阻断 (不在白名单)│ │
+│ │ 输入测试路径: [ /etc/shadow            ]    ──>[ 试运行 ] -> 🔴 策略阻断 (超出授权目录)│ │
+│ └─────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                 │
+│                                            [ 取消 ]   [ 💾 保存并应用该策略 ]    │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 8.4 前端与后端数据模型双向适配与即时仿真（Dry-Run）实现
+
+#### 1. 前端表单与规则 JSON 双向适配器 (`PolicyFormAdapter.js`)
+前端无需感知底层复杂的 AST 结构，通过轻量级转换器双向流动：
+```javascript
+export function buildRulesJsonFromForm(form) {
+  const rules = [];
+
+  // A. 命令执行规则生成
+  if (form.commandPatterns && form.commandPatterns.trim()) {
+    rules.push({
+      ruleId: 'r_cmd_' + Math.random().toString(36).slice(2, 9),
+      name: '终端命令白名单规则',
+      domain: 1, // SecurityTargetDomain.AllCommands
+      effect: 1, // PolicyEffect.Allow
+      commandPatterns: form.commandPatterns.trim(),
+      pathPatterns: null,
+      disallowSubshells: !!form.disallowSubshells,
+      disallowCommandChaining: !!form.disallowCommandChaining,
+      blockHighRiskFlags: !!form.blockHighRiskFlags,
+      readOnlyOnly: false
+    });
+  }
+
+  // B. 路径范围规则生成
+  if (form.pathPatterns && form.pathPatterns.trim()) {
+    rules.push({
+      ruleId: 'r_path_' + Math.random().toString(36).slice(2, 9),
+      name: '文件路径白名单规则',
+      domain: 3, // SecurityTargetDomain.AllFiles
+      effect: 1, // PolicyEffect.Allow
+      commandPatterns: null,
+      pathPatterns: form.pathPatterns.trim(),
+      disallowSubshells: false,
+      disallowCommandChaining: false,
+      blockHighRiskFlags: false,
+      readOnlyOnly: !!form.readOnlyOnly
+    });
+  }
+
+  return JSON.stringify(rules);
+}
+```
+
+#### 2. 即时试运行模拟（Dry-Run）接口契约
+在编辑自定义策略时，点击 `[试运行]` 调用后端轻量探测端点：
+`POST /api/SecurityPolicies/Simulate`
+- **请求载荷 (Request DTO)**：
+  ```json
+  {
+    "rulesJson": "[{\"ruleId\":\"...\", ...}]",
+    "targetDomain": "RemoteCommand",
+    "testPayload": "rm -rf /var/www"
+  }
+  ```
+- **响应载荷 (Response DTO)**：
+  ```json
+  {
+    "isAllowed": false,
+    "ruleTriggered": "终端命令白名单规则",
+    "deniedReason": "命令 'rm' 不在允许执行的命令白名单中",
+    "suggestion": "当前策略仅允许执行: [nginx -t, systemctl reload nginx, git pull]"
+  }
+  ```
+- **价值**：**用户不用保存即可当场验证策略有效性，杜绝配置失误导致生产误杀或出现安全漏斗！**
+
+#### 3. API Key 表单内的无感即时挂载联动
+```javascript
+// 在 ApiKeysView.js 的 setup 中
+async function handleCustomPolicySaved(createdPolicy) {
+  // 1. 刷新系统策略模板下拉/卡片数据源
+  await loadAvailablePolicyTemplates();
+  // 2. 自动勾选刚刚新建的策略模板 ID
+  if (!apiKeyForm.policyTemplateIds.includes(createdPolicy.id)) {
+    apiKeyForm.policyTemplateIds.push(createdPolicy.id);
+  }
+  showCustomPolicyModal.value = false;
+  toast.success(`策略模板 [${createdPolicy.name}] 已成功创建并自动挂载至当前 API Key`);
+}
 ```
 
 ---

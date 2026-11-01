@@ -1,10 +1,13 @@
 using System.Text;
 using System.Text.Json;
 using LinuxWebTool.Application.Features.Security;
+using LinuxWebTool.Application.Features.Security.Policies;
 using LinuxWebTool.Contracts.Features.Commands.Contracts;
 using LinuxWebTool.Contracts.Features.Mcp.Contracts;
+using LinuxWebTool.Contracts.Features.Security.Contracts;
 using LinuxWebTool.Contracts.Shared.Contracts;
 using LinuxWebTool.Infrastructure.Features.Scheduling.Adapters;
+using LinuxWebTool.Infrastructure.Features.Security.Adapters;
 using LinuxWebTool.Infrastructure.Shared.Persistence;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 using LinuxWebTool.Infrastructure.Shared.Support;
@@ -18,43 +21,15 @@ namespace LinuxWebTool.WebHost.Features.Mcp.Engine.Providers;
 public sealed class CommandMcpToolProvider(
     CommandStore commandStore,
     IUnifiedExecutionEngine executionEngine,
-    IOperationLogger operationLogger) : IMcpToolProvider
+    IOperationLogger operationLogger,
+    ISecurityPolicyEngine policyEngine) : IMcpToolProvider
 {
     private static JsonElement Schema(string json) => JsonDocument.Parse(json).RootElement.Clone();
     private static readonly JsonElement EmptyObjectSchema = Schema("""{"type":"object","properties":{}}""");
 
-    private static readonly JsonElement CommandListSchema = Schema("""
-    {
-        "type": "object",
-        "properties": {
-            "group_id": { "type": "string", "description": "按分组 ID 筛选（可选 Guid）" },
-            "keyword": { "type": "string", "description": "按名称或描述模糊搜索关键词（可选）" }
-        }
-    }
-    """);
-
-    private static readonly JsonElement CommandIdRequiredSchema = Schema("""
-    {
-        "type": "object",
-        "properties": {
-            "command_id": { "type": "string", "description": "指令模版唯一标识 ID (Guid)" }
-        },
-        "required": ["command_id"]
-    }
-    """);
-
-    private static readonly JsonElement CommandRunSchema = Schema("""
-    {
-        "type": "object",
-        "properties": {
-            "command_id": { "type": "string", "description": "指令模版唯一标识 ID (Guid)" },
-            "target_host_id": { "type": "string", "description": "覆盖指定的目标主机 ID；为空表示使用指令默认配置或本地主机" },
-            "arguments": { "type": "string", "description": "动态脚本位置参数（可选，$1 $2...）" },
-            "timeout_seconds": { "type": "integer", "description": "执行超时秒数，不传则使用指令默认配置（上限 600）" }
-        },
-        "required": ["command_id"]
-    }
-    """);
+    private static readonly JsonElement CommandListSchema = Schema("""{"type":"object","properties":{"group_id":{"type":"string","description":"按分组 ID 筛选（可选 Guid）"},"keyword":{"type":"string","description":"按名称或描述模糊搜索关键词（可选）"}}}""");
+    private static readonly JsonElement CommandIdRequiredSchema = Schema("""{"type":"object","properties":{"command_id":{"type":"string","description":"指令模版唯一标识 ID (Guid)"}},"required":["command_id"]}""");
+    private static readonly JsonElement CommandRunSchema = Schema("""{"type":"object","properties":{"command_id":{"type":"string","description":"指令模版唯一标识 ID (Guid)"},"target_host_id":{"type":"string","description":"覆盖指定的目标主机 ID；为空表示使用指令默认配置或本地主机"},"arguments":{"type":"string","description":"动态脚本位置参数（可选，$1 $2...）"},"timeout_seconds":{"type":"integer","description":"执行超时秒数，不传则使用指令默认配置（上限 600）"}},"required":["command_id"]}""");
 
     private static readonly JsonElement CommandBatchRunSchema = Schema("""
     {
@@ -230,6 +205,9 @@ public sealed class CommandMcpToolProvider(
             ? ExecutionTarget.Remote(effectiveHostId)
             : ExecutionTarget.Local;
 
+        if (await CheckPolicyAsync(context, effectiveHostId, cmd.CommandText) is { } denied)
+            return McpToolExecutionResult.Error($"Security Policy Denied: {denied}");
+
         var dynamicArgs = args.TryGetProperty("arguments", out var aProp) ? aProp.GetString() : null;
         var timeout = args.TryGetProperty("timeout_seconds", out var tProp) ? tProp.GetInt32() : (cmd.TimeoutSeconds ?? 60);
 
@@ -288,6 +266,11 @@ public sealed class CommandMcpToolProvider(
                 !ApiKeyPermissionMatrix.CanAccessRemoteHost(context.CallerKey.AllowRemoteHosts, context.CallerKey.AllowedHostIds, effectiveHost))
             {
                 return McpToolExecutionResult.Error($"Permission Denied: API Key is not authorized to access host '{effectiveHost}'.");
+            }
+
+            if (await CheckPolicyAsync(context, effectiveHost, cmd.CommandText) is { } batchDenied)
+            {
+                return McpToolExecutionResult.Error($"Security Policy Denied for command '{cmd.Name}': {batchDenied}");
             }
 
             items.Add(new BatchExecutionItem(
@@ -383,5 +366,14 @@ public sealed class CommandMcpToolProvider(
         await operationLogger.LogAsync("MCP删除指令", "指令管理", cmd.Name, id.ToString(), clientIp: context.ClientIp);
 
         return McpToolExecutionResult.Success("{\"success\":true, \"message\":\"Deleted successfully\"}");
+    }
+
+    private async ValueTask<string?> CheckPolicyAsync(McpRequestContext ctx, string? hostId, string cmdText)
+    {
+        if (ctx.CallerKey is null) return null;
+        var domain = !string.IsNullOrWhiteSpace(hostId) ? SecurityTargetDomain.RemoteCommand : SecurityTargetDomain.LocalCommand;
+        var decision = await policyEngine.EvaluateAsync(new SecurityEvaluationContext(
+            ctx.CallerKey.Id, ctx.CallerKey.Name, domain, "Execute", hostId ?? "localhost", cmdText, ctx.ClientIp ?? "mcp"));
+        return decision.IsAllowed ? null : decision.DeniedReason;
     }
 }

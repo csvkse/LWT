@@ -1,7 +1,10 @@
 using System.Text;
 using System.Text.Json;
+using LinuxWebTool.Application.Features.Security.Policies;
 using LinuxWebTool.Contracts.Features.Mcp.Contracts;
+using LinuxWebTool.Contracts.Features.Security.Contracts;
 using LinuxWebTool.Infrastructure.Features.Mount.Adapters;
+using LinuxWebTool.Infrastructure.Features.Security.Adapters;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 using LinuxWebTool.Infrastructure.Shared.Support;
 
@@ -14,9 +17,37 @@ public sealed class FileMcpToolProvider(
     DataPaths dataPaths,
     IDiskStatusCache diskStatusCache,
     MountStateMachineService mountHealth,
-    IOperationLogger operationLogger) : IMcpToolProvider
+    IOperationLogger operationLogger,
+    ISecurityPolicyEngine policyEngine) : IMcpToolProvider
 {
     private const long MaxTextReadBytes = 2 * 1024 * 1024; // 2MB 单次读取上限
+
+    private async ValueTask<(bool Allowed, string? Error)> CheckFileAccessAsync(string path, bool isWrite, McpRequestContext context)
+    {
+        if (context.CallerKey == null) return (true, null);
+
+        if (!PathScopeGuard.IsAllowed(path, context.CallerKey.AllowedPaths, out var pathErr))
+        {
+            return (false, $"Access Denied: {pathErr}");
+        }
+
+        var evalCtx = new SecurityEvaluationContext(
+            ApiKeyId: context.CallerKey.Id,
+            ApiKeyName: context.CallerKey.Name,
+            Domain: SecurityTargetDomain.LocalFile,
+            ActionVerb: isWrite ? "Write" : "Read",
+            TargetResource: "localhost",
+            RawCommandOrPath: path,
+            ClientIp: context.ClientIp ?? "mcp");
+
+        var decision = await policyEngine.EvaluateAsync(evalCtx);
+        if (!decision.IsAllowed)
+        {
+            return (false, $"Security Policy Denied: {decision.DeniedReason}");
+        }
+
+        return (true, null);
+    }
 
     private static JsonElement Schema(string json) => JsonDocument.Parse(json).RootElement.Clone();
     private static readonly JsonElement EmptyObjectSchema = Schema("""{"type":"object","properties":{}}""");
@@ -120,8 +151,8 @@ public sealed class FileMcpToolProvider(
                     return McpToolExecutionResult.Error("Missing path parameter");
 
                 var dirPath = pProp.GetString()!;
-                if (!PathScopeGuard.IsAllowed(dirPath, context.CallerKey?.AllowedPaths, out var pathErr))
-                    return McpToolExecutionResult.Error($"Access Denied: {pathErr}");
+                var (dirAllowed, dirErr) = await CheckFileAccessAsync(dirPath, isWrite: false, context);
+                if (!dirAllowed) return McpToolExecutionResult.Error(dirErr!);
                 if (!Directory.Exists(dirPath)) return McpToolExecutionResult.Error($"Directory not found: {dirPath}");
 
                 using var ms = new MemoryStream();
@@ -163,8 +194,8 @@ public sealed class FileMcpToolProvider(
                     return McpToolExecutionResult.Error("Missing path parameter");
 
                 var filePath = pProp.GetString()!;
-                if (!PathScopeGuard.IsAllowed(filePath, context.CallerKey?.AllowedPaths, out var pathErr))
-                    return McpToolExecutionResult.Error($"Access Denied: {pathErr}");
+                var (readAllowed, readErr) = await CheckFileAccessAsync(filePath, isWrite: false, context);
+                if (!readAllowed) return McpToolExecutionResult.Error(readErr!);
                 if (!File.Exists(filePath)) return McpToolExecutionResult.Error($"File not found: {filePath}");
                 if (IsProtectedFile(filePath)) return McpToolExecutionResult.Error("Access denied: protected system file");
 
@@ -194,8 +225,8 @@ public sealed class FileMcpToolProvider(
                 var filePath = pProp.GetString()!;
                 var content = args.TryGetProperty("content", out var cProp) ? cProp.GetString() ?? string.Empty : string.Empty;
                 var overwrite = !args.TryGetProperty("overwrite", out var owP) || owP.GetBoolean();
-                if (!PathScopeGuard.IsAllowed(filePath, context.CallerKey?.AllowedPaths, out var pathErr))
-                    return McpToolExecutionResult.Error($"Access Denied: {pathErr}");
+                var (writeAllowed, writeErr) = await CheckFileAccessAsync(filePath, isWrite: true, context);
+                if (!writeAllowed) return McpToolExecutionResult.Error(writeErr!);
                 if (IsProtectedFile(filePath)) return McpToolExecutionResult.Error("Access denied: protected system file");
                 if (File.Exists(filePath) && !overwrite) return McpToolExecutionResult.Error("File already exists and overwrite is false");
 
@@ -212,8 +243,8 @@ public sealed class FileMcpToolProvider(
                     return McpToolExecutionResult.Error("Missing path parameter");
 
                 var dirPath = pProp.GetString()!;
-                if (!PathScopeGuard.IsAllowed(dirPath, context.CallerKey?.AllowedPaths, out var pathErr))
-                    return McpToolExecutionResult.Error($"Access Denied: {pathErr}");
+                var (mkdirAllowed, mkdirErr) = await CheckFileAccessAsync(dirPath, isWrite: true, context);
+                if (!mkdirAllowed) return McpToolExecutionResult.Error(mkdirErr!);
                 if (IsProtectedFile(dirPath)) return McpToolExecutionResult.Error("Access denied: protected system file");
                 if (!Directory.Exists(dirPath)) Directory.CreateDirectory(dirPath);
                 await operationLogger.LogAsync("MCP建目录", "文件管理", Path.GetFileName(dirPath), dirPath, clientIp: context.ClientIp);
@@ -226,8 +257,8 @@ public sealed class FileMcpToolProvider(
                     return McpToolExecutionResult.Error("Missing path parameter");
 
                 var filePath = pProp.GetString()!;
-                if (!PathScopeGuard.IsAllowed(filePath, context.CallerKey?.AllowedPaths, out var pathErr))
-                    return McpToolExecutionResult.Error($"Access Denied: {pathErr}");
+                var (delAllowed, delErr) = await CheckFileAccessAsync(filePath, isWrite: true, context);
+                if (!delAllowed) return McpToolExecutionResult.Error(delErr!);
                 if (IsProtectedFile(filePath)) return McpToolExecutionResult.Error("Access denied: protected system file");
                 if (File.Exists(filePath)) File.Delete(filePath);
                 else if (Directory.Exists(filePath)) Directory.Delete(filePath, recursive: true);

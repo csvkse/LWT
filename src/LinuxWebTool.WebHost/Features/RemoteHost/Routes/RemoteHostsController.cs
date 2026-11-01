@@ -1,8 +1,11 @@
 using System.Diagnostics;
+using LinuxWebTool.Application.Features.Security.Policies;
 using LinuxWebTool.Contracts.Features.RemoteHost.Contracts;
+using LinuxWebTool.Contracts.Features.Security.Contracts;
 using LinuxWebTool.Infrastructure.Features.Mount.Adapters;
 using LinuxWebTool.Infrastructure.Features.RemoteHost.Adapters;
 using LinuxWebTool.Infrastructure.Features.RemoteHost.Security;
+using LinuxWebTool.Infrastructure.Features.Security.Adapters;
 using LinuxWebTool.Infrastructure.Shared.Persistence;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 using LinuxWebTool.Infrastructure.Shared.Support;
@@ -23,58 +26,22 @@ public sealed class RemoteHostsController(
     RemoteFileSystemSessionPool sessionPool,
     SshHostKeyProbe hostKeyProbe,
     IOperationLogger operationLogger,
-    ILogger<RemoteHostsController> logger) : MinimalApi.ControllerBase
+    ILogger<RemoteHostsController> logger,
+    ISecurityPolicyEngine policyEngine) : MinimalApi.ControllerBase
 {
+    private ApiKeyEntity? CurrentApiKey => HttpContext?.Items["CurrentApiKey"] as ApiKeyEntity;
     [HttpGet]
     public async Task<IResult> List()
     {
         var entities = await store.GetAllAsync();
-        var dtos = entities.Select(e => new RemoteHostItemResponse(
-            Id: e.Id,
-            Name: e.Name,
-            Host: e.Host,
-            Port: e.Port,
-            Protocol: e.Protocol,
-            AuthType: e.AuthType,
-            Username: e.Username,
-            HasCredential: !string.IsNullOrEmpty(e.EncryptedCredential),
-            HostKeyFingerprint: e.HostKeyFingerprint,
-            Tags: e.Tags,
-            Remark: e.Remark,
-            SortOrder: e.SortOrder,
-            CreatedAt: e.CreatedAt,
-            UpdatedAt: e.UpdatedAt,
-            LastConnectedAt: e.LastConnectedAt
-        )).ToList();
-
-        return Ok(dtos);
+        return Ok(entities.Select(ToDto).ToList());
     }
 
     [HttpGet("{id}")]
     public async Task<IResult> Get(string id)
     {
         var entity = await store.GetByIdAsync(id);
-        if (entity is null) return NotFound(new MessageResponse("远程主机不存在"));
-
-        var dto = new RemoteHostItemResponse(
-            Id: entity.Id,
-            Name: entity.Name,
-            Host: entity.Host,
-            Port: entity.Port,
-            Protocol: entity.Protocol,
-            AuthType: entity.AuthType,
-            Username: entity.Username,
-            HasCredential: !string.IsNullOrEmpty(entity.EncryptedCredential),
-            HostKeyFingerprint: entity.HostKeyFingerprint,
-            Tags: entity.Tags,
-            Remark: entity.Remark,
-            SortOrder: entity.SortOrder,
-            CreatedAt: entity.CreatedAt,
-            UpdatedAt: entity.UpdatedAt,
-            LastConnectedAt: entity.LastConnectedAt
-        );
-
-        return Ok(dto);
+        return entity is null ? NotFound(new MessageResponse("远程主机不存在")) : Ok(ToDto(entity));
     }
 
     [HttpPost]
@@ -112,26 +79,7 @@ public sealed class RemoteHostsController(
 
         await store.InsertAsync(entity);
         await operationLogger.LogAsync("添加远程主机", "远程运维", entity.Name, $"{entity.Host}:{entity.Port}", clientIp: HttpContext.GetClientIp());
-
-        var response = new RemoteHostItemResponse(
-            Id: entity.Id,
-            Name: entity.Name,
-            Host: entity.Host,
-            Port: entity.Port,
-            Protocol: entity.Protocol,
-            AuthType: entity.AuthType,
-            Username: entity.Username,
-            HasCredential: !string.IsNullOrEmpty(entity.EncryptedCredential),
-            HostKeyFingerprint: entity.HostKeyFingerprint,
-            Tags: entity.Tags,
-            Remark: entity.Remark,
-            SortOrder: entity.SortOrder,
-            CreatedAt: entity.CreatedAt,
-            UpdatedAt: entity.UpdatedAt,
-            LastConnectedAt: entity.LastConnectedAt
-        );
-
-        return Ok(response);
+        return Ok(ToDto(entity));
     }
 
     [HttpPut("{id}")]
@@ -396,6 +344,9 @@ public sealed class RemoteHostsController(
             return BadRequest(new MessageResponse("执行命令不能为空"));
         }
 
+        if (await CheckPolicyAsync(id, SecurityTargetDomain.RemoteCommand, "Execute", request.Command, "安全策略拦截此远程指令执行") is { } denied)
+            return denied;
+
         try
         {
             await using var adapter = factory.CreateAdapter(entity);
@@ -428,6 +379,9 @@ public sealed class RemoteHostsController(
                 ? fs.WorkingDirectory
                 : path.Trim();
 
+            if (await CheckPolicyAsync(id, SecurityTargetDomain.RemoteFile, "Read", targetPath, "安全策略拦截此远程目录访问") is { } denied)
+                return denied;
+
             var entries = await fs.ListDirectoryAsync(targetPath, cts.Token);
             await store.TouchConnectedAsync(id);
 
@@ -457,6 +411,9 @@ public sealed class RemoteHostsController(
         if (entity is null) return NotFound(new MessageResponse("远程主机不存在"));
 
         if (string.IsNullOrWhiteSpace(path)) return BadRequest(new MessageResponse("文件路径不能为空"));
+
+        if (await CheckPolicyAsync(id, SecurityTargetDomain.RemoteFile, "Read", path.Trim(), "安全策略拦截此远程文件读取") is { } denied)
+            return denied;
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
         cts.CancelAfter(TimeSpan.FromSeconds(30));
@@ -494,6 +451,9 @@ public sealed class RemoteHostsController(
 
         if (string.IsNullOrWhiteSpace(request.Path)) return BadRequest(new MessageResponse("文件路径不能为空"));
 
+        if (await CheckPolicyAsync(id, SecurityTargetDomain.RemoteFile, "Write", request.Path.Trim(), "安全策略拦截此远程文件修改") is { } denied)
+            return denied;
+
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
         cts.CancelAfter(TimeSpan.FromSeconds(30));
 
@@ -526,6 +486,13 @@ public sealed class RemoteHostsController(
         if (entity is null) return NotFound(new MessageResponse("远程主机不存在"));
 
         if (string.IsNullOrWhiteSpace(request.Path)) return BadRequest(new MessageResponse("路径不能为空"));
+
+        if (await CheckPolicyAsync(id, SecurityTargetDomain.RemoteFile, request.Action ?? "Action", request.Path.Trim(), "安全策略拦截此远程文件操作") is { } denied)
+            return denied;
+
+        if (!string.IsNullOrWhiteSpace(request.Destination) &&
+            await CheckPolicyAsync(id, SecurityTargetDomain.RemoteFile, request.Action ?? "Action", request.Destination.Trim(), "安全策略拦截此远程目标文件操作") is { } destDenied)
+            return destDenied;
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
         cts.CancelAfter(TimeSpan.FromSeconds(30));
@@ -604,6 +571,9 @@ public sealed class RemoteHostsController(
         var targetDir = string.IsNullOrWhiteSpace(path) ? "/" : path.Trim();
         var targetPath = targetDir.EndsWith('/') ? $"{targetDir}{fileName}" : $"{targetDir}/{fileName}";
 
+        if (await CheckPolicyAsync(id, SecurityTargetDomain.RemoteFile, "Upload", targetPath, "安全策略拦截此远程文件上传") is { } denied)
+            return denied;
+
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
         cts.CancelAfter(TimeSpan.FromSeconds(60));
 
@@ -640,6 +610,9 @@ public sealed class RemoteHostsController(
         var fileName = Path.GetFileName(cleanPath.TrimEnd('/'));
         if (string.IsNullOrWhiteSpace(fileName)) fileName = "remote_download";
 
+        if (await CheckPolicyAsync(id, SecurityTargetDomain.RemoteFile, "Read", cleanPath, "安全策略拦截此远程文件下载") is { } denied)
+            return denied;
+
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
         cts.CancelAfter(TimeSpan.FromSeconds(60));
 
@@ -662,5 +635,18 @@ public sealed class RemoteHostsController(
             logger.LogError(ex, "下载远程文件失败: {HostId}, Path={Path}", id, cleanPath);
             return StatusCode(500, new MessageResponse($"下载文件失败: {ex.Message}"));
         }
+    }
+
+    private static RemoteHostItemResponse ToDto(RemoteHostEntity e) => new(
+        e.Id, e.Name, e.Host, e.Port, e.Protocol, e.AuthType, e.Username,
+        !string.IsNullOrEmpty(e.EncryptedCredential), e.HostKeyFingerprint,
+        e.Tags, e.Remark, e.SortOrder, e.CreatedAt, e.UpdatedAt, e.LastConnectedAt);
+
+    private async ValueTask<IResult?> CheckPolicyAsync(string hostId, SecurityTargetDomain domain, string verb, string payload, string defaultDenied)
+    {
+        if (CurrentApiKey is not { } apiKey) return null;
+        var decision = await policyEngine.EvaluateAsync(new SecurityEvaluationContext(
+            apiKey.Id, apiKey.Name, domain, verb, hostId, payload, HttpContext.GetClientIp()));
+        return decision.IsAllowed ? null : StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(decision.DeniedReason ?? defaultDenied));
     }
 }

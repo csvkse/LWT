@@ -115,6 +115,12 @@ export const API = {
     clone: (id) => `/ApiKeys/${id}/Clone`,
     mcpCatalog: '/ApiKeys/McpCatalog',
   },
+  securityPolicies: {
+    templates: '/SecurityPolicies/Templates',
+    templateItem: (id) => `/SecurityPolicies/Templates/${id}`,
+    simulate: '/SecurityPolicies/Simulate',
+    capabilities: '/SecurityPolicies/Capabilities',
+  },
   frp: {
     lines: '/FrpTunnel/Lines',
     lineItem: (id) => `/FrpTunnel/Lines/${id}`,

@@ -1,7 +1,10 @@
 using System.Text;
 using System.Text.Json;
+using LinuxWebTool.Application.Features.Security.Policies;
 using LinuxWebTool.Contracts.Features.Mcp.Contracts;
+using LinuxWebTool.Contracts.Features.Security.Contracts;
 using LinuxWebTool.Contracts.Features.Terminal.Contracts;
+using LinuxWebTool.Infrastructure.Features.Security.Adapters;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 using LinuxWebTool.Infrastructure.Shared.Support;
 
@@ -13,7 +16,8 @@ namespace LinuxWebTool.WebHost.Features.Mcp.Engine.Providers;
 public sealed class TerminalMcpToolProvider(
     IShellExecutor shellExecutor,
     IPtySessionManager ptySessionManager,
-    IOperationLogger operationLogger) : IMcpToolProvider
+    IOperationLogger operationLogger,
+    ISecurityPolicyEngine policyEngine) : IMcpToolProvider
 {
     private static JsonElement Schema(string json) => JsonDocument.Parse(json).RootElement.Clone();
     private static readonly JsonElement EmptyObjectSchema = Schema("""{"type":"object","properties":{}}""");
@@ -95,6 +99,23 @@ public sealed class TerminalMcpToolProvider(
                 var cwd = args.TryGetProperty("working_directory", out var cwdP) ? cwdP.GetString() : null;
                 var timeout = args.TryGetProperty("timeout_seconds", out var tP) ? tP.GetInt32() : 60;
                 timeout = Math.Clamp(timeout, 1, 300);
+
+                if (context.CallerKey != null)
+                {
+                    var evalCtx = new SecurityEvaluationContext(
+                        ApiKeyId: context.CallerKey.Id,
+                        ApiKeyName: context.CallerKey.Name,
+                        Domain: SecurityTargetDomain.LocalCommand,
+                        ActionVerb: "Execute",
+                        TargetResource: "localhost",
+                        RawCommandOrPath: command,
+                        ClientIp: context.ClientIp ?? "mcp");
+                    var decision = await policyEngine.EvaluateAsync(evalCtx);
+                    if (!decision.IsAllowed)
+                    {
+                        return McpToolExecutionResult.Error($"Security Policy Denied: {decision.DeniedReason}");
+                    }
+                }
 
                 if (!string.IsNullOrWhiteSpace(context.CallerKey?.AllowedPaths))
                 {
