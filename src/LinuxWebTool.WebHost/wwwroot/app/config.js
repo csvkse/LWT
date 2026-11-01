@@ -236,6 +236,7 @@ export const API = {
     extensionCode: (id, file) => (file ? `/Services/Extensions/${id}/Code?file=${encodeURIComponent(file)}` : `/Services/Extensions/${id}/Code`),
     extensionDebug: (id) => `/Services/Extensions/${id}/Debug`,
     extensionCreate: '/Services/Extensions/Create',
+    extensionGatewayUrl: (id) => `/ext/${encodeURIComponent(id)}/`,
   },
   workers: {
     list: '/Workers',
@@ -258,6 +259,9 @@ export const API = {
     source: (id) => `/Workers/${id}/Source`,
     code: (id, file) => (file ? `/Workers/${id}/Code?file=${encodeURIComponent(file)}` : `/Workers/${id}/Code`),
     debug: (id) => `/Workers/${id}/Debug`,
+    workerAsset: (id, file) => (file ? `/Workers/${encodeURIComponent(id)}/Assets/${encodeURIComponent(file)}` : `/Workers/${encodeURIComponent(id)}/Assets`),
+    workerAction: '/Workers/Action',
+    workerGatewayUrl: (id) => `/w/${encodeURIComponent(id)}/`,
   },
   pluginOperations: {
     submit: '/PluginOperations/Submit',

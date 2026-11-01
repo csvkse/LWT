@@ -29,4 +29,6 @@ public interface IWorkersManager
     ValueTask<bool> SaveCodeAsync(string id, WorkerCodeSaveRequest request, CancellationToken ct = default);
     ValueTask<WorkerDebugRunResultDto> DebugRunAsync(string id, WorkerDebugRunRequest request, CancellationToken ct = default);
     ValueTask<WorkerInstanceDto> DeploySingleFileAsync(WorkerQuickDeployRequest request, CancellationToken ct = default);
+    string? ResolveWorkerAssetPath(string id, string? relativePath);
+    ValueTask<WorkerActionResult> ExecuteActionAsync(WorkerActionRequest request, CancellationToken ct = default);
 }

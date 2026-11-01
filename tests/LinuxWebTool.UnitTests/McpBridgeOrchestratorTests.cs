@@ -39,6 +39,8 @@ public sealed class McpBridgeOrchestratorTests
         public ValueTask<bool> SaveCodeAsync(string id, WorkerCodeSaveRequest request, CancellationToken ct = default) => ValueTask.FromResult(true);
         public ValueTask<WorkerDebugRunResultDto> DebugRunAsync(string id, WorkerDebugRunRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public ValueTask<WorkerInstanceDto> DeploySingleFileAsync(WorkerQuickDeployRequest request, CancellationToken ct = default) => throw new NotImplementedException();
+        public string? ResolveWorkerAssetPath(string id, string? relativePath) => null;
+        public ValueTask<WorkerActionResult> ExecuteActionAsync(WorkerActionRequest request, CancellationToken ct = default) => ValueTask.FromResult(new WorkerActionResult { Success = true });
     }
 
     private sealed class StubControlActions : IMcpBridgeControlActions

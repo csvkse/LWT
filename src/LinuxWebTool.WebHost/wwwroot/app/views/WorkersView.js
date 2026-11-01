@@ -6,6 +6,7 @@ import { toast } from '../store/toast.js';
 import WorkerUpdateModal from '../components/workers/WorkerUpdateModal.js';
 import WorkerInstallGuideModal from '../components/workers/WorkerInstallGuideModal.js';
 import WorkerCodeModal from '../components/workers/WorkerCodeModal.js';
+import WorkerWebviewModal from '../components/workers/WorkerWebviewModal.js';
 
 export default defineComponent({
   name: 'WorkersView',
@@ -13,6 +14,7 @@ export default defineComponent({
     WorkerUpdateModal,
     WorkerInstallGuideModal,
     WorkerCodeModal,
+    WorkerWebviewModal,
   },
   setup() {
     const router = useRouter();
@@ -488,6 +490,38 @@ export default defineComponent({
       }
     }
 
+    const isWebviewModalOpen = ref(false);
+    const selectedWebviewWorker = ref(null);
+
+    function openWebviewModal(w) {
+      selectedWebviewWorker.value = w;
+      isWebviewModalOpen.value = true;
+    }
+
+    function closeWebviewModal() {
+      isWebviewModalOpen.value = false;
+      selectedWebviewWorker.value = null;
+    }
+
+    async function triggerWorkerAction(w, act) {
+      try {
+        const res = await http(API.workers.workerAction, {
+          method: 'POST',
+          body: {
+            workerId: w.id,
+            action: act.action,
+          },
+        });
+        if (res.ok && res.data?.success !== false) {
+          toast.success(`动作 '${act.label}' 执行成功${res.data?.output ? ': ' + res.data.output.slice(0, 100) : ''}`);
+        } else {
+          toast.error(res.data?.message || res.message || `动作 '${act.label}' 执行失败`);
+        }
+      } catch (e) {
+        toast.error(`执行异常: ${e.message}`);
+      }
+    }
+
     onMounted(() => {
       loadWorkers();
       loadEnvironment();
@@ -557,6 +591,11 @@ export default defineComponent({
       isCodeModalOpen,
       currentWorkerForCode,
       openCodeModal,
+      isWebviewModalOpen,
+      selectedWebviewWorker,
+      openWebviewModal,
+      closeWebviewModal,
+      triggerWorkerAction,
     };
   },
   template: `
@@ -939,7 +978,26 @@ export default defineComponent({
               </button>
             </div>
 
-            <div class="flex items-center gap-1.5">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <button
+                v-if="w.hasUi || w.ui"
+                type="button"
+                class="btn btn-xs border-cyan-500/50 text-cyan-300 hover:bg-cyan-500/20"
+                title="打开独立交互控制台"
+                @click="openWebviewModal(w)"
+              >
+                🖥️ 控制台
+              </button>
+              <button
+                v-for="act in (w.customActions || [])"
+                :key="act.action"
+                type="button"
+                class="btn btn-xs border-purple-500/40 text-purple-300 hover:bg-purple-500/20"
+                :title="act.description || act.label"
+                @click="triggerWorkerAction(w, act)"
+              >
+                {{ act.icon || '⚡' }} {{ act.label }}
+              </button>
               <button
                 type="button"
                 class="btn btn-xs hover:border-cyan-500/30"
@@ -1308,6 +1366,13 @@ export default defineComponent({
         :worker="currentWorkerForCode"
         @close="isCodeModalOpen = false"
         @saved="loadWorkers()"
+      />
+
+      <!-- 弹窗 8：Worker Webview 沙箱控制台 -->
+      <WorkerWebviewModal
+        :show="isWebviewModalOpen"
+        :worker="selectedWebviewWorker"
+        @close="closeWebviewModal()"
       />
     </div>
   `,

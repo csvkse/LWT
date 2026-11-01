@@ -1,4 +1,5 @@
 using LinuxWebTool.Contracts.Features.Workers.Contracts;
+using LinuxWebTool.Contracts.Shared.Support;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -221,5 +222,50 @@ public class WorkersController(IWorkersManager workersManager) : MinimalApi.Cont
     {
         var result = await workersManager.DebugRunAsync(id, request, ct);
         return Ok(result);
+    }
+
+    [HttpGet("{id}/Assets")]
+    [HttpGet("{id}/Assets/{**filePath}")]
+    public async Task<IResult> GetWorkerAsset(string id, string? filePath = null, CancellationToken cancellationToken = default)
+    {
+        if (!PluginSecurityGuard.IsValidPluginId(id))
+        {
+            return NotFound(new WorkerOperationResponse(false, "非法 Worker ID"));
+        }
+
+        var assetPath = workersManager.ResolveWorkerAssetPath(id, filePath);
+        if (string.IsNullOrEmpty(assetPath) || !System.IO.File.Exists(assetPath))
+        {
+            return NotFound(new WorkerOperationResponse(false, "未找到请求的静态 Worker 资产文件"));
+        }
+
+        var ext = Path.GetExtension(assetPath)?.ToLowerInvariant() ?? string.Empty;
+        var contentType = ext switch
+        {
+            ".html" or ".htm" => "text/html; charset=utf-8",
+            ".js" or ".mjs" => "application/javascript; charset=utf-8",
+            ".css" => "text/css; charset=utf-8",
+            ".json" => "application/json; charset=utf-8",
+            ".svg" => "image/svg+xml",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".ico" => "image/x-icon",
+            ".woff" => "font/woff",
+            ".woff2" => "font/woff2",
+            ".ttf" => "font/ttf",
+            ".txt" or ".log" => "text/plain; charset=utf-8",
+            _ => "application/octet-stream"
+        };
+
+        var bytes = await System.IO.File.ReadAllBytesAsync(assetPath, cancellationToken);
+        return Results.File(bytes, contentType, enableRangeProcessing: true);
+    }
+
+    [HttpPost("Action")]
+    public async Task<IResult> ExecuteAction([FromBody] WorkerActionRequest request, CancellationToken ct)
+    {
+        var result = await workersManager.ExecuteActionAsync(request, ct);
+        return result.Success ? Ok(result) : BadRequest(result);
     }
 }

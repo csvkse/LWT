@@ -187,6 +187,7 @@ export default defineComponent({
       showWebviewModal,
       activeWebviewExt,
       openWebview: (ext) => { activeWebviewExt.value = ext; showWebviewModal.value = true; },
+      openGateway: (ext) => { const url = ext.accessUrl || API.services.extensionGatewayUrl(ext.manifest.id); window.open(url, '_blank'); },
       openCode: (ext) => { activeCodeExt.value = ext; showCodeModal.value = true; },
       loadExtensions,
       executeAction,
@@ -338,6 +339,9 @@ export default defineComponent({
             </div>
 
             <div class="flex flex-wrap items-center gap-1 justify-end">
+              <button v-if="ext.accessUrl || ext.manifest.port" type="button" class="btn btn-xs border-indigo-500/50 text-indigo-300 hover:bg-indigo-500/20" title="打开外部 HTTP 访问" @click="openGateway(ext)">
+                🔗 外部访问
+              </button>
               <button v-if="ext.hasUi || ext.manifest.ui" type="button" class="btn btn-xs border-cyan-500/50 text-cyan-300 hover:bg-cyan-500/20" title="打开独立交互控制台" @click="openWebview(ext)">
                 🖥️ 控制台
               </button>

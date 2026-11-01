@@ -512,6 +512,8 @@ public sealed partial class WorkersManager : IWorkersManager, IHostedService
             catch { }
         }
 
+        var hasUi = manifest.Ui != null || File.Exists(Path.Combine(dir, "ui", "index.html")) || File.Exists(Path.Combine(dir, "assets", "index.html")) || File.Exists(Path.Combine(dir, "index.html"));
+
         return new WorkerInstanceDto
         {
             Id = manifest.Id,
@@ -538,6 +540,10 @@ public sealed partial class WorkersManager : IWorkersManager, IHostedService
             KvSizeBytes = File.Exists(kvPath) ? new FileInfo(kvPath).Length : 0,
             DataDirectory = dir,
             IsEnabled = isEnabled,
+            HasUi = hasUi,
+            Ui = manifest.Ui,
+            CustomActions = manifest.CustomActions,
+            ConfigForm = manifest.ConfigForm,
             Source = source,
             MissingDependencies = missingDependencies,
             InstallGuideText = installGuideText

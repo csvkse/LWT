@@ -1049,5 +1049,45 @@ public class ArchitectureTests
         Assert.Contains("[HttpGet(\"Tasks/{id:guid}/Progress\")]", controllerContent);
         Assert.Contains("group_BackupSyncController.MapGet(\"Tasks/{id:guid}/Progress\"", endpointsContent);
     }
+
+    [Fact]
+    public void LinuxArch035_扩展与函数服务三套UI模式对称性与资产防逃逸门禁()
+    {
+        var servicesController = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "Services", "Routes", "ServicesController.cs");
+        var workersController = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "Workers", "Routes", "WorkersController.cs");
+        var endpointsFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "MinimalApi", "EndpointsMapper.g.cs");
+        var pipelineFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Composition", "PipelineExtensions.cs");
+        var workerContracts = Path.Combine(RepoRoot, "src", "LinuxWebTool.Contracts", "Features", "Workers", "Contracts", "WorkerModels.cs");
+        var extensionContracts = Path.Combine(RepoRoot, "src", "LinuxWebTool.Contracts", "Features", "Services", "Contracts", "ScriptExtensionModels.cs");
+
+        var servicesContent = File.ReadAllText(servicesController);
+        var workersContent = File.ReadAllText(workersController);
+        var endpointsContent = File.ReadAllText(endpointsFile);
+        var pipelineContent = File.ReadAllText(pipelineFile);
+        var workerContractsContent = File.ReadAllText(workerContracts);
+        var extensionContractsContent = File.ReadAllText(extensionContracts);
+
+        // 1. 模式 3 (Webview 沙箱资产) 对称性：双边控制器均暴露 Assets 端点
+        Assert.Contains("[HttpGet(\"Extensions/{id}/Assets\")]", servicesContent);
+        Assert.Contains("[HttpGet(\"{id}/Assets\")]", workersContent);
+        Assert.Contains("group_ServicesController.MapGet(\"Extensions/{id}/Assets\"", endpointsContent);
+        Assert.Contains("group_WorkersController.MapGet(\"{id}/Assets\"", endpointsContent);
+
+        // 2. 模式 1 (声明式动作与表单) 对称性：双边清单均声明 CustomActions/ConfigForm，控制器均暴露 Action 端点
+        Assert.Contains("[HttpPost(\"Extensions/Action\")]", servicesContent);
+        Assert.Contains("[HttpPost(\"Action\")]", workersContent);
+        Assert.Contains("group_ServicesController.MapPost(\"Extensions/Action\"", endpointsContent);
+        Assert.Contains("group_WorkersController.MapPost(\"Action\"", endpointsContent);
+        Assert.Contains("public ExtensionUiConfig? Ui { get; init; }", workerContractsContent);
+        Assert.Contains("public ExtensionUiConfig? Ui { get; init; }", extensionContractsContent);
+        Assert.Contains("CustomActions", workerContractsContent);
+        Assert.Contains("CustomActions", extensionContractsContent);
+
+        // 3. 模式 2 (HTTP 网关反代) 对称性：双边实例 DTO 均具备 AccessUrl，管道均配置动态网关反代
+        Assert.Contains("public string? AccessUrl { get; init; }", workerContractsContent);
+        Assert.Contains("public string? AccessUrl { get; init; }", extensionContractsContent);
+        Assert.Contains("app.Map(\"/w/{workerId}/{**catch-all}\"", pipelineContent);
+        Assert.Contains("app.Map(\"/ext/{extensionId}/{**catch-all}\"", pipelineContent);
+    }
 }
 

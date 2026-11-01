@@ -224,6 +224,8 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
                 var configDict = ReadExtensionConfig(dir);
                 var source = await GetSourceMetadataAsync(manifest.Id, cancellationToken);
                 var hasUi = manifest.Ui != null || File.Exists(Path.Combine(dir, "ui", "index.html")) || File.Exists(Path.Combine(dir, "assets", "index.html"));
+                int? port = manifest.Port;
+                string? accessUrl = (port.HasValue && port.Value > 0) ? $"/ext/{manifest.Id}/" : null;
 
                 list.Add(new ExtensionInstance
                 {
@@ -231,6 +233,8 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
                     Status = status,
                     StatusMessage = statusMsg,
                     Pid = pid,
+                    Port = port,
+                    AccessUrl = accessUrl,
                     CurrentConfig = configDict,
                     MissingRunners = missingRunners,
                     MissingBinaries = missingBinaries,
@@ -247,6 +251,13 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
         }
 
         return list;
+    }
+
+    public async Task<ExtensionInstance?> GetExtensionAsync(string extensionId, CancellationToken cancellationToken = default)
+    {
+        if (!PluginSecurityGuard.IsValidPluginId(extensionId)) return null;
+        var list = await ListExtensionsAsync(cancellationToken);
+        return list.FirstOrDefault(x => string.Equals(x.Manifest.Id, extensionId, StringComparison.OrdinalIgnoreCase));
     }
 
     public async Task<ServiceActionResult> ExecuteExtensionActionAsync(ExtensionActionRequest request, CancellationToken cancellationToken = default)
@@ -547,6 +558,12 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
                 uiConfig = new ExtensionUiConfig { Entry = entry, Title = title, Icon = uIcon, Mode = mode };
             }
 
+            int? port = null;
+            if (root.TryGetProperty("port", out var pPort) && pPort.TryGetInt32(out var parsedPort))
+            {
+                port = parsedPort;
+            }
+
             var isEnabled = !File.Exists(Path.Combine(dir, ".disabled"));
 
             return new ExtensionManifest
@@ -568,7 +585,8 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
                 CustomActions = customActions,
                 ConfigForm = formFields,
                 Ui = uiConfig,
-                Target = target
+                Target = target,
+                Port = port
             };
         }
         catch

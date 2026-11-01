@@ -1,3 +1,5 @@
+using LinuxWebTool.Contracts.Features.Services.Contracts;
+
 namespace LinuxWebTool.Contracts.Features.Workers.Contracts;
 
 /// <summary>
@@ -186,6 +188,21 @@ public sealed record WorkerManifest
     /// 环境变量自定义键值对。
     /// </summary>
     public IReadOnlyDictionary<string, string> EnvironmentVariables { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>
+    /// 可选前端 UI 声明配置（用于沙箱 Webview 或声明式 Schema 视图）。
+    /// </summary>
+    public ExtensionUiConfig? Ui { get; init; }
+
+    /// <summary>
+    /// Worker 自定义操作动作定义。
+    /// </summary>
+    public IReadOnlyList<ExtensionCustomAction>? CustomActions { get; init; }
+
+    /// <summary>
+    /// Worker 配置表单项定义。
+    /// </summary>
+    public IReadOnlyList<ExtensionFormField>? ConfigForm { get; init; }
 }
 
 /// <summary>
@@ -220,5 +237,32 @@ public sealed record WorkerInstanceDto
     public WorkerSourceMetadata? Source { get; init; }
     public IReadOnlyList<string> MissingDependencies { get; init; } = [];
     public string? InstallGuideText { get; init; }
+    public bool HasUi { get; init; }
+    public ExtensionUiConfig? Ui { get; init; }
+    public IReadOnlyList<ExtensionCustomAction>? CustomActions { get; init; }
+    public IReadOnlyList<ExtensionFormField>? ConfigForm { get; init; }
+}
+
+/// <summary>
+/// Worker 自定义操作请求。
+/// </summary>
+public sealed record WorkerActionRequest
+{
+    public required string WorkerId { get; init; }
+    public required string Action { get; init; }
+    public Dictionary<string, string>? ActionParams { get; init; }
+    public Dictionary<string, string>? ConfigValues { get; init; }
+    public string? Target { get; init; }
+}
+
+/// <summary>
+/// Worker 自定义操作执行结果。
+/// </summary>
+public sealed record WorkerActionResult
+{
+    public bool Success { get; init; }
+    public string? Message { get; init; }
+    public string? Output { get; init; }
+    public object? Data { get; init; }
 }
 

@@ -169,6 +169,83 @@ public static class PipelineExtensions
             }
         }).AllowAnonymous();
 
+        // 动态脚本扩展 (Script Extensions) HTTP 网关反向代理转发 (/ext/{extensionId}/*)
+        app.Map("/ext/{extensionId}/{**catch-all}", async (
+            string extensionId,
+            HttpContext context,
+            LinuxWebTool.Contracts.Features.Services.Contracts.IScriptExtensionManager extensionManager,
+            IHttpClientFactory httpClientFactory) =>
+        {
+            var ext = await extensionManager.GetExtensionAsync(extensionId, context.RequestAborted);
+            if (ext != null && !ext.IsEnabled)
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                context.Response.ContentType = "application/json; charset=utf-8";
+                await context.Response.WriteAsync($"{{\"code\":503,\"message\":\"Service Disabled: Extension '{extensionId}' is explicitly disabled.\"}}");
+                return;
+            }
+            if (ext == null || !ext.Port.HasValue || ext.Port.Value <= 0)
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                context.Response.ContentType = "application/json; charset=utf-8";
+                await context.Response.WriteAsync($"{{\"code\":503,\"message\":\"Extension '{extensionId}' is not running or has no declared HTTP port.\"}}");
+                return;
+            }
+
+            var client = httpClientFactory.CreateClient();
+            var port = ext.Port.Value;
+            var subPath = context.Request.RouteValues["catch-all"]?.ToString() ?? "";
+            var queryString = context.Request.QueryString.Value ?? "";
+            var targetUri = $"http://127.0.0.1:{port}/{subPath}{queryString}";
+
+            using var reqMsg = new HttpRequestMessage(new HttpMethod(context.Request.Method), targetUri);
+
+            foreach (var h in context.Request.Headers)
+            {
+                if (h.Key.Equals("Host", StringComparison.OrdinalIgnoreCase)) continue;
+                reqMsg.Headers.TryAddWithoutValidation(h.Key, h.Value.ToArray());
+            }
+
+            reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-For", context.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1");
+            reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-Host", context.Request.Host.Value);
+            reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-Prefix", $"/ext/{extensionId}");
+            reqMsg.Headers.TryAddWithoutValidation("X-LWT-Extension-Id", extensionId);
+
+            if (HttpMethods.IsPost(context.Request.Method) ||
+                HttpMethods.IsPut(context.Request.Method) ||
+                HttpMethods.IsPatch(context.Request.Method))
+            {
+                reqMsg.Content = new StreamContent(context.Request.Body);
+                if (context.Request.ContentType != null)
+                {
+                    reqMsg.Content.Headers.TryAddWithoutValidation("Content-Type", context.Request.ContentType);
+                }
+            }
+
+            try
+            {
+                using var respMsg = await client.SendAsync(reqMsg, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
+                context.Response.StatusCode = (int)respMsg.StatusCode;
+                foreach (var h in respMsg.Headers)
+                {
+                    if (IsHopByHopHeader(h.Key)) continue;
+                    context.Response.Headers[h.Key] = h.Value.ToArray();
+                }
+                foreach (var h in respMsg.Content.Headers)
+                {
+                    if (IsHopByHopHeader(h.Key)) continue;
+                    context.Response.Headers[h.Key] = h.Value.ToArray();
+                }
+                await respMsg.Content.CopyToAsync(context.Response.Body, context.RequestAborted);
+            }
+            catch (Exception ex)
+            {
+                context.Response.StatusCode = StatusCodes.Status502BadGateway;
+                context.Response.ContentType = "application/json; charset=utf-8";
+                await context.Response.WriteAsync($"{{\"code\":502,\"message\":\"Failed to reach extension backend: {ex.Message}\"}}");
+            }
+        }).AllowAnonymous();
+
         // 未匹配的 API 必须返回 JSON 404，不能被 SPA fallback 返回 index.html（否则前端会把 HTML 当业务数据）。
         // 以 /api/{*path} 作为较具体的 fallback endpoint：正常 Controller 路由优先，未知 API 才落到这里。
         app.MapFallback("/api/{*path}", async context =>

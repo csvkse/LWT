@@ -75,6 +75,7 @@ public interface IScriptExtensionManager
     Task<bool> SaveCodeAsync(string extensionId, ExtensionCodeSaveRequest request, CancellationToken cancellationToken = default);
     Task<ExtensionDebugRunResultDto> DebugRunAsync(string extensionId, ExtensionDebugRunRequest request, CancellationToken cancellationToken = default);
     Task<ServiceActionResult> CreateExtensionAsync(ExtensionCreateRequest request, CancellationToken cancellationToken = default);
+    Task<ExtensionInstance?> GetExtensionAsync(string extensionId, CancellationToken cancellationToken = default);
     string? ResolveExtensionAssetPath(string extensionId, string? relativePath);
 }
 

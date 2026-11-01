@@ -411,6 +411,8 @@ namespace LinuxWebTool.WebHost.Composition;
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerCodeSaveRequest))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerDebugRunRequest))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerDebugRunResultDto))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerActionRequest))]
+[JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Workers.Contracts.WorkerActionResult))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Services.Contracts.ExtensionHookRequest))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Services.Contracts.ExtensionHookResponse))]
 [JsonSerializable(typeof(LinuxWebTool.Contracts.Features.Plugins.Contracts.CommandArgumentBinding))]

@@ -414,4 +414,153 @@ public sealed class ExtensionsAndWorkersCodeAndZipTests : IDisposable
         var list = await manager.ListExtensionsAsync(CancellationToken.None);
         Assert.Contains(list, x => x.Manifest.Id == fallbackExtId && x.HasUi);
     }
+
+    [Fact]
+    public void ResolveWorkerAssetPath_ResolvesStaticUiFileAndPreventsTraversal()
+    {
+        var workerId = "sample-ui-worker";
+        var workerPath = Path.Combine(_tempRoot, "data", "workers", workerId);
+        var uiDir = Path.Combine(workerPath, "ui");
+        Directory.CreateDirectory(uiDir);
+
+        File.WriteAllText(Path.Combine(uiDir, "index.html"), "<html><body>Worker UI</body></html>");
+        File.WriteAllText(Path.Combine(uiDir, "main.js"), "console.log('worker ui');");
+
+        var manager = new WorkersManager(
+            NullLogger<WorkersManager>.Instance,
+            _tempRoot);
+
+        // 1. 默认解析 index.html
+        var defaultAsset = manager.ResolveWorkerAssetPath(workerId, null);
+        Assert.NotNull(defaultAsset);
+        Assert.True(File.Exists(defaultAsset));
+        Assert.EndsWith("index.html", defaultAsset);
+
+        // 2. 解析指定子文件
+        var jsAsset = manager.ResolveWorkerAssetPath(workerId, "main.js");
+        Assert.NotNull(jsAsset);
+        Assert.True(File.Exists(jsAsset));
+
+        // 3. 拦截路径穿越逃逸
+        var malicious = manager.ResolveWorkerAssetPath(workerId, "../../../secret.txt");
+        Assert.Null(malicious);
+
+        // 4. 不存在文件返回 null
+        var missing = manager.ResolveWorkerAssetPath(workerId, "notfound.css");
+        Assert.Null(missing);
+    }
+
+    [Fact]
+    public async Task ExtensionPortAndAccessUrl_ParsesPortAndExposesAccessUrl()
+    {
+        var extId = "gateway-proxy-ext";
+        var extPath = Path.Combine(_extDir, extId);
+        Directory.CreateDirectory(extPath);
+
+        File.WriteAllText(Path.Combine(extPath, "manifest.json"), """
+        {
+            "manifestVersion": 1,
+            "hostApiVersion": "1",
+            "id": "gateway-proxy-ext",
+            "name": "Gateway Proxy Test",
+            "version": "1.0.0",
+            "supportedPlatforms": ["linux", "windows"],
+            "port": 9090
+        }
+        """);
+
+        var executor = new MockShellExecutor();
+        var manager = new ScriptExtensionManager(
+            executor,
+            NullLogger<ScriptExtensionManager>.Instance,
+            _extDir);
+
+        var list = await manager.ListExtensionsAsync(CancellationToken.None);
+        var inst = list.FirstOrDefault(x => x.Manifest.Id == extId);
+        Assert.NotNull(inst);
+        Assert.Equal(9090, inst.Port);
+        Assert.Equal("/ext/gateway-proxy-ext/", inst.AccessUrl);
+
+        var retrieved = await manager.GetExtensionAsync(extId, CancellationToken.None);
+        Assert.NotNull(retrieved);
+        Assert.Equal(9090, retrieved.Port);
+        Assert.Equal("/ext/gateway-proxy-ext/", retrieved.AccessUrl);
+    }
+
+    [Fact]
+    public async Task MultiModeCoexistence_BothExtensionsAndWorkersSupportCompositeModes()
+    {
+        // 1. 扩展服务三模式复合共存 (Mode 1: customActions, Mode 2: port/accessUrl, Mode 3: ui)
+        var extId = "composite-ext";
+        var extPath = Path.Combine(_extDir, extId);
+        var extUi = Path.Combine(extPath, "ui");
+        Directory.CreateDirectory(extUi);
+        File.WriteAllText(Path.Combine(extUi, "index.html"), "<html><body>Composite Extension</body></html>");
+        File.WriteAllText(Path.Combine(extPath, "manifest.json"), """
+        {
+            "manifestVersion": 1,
+            "hostApiVersion": "1",
+            "id": "composite-ext",
+            "name": "Composite Extension Test",
+            "version": "1.0.0",
+            "supportedPlatforms": ["linux", "windows"],
+            "port": 9091,
+            "customActions": [
+                { "action": "reload", "label": "重载配置", "requireParam": false }
+            ],
+            "ui": {
+                "entry": "index.html",
+                "title": "Composite Extension Console"
+            }
+        }
+        """);
+
+        var executor = new MockShellExecutor();
+        var extManager = new ScriptExtensionManager(
+            executor,
+            NullLogger<ScriptExtensionManager>.Instance,
+            _extDir);
+
+        var extList = await extManager.ListExtensionsAsync(CancellationToken.None);
+        var extInst = extList.FirstOrDefault(x => x.Manifest.Id == extId);
+        Assert.NotNull(extInst);
+        Assert.True(extInst.HasUi);
+        Assert.NotNull(extInst.Manifest.Ui);
+        Assert.Equal(9091, extInst.Port);
+        Assert.Equal("/ext/composite-ext/", extInst.AccessUrl);
+        Assert.Single(extInst.Manifest.CustomActions);
+        Assert.Equal("reload", extInst.Manifest.CustomActions[0].Action);
+
+        // 2. 函数服务三模式复合共存 (Mode 1: customActions, Mode 2: Service accessUrl, Mode 3: ui)
+        var workerId = "composite-worker";
+        var workerPath = Path.Combine(_tempRoot, "data", "workers", workerId);
+        var workerUi = Path.Combine(workerPath, "ui");
+        Directory.CreateDirectory(workerUi);
+        File.WriteAllText(Path.Combine(workerUi, "index.html"), "<html><body>Composite Worker</body></html>");
+        var workerManifest = new WorkerManifest
+        {
+            Id = workerId,
+            Name = "Composite Worker Test",
+            Mode = WorkerServiceMode.Service,
+            Runtime = WorkerRuntimeType.Python,
+            Entrypoint = "worker.py",
+            CustomActions = [new ExtensionCustomAction { Action = "flush_cache", Label = "清理缓存" }],
+            Ui = new ExtensionUiConfig { Entry = "index.html", Title = "Composite Worker Console" }
+        };
+        File.WriteAllText(Path.Combine(workerPath, "worker.json"), JsonSerializer.Serialize(workerManifest, WorkerJsonContext.Default.WorkerManifest));
+
+        var workerManager = new WorkersManager(
+            NullLogger<WorkersManager>.Instance,
+            _tempRoot);
+
+        var workerList = await workerManager.GetAllAsync(CancellationToken.None);
+        var workerInst = workerList.FirstOrDefault(x => x.Id == workerId);
+        Assert.NotNull(workerInst);
+        Assert.True(workerInst.HasUi);
+        Assert.NotNull(workerInst.Ui);
+        Assert.Equal("/w/composite-worker/", workerInst.AccessUrl);
+        Assert.NotNull(workerInst.CustomActions);
+        Assert.Single(workerInst.CustomActions);
+        Assert.Equal("flush_cache", workerInst.CustomActions[0].Action);
+    }
 }
