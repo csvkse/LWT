@@ -2,6 +2,7 @@ import { defineComponent, ref, watch } from 'vue';
 import { http } from '../../api/client.js';
 import { API } from '../../config.js';
 import { toast } from '../../store/toast.js';
+import { useFileTree } from '../../utils/fileTree.js';
 
 export default defineComponent({
   name: 'PluginCodeModal',
@@ -25,6 +26,8 @@ export default defineComponent({
     const codeContent = ref('');
     const debugInput = ref('');
     const debugResult = ref(null);
+
+    const { visibleNodes, toggleFolder, expandAll, collapseAll } = useFileTree(fileList, activeFile);
 
     watch(
       () => [props.show, props.plugin],
