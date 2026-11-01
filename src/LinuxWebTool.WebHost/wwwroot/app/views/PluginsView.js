@@ -2,6 +2,7 @@ import { computed, defineComponent, onMounted, ref } from 'vue';
 import { http } from '../api/client.js';
 import { API } from '../config.js';
 import { toast } from '../store/toast.js';
+import { filterPlugins } from '../utils/pluginFilterStrategies.js';
 
 import PluginCard from '../components/plugins/PluginCard.js';
 import PluginActionModal from '../components/plugins/PluginActionModal.js';
@@ -70,36 +71,20 @@ export default defineComponent({
       return Array.from(set);
     });
 
-    // 列表筛选
+    // 列表筛选（采用策略模式解耦 Profile、Category、Keyword 多维过滤）
     const filteredPlugins = computed(() => {
-      return plugins.value.filter((p) => {
-        // Tab 过滤
-        if (profileTab.value === 'resident' && p.profile !== 0) return false;
-        if (profileTab.value === 'oneshot' && p.profile !== 1) return false;
-
-        // 分类过滤
-        if (categoryFilter.value !== 'all' && p.manifest?.category !== categoryFilter.value) {
-          return false;
-        }
-
-        // 关键词过滤
-        if (searchKeyword.value.trim()) {
-          const kw = searchKeyword.value.trim().toLowerCase();
-          const matchName = (p.name || '').toLowerCase().includes(kw);
-          const matchId = (p.id || '').toLowerCase().includes(kw);
-          const matchDesc = (p.manifest?.description || '').toLowerCase().includes(kw);
-          const matchCat = (p.manifest?.category || '').toLowerCase().includes(kw);
-          if (!matchName && !matchId && !matchDesc && !matchCat) return false;
-        }
-
-        return true;
+      return filterPlugins(plugins.value, {
+        profile: profileTab.value,
+        category: categoryFilter.value,
+        keyword: searchKeyword.value,
       });
     });
 
     async function loadPlugins() {
       loading.value = true;
       try {
-        const res = await http(API.plugins.list(profileTab.value, searchKeyword.value), { method: 'GET' });
+        // 全量拉取插件事实源，保证统计指标与分类集合的准确性，过滤完全交由前端策略引擎
+        const res = await http(API.plugins.list('all', ''), { method: 'GET' });
         if (res.ok && Array.isArray(res.data)) {
           plugins.value = res.data;
         } else {
@@ -110,6 +95,12 @@ export default defineComponent({
       } finally {
         loading.value = false;
       }
+    }
+
+    function resetFilters() {
+      profileTab.value = 'all';
+      categoryFilter.value = 'all';
+      searchKeyword.value = '';
     }
 
     async function startPlugin(p) {
@@ -225,7 +216,10 @@ export default defineComponent({
         if (res && res.ok && res.data) {
           envInfo.value = res.data;
         }
-      } catch (_) {}
+      } catch {
+        // 环境信息非关键依赖，异常时静默降级
+        envInfo.value = {};
+      }
     }
 
     onMounted(() => {
@@ -254,6 +248,7 @@ export default defineComponent({
       stats,
       categories,
       filteredPlugins,
+      resetFilters,
       loadPlugins,
       startPlugin,
       stopPlugin,
@@ -343,7 +338,7 @@ export default defineComponent({
           <select
             v-if="categories.length > 0"
             v-model="categoryFilter"
-            class="input-base text-xs py-1.5 px-2 bg-slate-900"
+            class="input text-xs py-1.5 px-2 bg-slate-900/90 border border-cyber-line/80 text-slate-200 focus:border-cyan-400 rounded-md"
           >
             <option value="all">全部分类</option>
             <option v-for="cat in categories" :key="cat" :value="cat">
@@ -351,13 +346,26 @@ export default defineComponent({
             </option>
           </select>
 
-          <!-- 搜索框 -->
-          <input
-            v-model="searchKeyword"
-            type="text"
-            class="input-base text-xs py-1.5 px-3 w-40 md:w-48"
-            placeholder="搜索插件名称/ID..."
-          />
+          <!-- 搜索框：暗黑科技底色、发光边框、放大镜图标与一键清空 (✕) -->
+          <div class="relative flex items-center">
+            <span class="absolute left-2.5 text-slate-500 pointer-events-none text-xs">🔍</span>
+            <input
+              v-model="searchKeyword"
+              type="text"
+              class="input text-xs py-1.5 pl-7 pr-7 w-40 md:w-56 bg-slate-900/90 border border-cyber-line/80 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/30 text-slate-100 placeholder:text-slate-500 rounded-md transition-all"
+              placeholder="搜索插件名称/ID..."
+              @keydown.esc="searchKeyword = ''"
+            />
+            <button
+              v-if="searchKeyword"
+              type="button"
+              class="absolute right-2 text-slate-400 hover:text-slate-200 text-xs p-0.5 rounded transition-colors"
+              title="清空搜索"
+              @click="searchKeyword = ''"
+            >
+              ✕
+            </button>
+          </div>
 
           <!-- 导入与新建 -->
           <button
@@ -396,7 +404,17 @@ export default defineComponent({
       <div v-else-if="filteredPlugins.length === 0" class="panel py-16 text-center text-slate-400 text-xs space-y-3">
         <div class="text-3xl">🧩</div>
         <div class="text-slate-300 font-medium">未找到符合条件的插件</div>
-        <div class="text-slate-500">尝试更换筛选标签或点击“导入/扫描”添加官方与社区插件</div>
+        <div class="text-slate-500">
+          当前检索条件无匹配项，可尝试
+          <button
+            type="button"
+            class="text-cyan-400 hover:text-cyan-300 underline ml-1 cursor-pointer"
+            @click="resetFilters()"
+          >
+            重置所有筛选
+          </button>
+          或点击“导入/扫描”添加官方与社区插件
+        </div>
       </div>
 
       <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -1,24 +1,5 @@
 import { computed, defineComponent } from 'vue';
-
-const RUNTIME_MAP = {
-  0: { label: 'Node.js', icon: '🟢', color: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' },
-  1: { label: 'Python', icon: '🐍', color: 'text-amber-400 border-amber-500/30 bg-amber-500/10' },
-  2: { label: '.NET AOT', icon: '⚡', color: 'text-purple-400 border-purple-500/30 bg-purple-500/10' },
-  3: { label: 'Bash', icon: '🐚', color: 'text-sky-400 border-sky-500/30 bg-sky-500/10' },
-  4: { label: 'PowerShell', icon: '💻', color: 'text-blue-400 border-blue-500/30 bg-blue-500/10' },
-  5: { label: 'Native', icon: '⚙️', color: 'text-slate-300 border-slate-500/30 bg-slate-500/10' },
-};
-
-const STATE_MAP = {
-  0: { label: '已停止', color: 'bg-slate-700 text-slate-300' },
-  1: { label: '启动中', color: 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse' },
-  2: { label: '运行中', color: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' },
-  3: { label: '停止中', color: 'bg-orange-500/20 text-orange-300 border border-orange-500/40' },
-  4: { label: '降级', color: 'bg-amber-700/30 text-amber-400 border border-amber-600/50' },
-  5: { label: '异常', color: 'bg-red-500/20 text-red-300 border border-red-500/40' },
-  6: { label: '已禁用', color: 'bg-slate-700 text-slate-400' },
-  7: { label: '缺少依赖', color: 'bg-amber-500/20 text-amber-300 border border-amber-500/40' },
-};
+import { PluginStateMachine } from '../../utils/pluginStateMachine.js';
 
 export default defineComponent({
   name: 'PluginCard',
@@ -48,18 +29,11 @@ export default defineComponent({
     const isDegradedOrError = computed(() => props.plugin.state === 4 || props.plugin.state === 5);
     const isMissingRuntime = computed(() => Boolean(props.plugin.isMissingRuntime || props.plugin.state === 7));
 
-    const runtimeMeta = computed(() => RUNTIME_MAP[props.plugin.runtime] || RUNTIME_MAP[5]);
-    const stateMeta = computed(() => {
-      if (isMissingRuntime.value) {
-        return STATE_MAP[7];
-      }
-      if (!isResident.value) {
-        return props.plugin.manifest?.enabled !== false
-          ? { label: '已就绪', color: 'bg-sky-500/20 text-sky-300 border border-sky-500/40' }
-          : STATE_MAP[6];
-      }
-      return STATE_MAP[props.plugin.state] || STATE_MAP[0];
-    });
+    const runtimeMeta = computed(() => PluginStateMachine.getRuntimeMeta(props.plugin.runtime));
+    const stateMeta = computed(() => PluginStateMachine.getStateMeta(props.plugin));
+    const canStart = computed(() => PluginStateMachine.canStart(props.plugin));
+    const canStop = computed(() => PluginStateMachine.canStop(props.plugin));
+    const canRestart = computed(() => PluginStateMachine.canRestart(props.plugin));
 
     const hasWebview = computed(() => Boolean(props.plugin.manifest?.ui?.hasWebview || props.plugin.manifest?.ui?.entry));
     const hasHttpService = computed(() => isResident.value && Boolean(props.plugin.manifest?.network?.supportHttp));
@@ -91,6 +65,9 @@ export default defineComponent({
       isMissingRuntime,
       runtimeMeta,
       stateMeta,
+      canStart,
+      canStop,
+      canRestart,
       hasWebview,
       hasHttpService,
       customActions,
@@ -243,8 +220,8 @@ export default defineComponent({
           <button
             v-if="!isRunning"
             type="button"
-            class="btn-ghost px-2 py-1 text-xs text-emerald-400 hover:bg-emerald-500/10 rounded flex items-center gap-1"
-            :disabled="isStarting"
+            class="btn-ghost px-2 py-1 text-xs text-emerald-400 hover:bg-emerald-500/10 rounded flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            :disabled="!canStart"
             @click="handleStart()"
           >
             <span>▶</span>
@@ -253,7 +230,8 @@ export default defineComponent({
           <button
             v-if="isRunning"
             type="button"
-            class="btn-ghost px-2 py-1 text-xs text-orange-400 hover:bg-orange-500/10 rounded flex items-center gap-1"
+            class="btn-ghost px-2 py-1 text-xs text-orange-400 hover:bg-orange-500/10 rounded flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            :disabled="!canStop"
             @click="handleStop()"
           >
             <span>⏹</span>
@@ -262,7 +240,8 @@ export default defineComponent({
           <button
             v-if="isRunning"
             type="button"
-            class="btn-ghost px-2 py-1 text-xs text-cyan-400 hover:bg-cyan-500/10 rounded flex items-center gap-1"
+            class="btn-ghost px-2 py-1 text-xs text-cyan-400 hover:bg-cyan-500/10 rounded flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            :disabled="!canRestart"
             @click="handleRestart()"
           >
             <span>🔄</span>

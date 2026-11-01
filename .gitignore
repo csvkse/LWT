@@ -13,5 +13,8 @@ publish/
 *.db-wal
 .env
 .env.*
+env/
+.envdev
+*.envdev
 scratch/
 artifacts/
