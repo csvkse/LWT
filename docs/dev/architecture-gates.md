@@ -65,6 +65,9 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + MCP 端点
 | `FE-TERMINAL-SESSION-HEAL` | TerminalView 必须具备失效会话自动重置与新建降级机制（防止服务重启或会话过期后前端卡死） | frontend-gate.cjs |
 | `FE-FILE-SIZE-LIMIT` | 前端单文件代码行数门禁（视图 <= 2000 行，非视图模块 <= 400 行） | frontend-gate.cjs |
 | `FE-CONTAINER-HEIGHT-LIMIT` | 禁止前端列表容器无限长度延伸，包含动态长列表（v-for）的容器必须具备逻辑高度约束（分页适配器 usePagination、max-h-* 或 flex-1 min-h-0 + overflow-y-auto） | frontend-gate.cjs |
+| `FE-THEME-FORM-CONTROL-DARK` | 所有表单输入控件（input/select/textarea）必须显式具备暗黑主题类名（.input 等）或暗色底色，严禁回退至浏览器默认白底 | frontend-gate.cjs |
+| `FE-PLUGIN-DATA-PURITY` | PluginsView 全局数据加载函数禁止传递响应式过滤参数，防止增删改查刷新后冲垮宏观统计卡片与分类树事实源 | frontend-gate.cjs |
+| `FE-PLUGIN-FILTER-FSM` | 插件中心多维策略过滤、有限状态机生命周期守卫与暗黑搜索框契约行为门禁 | frontend-gate.cjs / node --test |
 
 
 ## 约定要点

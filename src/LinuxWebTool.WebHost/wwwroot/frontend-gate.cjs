@@ -22,6 +22,9 @@
  *  FE-EASYTIER-IP-MODE EasyTier 新建/编辑提交必须保证静态 IPv4 优先于 DHCP（组件行为测试）
  *  FE-FILE-SIZE-LIMIT 单文件代码行数与单一职责门禁（views <= 2000 行，非 views <= 400 行）
  *  FE-CONTAINER-HEIGHT-LIMIT 列表容器必须有逻辑高度限制（禁止无界列表，需配置分页适配器、max-h-* 或 flex-1 min-h-0 + overflow-y-auto）
+ *  FE-THEME-FORM-CONTROL-DARK 所有表单输入控件（input/select/textarea）必须显式具备暗黑主题类名或暗色底色，严禁回退至白底默认样式
+ *  FE-PLUGIN-DATA-PURITY PluginsView 全局数据加载禁止传递响应式过滤参数，防止刷新冲垮宏观统计卡片与分类树事实源
+ *  FE-PLUGIN-FILTER-FSM 插件中心策略模式多维过滤、有限状态机与暗黑搜索框契约行为门禁
  *
  * 基线：frontend-gate-baseline.json 冻结存量债务，只允许删除条目，不允许新增。
  */
@@ -138,6 +141,32 @@ function normalizeRoute(pathValue) {
     .filter(Boolean)
     .map((segment) => (segment.startsWith('{') || segment.startsWith(':') || /^%3a/i.test(segment) ? '*' : segment))
     .join('/');
+}
+
+function extractFormControls(tpl) {
+  const results = [];
+  const tagStartRegex = /<(input|select|textarea)\b/gi;
+  let match;
+  while ((match = tagStartRegex.exec(tpl))) {
+    const tagName = match[1].toLowerCase();
+    let i = match.index + match[0].length;
+    let quote = null;
+    let attrs = '';
+    while (i < tpl.length) {
+      const ch = tpl[i];
+      if (quote) {
+        if (ch === quote) quote = null;
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+      } else if (ch === '>') {
+        break;
+      }
+      attrs += ch;
+      i++;
+    }
+    results.push({ tag: tagName, attrs, index: match.index });
+  }
+  return results;
 }
 
 function loadApiConfig(configFile) {
@@ -380,6 +409,31 @@ for (const file of files) {
         }
       }
 
+      // FE-THEME-FORM-CONTROL-DARK：所有表单输入控件（input/select/textarea）必须显式具备暗黑主题类名或暗色底色，严禁回退至白底默认样式
+      const formControls = extractFormControls(tpl);
+      for (const ctrl of formControls) {
+        const typeMatch = ctrl.attrs.match(/\btype\s*=\s*['"]([^'"]+)['"]/i);
+        const type = typeMatch ? typeMatch[1].toLowerCase() : (ctrl.tag === 'input' ? 'text' : ctrl.tag);
+        if (['checkbox', 'radio', 'file', 'hidden', 'button', 'submit', 'range'].includes(type)) continue;
+
+        const classMatch = ctrl.attrs.match(/\bclass\s*=\s*['"]([^'"]+)['"]/i);
+        const cls = classMatch ? classMatch[1] : '';
+
+        const hasInputClass = /(?:^|\s)(input|input-base|select)(?:$|\s)/.test(cls);
+        const hasDarkBg = /\bbg-(slate|cyber|zinc|gray|neutral)-(700|800|900|950)\b/.test(cls) ||
+                          /\bbg-cyber-(bg|panel|panel-2)\b/.test(cls) ||
+                          /\bbg-transparent\b/.test(cls) ||
+                          /\bbg-\[#0[0-9a-fA-F]{5}\]/.test(cls);
+
+        if (!hasInputClass && !hasDarkBg) {
+          add(
+            'FE-THEME-FORM-CONTROL-DARK',
+            file,
+            `<${ctrl.tag} type="${type}"> 缺少系统暗黑主题类名（.input 或 bg-slate-900 / bg-cyber-*），会导致浏览器回退为刺眼白底默认样式`
+          );
+        }
+      }
+
       // FE-CONTAINER-HEIGHT-LIMIT：前端列表容器显示门禁（禁止无界无限长度列表，必须有逻辑高度限制或分页切片）
       const forMatches = tpl.matchAll(/<([a-z0-9-]+)\b([^>]*?v-for\s*=\s*["']([^"']+)["'][^>]*)>/gi);
       for (const match of forMatches) {
@@ -418,6 +472,17 @@ for (const file of files) {
     if (path.basename(file) === 'TerminalView.js') {
       if (!content.includes('API.terminal.sessions') || !content.includes("runtime.sessionId = ''")) {
         add('FE-TERMINAL-SESSION-HEAL', file, 'TerminalView 必须具备失效会话自动重置与新建降级机制，防止服务重启后前端卡死');
+      }
+    }
+
+    // FE-PLUGIN-DATA-PURITY：PluginsView 必须保证全量事实源纯净性，严禁在全局数据加载时传入响应式过滤参数造成数据冲刷
+    if (path.basename(file) === 'PluginsView.js') {
+      if (/API\.plugins\.list\s*\(\s*(?:profileTab|searchKeyword)/.test(content)) {
+        add(
+          'FE-PLUGIN-DATA-PURITY',
+          file,
+          'PluginsView 全局数据加载函数禁止传递响应式过滤变量（profileTab/searchKeyword），防止增删改查刷新后冲垮统计卡片与分类树事实源'
+        );
       }
     }
 
@@ -564,4 +629,15 @@ if (containerHeightResult.error || containerHeightResult.status !== 0) {
   process.exit(1);
 }
 console.log('✅ FE-CONTAINER-HEIGHT-LIMIT：前端列表容器逻辑高度限制门禁通过');
+
+const pluginTests = path.resolve(__dirname, '../../../tests/frontend/plugin-filter-and-state-machine.test.mjs');
+const pluginResult = spawnSync(process.execPath, ['--experimental-vm-modules', '--test', pluginTests], {
+  encoding: 'utf8', timeout: 30000, windowsHide: true,
+});
+if (pluginResult.error || pluginResult.status !== 0) {
+  console.error('[FE-PLUGIN-FILTER-FSM] 插件策略过滤、状态机与暗黑主题行为门禁失败');
+  console.error(pluginResult.stdout || pluginResult.stderr || pluginResult.error?.message);
+  process.exit(1);
+}
+console.log('✅ FE-PLUGIN-FILTER-FSM：插件策略过滤、状态机与暗黑主题门禁通过');
 console.log('✅ 前端架构门禁通过');

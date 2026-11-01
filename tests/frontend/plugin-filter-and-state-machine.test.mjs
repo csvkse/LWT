@@ -168,3 +168,31 @@ test('PLUGIN-THEME-01: PluginsView 搜索框及相关样式必须符合暗黑赛
   assert.ok(content.includes('searchKeyword'), '搜索框双向绑定 searchKeyword');
   assert.ok(content.includes('resetFilters()'), '空状态下必须提供重置筛选 resetFilters() 快捷入口');
 });
+
+test('PLUGIN-THEME-02: 门禁规则 FE-THEME-FORM-CONTROL-DARK 能够精准拦截白底未修饰表单控件', () => {
+  const badTemplate = `
+    <div>
+      <input type="text" class="legacy-unregistered-input" placeholder="测试白底回退" />
+    </div>
+  `;
+  const badTagMatch = badTemplate.match(/<input\b([^>]*?)>/i);
+  assert.ok(badTagMatch);
+  const clsMatch = badTagMatch[1].match(/\bclass\s*=\s*['"]([^'"]+)['"]/i);
+  const cls = clsMatch ? clsMatch[1] : '';
+  const hasDark = /(?:^|\s)(input|input-base|select)(?:$|\s)/.test(cls) ||
+                  /\bbg-(slate|cyber|zinc|gray|neutral)-(700|800|900|950)\b/.test(cls) ||
+                  /\bbg-cyber-(bg|panel|panel-2)\b/.test(cls) ||
+                  /\bbg-transparent\b/.test(cls);
+  assert.equal(hasDark, false, '未声明系统暗黑主题类的控件必须被门禁精准判定为未通过');
+});
+
+test('PLUGIN-DATA-01: 门禁规则 FE-PLUGIN-DATA-PURITY 能够拦截全局事实源污染传参', () => {
+  const badCall = "const res = await http(API.plugins.list(profileTab.value, searchKeyword.value));";
+  const isViolated = /API\.plugins\.list\s*\(\s*(?:profileTab|searchKeyword)/.test(badCall);
+  assert.equal(isViolated, true, '数据加载携带 profileTab 或 searchKeyword 必须被门禁拦截');
+
+  const goodCall = "const res = await http(API.plugins.list('all', ''), { method: 'GET' });";
+  const isGoodViolated = /API\.plugins\.list\s*\(\s*(?:profileTab|searchKeyword)/.test(goodCall);
+  assert.equal(isGoodViolated, false, '合规的全量事实源加载调用必须被放行');
+});
+

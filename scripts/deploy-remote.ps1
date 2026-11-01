@@ -3,6 +3,11 @@ param(
     [ValidateSet("Official", "Dev")]
     [string]$Mode = "Official",
 
+    [ValidateSet("Direct", "GitArchive", "GitPull")]
+    [string]$SyncMethod = "Direct",
+
+    [switch]$FrontendOnly,
+
     [string]$EnvFile = "env/.envdev",
     [switch]$SkipDeps,
     [switch]$CheckOnly,
@@ -85,13 +90,21 @@ if (-not $deployHost) {
 }
 
 # Mode-specific adjustments (Adapter Pattern)
+if ($FrontendOnly) {
+    $Mode = "Dev"
+}
+
 if ($Mode -eq "Dev") {
     $containerName = "${containerName}-dev"
     $devPort = "5271"
     $devImage = "lwt:dev"
     $devWorkdir = "/opt/lwt-dev"
     $devWebUrl = "http://${deployHost}:${devPort}/"
-    Write-Success "Adapter [LinuxFastDevAdapter] selected: Target $deployUser@$deployHost`:$deployPort, container $containerName (Port $devPort)"
+    if ($FrontendOnly) {
+        Write-Success "Adapter [LinuxFastDevAdapter - FrontendHotSync] selected: Target $deployUser@$deployHost`:$deployPort, container $containerName"
+    } else {
+        Write-Success "Adapter [LinuxFastDevAdapter] selected: Target $deployUser@$deployHost`:$deployPort, container $containerName (Port $devPort), SyncMethod: $SyncMethod"
+    }
 } else {
     Write-Success "Adapter [OfficialGithubAotAdapter] selected: Target $deployUser@$deployHost`:$deployPort, container $containerName (Port $webPort), image $dockerImage"
 }
@@ -138,41 +151,140 @@ try {
     }
 
     # =========================================================================
-    # Strategy A: Linux Fast Dev Pipeline (Local Git Bundle Sync + Fast JIT Build)
+    # Strategy A: Linux Fast Dev Pipeline (Decoupled Sync + Fast JIT Build)
     # =========================================================================
-    if ($Mode -eq "Dev") {
-        Write-Step "1/4 [Dev] Bundling local HEAD and streaming directly to $devWorkdir on remote host..."
-        $localBundle = "dev-bundle.tar.gz"
+    if ($FrontendOnly) {
+        Write-Step "[Dev - Frontend HotSync] Bundling wwwroot and streaming to running container..."
+        $feBundle = "fe-bundle.tar.gz"
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
         try {
-            if (Test-Path $localBundle) { Remove-Item $localBundle -Force }
-            $p = Start-Process -FilePath "git" -ArgumentList "archive", "--output=$localBundle", "HEAD" -NoNewWindow -Wait -PassThru
-            if ($p.ExitCode -ne 0 -or -not (Test-Path $localBundle)) {
-                throw "Failed to create local git archive bundle at $localBundle"
+            if (Test-Path $feBundle) { Remove-Item $feBundle -Force }
+            & tar.exe -czf $feBundle -C src/LinuxWebTool.WebHost/wwwroot .
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $feBundle)) {
+                throw "Failed to create frontend bundle at $feBundle"
             }
 
-            # 确保目标目录存在
-            Invoke-RemoteSsh "mkdir -p $devWorkdir"
-
-            # 使用 Start-Process -RedirectStandardInput 将二进制 tar 包直接输入 SSH stdin 并在远程内存解压
-            $streamArgs = @(
+            # 1. 同步到远程宿主机工作区
+            Invoke-RemoteSsh "mkdir -p $devWorkdir/src/LinuxWebTool.WebHost/wwwroot"
+            $feStreamArgs = @(
                 "-i", $tempKeyPath,
                 "-p", "$deployPort",
                 "-o", "StrictHostKeyChecking=no",
                 "-o", "UserKnownHostsFile=/dev/null",
                 "-o", "LogLevel=ERROR",
                 "$deployUser@$deployHost",
-                "tar -xzf - -C $devWorkdir"
+                "tar -xzf - -C $devWorkdir/src/LinuxWebTool.WebHost/wwwroot"
             )
-            $streamProc = Start-Process -FilePath "ssh" -ArgumentList $streamArgs -RedirectStandardInput $localBundle -NoNewWindow -Wait -PassThru
-            if ($streamProc.ExitCode -ne 0) {
-                throw "Direct SSH stream extraction failed with exit code $($streamProc.ExitCode)"
+            $feProc = Start-Process -FilePath "ssh" -ArgumentList $feStreamArgs -RedirectStandardInput $feBundle -NoNewWindow -Wait -PassThru
+            if ($feProc.ExitCode -ne 0) {
+                throw "Frontend host sync failed with exit code $($feProc.ExitCode)"
             }
-            Write-Success "Source code bundle synchronized and extracted to $devWorkdir in <1s!"
+
+            # 2. 如果开发容器正在运行，直接热补丁到容器内部 /app/wwwroot（无需构建与重启）
+            $containerRunning = (Invoke-RemoteSsh "docker ps -q --filter name=$containerName").Trim()
+            if ($containerRunning) {
+                $containerStreamArgs = @(
+                    "-i", $tempKeyPath,
+                    "-p", "$deployPort",
+                    "-o", "StrictHostKeyChecking=no",
+                    "-o", "UserKnownHostsFile=/dev/null",
+                    "-o", "LogLevel=ERROR",
+                    "$deployUser@$deployHost",
+                    "docker exec -i $containerName tar -xzf - -C /app/wwwroot"
+                )
+                $cProc = Start-Process -FilePath "ssh" -ArgumentList $containerStreamArgs -RedirectStandardInput $feBundle -NoNewWindow -Wait -PassThru
+                if ($cProc.ExitCode -ne 0) {
+                    Write-Warn "Direct container patch exited with code $($cProc.ExitCode)"
+                }
+            }
+
+            $sw.Stop()
+            Write-Success "Frontend static assets hot-synced in $($sw.ElapsedMilliseconds) ms!"
+            Write-Host "Instant Web URL: $devWebUrl (Simply press Ctrl+F5 in browser to view changes)" -ForegroundColor Green
+            return
         }
         finally {
-            if (Test-Path $localBundle) {
-                Remove-Item -Path $localBundle -Force -ErrorAction SilentlyContinue
+            if (Test-Path $feBundle) { Remove-Item $feBundle -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    if ($Mode -eq "Dev") {
+        # 1/4 Code Sync (Strategy Pattern: Direct vs GitArchive vs GitPull)
+        if ($SyncMethod -eq "Direct") {
+            Write-Step "1/4 [Dev - Direct Sync] Packaging live working tree via native tar (decoupled from Git)..."
+            $localBundle = "dev-bundle.tar.gz"
+            try {
+                if (Test-Path $localBundle) { Remove-Item $localBundle -Force }
+                & tar.exe -czf $localBundle --exclude=.git --exclude=bin --exclude=obj --exclude=node_modules --exclude=env --exclude=*.tmp --exclude=*.tar.gz Directory.Build.props Directory.Packages.props Dockerfile.dev src extensions
+                if ($LASTEXITCODE -ne 0 -or -not (Test-Path $localBundle)) {
+                    throw "Failed to create direct workspace bundle at $localBundle"
+                }
+
+                Invoke-RemoteSsh "mkdir -p $devWorkdir"
+                $streamArgs = @(
+                    "-i", $tempKeyPath,
+                    "-p", "$deployPort",
+                    "-o", "StrictHostKeyChecking=no",
+                    "-o", "UserKnownHostsFile=/dev/null",
+                    "-o", "LogLevel=ERROR",
+                    "$deployUser@$deployHost",
+                    "tar -xzf - -C $devWorkdir"
+                )
+                $streamProc = Start-Process -FilePath "ssh" -ArgumentList $streamArgs -RedirectStandardInput $localBundle -NoNewWindow -Wait -PassThru
+                if ($streamProc.ExitCode -ne 0) {
+                    throw "Direct SSH stream extraction failed with exit code $($streamProc.ExitCode)"
+                }
+                Write-Success "Live workspace synchronized to $devWorkdir in <1s (Uncommitted edits included, Git decoupled)!"
             }
+            finally {
+                if (Test-Path $localBundle) { Remove-Item $localBundle -Force -ErrorAction SilentlyContinue }
+            }
+        }
+        elseif ($SyncMethod -eq "GitArchive") {
+            Write-Step "1/4 [Dev - GitArchive Sync] Bundling local git HEAD commit..."
+            $localBundle = "dev-bundle.tar.gz"
+            try {
+                if (Test-Path $localBundle) { Remove-Item $localBundle -Force }
+                $p = Start-Process -FilePath "git" -ArgumentList "archive", "--output=$localBundle", "HEAD" -NoNewWindow -Wait -PassThru
+                if ($p.ExitCode -ne 0 -or -not (Test-Path $localBundle)) {
+                    throw "Failed to create git archive bundle at $localBundle"
+                }
+
+                Invoke-RemoteSsh "mkdir -p $devWorkdir"
+                $streamArgs = @(
+                    "-i", $tempKeyPath,
+                    "-p", "$deployPort",
+                    "-o", "StrictHostKeyChecking=no",
+                    "-o", "UserKnownHostsFile=/dev/null",
+                    "-o", "LogLevel=ERROR",
+                    "$deployUser@$deployHost",
+                    "tar -xzf - -C $devWorkdir"
+                )
+                $streamProc = Start-Process -FilePath "ssh" -ArgumentList $streamArgs -RedirectStandardInput $localBundle -NoNewWindow -Wait -PassThru
+                if ($streamProc.ExitCode -ne 0) {
+                    throw "SSH stream extraction failed with exit code $($streamProc.ExitCode)"
+                }
+                Write-Success "Git HEAD bundle synchronized to $devWorkdir in <1s!"
+            }
+            finally {
+                if (Test-Path $localBundle) { Remove-Item $localBundle -Force -ErrorAction SilentlyContinue }
+            }
+        }
+        elseif ($SyncMethod -eq "GitPull") {
+            Write-Step "1/4 [Dev - GitPull Sync] Pulling remote git repository from GitHub on host..."
+            $gitSyncScript = @"
+if [ ! -d "$devWorkdir/.git" ]; then
+    mkdir -p "$devWorkdir"
+    git clone https://github.com/csvkse/LWT.git "$devWorkdir"
+else
+    git -C "$devWorkdir" fetch origin main
+    git -C "$devWorkdir" reset --hard origin/main
+fi
+git -C "$devWorkdir" log -1 --oneline
+"@
+            $gitOutput = Invoke-RemoteSsh $gitSyncScript
+            Write-Host $gitOutput -ForegroundColor DarkCyan
+            Write-Success "Remote source code synchronized via Git pull!"
         }
 
         Write-Step "2/4 [Dev] Building fast development image ($devImage) via Dockerfile.dev..."
@@ -193,13 +305,15 @@ docker run -d \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p ${devPort}:5270 \
   -v ${containerName}-data:/app/data \
+  -v ${devWorkdir}/src/LinuxWebTool.WebHost/wwwroot:/app/wwwroot \
+  -v ${devWorkdir}/extensions:/app/extensions \
   -v /lwt:/lwt:rshared \
   -v /var/docker:/var/docker:rshared \
   -v /usr/local/bin:/usr/local/bin:ro \
   $devImage
 "@
         Invoke-RemoteSsh $devRunCmd
-        Write-Success "Dev container launched!"
+        Write-Success "Dev container launched (Live volume mounts for wwwroot and extensions active)!"
 
         Write-Step "4/4 [Dev] Waiting for dev container health..."
         $maxWaitSec = 30
@@ -240,6 +354,14 @@ docker run -d \
         } catch {
             Write-Warn "Failed to sync credentials, container will use its own admin.json."
         }
+
+        # Automated Smoke Test
+        try {
+            $smokeCode = (Invoke-RemoteSsh "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:${devPort}/health").Trim()
+            if ($smokeCode -eq "200") {
+                Write-Success "Smoke Test: GET http://127.0.0.1:${devPort}/health returned 200 OK!"
+            }
+        } catch {}
 
         $ps = Invoke-RemoteSsh "docker ps --filter name=$containerName"
         Write-Host $ps -ForegroundColor Green

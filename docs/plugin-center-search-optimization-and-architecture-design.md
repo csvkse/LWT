@@ -144,3 +144,21 @@ classDiagram
    - 编写 `tests/frontend/plugin-filter-and-state-machine.test.mjs`，覆盖过滤策略、多词搜索、状态机守卫与数据纯净性；
    - 运行前端门禁 `frontend-gate.cjs`，确保零违规；
    - 运行全量前端单元测试，确保回归测试通过率 100%。
+
+---
+
+## 六、长效防御：自动化架构门禁（Guardrails）
+
+为彻底杜绝同类“输入框白底回退”与“全局事实源污染”问题在未来团队协同开发中反复滋生，已在 `frontend-gate.cjs` 中建立永久静态与行为双层门禁：
+
+1. **`FE-THEME-FORM-CONTROL-DARK`（静态模板表单暗黑门禁）**：
+   - 静态 AST 提取所有 Vue 模板中的 `<input>`、`<select>`、`<textarea>` 交互控件；
+   - 强制断言每个控件必须显式附带系统规范输入类（`.input`、`.input-base` 等）或显式深色底色（`bg-slate-900`、`bg-cyber-*`）；
+   - 一旦开发者遗漏类名或误写未在 CSS 定义的假类名导致白底 UA 样式，门禁直接阻断并报错，不可通过基线豁免。
+2. **`FE-PLUGIN-DATA-PURITY`（数据事实源防冲刷门禁）**：
+   - 静态分析 `PluginsView.js` 的 `loadPlugins` 函数调用；
+   - 严禁向后端中枢事实源接口传递响应式检索变量（如 `profileTab.value`、`searchKeyword.value`），强制将多维过滤限制在前端 Presentation 策略层。
+3. **`FE-PLUGIN-FILTER-FSM`（动态行为门禁）**：
+   - 将 `plugin-filter-and-state-machine.test.mjs` 纳入 `node frontend-gate.cjs` 必测流水线；
+   - 涵盖策略过滤精度、状态机非法并发守卫、多词空格联合检索与暗黑科技感输入组件契约。
+
