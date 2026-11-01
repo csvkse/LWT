@@ -99,6 +99,36 @@ public static class ApiKeyPermissionMatrix
     }
 
     /// <summary>
+    /// 校验当前 API Key 是否被授权执行或访问特定的指令 ID（Resource Scoping）
+    /// </summary>
+    public static bool CanAccessCommand(bool allowTerminal, string? allowedCommandIds, string targetCommandId)
+    {
+        if (!allowTerminal) return false;
+        if (string.IsNullOrWhiteSpace(targetCommandId)) return false;
+
+        // 若未限制特定指令或为通配符 "*"，允许全部指令
+        if (string.IsNullOrWhiteSpace(allowedCommandIds) || allowedCommandIds.Trim() == "*")
+        {
+            return true;
+        }
+
+        var trimmed = allowedCommandIds.Trim();
+
+        // 尝试以逗号/分号切分（兼容纯文本与 JSON 字符串数组格式）
+        var rawTokens = trimmed.Split(new[] { ',', ';', ' ', '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var token in rawTokens)
+        {
+            var cleaned = token.Trim().Trim('"', '[', ']', '\'', ' ');
+            if (string.Equals(cleaned, targetCommandId.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// 依据权限标记对 MCP 工具列表进行动态过滤投影
     /// </summary>
     public static bool IsMcpToolPermitted(

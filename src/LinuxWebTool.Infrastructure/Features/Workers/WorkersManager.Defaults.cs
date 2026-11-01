@@ -15,6 +15,7 @@ public sealed partial class WorkersManager
             EnsureDemoDotNetCreated();
             EnsureDemoShCreated();
             EnsureDemoPsCreated();
+            EnsureChatGptChannelCreated();
         }
         catch (Exception ex)
         {
@@ -286,5 +287,67 @@ while ($true) {
 }
 ";
         File.WriteAllText(Path.Combine(dir, "worker.ps1"), script);
+    }
+
+    private void EnsureChatGptChannelCreated()
+    {
+        var id = "chatgpt-channel";
+        var dir = Path.Combine(_workersRoot, id);
+        if (Directory.Exists(dir)) return;
+
+        Directory.CreateDirectory(dir);
+        var entrypoint = OperatingSystem.IsWindows() ? "mcp-bridge.exe" : "mcp-bridge";
+        var manifest = new WorkerManifest
+        {
+            Id = id,
+            Name = "ChatGPT 渠道 (MCP Bridge)",
+            Version = "1.0.0",
+            Description = "Go 自治长时微服务，支持 OpenAI Secure MCP Tunnel 隧道穿透与本地第三方 MCP 工具聚合。",
+            Author = "Antigravity",
+            Mode = WorkerServiceMode.Service,
+            Runtime = WorkerRuntimeType.Native,
+            Entrypoint = entrypoint,
+            Source = "package",
+            ProgramRef = entrypoint,
+            Network = new WorkerNetworkConfig { RoutingMode = "path", PathPrefix = $"/w/{id}" },
+            Storage = new WorkerStorageConfig { EnableSqlite = true, EnableKv = true },
+            Supervision = new WorkerSupervisionConfig { AutoRestart = true },
+            Arguments = ["serve", "--listen", "127.0.0.1:{port}"],
+            Control = new LinuxWebTool.Contracts.Features.Plugins.Contracts.ResidentControlSpec
+            {
+                BaseUrl = "http://127.0.0.1:{port}",
+                HealthPath = "/health",
+                SupportedCapabilities = ["health", "ui", "config"]
+            }
+        };
+        File.WriteAllText(Path.Combine(dir, "worker.json"), JsonSerializer.Serialize(manifest, WorkerJsonContext.Default.WorkerManifest));
+        TryProvisionMcpBridgeBinary(dir, entrypoint);
+    }
+
+    private void TryProvisionMcpBridgeBinary(string targetDir, string binaryName)
+    {
+        try
+        {
+            var searchPaths = new[]
+            {
+                Path.Combine(AppContext.BaseDirectory, binaryName),
+                Path.Combine(AppContext.BaseDirectory, "workers", "mcp-bridge", binaryName),
+                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "workers", "mcp-bridge", binaryName),
+                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "artifacts", "mcp-bridge", binaryName)
+            };
+
+            foreach (var sp in searchPaths)
+            {
+                if (File.Exists(sp))
+                {
+                    File.Copy(sp, Path.Combine(targetDir, binaryName), overwrite: true);
+                    return;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "尝试自动预置 mcp-bridge 二进制跳过");
+        }
     }
 }

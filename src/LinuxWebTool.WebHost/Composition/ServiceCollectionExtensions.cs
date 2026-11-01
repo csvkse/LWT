@@ -104,7 +104,13 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IDockerEngineAdapter, LinuxWebTool.Infrastructure.Features.Services.Adapters.Docker.DockerEngineAdapter>();
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.ISystemServiceConfigAdapter, LinuxWebTool.Infrastructure.Features.Services.Adapters.Config.SystemServiceConfigAdapter>();
         builder.Services.AddSingleton<LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.IExtensionRepoFetcher, LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.CompositeExtensionRepoFetcher>();
-        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IScriptExtensionManager, LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.ScriptExtensionManager>();
+        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IScriptExtensionManager>(sp =>
+            new LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.ScriptExtensionManager(
+                sp.GetRequiredService<IShellExecutor>(),
+                sp.GetRequiredService<LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.IExtensionRepoFetcher>(),
+                sp.GetRequiredService<ILogger<LinuxWebTool.Infrastructure.Features.Services.Adapters.Extensions.ScriptExtensionManager>>(),
+                dataPaths.PathFor(Path.Combine("services", "extensions")),
+                contentRoot));
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Services.Contracts.IServicesHubOrchestrator, LinuxWebTool.Application.Features.Services.ServicesHubOrchestrator>();
 
         // SaaS 函数微服务与长时守护平台 (Workers & Daemons)

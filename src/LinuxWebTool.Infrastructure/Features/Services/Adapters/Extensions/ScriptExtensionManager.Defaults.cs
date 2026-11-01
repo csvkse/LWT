@@ -9,6 +9,7 @@ public sealed partial class ScriptExtensionManager
         EnsureSampleExtensionCreated();
         EnsureSshAccessGuardCreated();
         EnsureCaddyManagerCreated();
+        EnsureNativeCommandDemoCreated();
     }
 
     private void EnsureSampleExtensionCreated()
@@ -80,6 +81,12 @@ public sealed partial class ScriptExtensionManager
   "icon": "🛡️",
   "supportedPlatforms": ["linux", "windows"],
   "target": "host",
+  "ui": {
+    "entry": "ui/index.html",
+    "title": "SSH 安全审计看板",
+    "icon": "🛡️",
+    "mode": "webview"
+  },
   "dependencies": {
     "runners": ["sh"],
     "binaries": ["last", "who"]
@@ -275,6 +282,78 @@ try {
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to create caddy-server-manager extension");
+        }
+    }
+
+    private void EnsureNativeCommandDemoCreated()
+    {
+        try
+        {
+            var dir = Path.Combine(_baseExtensionsDir, "native-command-demo");
+            if (Directory.Exists(dir)) return;
+            Directory.CreateDirectory(dir);
+
+            const string manifestJson = """
+{
+  "manifestVersion": 1,
+  "hostApiVersion": "1",
+  "id": "native-command-demo",
+  "name": "原生命令行工具包装示例",
+  "category": "tools",
+  "version": "1.0.0",
+  "description": "直接调用原生命令行可执行程序，支持结构化参数绑定、进度解析与产物下载。",
+  "icon": "⚡",
+  "supportedPlatforms": ["linux", "windows"],
+  "customActions": [
+    {
+      "action": "convert",
+      "label": "快速格式转换",
+      "icon": "🔄",
+      "executor": "command",
+      "command": {
+        "commandId": "convert",
+        "programRef": "bin/tool",
+        "argumentBindings": [
+          { "type": "literal", "value": "--action=convert" },
+          { "type": "inputScalar", "value": "format", "prefix": "--format=" },
+          { "type": "artifactPath", "value": "output.txt" }
+        ],
+        "stdinMode": "closed",
+        "acceptedExitCodes": [0],
+        "resultParser": "artifacts",
+        "progressParser": "none",
+        "artifactRules": [
+          { "artifactId": "output", "relativePath": "output.txt", "contentType": "text/plain" }
+        ],
+        "timeoutSeconds": 30
+      }
+    },
+    {
+      "action": "query_json",
+      "label": "查询结构化指标",
+      "icon": "📊",
+      "executor": "command",
+      "command": {
+        "commandId": "query_json",
+        "programRef": "bin/tool",
+        "argumentBindings": [
+          { "type": "literal", "value": "--action=metrics" }
+        ],
+        "stdinMode": "closed",
+        "acceptedExitCodes": [0],
+        "resultParser": "json",
+        "timeoutSeconds": 10
+      }
+    }
+  ]
+}
+""";
+            File.WriteAllText(Path.Combine(dir, "manifest.json"), manifestJson);
+            File.WriteAllText(Path.Combine(dir, "README.md"), "# 原生命令行工具包装示例\n此示例展示免语言运行时直接调用已编译原生程序。");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to create native-command-demo extension");
         }
     }
 }

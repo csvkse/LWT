@@ -8,6 +8,12 @@
   "description": "实时监控 SSH 成功与失败登录轨迹，支持恶意 IP/网段一键封禁与解封",
   "icon": "🛡️",
   "supportedPlatforms": ["linux", "windows"],
+  "ui": {
+    "entry": "ui/index.html",
+    "title": "SSH 安全审计看板",
+    "icon": "🛡️",
+    "mode": "webview"
+  },
   "dependencies": {
     "runners": ["sh"],
     "binaries": ["last", "who"]

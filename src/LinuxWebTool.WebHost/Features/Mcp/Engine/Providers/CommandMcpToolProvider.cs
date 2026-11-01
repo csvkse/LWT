@@ -114,10 +114,10 @@ public sealed class CommandMcpToolProvider(
         switch (toolName)
         {
             case "command_list":
-                return await HandleListAsync(args);
+                return await HandleListAsync(args, context);
 
             case "command_get":
-                return await HandleGetAsync(args);
+                return await HandleGetAsync(args, context);
 
             case "command_run":
                 return await HandleRunAsync(args, context);
@@ -136,7 +136,7 @@ public sealed class CommandMcpToolProvider(
         }
     }
 
-    private async Task<McpToolExecutionResult> HandleListAsync(JsonElement args)
+    private async Task<McpToolExecutionResult> HandleListAsync(JsonElement args, McpRequestContext context)
     {
         Guid? groupId = args.TryGetProperty("group_id", out var gProp) && Guid.TryParse(gProp.GetString(), out var gid) ? gid : null;
         var keyword = args.TryGetProperty("keyword", out var kProp) ? kProp.GetString() : null;
@@ -144,6 +144,11 @@ public sealed class CommandMcpToolProvider(
         var commands = await commandStore.GetAllAsync();
         var query = commands.Where(c => (!groupId.HasValue || c.GroupId == groupId.Value)
             && (string.IsNullOrWhiteSpace(keyword) || c.Name.Contains(keyword, StringComparison.OrdinalIgnoreCase) || (c.Description ?? string.Empty).Contains(keyword, StringComparison.OrdinalIgnoreCase)));
+
+        if (context.CallerKey != null && !string.IsNullOrWhiteSpace(context.CallerKey.AllowedCommandIds) && context.CallerKey.AllowedCommandIds.Trim() != "*")
+        {
+            query = query.Where(c => ApiKeyPermissionMatrix.CanAccessCommand(context.CallerKey.AllowTerminal, context.CallerKey.AllowedCommandIds, c.Id.ToString()));
+        }
 
         using var ms = new MemoryStream();
         using (var writer = new Utf8JsonWriter(ms))
@@ -167,13 +172,19 @@ public sealed class CommandMcpToolProvider(
         return McpToolExecutionResult.Success(Encoding.UTF8.GetString(ms.ToArray()));
     }
 
-    private async Task<McpToolExecutionResult> HandleGetAsync(JsonElement args)
+    private async Task<McpToolExecutionResult> HandleGetAsync(JsonElement args, McpRequestContext context)
     {
         if (!args.TryGetProperty("command_id", out var idProp) || !Guid.TryParse(idProp.GetString(), out var id))
             return McpToolExecutionResult.Error("Missing or invalid command_id");
 
         var cmd = await commandStore.GetByIdAsync(id);
         if (cmd == null) return McpToolExecutionResult.Error($"Command not found: '{id}'");
+
+        if (context.CallerKey != null &&
+            !ApiKeyPermissionMatrix.CanAccessCommand(context.CallerKey.AllowTerminal, context.CallerKey.AllowedCommandIds, cmd.Id.ToString()))
+        {
+            return McpToolExecutionResult.Error($"Permission Denied: API Key is not authorized to inspect command '{cmd.Id}'.");
+        }
 
         using var ms = new MemoryStream();
         using (var writer = new Utf8JsonWriter(ms))
@@ -199,6 +210,12 @@ public sealed class CommandMcpToolProvider(
 
         var cmd = await commandStore.GetByIdAsync(id);
         if (cmd == null) return McpToolExecutionResult.Error($"Command not found: '{id}'");
+
+        if (context.CallerKey != null &&
+            !ApiKeyPermissionMatrix.CanAccessCommand(context.CallerKey.AllowTerminal, context.CallerKey.AllowedCommandIds, cmd.Id.ToString()))
+        {
+            return McpToolExecutionResult.Error($"Permission Denied: API Key is not authorized to execute command '{cmd.Name}' ({cmd.Id}).");
+        }
 
         var targetHostId = args.TryGetProperty("target_host_id", out var thProp) ? thProp.GetString() : null;
         var effectiveHostId = !string.IsNullOrWhiteSpace(targetHostId) ? targetHostId.Trim() : cmd.DefaultTargetHostId;

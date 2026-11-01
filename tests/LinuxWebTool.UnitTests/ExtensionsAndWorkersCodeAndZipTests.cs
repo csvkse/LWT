@@ -340,4 +340,78 @@ public sealed class ExtensionsAndWorkersCodeAndZipTests : IDisposable
         Assert.NotNull(debugRes);
         Assert.False(debugRes.IsError);
     }
+
+    [Fact]
+    public void ResolveExtensionAssetPath_ResolvesStaticUiFileAndPreventsTraversal()
+    {
+        var extId = "sample-ui-ext";
+        var extPath = Path.Combine(_extDir, extId);
+        var uiDir = Path.Combine(extPath, "ui");
+        Directory.CreateDirectory(uiDir);
+
+        File.WriteAllText(Path.Combine(uiDir, "index.html"), "<html><body>Hello UI</body></html>");
+        File.WriteAllText(Path.Combine(uiDir, "app.js"), "console.log('ui');");
+
+        var executor = new MockShellExecutor();
+        var manager = new ScriptExtensionManager(
+            executor,
+            NullLogger<ScriptExtensionManager>.Instance,
+            _extDir);
+
+        // 1. Valid default asset (index.html)
+        var defaultAsset = manager.ResolveExtensionAssetPath(extId, null);
+        Assert.NotNull(defaultAsset);
+        Assert.True(File.Exists(defaultAsset));
+        Assert.EndsWith("index.html", defaultAsset);
+
+        // 2. Specific file in ui
+        var jsAsset = manager.ResolveExtensionAssetPath(extId, "app.js");
+        Assert.NotNull(jsAsset);
+        Assert.True(File.Exists(jsAsset));
+
+        // 3. Path traversal attack blocked
+        var malicious = manager.ResolveExtensionAssetPath(extId, "../../../secret.txt");
+        Assert.Null(malicious);
+
+        // 4. Non-existent file
+        var missing = manager.ResolveExtensionAssetPath(extId, "notfound.css");
+        Assert.Null(missing);
+    }
+
+    [Fact]
+    public async Task FallbackExtensionsDirectory_DiscoversExtensionsFromSecondaryDirs()
+    {
+        var secondaryRoot = Path.Combine(_tempRoot, "secondary_root");
+        var secondaryExtensions = Path.Combine(secondaryRoot, "extensions");
+        Directory.CreateDirectory(secondaryExtensions);
+
+        var fallbackExtId = "fallback-test-ext";
+        var pluginPath = Path.Combine(secondaryExtensions, fallbackExtId);
+        Directory.CreateDirectory(pluginPath);
+        File.WriteAllText(Path.Combine(pluginPath, "manifest.json"), """
+        {
+            "manifestVersion": 1,
+            "hostApiVersion": "1",
+            "id": "fallback-test-ext",
+            "name": "Fallback Extension Test",
+            "version": "1.0.0",
+            "entrypoint": "test.sh",
+            "supportedPlatforms": ["linux", "windows"],
+            "ui": {
+                "entry": "index.html",
+                "title": "Fallback UI"
+            }
+        }
+        """);
+
+        var executor = new MockShellExecutor();
+        var manager = new ScriptExtensionManager(
+            executor,
+            NullLogger<ScriptExtensionManager>.Instance,
+            _extDir,
+            fallbackExtensionsDirs: [secondaryExtensions]);
+
+        var list = await manager.ListExtensionsAsync(CancellationToken.None);
+        Assert.Contains(list, x => x.Manifest.Id == fallbackExtId && x.HasUi);
+    }
 }

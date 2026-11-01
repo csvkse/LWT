@@ -43,6 +43,7 @@ public class ApiKeyService(ApiKeyStore store, ILogger<ApiKeyService> logger)
             AllowedPaths = string.IsNullOrWhiteSpace(request.AllowedPaths) ? null : request.AllowedPaths.Trim(),
             AllowedHostIds = string.IsNullOrWhiteSpace(request.AllowedHostIds) ? null : request.AllowedHostIds.Trim(),
             AllowedTools = request.AllowedTools != null && request.AllowedTools.Count > 0 ? string.Join(",", request.AllowedTools) : null,
+            AllowedCommandIds = string.IsNullOrWhiteSpace(request.AllowedCommandIds) ? null : request.AllowedCommandIds.Trim(),
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = request.ExpiresAt
         };

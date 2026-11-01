@@ -10,12 +10,13 @@ import ExtensionLogsModal from './ExtensionLogsModal.js';
 import ExtensionRepoImportModal from './ExtensionRepoImportModal.js';
 import ExtensionUpdateModal from './ExtensionUpdateModal.js';
 import ExtensionZipImportModal from './ExtensionZipImportModal.js';
+import ExtensionWebviewModal from './ExtensionWebviewModal.js';
 
 export default defineComponent({
   name: 'ExtensionsSubmodule',
   components: {
     ExtensionInstallGuideModal, ExtensionActionModal, ExtensionRepoImportModal, ExtensionZipImportModal,
-    ExtensionConfigModal, ExtensionUpdateModal, ExtensionLogsModal, ExtensionCodeModal,
+    ExtensionConfigModal, ExtensionUpdateModal, ExtensionLogsModal, ExtensionCodeModal, ExtensionWebviewModal,
   },
   props: {
     env: { type: Object, default: () => ({}) },
@@ -49,6 +50,8 @@ export default defineComponent({
     const activeActionExt = ref(null);
     const activeActionDef = ref(null);
     const showRepoModal = ref(false);
+    const showWebviewModal = ref(false);
+    const activeWebviewExt = ref(null);
 
     async function loadExtensions() {
       loading.value = true;
@@ -181,6 +184,9 @@ export default defineComponent({
       showZipModal,
       showCodeModal,
       activeCodeExt,
+      showWebviewModal,
+      activeWebviewExt,
+      openWebview: (ext) => { activeWebviewExt.value = ext; showWebviewModal.value = true; },
       openCode: (ext) => { activeCodeExt.value = ext; showCodeModal.value = true; },
       loadExtensions,
       executeAction,
@@ -332,6 +338,9 @@ export default defineComponent({
             </div>
 
             <div class="flex flex-wrap items-center gap-1 justify-end">
+              <button v-if="ext.hasUi || ext.manifest.ui" type="button" class="btn btn-xs border-cyan-500/50 text-cyan-300 hover:bg-cyan-500/20" title="打开独立交互控制台" @click="openWebview(ext)">
+                🖥️ 控制台
+              </button>
               <button
                 type="button"
                 class="btn btn-xs hover:border-cyan-500/40"
@@ -341,37 +350,16 @@ export default defineComponent({
               >
                 {{ ext.isEnabled === false ? '启用' : '禁用' }}
               </button>
-              <button
-                type="button"
-                class="btn btn-xs hover:border-cyan-500/40 text-cyan-300"
-                title="检查版本与安全热更新"
-                @click="openUpdate(ext)"
-              >
+              <button type="button" class="btn btn-xs hover:border-cyan-500/40 text-cyan-300" title="检查版本与安全热更新" @click="openUpdate(ext)">
                 更新
               </button>
-              <button
-                v-if="ext.manifest.configForm?.length"
-                type="button"
-                class="btn btn-xs hover:border-cyan-500/40"
-                :disabled="ext.status.startsWith('Missing')"
-                @click="openConfig(ext)"
-              >
+              <button v-if="ext.manifest.configForm?.length" type="button" class="btn btn-xs hover:border-cyan-500/40" :disabled="ext.status.startsWith('Missing')" @click="openConfig(ext)">
                 配置
               </button>
-              <button
-                v-if="ext.manifest.capabilities?.logs"
-                type="button"
-                class="btn btn-xs hover:border-cyan-500/40"
-                @click="viewLogs(ext.manifest.id)"
-              >
+              <button v-if="ext.manifest.capabilities?.logs" type="button" class="btn btn-xs hover:border-cyan-500/40" @click="viewLogs(ext.manifest.id)">
                 日志
               </button>
-              <button
-                type="button"
-                class="btn btn-xs hover:border-amber-500/40 text-amber-300"
-                title="在线编辑代码与调试"
-                @click="openCode(ext)"
-              >
+              <button type="button" class="btn btn-xs hover:border-amber-500/40 text-amber-300" title="在线编辑代码与调试" @click="openCode(ext)">
                 编辑
               </button>
             </div>
@@ -379,6 +367,7 @@ export default defineComponent({
         </div>
       </div>
 
+      <ExtensionWebviewModal :show="showWebviewModal" :ext="activeWebviewExt" @close="showWebviewModal = false" />
       <ExtensionConfigModal :show="showConfigModal" :ext="editingExt" :form-values="configFormValues" :saving="savingConfig" @close="showConfigModal = false" @save="saveConfig()" />
       <ExtensionLogsModal :show="showLogsModal" :ext-id="logsExtId" :logs="logsContent" @close="showLogsModal = false" />
       <ExtensionInstallGuideModal :show="showGuideModal" :ext="activeGuideExt" :env="env" @close="showGuideModal = false" />

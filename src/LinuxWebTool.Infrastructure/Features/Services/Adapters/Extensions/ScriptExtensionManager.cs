@@ -21,33 +21,125 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
     private readonly IExtensionRepoFetcher _repoFetcher;
     private readonly ILogger<ScriptExtensionManager> _logger;
     private readonly string _baseExtensionsDir;
+    private readonly string[] _fallbackExtensionsDirs;
     private readonly ConcurrentDictionary<string, (string Status, string? Message, int? Pid, DateTime ExpireAt)> _statusCache = new(StringComparer.OrdinalIgnoreCase);
 
     public ScriptExtensionManager(
         IShellExecutor shellExecutor,
         IExtensionRepoFetcher repoFetcher,
         ILogger<ScriptExtensionManager> logger,
-        string? baseExtensionsDir = null)
+        string? baseExtensionsDir = null,
+        string? contentRoot = null,
+        IReadOnlyList<string>? fallbackExtensionsDirs = null)
     {
         _shellExecutor = shellExecutor;
         _repoFetcher = repoFetcher;
         _logger = logger;
         _baseExtensionsDir = baseExtensionsDir ?? Path.Combine(AppContext.BaseDirectory, "data", "services", "extensions");
+
+        var fallbacks = new List<string>();
+        if (fallbackExtensionsDirs != null)
+        {
+            foreach (var f in fallbackExtensionsDirs)
+            {
+                if (!string.IsNullOrWhiteSpace(f) && Directory.Exists(f) && !fallbacks.Contains(f, StringComparer.OrdinalIgnoreCase) && !string.Equals(f, _baseExtensionsDir, StringComparison.OrdinalIgnoreCase))
+                {
+                    fallbacks.Add(f);
+                }
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(contentRoot))
+        {
+            var cExt = Path.Combine(contentRoot, "extensions");
+            if (Directory.Exists(cExt) && !string.Equals(cExt, _baseExtensionsDir, StringComparison.OrdinalIgnoreCase) && !fallbacks.Contains(cExt, StringComparer.OrdinalIgnoreCase))
+            {
+                fallbacks.Add(cExt);
+            }
+            var repoExt = Path.GetFullPath(Path.Combine(contentRoot, "..", "..", "extensions"));
+            if (Directory.Exists(repoExt) && !fallbacks.Contains(repoExt, StringComparer.OrdinalIgnoreCase) && !string.Equals(repoExt, _baseExtensionsDir, StringComparison.OrdinalIgnoreCase))
+            {
+                fallbacks.Add(repoExt);
+            }
+        }
+        var appExt = Path.Combine(AppContext.BaseDirectory, "extensions");
+        if (Directory.Exists(appExt) && !string.Equals(appExt, _baseExtensionsDir, StringComparison.OrdinalIgnoreCase) && !fallbacks.Contains(appExt, StringComparer.OrdinalIgnoreCase))
+        {
+            fallbacks.Add(appExt);
+        }
+        _fallbackExtensionsDirs = [.. fallbacks];
     }
 
     public ScriptExtensionManager(
         IShellExecutor shellExecutor,
         ILogger<ScriptExtensionManager> logger,
-        string? baseExtensionsDir = null)
-        : this(shellExecutor, new CompositeExtensionRepoFetcher(shellExecutor, NullLogger<CompositeExtensionRepoFetcher>.Instance), logger, baseExtensionsDir)
+        string? baseExtensionsDir = null,
+        string? contentRoot = null,
+        IReadOnlyList<string>? fallbackExtensionsDirs = null)
+        : this(shellExecutor, new CompositeExtensionRepoFetcher(shellExecutor, NullLogger<CompositeExtensionRepoFetcher>.Instance), logger, baseExtensionsDir, contentRoot, fallbackExtensionsDirs)
     {
+    }
+
+    public string ResolveExtensionDirectory(string extensionId)
+    {
+        var primaryDir = PluginSecurityGuard.EnsureSafePluginDirectory(_baseExtensionsDir, extensionId);
+        if (Directory.Exists(primaryDir))
+        {
+            return primaryDir;
+        }
+
+        foreach (var fallback in _fallbackExtensionsDirs)
+        {
+            if (Directory.Exists(fallback))
+            {
+                var candidate = Path.Combine(fallback, extensionId);
+                if (Directory.Exists(candidate) && File.Exists(Path.Combine(candidate, "manifest.json")))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return primaryDir;
+    }
+
+    public string? ResolveExtensionAssetPath(string extensionId, string? relativePath)
+    {
+        if (!PluginSecurityGuard.IsValidPluginId(extensionId)) return null;
+
+        var extDir = ResolveExtensionDirectory(extensionId);
+        if (!Directory.Exists(extDir)) return null;
+
+        var cleanRel = string.IsNullOrWhiteSpace(relativePath) ? "index.html" : relativePath.Trim().TrimStart('/', '\\');
+        if (cleanRel.Contains("..")) return null;
+
+        var candidates = new[]
+        {
+            Path.Combine(extDir, "ui", cleanRel),
+            Path.Combine(extDir, "assets", cleanRel),
+            Path.Combine(extDir, cleanRel)
+        };
+
+        foreach (var c in candidates)
+        {
+            if (File.Exists(c))
+            {
+                var full = Path.GetFullPath(c);
+                var fullExtDir = Path.GetFullPath(extDir);
+                if (full.StartsWith(fullExtDir, StringComparison.OrdinalIgnoreCase))
+                {
+                    return full;
+                }
+            }
+        }
+
+        return null;
     }
 
     public async Task<IReadOnlyList<ExtensionInstance>> ListExtensionsAsync(CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(_baseExtensionsDir))
         {
-            Directory.CreateDirectory(_baseExtensionsDir);
+            try { Directory.CreateDirectory(_baseExtensionsDir); } catch { }
             EnsureDefaultExtensionsCreated();
         }
         else if (!Directory.EnumerateFileSystemEntries(_baseExtensionsDir).Any())
@@ -56,9 +148,22 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
         }
 
         var list = new List<ExtensionInstance>();
-        var subDirs = Directory.GetDirectories(_baseExtensionsDir);
+        var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var dir in subDirs)
+        var searchDirs = new List<string>();
+        if (Directory.Exists(_baseExtensionsDir))
+        {
+            searchDirs.AddRange(Directory.GetDirectories(_baseExtensionsDir));
+        }
+        foreach (var fallback in _fallbackExtensionsDirs)
+        {
+            if (Directory.Exists(fallback))
+            {
+                searchDirs.AddRange(Directory.GetDirectories(fallback));
+            }
+        }
+
+        foreach (var dir in searchDirs)
         {
             var manifestPath = Path.Combine(dir, "manifest.json");
             if (!File.Exists(manifestPath)) continue;
@@ -68,6 +173,7 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
                 var json = await File.ReadAllTextAsync(manifestPath, cancellationToken);
                 var manifest = ParseManifest(json, dir);
                 if (manifest == null) continue;
+                if (!seenIds.Add(manifest.Id)) continue;
 
                 var currentOs = OperatingSystem.IsWindows() ? "windows" : (OperatingSystem.IsLinux() ? "linux" : "macos");
                 if (!manifest.SupportedPlatforms.Contains(currentOs, StringComparer.OrdinalIgnoreCase))
@@ -117,6 +223,7 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
                 var installGuideText = ResolveInstallGuide(manifest, missingRunners, missingBinaries);
                 var configDict = ReadExtensionConfig(dir);
                 var source = await GetSourceMetadataAsync(manifest.Id, cancellationToken);
+                var hasUi = manifest.Ui != null || File.Exists(Path.Combine(dir, "ui", "index.html")) || File.Exists(Path.Combine(dir, "assets", "index.html"));
 
                 list.Add(new ExtensionInstance
                 {
@@ -129,6 +236,7 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
                     MissingBinaries = missingBinaries,
                     InstallGuideText = installGuideText,
                     IsEnabled = isEnabled,
+                    HasUi = hasUi,
                     Source = source
                 });
             }
@@ -155,7 +263,7 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
         string dir;
         try
         {
-            dir = PluginSecurityGuard.EnsureSafePluginDirectory(_baseExtensionsDir, request.ExtensionId);
+            dir = ResolveExtensionDirectory(request.ExtensionId);
         }
         catch (Exception ex)
         {
@@ -263,7 +371,7 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
             return "未找到该扩展插件目录。";
         }
 
-        var dir = PluginSecurityGuard.EnsureSafePluginDirectory(_baseExtensionsDir, extensionId);
+        var dir = ResolveExtensionDirectory(extensionId);
         if (!Directory.Exists(dir))
         {
             return "未找到该扩展插件目录。";
@@ -429,6 +537,16 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
                 caps = new ExtensionCapabilities { Lifecycle = life, Config = conf, Logs = logs };
             }
 
+            ExtensionUiConfig? uiConfig = null;
+            if (root.TryGetProperty("ui", out var pUi) && pUi.ValueKind == JsonValueKind.Object)
+            {
+                var entry = pUi.TryGetProperty("entry", out var pEnt) ? pEnt.GetString() ?? "index.html" : "index.html";
+                var title = pUi.TryGetProperty("title", out var pTit) ? pTit.GetString() : null;
+                var uIcon = pUi.TryGetProperty("icon", out var pUIc) ? pUIc.GetString() : null;
+                var mode = pUi.TryGetProperty("mode", out var pMod) ? pMod.GetString() ?? "webview" : "webview";
+                uiConfig = new ExtensionUiConfig { Entry = entry, Title = title, Icon = uIcon, Mode = mode };
+            }
+
             var isEnabled = !File.Exists(Path.Combine(dir, ".disabled"));
 
             return new ExtensionManifest
@@ -449,6 +567,7 @@ public sealed partial class ScriptExtensionManager : IScriptExtensionManager
                 InstallGuide = installGuide,
                 CustomActions = customActions,
                 ConfigForm = formFields,
+                Ui = uiConfig,
                 Target = target
             };
         }

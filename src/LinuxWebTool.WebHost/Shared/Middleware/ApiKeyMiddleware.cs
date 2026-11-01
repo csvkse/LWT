@@ -159,9 +159,32 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
             return entity.AllowServices || entity.AllowWorkers;
         }
 
-        // 2. 指令与终端模块
-        if (path.StartsWith("/api/Commands", StringComparison.OrdinalIgnoreCase) ||
-            path.StartsWith("/api/Groups", StringComparison.OrdinalIgnoreCase) ||
+        // 2. 指令与终端模块（支持自定义指令白名单 Resource Scoping）
+        if (path.StartsWith("/api/Commands", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!entity.AllowTerminal) return false;
+
+            var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length >= 3)
+            {
+                var candidate = segments[2];
+                // 如果是 QuickExecute（任意命令行快捷执行），但在非通配授权下，严禁越权执行未登记指令
+                if (string.Equals(candidate, "QuickExecute", StringComparison.OrdinalIgnoreCase))
+                {
+                    return string.IsNullOrWhiteSpace(entity.AllowedCommandIds) || entity.AllowedCommandIds.Trim() == "*";
+                }
+
+                if (!string.Equals(candidate, "BatchExecute", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 若为针对特定指令 ID 的访问（如 /api/Commands/{id}/Execute 或 /api/Commands/{id}）
+                    return ApiKeyPermissionMatrix.CanAccessCommand(entity.AllowTerminal, entity.AllowedCommandIds, candidate);
+                }
+            }
+
+            return true;
+        }
+
+        if (path.StartsWith("/api/Groups", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("/api/Terminal", StringComparison.OrdinalIgnoreCase))
         {
             return entity.AllowTerminal;

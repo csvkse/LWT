@@ -1,4 +1,5 @@
 using LinuxWebTool.Contracts.Features.Services.Contracts;
+using LinuxWebTool.Contracts.Shared.Support;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -252,6 +253,44 @@ public class ServicesController(
     {
         var meta = await extensionManager.GetSourceMetadataAsync(id, cancellationToken);
         return meta != null ? Ok(meta) : NotFound(new ServiceActionResult { Success = false, Message = "未找到来源元数据" });
+    }
+
+    [HttpGet("Extensions/{id}/Assets")]
+    [HttpGet("Extensions/{id}/Assets/{**filePath}")]
+    public async Task<IResult> GetExtensionAsset(string id, string? filePath = null, CancellationToken cancellationToken = default)
+    {
+        if (!PluginSecurityGuard.IsValidPluginId(id))
+        {
+            return NotFound(new MessageResponse("非法扩展 ID"));
+        }
+
+        var assetPath = extensionManager.ResolveExtensionAssetPath(id, filePath);
+        if (string.IsNullOrEmpty(assetPath) || !System.IO.File.Exists(assetPath))
+        {
+            return NotFound(new MessageResponse("未找到请求的静态扩展资产文件"));
+        }
+
+        var ext = Path.GetExtension(assetPath)?.ToLowerInvariant() ?? string.Empty;
+        var contentType = ext switch
+        {
+            ".html" or ".htm" => "text/html; charset=utf-8",
+            ".js" or ".mjs" => "application/javascript; charset=utf-8",
+            ".css" => "text/css; charset=utf-8",
+            ".json" => "application/json; charset=utf-8",
+            ".svg" => "image/svg+xml",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".ico" => "image/x-icon",
+            ".woff" => "font/woff",
+            ".woff2" => "font/woff2",
+            ".ttf" => "font/ttf",
+            ".txt" or ".log" => "text/plain; charset=utf-8",
+            _ => "application/octet-stream"
+        };
+
+        var bytes = await System.IO.File.ReadAllBytesAsync(assetPath, cancellationToken);
+        return Results.File(bytes, contentType, enableRangeProcessing: true);
     }
 
     [HttpPost("Extensions/Import/Zip")]

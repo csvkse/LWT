@@ -168,4 +168,21 @@ public sealed class ApiKeyPermissionMatrixTests
         Assert.Contains("file_list_directory", set);
         Assert.Contains("schedule_list", set);
     }
+
+    [Theory]
+    [InlineData(true, null, "cmd-1", true)]
+    [InlineData(true, "", "cmd-1", true)]
+    [InlineData(true, "*", "cmd-1", true)]
+    [InlineData(false, "*", "cmd-1", false)]
+    [InlineData(true, "[\"cmd-1\", \"cmd-2\"]", "cmd-1", true)]
+    [InlineData(true, "[\"cmd-1\", \"cmd-2\"]", "cmd-2", true)]
+    [InlineData(true, "[\"cmd-1\", \"cmd-2\"]", "cmd-3", false)]
+    [InlineData(true, "cmd-1, cmd-2", "cmd-1", true)]
+    [InlineData(true, "cmd-1, cmd-2", "cmd-3", false)]
+    [InlineData(false, "[\"cmd-1\"]", "cmd-1", false)]
+    public void CanAccessCommand_EvaluatesAccurately(bool allowTerminal, string? allowedCommandIds, string targetCommandId, bool expected)
+    {
+        var result = ApiKeyPermissionMatrix.CanAccessCommand(allowTerminal, allowedCommandIds, targetCommandId);
+        Assert.Equal(expected, result);
+    }
 }

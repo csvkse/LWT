@@ -1,4 +1,4 @@
-﻿# 发布 LinuxWebTool 到 Linux（默认 linux-x64 自包含，目标机无需安装 .NET 运行时）
+# 发布 LinuxWebTool 到 Linux（默认 linux-x64 自包含，目标机无需安装 .NET 运行时）
 # 用法：./scripts/publish.ps1 [-Runtime linux-x64] [-OutputDir publish/linuxwebtool]
 param(
     [string]$Runtime = 'linux-x64',
@@ -13,6 +13,10 @@ dotnet publish (Join-Path $root 'src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.c
     -p:PublishAot=true `
     -o (Join-Path $root $OutputDir) --nologo
 if ($LASTEXITCODE -ne 0) { throw 'publish 失败' }
+
+if (Test-Path (Join-Path $root 'extensions')) {
+    Copy-Item -Path (Join-Path $root 'extensions') -Destination (Join-Path $root $OutputDir) -Recurse -Force
+}
 
 Write-Host "`n✅ 发布完成：$root/$OutputDir" -ForegroundColor Green
 Write-Host @'

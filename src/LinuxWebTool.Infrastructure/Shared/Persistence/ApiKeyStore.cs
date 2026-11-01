@@ -27,8 +27,8 @@ public partial class ApiKeyStore(DbConnectionFactory factory)
     {
         using var db = factory.CreateConnection();
         const string sql = @"
-            INSERT INTO api_key (Id, Name, KeyPrefix, KeyHash, IsEnabled, AllowApi, AllowMcp, AllowTerminal, AllowSchedules, AllowFiles, AllowTranscode, AllowGateway, AllowRemoteHosts, AllowServices, AllowWorkers, AllowedPaths, AllowedHostIds, AllowedTools, CreatedAt, LastUsedAt, ExpiresAt)
-            VALUES (@Id, @Name, @KeyPrefix, @KeyHash, @IsEnabled, @AllowApi, @AllowMcp, @AllowTerminal, @AllowSchedules, @AllowFiles, @AllowTranscode, @AllowGateway, @AllowRemoteHosts, @AllowServices, @AllowWorkers, @AllowedPaths, @AllowedHostIds, @AllowedTools, @CreatedAt, @LastUsedAt, @ExpiresAt)";
+            INSERT INTO api_key (Id, Name, KeyPrefix, KeyHash, IsEnabled, AllowApi, AllowMcp, AllowTerminal, AllowSchedules, AllowFiles, AllowTranscode, AllowGateway, AllowRemoteHosts, AllowServices, AllowWorkers, AllowedPaths, AllowedHostIds, AllowedTools, AllowedCommandIds, CreatedAt, LastUsedAt, ExpiresAt)
+            VALUES (@Id, @Name, @KeyPrefix, @KeyHash, @IsEnabled, @AllowApi, @AllowMcp, @AllowTerminal, @AllowSchedules, @AllowFiles, @AllowTranscode, @AllowGateway, @AllowRemoteHosts, @AllowServices, @AllowWorkers, @AllowedPaths, @AllowedHostIds, @AllowedTools, @AllowedCommandIds, @CreatedAt, @LastUsedAt, @ExpiresAt)";
         await db.ExecuteAsync(sql, entity);
     }
 
@@ -41,7 +41,8 @@ public partial class ApiKeyStore(DbConnectionFactory factory)
                 AllowTerminal = @AllowTerminal, AllowSchedules = @AllowSchedules, AllowFiles = @AllowFiles,
                 AllowTranscode = @AllowTranscode, AllowGateway = @AllowGateway, AllowRemoteHosts = @AllowRemoteHosts,
                 AllowServices = @AllowServices, AllowWorkers = @AllowWorkers,
-                AllowedPaths = @AllowedPaths, AllowedHostIds = @AllowedHostIds, AllowedTools = @AllowedTools, ExpiresAt = @ExpiresAt
+                AllowedPaths = @AllowedPaths, AllowedHostIds = @AllowedHostIds, AllowedTools = @AllowedTools,
+                AllowedCommandIds = @AllowedCommandIds, ExpiresAt = @ExpiresAt
             WHERE Id = @Id COLLATE NOCASE";
         await db.ExecuteAsync(sql, entity);
     }

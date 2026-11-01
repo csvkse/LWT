@@ -74,6 +74,17 @@ public sealed record ExtensionCustomAction
 }
 
 /// <summary>
+/// 扩展前端 UI 声明配置（用于沙箱 Webview 或声明式 Schema 视图）。
+/// </summary>
+public sealed record ExtensionUiConfig
+{
+    public string Entry { get; init; } = "index.html";
+    public string? Title { get; init; }
+    public string? Icon { get; init; }
+    public string Mode { get; init; } = "webview"; // webview, schema
+}
+
+/// <summary>
 /// 动态脚本扩展清单元数据 (manifest.json)。
 /// </summary>
 public sealed record ExtensionManifest
@@ -94,6 +105,7 @@ public sealed record ExtensionManifest
     public Dictionary<string, string> InstallGuide { get; init; } = [];
     public IReadOnlyList<ExtensionCustomAction> CustomActions { get; init; } = [];
     public IReadOnlyList<ExtensionFormField> ConfigForm { get; init; } = [];
+    public ExtensionUiConfig? Ui { get; init; }
     public string Target { get; init; } = "container";
 }
 
@@ -111,6 +123,7 @@ public sealed record ExtensionInstance
     public IReadOnlyList<string> MissingBinaries { get; init; } = [];
     public string? InstallGuideText { get; init; }
     public bool IsEnabled { get; init; } = true;
+    public bool HasUi { get; init; }
     public ExtensionSourceMetadata? Source { get; init; }
     public string Target { get; init; } = "container";
 }

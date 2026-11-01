@@ -21,6 +21,7 @@ public class ApiKeyEntity
     public string? AllowedPaths { get; set; }
     public string? AllowedHostIds { get; set; }
     public string? AllowedTools { get; set; }
+    public string? AllowedCommandIds { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastUsedAt { get; set; }
     public DateTime? ExpiresAt { get; set; }

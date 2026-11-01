@@ -9,6 +9,8 @@ export default defineComponent({
   setup() {
     const keys = ref([]);
     const availableHosts = ref([]);
+    const availableCommands = ref([]);
+    const availableGroups = ref([]);
     const mcpCatalog = ref([]);
     const loading = ref(false);
 
@@ -18,6 +20,10 @@ export default defineComponent({
     // 树状权限搜索与协议过滤
     const scopeSearchKeyword = ref('');
     const scopeProtocolFilter = ref('all'); // 'all' | 'api' | 'mcp'
+
+    // 指令资源范围搜索与分组过滤
+    const commandSearchKeyword = ref('');
+    const commandGroupFilter = ref('all');
 
     // 新建 / 编辑弹窗
     const showModal = ref(false);
@@ -37,6 +43,8 @@ export default defineComponent({
       allowRemoteHosts: false,
       hostScopeMode: 'all', // 'all' | 'custom'
       selectedHostIds: [],
+      commandScopeMode: 'all', // 'all' | 'custom'
+      selectedCommandIds: [],  // string[]
       mcpFilterMode: 'all', // 'all' | 'custom'
       allowedTools: [],     // string[]
       expiresAt: '',
@@ -62,6 +70,65 @@ export default defineComponent({
         return allowedHostIds.split(',').map(s => s.trim()).filter(Boolean);
       }
       return [];
+    }
+
+    function parseCommandIds(allowedCommandIds) {
+      if (!allowedCommandIds || allowedCommandIds === '*') return [];
+      try {
+        const parsed = JSON.parse(allowedCommandIds);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        return allowedCommandIds.split(',').map(s => s.trim()).filter(Boolean);
+      }
+      return [];
+    }
+
+    const filteredCommands = computed(() => {
+      const kw = commandSearchKeyword.value.trim().toLowerCase();
+      const grp = commandGroupFilter.value;
+      return (availableCommands.value || []).filter(c => {
+        if (grp !== 'all' && c.groupId !== grp) return false;
+        if (!kw) return true;
+        if (c.name && c.name.toLowerCase().includes(kw)) return true;
+        if (c.command && c.command.toLowerCase().includes(kw)) return true;
+        if (c.description && c.description.toLowerCase().includes(kw)) return true;
+        return false;
+      });
+    });
+
+    function selectAllCommands() {
+      const ids = new Set(form.selectedCommandIds);
+      for (const c of filteredCommands.value) {
+        ids.add(c.id);
+      }
+      form.selectedCommandIds = Array.from(ids);
+    }
+
+    function clearAllCommands() {
+      if (commandSearchKeyword.value || commandGroupFilter.value !== 'all') {
+        const filteredIds = new Set(filteredCommands.value.map(c => c.id));
+        form.selectedCommandIds = form.selectedCommandIds.filter(id => !filteredIds.has(id));
+      } else {
+        form.selectedCommandIds = [];
+      }
+    }
+
+    function invertCommandSelection() {
+      const current = new Set(form.selectedCommandIds);
+      for (const c of filteredCommands.value) {
+        if (current.has(c.id)) {
+          current.delete(c.id);
+        } else {
+          current.add(c.id);
+        }
+      }
+      form.selectedCommandIds = Array.from(current);
+    }
+
+    function getGroupName(groupId) {
+      if (!groupId) return '未分组';
+      const g = availableGroups.value.find(x => x.id === groupId);
+      return g ? g.name : '未分组';
     }
 
     function getAllCatalogToolNames() {
@@ -289,10 +356,12 @@ export default defineComponent({
 
     async function load() {
       loading.value = true;
-      const [resKeys, resHosts, resCatalog] = await Promise.all([
+      const [resKeys, resHosts, resCatalog, resCommands, resGroups] = await Promise.all([
         http(API.apiKeys.list, { method: 'GET' }),
         http(API.remoteHosts.list, { method: 'GET' }),
         http(API.apiKeys.mcpCatalog, { method: 'GET' }),
+        http(API.commands.list, { method: 'GET' }),
+        http(API.groups.list, { method: 'GET' }),
       ]);
       loading.value = false;
       if (resKeys.ok) {
@@ -304,6 +373,12 @@ export default defineComponent({
       if (resCatalog.ok) {
         mcpCatalog.value = resCatalog.data || [];
       }
+      if (resCommands.ok) {
+        availableCommands.value = resCommands.data || [];
+      }
+      if (resGroups.ok) {
+        availableGroups.value = resGroups.data || [];
+      }
     }
 
     function openCreate() {
@@ -313,6 +388,8 @@ export default defineComponent({
       currentId.value = null;
       scopeSearchKeyword.value = '';
       scopeProtocolFilter.value = 'all';
+      commandSearchKeyword.value = '';
+      commandGroupFilter.value = 'all';
       Object.assign(form, {
         name: '',
         allowApi: true,
@@ -325,6 +402,8 @@ export default defineComponent({
         allowRemoteHosts: false,
         hostScopeMode: 'all',
         selectedHostIds: [],
+        commandScopeMode: 'all',
+        selectedCommandIds: [],
         mcpFilterMode: 'all',
         allowedTools: getAllCatalogToolNames(),
         expiresAt: '',
@@ -339,7 +418,10 @@ export default defineComponent({
       currentId.value = key.id;
       scopeSearchKeyword.value = '';
       scopeProtocolFilter.value = 'all';
+      commandSearchKeyword.value = '';
+      commandGroupFilter.value = 'all';
       const hostIds = parseHostIds(key.allowedHostIds);
+      const cmdIds = parseCommandIds(key.allowedCommandIds);
       const hasCustomTools = key.allowedTools && Array.isArray(key.allowedTools) && key.allowedTools.length > 0;
       Object.assign(form, {
         name: key.name,
@@ -353,6 +435,8 @@ export default defineComponent({
         allowRemoteHosts: Boolean(key.allowRemoteHosts),
         hostScopeMode: (key.allowedHostIds && key.allowedHostIds !== '*') ? 'custom' : 'all',
         selectedHostIds: hostIds,
+        commandScopeMode: (key.allowedCommandIds && key.allowedCommandIds !== '*') ? 'custom' : 'all',
+        selectedCommandIds: cmdIds,
         mcpFilterMode: hasCustomTools ? 'custom' : 'all',
         allowedTools: hasCustomTools ? [...key.allowedTools] : getAllCatalogToolNames(),
         expiresAt: key.expiresAt ? key.expiresAt.slice(0, 16) : '',
@@ -367,7 +451,10 @@ export default defineComponent({
       currentId.value = key.id;
       scopeSearchKeyword.value = '';
       scopeProtocolFilter.value = 'all';
+      commandSearchKeyword.value = '';
+      commandGroupFilter.value = 'all';
       const hostIds = parseHostIds(key.allowedHostIds);
+      const cmdIds = parseCommandIds(key.allowedCommandIds);
       const hasCustomTools = key.allowedTools && Array.isArray(key.allowedTools) && key.allowedTools.length > 0;
       Object.assign(form, {
         name: `${key.name} - 副本`,
@@ -381,6 +468,8 @@ export default defineComponent({
         allowRemoteHosts: Boolean(key.allowRemoteHosts),
         hostScopeMode: (key.allowedHostIds && key.allowedHostIds !== '*') ? 'custom' : 'all',
         selectedHostIds: hostIds,
+        commandScopeMode: (key.allowedCommandIds && key.allowedCommandIds !== '*') ? 'custom' : 'all',
+        selectedCommandIds: cmdIds,
         mcpFilterMode: hasCustomTools ? 'custom' : 'all',
         allowedTools: hasCustomTools ? [...key.allowedTools] : getAllCatalogToolNames(),
         expiresAt: key.expiresAt ? key.expiresAt.slice(0, 16) : '',
@@ -400,6 +489,18 @@ export default defineComponent({
           allowedHostIds = JSON.stringify(form.selectedHostIds);
         } else {
           allowedHostIds = '*';
+        }
+      }
+
+      let allowedCommandIds = null;
+      if (form.allowTerminal) {
+        if (form.commandScopeMode === 'custom') {
+          if (form.selectedCommandIds.length === 0) {
+            return toast.error('请至少选择一条被授权的预设指令，或应用允许全部指令策略');
+          }
+          allowedCommandIds = JSON.stringify(form.selectedCommandIds);
+        } else {
+          allowedCommandIds = '*';
         }
       }
 
@@ -426,6 +527,7 @@ export default defineComponent({
         allowGateway: form.allowGateway,
         allowRemoteHosts: form.allowRemoteHosts,
         allowedHostIds: allowedHostIds,
+        allowedCommandIds: allowedCommandIds,
         allowedTools: allowedTools,
         expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : null,
       };
@@ -536,6 +638,13 @@ export default defineComponent({
       return `指定${ids.length}台`;
     }
 
+    function getCommandScopeLabel(key) {
+      if (!key.allowTerminal) return '';
+      if (!key.allowedCommandIds || key.allowedCommandIds === '*') return '全部指令';
+      const ids = parseCommandIds(key.allowedCommandIds);
+      return `指定${ids.length}条`;
+    }
+
     const originUrl = window.location.origin;
 
     onMounted(load);
@@ -544,6 +653,16 @@ export default defineComponent({
       originUrl,
       keys,
       availableHosts,
+      availableCommands,
+      availableGroups,
+      commandSearchKeyword,
+      commandGroupFilter,
+      filteredCommands,
+      selectAllCommands,
+      clearAllCommands,
+      invertCommandSelection,
+      getGroupName,
+      getCommandScopeLabel,
       mcpCatalog,
       loading,
       collapsedCategories,
@@ -651,7 +770,9 @@ export default defineComponent({
                 </td>
                 <td class="py-2.5 px-3">
                   <div class="flex flex-wrap items-center gap-1">
-                    <span v-if="k.allowTerminal" class="badge border-emerald-500/40 text-emerald-300 bg-emerald-950/30">指令/终端</span>
+                    <span v-if="k.allowTerminal" class="badge border-emerald-500/40 text-emerald-300 bg-emerald-950/30">
+                      指令 ({{ getCommandScopeLabel(k) }})
+                    </span>
                     <span v-if="k.allowSchedules" class="badge border-blue-500/40 text-blue-300 bg-blue-950/30">工作流/调度</span>
                     <span v-if="k.allowFiles" class="badge border-amber-500/40 text-amber-300 bg-amber-950/30">文件</span>
                     <span v-if="k.allowTranscode" class="badge border-rose-500/40 text-rose-300 bg-rose-950/30">转码</span>
@@ -851,6 +972,75 @@ export default defineComponent({
                       <span v-if="cat.tools && cat.tools.length > 0" class="text-[10px] font-mono text-slate-400 bg-slate-800/70 px-1.5 py-0.5 rounded ml-1">
                         {{ getCategorySelectedCount(cat) }} / {{ cat.tools.length }}
                       </span>
+                    </div>
+                  </div>
+
+                  <!-- 预设指令专用范围约束嵌入项 (Command Scoping) -->
+                  <div v-if="(cat.key === 'terminal' || cat.key === 'commands' || cat.moduleCode === 'terminal' || cat.moduleCode === 'commands') && !isCategoryCollapsed(cat.key)"
+                       class="px-3 py-2 bg-emerald-950/20 border-t border-emerald-800/30 flex flex-col gap-2">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div class="flex items-center gap-2">
+                        <span class="font-medium text-emerald-300 text-xs">⚡ 授权指令范围约束 (Command Scoping)</span>
+                        <span class="badge border-emerald-500/40 text-emerald-300 bg-emerald-950/40 text-[10px] font-mono">
+                          {{ form.commandScopeMode === 'all' ? '全部可用指令' : '已选 ' + form.selectedCommandIds.length + ' / ' + availableCommands.length + ' 条' }}
+                        </span>
+                      </div>
+                      <div class="flex items-center gap-3 text-xs">
+                        <label class="flex items-center gap-1.5 cursor-pointer">
+                          <input type="radio" value="all" v-model="form.commandScopeMode" class="accent-emerald-500" />
+                          <span class="text-slate-300">允许全部指令与快捷执行</span>
+                        </label>
+                        <label class="flex items-center gap-1.5 cursor-pointer">
+                          <input type="radio" value="custom" v-model="form.commandScopeMode" class="accent-emerald-500" />
+                          <span class="text-slate-300">仅允许指定指令 (禁用任意执行)</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <!-- 自定义指令选择器面板 -->
+                    <div v-if="form.commandScopeMode === 'custom'" class="flex flex-col gap-2 bg-slate-900/80 p-2.5 rounded border border-slate-800">
+                      <!-- 搜索与分组过滤栏 + 快捷批量操作 -->
+                      <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+                        <div class="flex items-center gap-2 flex-1">
+                          <input v-model="commandSearchKeyword" placeholder="搜索指令名称、命令模板或描述..." class="input text-xs flex-1" />
+                          <select v-model="commandGroupFilter" class="select text-xs w-36">
+                            <option value="all">全部分组</option>
+                            <option v-for="g in availableGroups" :key="g.id" :value="g.id">{{ g.name }}</option>
+                          </select>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                          <button type="button" class="btn btn-xs hover:border-emerald-500/50 text-emerald-300" @click="selectAllCommands()">全选过滤项</button>
+                          <button type="button" class="btn btn-xs hover:border-cyan-500/50 text-cyan-300" @click="invertCommandSelection()">反选</button>
+                          <button type="button" class="btn btn-xs hover:border-slate-600 text-slate-400" @click="clearAllCommands()">清空</button>
+                        </div>
+                      </div>
+
+                      <!-- 指令选择复选框列表 -->
+                      <div v-if="availableCommands.length === 0" class="text-[11px] text-slate-500 py-3 text-center">
+                        系统中暂无已配置的预设指令。
+                      </div>
+                      <div v-else-if="filteredCommands.length === 0" class="text-[11px] text-slate-500 py-3 text-center">
+                        无匹配的指令，请调整搜索条件。
+                      </div>
+                      <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto pr-1">
+                        <label v-for="cmd in filteredCommands" :key="cmd.id"
+                               class="flex items-start gap-2 p-2 rounded bg-slate-950/60 border border-slate-800/80 hover:border-emerald-500/40 cursor-pointer text-xs transition-colors"
+                               :class="form.selectedCommandIds.includes(cmd.id) ? 'bg-emerald-950/20 border-emerald-500/40' : ''">
+                          <input type="checkbox" :value="cmd.id" v-model="form.selectedCommandIds" class="accent-emerald-500 mt-0.5" />
+                          <div class="flex flex-col gap-0.5 flex-1 min-w-0">
+                            <div class="flex items-center justify-between gap-1">
+                              <span class="font-medium text-slate-200 truncate">{{ cmd.name }}</span>
+                              <span class="text-[10px] text-slate-400 bg-slate-800 px-1 rounded shrink-0">{{ getGroupName(cmd.groupId) }}</span>
+                            </div>
+                            <div class="font-mono text-[11px] text-emerald-300/80 truncate bg-black/40 px-1 py-0.5 rounded">
+                              {{ cmd.command }}
+                            </div>
+                            <div v-if="cmd.description" class="text-[11px] text-slate-500 line-clamp-1">
+                              {{ cmd.description }}
+                            </div>
+                          </div>
+                        </label>
+                      </div>
                     </div>
                   </div>
 

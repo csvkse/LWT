@@ -152,6 +152,7 @@ RUN find /app/publish -type f -name "*.pdb" -delete
 FROM base AS final
 WORKDIR /app
 COPY --from=build --chown=appuser:appgroup /app/publish .
+COPY --chown=appuser:appgroup extensions ./extensions
 
 # appsettings.json 已将 Urls 设为 http://0.0.0.0:5270，容器内直接生效，
 # 本地开发由 launchSettings.json 的 applicationUrl 覆盖，二者互不干扰。

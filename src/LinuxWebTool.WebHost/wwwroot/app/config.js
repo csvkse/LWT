@@ -231,6 +231,7 @@ export const API = {
     extensionCheckUpdate: (id) => `/Services/Extensions/${id}/CheckUpdate`,
     extensionHotUpdate: (id) => `/Services/Extensions/${id}/HotUpdate`,
     extensionSource: (id) => `/Services/Extensions/${id}/Source`,
+    extensionAsset: (id, file) => (file ? `/Services/Extensions/${encodeURIComponent(id)}/Assets/${encodeURIComponent(file)}` : `/Services/Extensions/${encodeURIComponent(id)}/Assets`),
     extensionImportZip: '/Services/Extensions/Import/Zip',
     extensionCode: (id, file) => (file ? `/Services/Extensions/${id}/Code?file=${encodeURIComponent(file)}` : `/Services/Extensions/${id}/Code`),
     extensionDebug: (id) => `/Services/Extensions/${id}/Debug`,
