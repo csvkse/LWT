@@ -138,23 +138,43 @@ try {
     }
 
     # =========================================================================
-    # Strategy A: Linux Fast Dev Pipeline (Git Pull + Local Fast JIT Docker Build)
+    # Strategy A: Linux Fast Dev Pipeline (Local Git Bundle Sync + Fast JIT Build)
     # =========================================================================
     if ($Mode -eq "Dev") {
-        Write-Step "1/4 [Dev] Syncing repository to $devWorkdir on remote host..."
-        $gitSyncScript = @"
-if [ ! -d "$devWorkdir/.git" ]; then
-    mkdir -p "$devWorkdir"
-    git clone https://github.com/csvkse/LWT.git "$devWorkdir"
-else
-    git -C "$devWorkdir" fetch origin main
-    git -C "$devWorkdir" reset --hard origin/main
-fi
-git -C "$devWorkdir" log -1 --oneline
-"@
-        $gitOutput = Invoke-RemoteSsh $gitSyncScript
-        Write-Host $gitOutput -ForegroundColor DarkCyan
-        Write-Success "Source code synchronized!"
+        Write-Step "1/4 [Dev] Bundling local HEAD and syncing to $devWorkdir on remote host..."
+        $localBundle = "dev-bundle.tar.gz"
+        try {
+            # 打包本地最新已提交代码（排除无关大文件，仅 3MB，毫秒级生成）
+            & git archive -o $localBundle HEAD
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to create local git archive bundle"
+            }
+
+            # 通过 SSH/SCP 高速推送至远程主机（免疫 GitHub GFW 网络抖动）
+            $scpArgs = @(
+                "-i", $tempKeyPath,
+                "-P", $deployPort,
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "UserKnownHostsFile=/dev/null",
+                "-o", "LogLevel=ERROR",
+                $localBundle,
+                "${deployUser}@${deployHost}:/tmp/${localBundle}"
+            )
+            & scp @scpArgs
+            if ($LASTEXITCODE -ne 0) {
+                throw "SCP dev bundle failed with exit code $($LASTEXITCODE)"
+            }
+
+            # 远程解压至开发工作空间
+            $extractScript = "mkdir -p $devWorkdir && tar -xzf /tmp/$localBundle -C $devWorkdir && rm -f /tmp/$localBundle"
+            Invoke-RemoteSsh $extractScript
+            Write-Success "Source code bundle synchronized to $devWorkdir in <1s!"
+        }
+        finally {
+            if (Test-Path $localBundle) {
+                Remove-Item -Path $localBundle -Force -ErrorAction SilentlyContinue
+            }
+        }
 
         Write-Step "2/4 [Dev] Building fast development image ($devImage) via Dockerfile.dev..."
         Invoke-RemoteSsh "docker build -f $devWorkdir/Dockerfile.dev -t $devImage $devWorkdir"
@@ -191,16 +211,24 @@ docker run -d \
             Start-Sleep -Seconds 2
             $waited += 2
             try {
-                $healthStatus = Invoke-RemoteSsh "docker inspect --format '{{.State.Health.Status}}' $containerName 2>/dev/null"
-                if ($healthStatus -match "healthy") {
+                $cState = (Invoke-RemoteSsh "docker inspect --format '{{.State.Status}}' $containerName 2>/dev/null").Trim()
+                if ($cState -eq "restarting" -or $cState -eq "exited") {
+                    Write-Warn "Container entered $cState state! Recent logs:"
+                    Invoke-RemoteSsh "docker logs --tail 20 $containerName"
+                    throw "Dev container failed to start (State: $cState)"
+                }
+                $healthStatus = (Invoke-RemoteSsh "docker inspect --format '{{.State.Health.Status}}' $containerName 2>/dev/null").Trim()
+                if ($healthStatus -eq "healthy") {
                     $isHealthy = $true
                     break
                 }
-            } catch {}
+            } catch {
+                if ($_.Exception.Message -match "failed to start") { throw $_ }
+            }
         }
 
         if (-not $isHealthy) {
-            Write-Warn "Dev container did not report healthy yet. Recent logs:"
+            Write-Warn "Dev container did not report healthy within $maxWaitSec seconds. Recent logs:"
             Invoke-RemoteSsh "docker logs --tail 25 $containerName"
         } else {
             Write-Success "Dev container is healthy and responding!"
