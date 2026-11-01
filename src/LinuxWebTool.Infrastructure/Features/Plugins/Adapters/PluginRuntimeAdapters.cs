@@ -232,9 +232,20 @@ public sealed class DotNetRuntimeAdapter : IRuntimeAdapter
     {
         var env = NodeRuntimeAdapter.BuildStandardEnv(manifest, pluginDir, port, extraEnv);
         var entry = Path.Combine(pluginDir, manifest.Entrypoint);
-        var args = entry.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) || entry.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
-            ? $"run --project \"{entry}\""
-            : $"exec \"{entry}\"";
+        string args;
+        if (entry.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+        {
+            args = $"run --project \"{entry}\"";
+        }
+        else if (entry.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            args = $"exec \"{entry}\"";
+        }
+        else
+        {
+            var proj = Directory.GetFiles(pluginDir, "*.csproj").FirstOrDefault();
+            args = proj != null ? $"run --project \"{proj}\"" : $"run --project \"{pluginDir}\"";
+        }
 
         return new PluginStartSpec
         {
@@ -391,11 +402,18 @@ public sealed class NativeRuntimeAdapter : IRuntimeAdapter
             {
                 throw new System.Security.SecurityException($"禁止路径逃逸: {targetRef}");
             }
-            if (!File.Exists(candidate))
+            if (File.Exists(candidate))
+            {
+                exe = candidate;
+            }
+            else if (NodeRuntimeAdapter.IsExecutableInPath(targetRef))
+            {
+                exe = targetRef;
+            }
+            else
             {
                 throw new FileNotFoundException($"原生程序文件不存在: {candidate}");
             }
-            exe = candidate;
         }
         else
         {

@@ -179,17 +179,30 @@ public sealed class ResidentExecutionStrategy : IExecutionProfileStrategy
         CancellationToken ct)
     {
         // 1. 优先探测是否匹配 hooks 目录下的脚本
-        var scriptCandidates = new[]
-        {
-            Path.Combine(pluginDir, "hooks", $"{request.Action}.ps1"),
-            Path.Combine(pluginDir, "hooks", $"{request.Action}.sh"),
-            Path.Combine(pluginDir, "hooks", $"{request.Action}.py"),
-            Path.Combine(pluginDir, "hooks", $"{request.Action}.js"),
-            Path.Combine(pluginDir, $"{request.Action}.ps1"),
-            Path.Combine(pluginDir, $"{request.Action}.sh"),
-            Path.Combine(pluginDir, $"{request.Action}.py"),
-            Path.Combine(pluginDir, $"{request.Action}.js")
-        };
+        var isWindows = OperatingSystem.IsWindows();
+        var scriptCandidates = isWindows
+            ? new[]
+            {
+                Path.Combine(pluginDir, "hooks", $"{request.Action}.ps1"),
+                Path.Combine(pluginDir, "hooks", $"{request.Action}.sh"),
+                Path.Combine(pluginDir, "hooks", $"{request.Action}.py"),
+                Path.Combine(pluginDir, "hooks", $"{request.Action}.js"),
+                Path.Combine(pluginDir, $"{request.Action}.ps1"),
+                Path.Combine(pluginDir, $"{request.Action}.sh"),
+                Path.Combine(pluginDir, $"{request.Action}.py"),
+                Path.Combine(pluginDir, $"{request.Action}.js")
+            }
+            : new[]
+            {
+                Path.Combine(pluginDir, "hooks", $"{request.Action}.sh"),
+                Path.Combine(pluginDir, "hooks", $"{request.Action}.py"),
+                Path.Combine(pluginDir, "hooks", $"{request.Action}.js"),
+                Path.Combine(pluginDir, "hooks", $"{request.Action}.ps1"),
+                Path.Combine(pluginDir, $"{request.Action}.sh"),
+                Path.Combine(pluginDir, $"{request.Action}.py"),
+                Path.Combine(pluginDir, $"{request.Action}.js"),
+                Path.Combine(pluginDir, $"{request.Action}.ps1")
+            };
 
         var scriptFile = scriptCandidates.FirstOrDefault(File.Exists);
         if (scriptFile != null)

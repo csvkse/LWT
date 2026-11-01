@@ -79,10 +79,14 @@ export default defineComponent({
       operationStatus.value = null;
 
       try {
+        const actionVerb = props.actionDef.action || props.actionDef.name;
+        const paramVal = props.actionDef.requireParam
+          ? (formValues.value.param ?? '')
+          : (formValues.value.param ?? '');
         const payload = {
           pluginId: props.plugin.id,
-          actionName: props.actionDef.name,
-          parameters: formValues.value,
+          action: actionVerb,
+          param: paramVal,
         };
         const res = await http(API.plugins.action, {
           method: 'POST',
@@ -96,8 +100,13 @@ export default defineComponent({
             pollTimer = setInterval(() => pollOperation(res.data.operationId), 1500);
           } else {
             executing.value = false;
-            toast.success(`动作 [${props.actionDef.name}] 执行完成`);
-            emit('refresh');
+            const isOk = res.data.status === 'succeeded' || res.data.success;
+            if (isOk) {
+              toast.success(`动作 [${props.actionDef.label || actionVerb}] 执行完成`);
+              emit('refresh');
+            } else {
+              toast.error(res.data.message || res.data.error || '动作执行失败');
+            }
           }
         } else {
           executing.value = false;
@@ -138,10 +147,10 @@ export default defineComponent({
             <span class="text-xl">{{ actionDef?.icon || '⚡' }}</span>
             <div>
               <h3 class="font-display font-semibold text-slate-100 text-sm">
-                {{ actionDef?.name }}
+                {{ actionDef?.label || actionDef?.name || actionDef?.action }}
               </h3>
-              <div class="text-xs text-slate-400">
-                插件: {{ plugin?.name }} ({{ plugin?.id }})
+              <div class="text-xs text-slate-400 font-mono">
+                插件: {{ plugin?.name }} ({{ plugin?.id }}) · 动作: {{ actionDef?.action || actionDef?.name }}
               </div>
             </div>
           </div>
@@ -156,7 +165,22 @@ export default defineComponent({
             {{ actionDef.description }}
           </div>
 
-          <div v-if="actionDef?.fields && actionDef.fields.length > 0" class="space-y-3">
+          <!-- 单一必须参数（用于 ban_ip 等动作） -->
+          <div v-if="actionDef?.requireParam" class="space-y-1.5">
+            <label class="text-xs text-slate-300 font-semibold flex items-center justify-between">
+              <span>输入参数:</span>
+              <span class="text-amber-400 text-[10px]">* 必需参数</span>
+            </label>
+            <input
+              v-model="formValues.param"
+              type="text"
+              class="input-base text-xs w-full font-mono text-cyan-300"
+              :placeholder="actionDef?.paramPlaceholder || '请输入执行参数...'"
+            />
+          </div>
+
+          <!-- 多字段参数定义（如果存在） -->
+          <div v-else-if="actionDef?.fields && actionDef.fields.length > 0" class="space-y-3">
             <div class="text-xs font-semibold text-slate-300">参数配置:</div>
             <div v-for="field in actionDef.fields" :key="field.name" class="space-y-1">
               <label class="text-xs text-slate-300 flex items-center justify-between">

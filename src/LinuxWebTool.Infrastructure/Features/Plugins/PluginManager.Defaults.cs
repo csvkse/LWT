@@ -135,6 +135,15 @@ public sealed partial class PluginManager
             Profile = PluginProfile.OneShot,
             Runtime = PluginRuntime.Native,
             Entrypoint = "caddy",
+            Source = "system",
+            Dependencies = new PluginDependencies { Binaries = ["caddy"] },
+            InstallGuide = new Dictionary<string, string>
+            {
+                ["alpine"] = "apk add --no-cache caddy",
+                ["debian"] = "apt update && apt install -y caddy",
+                ["rhel"] = "dnf install -y caddy",
+                ["windows"] = "winget install CaddyServer.Caddy"
+            },
             Network = new PluginNetworkConfig { Mode = "port", Port = 2019 },
             CustomActions =
             [
@@ -171,6 +180,7 @@ public sealed partial class PluginManager
             Profile = PluginProfile.OneShot,
             Runtime = PluginRuntime.Native,
             Entrypoint = OperatingSystem.IsWindows() ? "cmd.exe" : "uname",
+            Source = "system",
             CustomActions = [new PluginCustomAction { Action = "info", Label = "系统信息", Icon = "💻" }]
         };
 
@@ -309,6 +319,17 @@ try {
     Console.WriteLine($"Error: {ex.Message}");
 }
 """;
+        var csproj = """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>
+""";
+        File.WriteAllText(Path.Combine(dir, "demo-dotnet-service.csproj"), csproj);
         File.WriteAllText(Path.Combine(dir, "Program.cs"), cs);
     }
 
@@ -390,7 +411,9 @@ while ($true) {
 
         Directory.CreateDirectory(dir);
         var uiDir = Path.Combine(dir, "ui");
+        var hooksDir = Path.Combine(dir, "hooks");
         Directory.CreateDirectory(uiDir);
+        Directory.CreateDirectory(hooksDir);
 
         var manifest = new PluginManifest
         {
@@ -439,6 +462,13 @@ print(f"[ChatGPT-Channel] Gateway running on port {port}...")
 httpd.serve_forever()
 """;
         File.WriteAllText(Path.Combine(dir, "worker.py"), py);
+
+        File.WriteAllText(Path.Combine(hooksDir, "health.py"), "print('{\"status\":\"healthy\",\"latency_ms\":12,\"channel\":\"ChatGPT Multi-Model Gateway\"}')");
+        File.WriteAllText(Path.Combine(hooksDir, "health.sh"), "echo '{\"status\":\"healthy\",\"latency_ms\":12,\"channel\":\"ChatGPT Multi-Model Gateway\"}'");
+        File.WriteAllText(Path.Combine(hooksDir, "health.ps1"), "Write-Output '{\"status\":\"healthy\",\"latency_ms\":12,\"channel\":\"ChatGPT Multi-Model Gateway\"}'");
+        File.WriteAllText(Path.Combine(hooksDir, "sync_models.py"), "print('{\"models\":[\"gpt-4o\",\"gpt-4o-mini\",\"o1-preview\",\"o3-mini\"],\"synced_at\":\"2026-11-02T01:30:00Z\"}')");
+        File.WriteAllText(Path.Combine(hooksDir, "sync_models.sh"), "echo '{\"models\":[\"gpt-4o\",\"gpt-4o-mini\",\"o1-preview\",\"o3-mini\"],\"synced_at\":\"2026-11-02T01:30:00Z\"}'");
+        File.WriteAllText(Path.Combine(hooksDir, "sync_models.ps1"), "Write-Output '{\"models\":[\"gpt-4o\",\"gpt-4o-mini\",\"o1-preview\",\"o3-mini\"],\"synced_at\":\"2026-11-02T01:30:00Z\"}'");
 
         var html = """
 <!DOCTYPE html>

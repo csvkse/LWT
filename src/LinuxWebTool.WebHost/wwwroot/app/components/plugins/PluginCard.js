@@ -16,6 +16,8 @@ const STATE_MAP = {
   3: { label: '停止中', color: 'bg-orange-500/20 text-orange-300 border border-orange-500/40' },
   4: { label: '降级', color: 'bg-amber-700/30 text-amber-400 border border-amber-600/50' },
   5: { label: '异常', color: 'bg-red-500/20 text-red-300 border border-red-500/40' },
+  6: { label: '已禁用', color: 'bg-slate-700 text-slate-400' },
+  7: { label: '缺少依赖', color: 'bg-amber-500/20 text-amber-300 border border-amber-500/40' },
 };
 
 export default defineComponent({
@@ -37,24 +39,29 @@ export default defineComponent({
     'webview',
     'delete',
     'toggle-enabled',
+    'install-guide',
   ],
   setup(props, { emit }) {
     const isResident = computed(() => props.plugin.profile === 0);
     const isRunning = computed(() => props.plugin.state === 2);
     const isStarting = computed(() => props.plugin.state === 1);
     const isDegradedOrError = computed(() => props.plugin.state === 4 || props.plugin.state === 5);
+    const isMissingRuntime = computed(() => Boolean(props.plugin.isMissingRuntime || props.plugin.state === 7));
 
     const runtimeMeta = computed(() => RUNTIME_MAP[props.plugin.runtime] || RUNTIME_MAP[5]);
     const stateMeta = computed(() => {
+      if (isMissingRuntime.value) {
+        return STATE_MAP[7];
+      }
       if (!isResident.value) {
         return props.plugin.manifest?.enabled !== false
           ? { label: '已就绪', color: 'bg-sky-500/20 text-sky-300 border border-sky-500/40' }
-          : { label: '已禁用', color: 'bg-slate-700 text-slate-400' };
+          : STATE_MAP[6];
       }
       return STATE_MAP[props.plugin.state] || STATE_MAP[0];
     });
 
-    const hasWebview = computed(() => Boolean(props.plugin.manifest?.ui?.hasWebview));
+    const hasWebview = computed(() => Boolean(props.plugin.manifest?.ui?.hasWebview || props.plugin.manifest?.ui?.entry));
     const hasHttpService = computed(() => isResident.value && Boolean(props.plugin.manifest?.network?.supportHttp));
     const customActions = computed(() => props.plugin.manifest?.customActions || []);
 
@@ -68,6 +75,7 @@ export default defineComponent({
     function handleWebview() { emit('webview', props.plugin); }
     function handleDelete() { emit('delete', props.plugin); }
     function handleToggleEnabled() { emit('toggle-enabled', props.plugin); }
+    function handleInstallGuide() { emit('install-guide', props.plugin); }
 
     function openGateway() {
       if (props.plugin.gatewayUrl) {
@@ -80,6 +88,7 @@ export default defineComponent({
       isRunning,
       isStarting,
       isDegradedOrError,
+      isMissingRuntime,
       runtimeMeta,
       stateMeta,
       hasWebview,
@@ -95,6 +104,7 @@ export default defineComponent({
       handleWebview,
       handleDelete,
       handleToggleEnabled,
+      handleInstallGuide,
       openGateway,
     };
   },
@@ -170,6 +180,21 @@ export default defineComponent({
           ⚠️ {{ plugin.lastError }}
         </div>
 
+        <!-- 缺失依赖引导横幅 -->
+        <div v-if="isMissingRuntime" class="mt-2.5 p-2 rounded bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2">
+          <div class="text-[11px] text-amber-300 font-mono truncate" :title="plugin.missingRuntimeMessage || '缺少运行环境或必要依赖'">
+            ⚠️ {{ plugin.missingRuntimeMessage || '缺少运行环境或依赖' }}
+          </div>
+          <button
+            type="button"
+            class="text-[11px] text-cyan-400 hover:text-cyan-300 font-medium shrink-0 underline flex items-center gap-1"
+            @click="handleInstallGuide()"
+          >
+            <span>🛠️</span>
+            <span>安装引导</span>
+          </button>
+        </div>
+
         <!-- 三种 UI 模式触发区 -->
         <div class="mt-3 space-y-2">
           <!-- 模式 3: 嵌入式 Webview 弹窗入口 -->
@@ -199,13 +224,13 @@ export default defineComponent({
           <div v-if="customActions.length > 0" class="flex flex-wrap gap-1.5">
             <button
               v-for="act in customActions"
-              :key="act.name"
+              :key="act.action || act.name"
               type="button"
               class="btn-ghost py-1 px-2 text-[11px] rounded border border-cyber-line hover:border-cyan-500/40 text-slate-200 flex items-center gap-1"
               @click="handleAction(act)"
             >
               <span>{{ act.icon || '⚡' }}</span>
-              <span>{{ act.name }}</span>
+              <span>{{ act.label || act.name || act.action }}</span>
             </button>
           </div>
         </div>
@@ -258,6 +283,14 @@ export default defineComponent({
 
         <!-- 工具抽屉与治理 -->
         <div class="flex items-center gap-1 ml-auto">
+          <button
+            type="button"
+            class="btn-ghost p-1 text-slate-400 hover:text-amber-300 rounded"
+            title="环境依赖与安装指引"
+            @click="handleInstallGuide()"
+          >
+            <span>🛠️</span>
+          </button>
           <button
             type="button"
             class="btn-ghost p-1 text-slate-400 hover:text-cyan-300 rounded"

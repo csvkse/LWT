@@ -11,6 +11,7 @@ import PluginImportModal from '../components/plugins/PluginImportModal.js';
 import PluginLogsDrawer from '../components/plugins/PluginLogsDrawer.js';
 import PluginKvDrawer from '../components/plugins/PluginKvDrawer.js';
 import PluginCreateModal from '../components/plugins/PluginCreateModal.js';
+import PluginInstallGuideModal from '../components/plugins/PluginInstallGuideModal.js';
 
 export default defineComponent({
   name: 'PluginsView',
@@ -23,6 +24,7 @@ export default defineComponent({
     PluginLogsDrawer,
     PluginKvDrawer,
     PluginCreateModal,
+    PluginInstallGuideModal,
   },
   setup() {
     const plugins = ref([]);
@@ -39,6 +41,9 @@ export default defineComponent({
     const showCodeModal = ref(false);
     const showLogsDrawer = ref(false);
     const showKvDrawer = ref(false);
+    const showGuideModal = ref(false);
+    const selectedGuidePlugin = ref(null);
+    const envInfo = ref({});
 
     const activePlugin = ref(null);
     const activeActionDef = ref(null);
@@ -209,8 +214,23 @@ export default defineComponent({
       showKvDrawer.value = true;
     }
 
+    function openInstallGuide(p) {
+      selectedGuidePlugin.value = p;
+      showGuideModal.value = true;
+    }
+
+    async function loadEnvironment() {
+      try {
+        const res = await http(API.services.environment, { method: 'GET' });
+        if (res && res.ok && res.data) {
+          envInfo.value = res.data;
+        }
+      } catch (_) {}
+    }
+
     onMounted(() => {
       loadPlugins();
+      loadEnvironment();
     });
 
     return {
@@ -226,6 +246,9 @@ export default defineComponent({
       showCodeModal,
       showLogsDrawer,
       showKvDrawer,
+      showGuideModal,
+      selectedGuidePlugin,
+      envInfo,
       activePlugin,
       activeActionDef,
       stats,
@@ -242,6 +265,7 @@ export default defineComponent({
       openCode,
       openLogs,
       openKv,
+      openInstallGuide,
     };
   },
   template: `
@@ -390,10 +414,18 @@ export default defineComponent({
           @code="openCode(p)"
           @logs="openLogs(p)"
           @kv="openKv(p)"
+          @install-guide="openInstallGuide(p)"
         />
       </div>
 
       <!-- 弹出模态层 -->
+      <PluginInstallGuideModal
+        :show="showGuideModal"
+        :plugin="selectedGuidePlugin"
+        :env="envInfo"
+        @close="showGuideModal = false"
+      />
+
       <PluginActionModal
         :show="showActionModal"
         :plugin="activePlugin"

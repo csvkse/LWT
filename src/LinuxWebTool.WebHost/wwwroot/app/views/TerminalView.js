@@ -90,12 +90,24 @@ export default defineComponent({
     const router = useRouter();
     const requestedDirectory = () => typeof route.query.cwd === 'string' ? route.query.cwd : undefined;
     const directoryRequest = () => typeof route.query.open === 'string' ? route.query.open : requestedDirectory();
+    const requestedExec = () => typeof route.query.exec === 'string' ? route.query.exec : undefined;
+    const requestedTarget = () => typeof route.query.target === 'string' ? route.query.target : 'container';
     const initialTabId = 'tab-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     const isFullscreen = ref(false);
     const terminalHost = ref(null);
     const activeCommandSet = ref(isWindowsClient ? 'windows' : 'linux');
     const tabs = ref([
-      { id: initialTabId, title: '终端 1', sessionId: '', isConnected: false, awaitingInput: null, workingDirectory: requestedDirectory(), directoryRequest: directoryRequest() },
+      {
+        id: initialTabId,
+        title: requestedTarget() === 'host' ? '[宿主] 终端 1' : '终端 1',
+        target: requestedTarget(),
+        initialCommand: requestedExec(),
+        sessionId: '',
+        isConnected: false,
+        awaitingInput: null,
+        workingDirectory: requestedDirectory(),
+        directoryRequest: directoryRequest(),
+      },
     ]);
     const activeTabId = ref(initialTabId);
     const backgroundSessions = ref([]);
@@ -376,6 +388,13 @@ export default defineComponent({
             try { runtime.fitAddon.fit(); } catch { /* The terminal can be hidden during navigation. */ }
             ws.send(JSON.stringify({ type: 'resize', cols: runtime.term.cols, rows: runtime.term.rows }));
             runtime.term.focus();
+            if (tab.initialCommand) {
+              const cmdToRun = tab.initialCommand;
+              tab.initialCommand = null;
+              setTimeout(() => {
+                sendInput(runtime, cmdToRun + '\r');
+              }, 400);
+            }
           });
           refreshSessions();
         };
@@ -643,8 +662,12 @@ export default defineComponent({
       if (!disposed) listTimer = setInterval(() => refreshSessions(), 5000);
     });
 
-    watch(() => [route.query.cwd, route.query.open], () => {
-      if (requestedDirectory() !== undefined) addTab(requestedDirectory());
+    watch(() => [route.query.cwd, route.query.open, route.query.exec, route.query.target], () => {
+      if (requestedExec() !== undefined) {
+        addTab(requestedDirectory(), requestedTarget(), requestedExec());
+      } else if (requestedDirectory() !== undefined) {
+        addTab(requestedDirectory(), requestedTarget());
+      }
     });
 
     onBeforeUnmount(() => {
