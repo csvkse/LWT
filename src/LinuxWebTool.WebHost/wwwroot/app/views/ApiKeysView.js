@@ -444,7 +444,7 @@ export default defineComponent({
         selectedCommandIds: [],
         mcpFilterMode: 'all',
         allowedTools: getAllCatalogToolNames(),
-        policyTemplateIds: ['tpl_safe_base'],
+        policyTemplateIds: ['tpl_docker_ops'],
         expiresAt: '',
       });
       showModal.value = true;
@@ -478,7 +478,7 @@ export default defineComponent({
         selectedCommandIds: cmdIds,
         mcpFilterMode: hasCustomTools ? 'custom' : 'all',
         allowedTools: hasCustomTools ? [...key.allowedTools] : getAllCatalogToolNames(),
-        policyTemplateIds: key.policyTemplateIds ? [...key.policyTemplateIds] : ['tpl_safe_base'],
+        policyTemplateIds: key.policyTemplateIds ? [...key.policyTemplateIds] : ['tpl_docker_ops'],
         expiresAt: key.expiresAt ? key.expiresAt.slice(0, 16) : '',
       });
       showModal.value = true;
@@ -512,7 +512,7 @@ export default defineComponent({
         selectedCommandIds: cmdIds,
         mcpFilterMode: hasCustomTools ? 'custom' : 'all',
         allowedTools: hasCustomTools ? [...key.allowedTools] : getAllCatalogToolNames(),
-        policyTemplateIds: key.policyTemplateIds ? [...key.policyTemplateIds] : ['tpl_safe_base'],
+        policyTemplateIds: key.policyTemplateIds ? [...key.policyTemplateIds] : ['tpl_docker_ops'],
         expiresAt: key.expiresAt ? key.expiresAt.slice(0, 16) : '',
       });
       showModal.value = true;
