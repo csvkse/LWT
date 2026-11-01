@@ -232,9 +232,17 @@ public sealed class PluginOperationCoordinatorTests
         var cancelled = await coordinator.CancelAsync(accepted.OperationId, "anonymous", CancellationToken.None);
         Assert.NotNull(cancelled);
 
-        // Wait a short moment for cancellation status update
-        await Task.Delay(100);
-        var op = await coordinator.GetAsync(accepted.OperationId, "anonymous", CancellationToken.None);
+        // Wait for cancellation status update
+        PluginOperationDto? op = null;
+        for (var i = 0; i < 60; i++)
+        {
+            op = await coordinator.GetAsync(accepted.OperationId, "anonymous", CancellationToken.None);
+            if (op != null && op.Status == "cancelled")
+            {
+                break;
+            }
+            await Task.Delay(50);
+        }
         Assert.NotNull(op);
         Assert.Equal("cancelled", op.Status);
     }
