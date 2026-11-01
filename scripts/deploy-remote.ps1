@@ -5,7 +5,8 @@ param(
 
     [string]$EnvFile = "env/.envdev",
     [switch]$SkipDeps,
-    [switch]$CheckOnly
+    [switch]$CheckOnly,
+    [string]$RemoteExec = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -119,6 +120,13 @@ try {
         return $output
     }
 
+    if ($RemoteExec) {
+        Write-Step "Executing remote command: $RemoteExec"
+        $execOutput = Invoke-RemoteSsh $RemoteExec
+        Write-Host $execOutput
+        return
+    }
+
     if ($CheckOnly) {
         Write-Step "Checking remote host connectivity and container status..."
         $uptime = Invoke-RemoteSsh "uptime"
@@ -175,7 +183,37 @@ docker run -d \
         Write-Success "Dev container launched!"
 
         Write-Step "4/4 [Dev] Waiting for dev container health..."
-        Start-Sleep -Seconds 3
+        $maxWaitSec = 30
+        $waited = 0
+        $isHealthy = $false
+
+        while ($waited -lt $maxWaitSec) {
+            Start-Sleep -Seconds 2
+            $waited += 2
+            try {
+                $healthStatus = Invoke-RemoteSsh "docker inspect --format '{{.State.Health.Status}}' $containerName 2>/dev/null"
+                if ($healthStatus -match "healthy") {
+                    $isHealthy = $true
+                    break
+                }
+            } catch {}
+        }
+
+        if (-not $isHealthy) {
+            Write-Warn "Dev container did not report healthy yet. Recent logs:"
+            Invoke-RemoteSsh "docker logs --tail 25 $containerName"
+        } else {
+            Write-Success "Dev container is healthy and responding!"
+        }
+
+        # Sync credentials from production container if needed
+        try {
+            Invoke-RemoteSsh "if docker ps -q --filter name=linuxwebtool | grep -q . ; then docker exec linuxwebtool cat /app/data/admin.json > /tmp/admin.json 2>/dev/null && docker cp /tmp/admin.json ${containerName}:/app/data/admin.json 2>/dev/null && rm -f /tmp/admin.json; fi"
+            Write-Success "Synced admin credentials from production container!"
+        } catch {
+            Write-Warn "Failed to sync credentials, container will use its own admin.json."
+        }
+
         $ps = Invoke-RemoteSsh "docker ps --filter name=$containerName"
         Write-Host $ps -ForegroundColor Green
 
