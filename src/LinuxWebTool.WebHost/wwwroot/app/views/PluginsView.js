@@ -417,7 +417,7 @@ export default defineComponent({
         </div>
       </div>
 
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 list-viewport p-1">
         <PluginCard
           v-for="p in filteredPlugins"
           :key="p.id"

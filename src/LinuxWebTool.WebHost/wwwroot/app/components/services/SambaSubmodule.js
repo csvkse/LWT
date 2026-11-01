@@ -151,7 +151,7 @@ export default defineComponent({
       <div v-else-if="shares.length === 0" class="panel p-8 text-center text-slate-500 text-xs">
         当前暂无自定义 Samba 共享，点击「➕ 新建共享」创建首个共享目录。
       </div>
-      <div v-else class="panel overflow-x-auto">
+      <div v-else class="panel overflow-x-auto list-viewport">
         <table class="data-table min-w-[48rem]">
           <thead>
             <tr>

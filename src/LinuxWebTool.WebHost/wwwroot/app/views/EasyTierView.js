@@ -811,7 +811,7 @@ export default defineComponent({
         </button>
       </div>
 
-      <div v-else class="grid grid-cols-1 gap-4">
+      <div v-else class="grid grid-cols-1 gap-4 list-viewport p-1">
         <div v-for="node in nodes" :key="node.id" class="panel p-4 transition-all hover:border-slate-600">
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-700/60">
             <div class="flex items-center gap-3">
@@ -940,7 +940,7 @@ export default defineComponent({
                 暂无发现的对端节点，请检查对端 Peer 地址配置是否连通
               </div>
 
-              <div v-else class="overflow-x-auto">
+              <div v-else class="overflow-x-auto list-viewport">
                 <table class="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr class="text-slate-400 border-b border-slate-800 bg-slate-900/40">
@@ -988,7 +988,7 @@ export default defineComponent({
                 <div class="text-[11px] font-semibold text-slate-400 mb-1.5 flex items-center gap-1.5">
                   <span>虚拟网段路由表 ({{ activeNodeDetail.routes.length }} 条)</span>
                 </div>
-                <div class="overflow-x-auto">
+                <div class="overflow-x-auto list-viewport">
                   <table class="w-full text-left text-[11px] border-collapse bg-slate-900/30 rounded border border-slate-800/60">
                     <thead>
                       <tr class="text-slate-500 border-b border-slate-800 bg-slate-900/60">
@@ -1319,7 +1319,7 @@ export default defineComponent({
                     未配置子网代理。如需让其他虚拟节点直接访问本机的物理局域网设备，请点击上方“+ 新增子网规则”。
                   </div>
 
-                  <div v-else class="overflow-x-auto">
+                  <div v-else class="overflow-x-auto list-viewport">
                     <table class="w-full text-left text-xs border-collapse">
                       <thead>
                         <tr class="text-slate-400 border-b border-slate-800 bg-slate-950/50">

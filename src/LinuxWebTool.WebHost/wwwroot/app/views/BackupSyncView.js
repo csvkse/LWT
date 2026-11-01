@@ -1256,7 +1256,7 @@ export default defineComponent({
           暂无快照数据。当增量备份任务执行后，生成的独立时间线快照将呈现在此。
         </div>
 
-        <div v-else class="panel overflow-x-auto">
+        <div v-else class="panel overflow-x-auto list-viewport">
           <table class="data-table min-w-[56rem]">
             <thead>
               <tr>
@@ -1388,7 +1388,7 @@ export default defineComponent({
         </div>
 
         <!-- 记录表格 -->
-        <div class="panel overflow-x-auto">
+        <div class="panel overflow-x-auto list-viewport">
           <div v-if="records.length === 0" class="p-8 text-center text-slate-500 text-xs">
             {{ recordsLoading ? '正在加载执行记录...' : '暂无相关执行记录' }}
           </div>

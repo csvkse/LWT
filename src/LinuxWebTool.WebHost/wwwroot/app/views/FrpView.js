@@ -408,7 +408,7 @@ export default defineComponent({
         <p>暂无配置的穿透线路，请点击右上角「+ 新建穿透线路」添加您的第一个服务映射。</p>
       </div>
 
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 list-viewport p-1">
         <div v-for="line in lines" :key="line.id"
              class="panel p-5 flex flex-col justify-between border-slate-700/60 hover:border-slate-600 transition-colors">
           <!-- 线路卡片头部 -->

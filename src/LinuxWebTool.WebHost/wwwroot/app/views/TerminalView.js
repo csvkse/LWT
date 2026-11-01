@@ -787,7 +787,7 @@ export default defineComponent({
         </div>
       </div>
 
-      <div v-if="showBackground" class="panel p-3 space-y-2">
+      <div v-if="showBackground" class="panel p-3 space-y-2 card-list-viewport">
         <div class="flex justify-between items-center"><span>后台终端</span><button class="btn btn-xs" :disabled="listBusy" @click="refreshSessions()">{{ listBusy ? '加载中…' : '刷新' }}</button></div>
         <p class="text-xs text-slate-400">已使用终端断开后继续运行；未使用且空闲的终端会自动清理。服务或容器重启后会话结束。</p>
         <p v-if="listError" class="text-xs text-rose-400">{{ listError }}</p>

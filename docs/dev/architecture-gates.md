@@ -64,6 +64,8 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + MCP 端点
 | `FE-TEMPLATE-TAG-BALANCE` | Vue 组件模板关键结构标签（div/table/thead/tbody/section/aside）必须严格开闭平衡 | frontend-gate.cjs |
 | `FE-TERMINAL-SESSION-HEAL` | TerminalView 必须具备失效会话自动重置与新建降级机制（防止服务重启或会话过期后前端卡死） | frontend-gate.cjs |
 | `FE-FILE-SIZE-LIMIT` | 前端单文件代码行数门禁（视图 <= 2000 行，非视图模块 <= 400 行） | frontend-gate.cjs |
+| `FE-CONTAINER-HEIGHT-LIMIT` | 禁止前端列表容器无限长度延伸，包含动态长列表（v-for）的容器必须具备逻辑高度约束（分页适配器 usePagination、max-h-* 或 flex-1 min-h-0 + overflow-y-auto） | frontend-gate.cjs |
+
 
 ## 约定要点
 

@@ -356,7 +356,7 @@ export default defineComponent({
         <button class="btn btn-xs ml-auto" @click="load()">重试</button>
       </div>
 
-      <div class="panel overflow-x-auto">
+      <div class="panel overflow-x-auto list-viewport">
         <table class="data-table min-w-[48rem]">
           <thead>
             <tr>

@@ -21,6 +21,7 @@
  *  FE-API-SIGNATURE   API 调用签名严格校验（禁止对字符串进行函数调用、禁止对函数作为纯值无参传递）
  *  FE-EASYTIER-IP-MODE EasyTier 新建/编辑提交必须保证静态 IPv4 优先于 DHCP（组件行为测试）
  *  FE-FILE-SIZE-LIMIT 单文件代码行数与单一职责门禁（views <= 2000 行，非 views <= 400 行）
+ *  FE-CONTAINER-HEIGHT-LIMIT 列表容器必须有逻辑高度限制（禁止无界列表，需配置分页适配器、max-h-* 或 flex-1 min-h-0 + overflow-y-auto）
  *
  * 基线：frontend-gate-baseline.json 冻结存量债务，只允许删除条目，不允许新增。
  */
@@ -378,6 +379,39 @@ for (const file of files) {
           add('FE-TEMPLATE-TAG-BALANCE', file, `<${tag}> 标签不平衡: ${opens} 处开启 vs ${closes} 处闭合，可能导致 DOM 树结构异常`);
         }
       }
+
+      // FE-CONTAINER-HEIGHT-LIMIT：前端列表容器显示门禁（禁止无界无限长度列表，必须有逻辑高度限制或分页切片）
+      const forMatches = tpl.matchAll(/<([a-z0-9-]+)\b([^>]*?v-for\s*=\s*["']([^"']+)["'][^>]*)>/gi);
+      for (const match of forMatches) {
+        const tagName = match[1].toLowerCase();
+        const forExpr = match[3];
+
+        // 1. 豁免元素与短静态列表 (不属于长列表容器)
+        const isExemptTag = ['option', 'button', 'span', 'label', 'router-link', 'template', 'a', 'kbd'].includes(tagName);
+        const isExemptVar = /\b(tabs|groups|options|breadcrumbs|presets|columns|commonPresets|excludeChips|categories|distroOptions|TABS|RANGES|PROCESS_SORTS|QUICK_COMMANDS|EXEC_PRESETS|STATUS_OPTIONS|SOURCE_OPTIONS|PROTOCOL_OPTIONS|NAV_GROUPS|hardware|disks|networks|stages|steps|argumentBindings|artifactRules|fields|toastState\.items|moduleCatalog)\b/i.test(forExpr);
+        if (isExemptTag || isExemptVar) continue;
+
+        // 2. 检查数据源是否已接入逻辑数据有界控制 (分页切片 pagedUnits, pagination.pagedItems, slice, 或视图自带分页控制器)
+        const isPagedData = /\b(paged\w*|slice\s*\(|pagination\.)/i.test(forExpr);
+        const hasPaginationControl = /\b(PaginationBar|pagination-bar)\b/i.test(tpl) ||
+          (/\b(page|pageSize)\b/i.test(content) && /\b(total|totalPages)\b/i.test(content));
+        if (isPagedData || hasPaginationControl) continue;
+
+        // 3. 向上回溯分析宿主容器是否有物理高度约束
+        const matchIdx = match.index;
+        const surroundingSnippet = tpl.slice(Math.max(0, matchIdx - 1800), matchIdx + match[0].length);
+        const hasMaxHeight = /\b(?:max-h-|h-\[|h-full|h-screen)/.test(surroundingSnippet);
+        const hasFlexScroll = /\bflex-1\b/.test(surroundingSnippet) && /\boverflow-(?:y-)?(?:auto|scroll)\b/.test(surroundingSnippet);
+        const hasBoundedClass = /\b(output-block|bounded-list|list-viewport|modal-list-viewport|card-list-viewport)\b/.test(surroundingSnippet);
+
+        if (!hasMaxHeight && !hasFlexScroll && !hasBoundedClass) {
+          add(
+            'FE-CONTAINER-HEIGHT-LIMIT',
+            file,
+            `列表循环 "${forExpr}" 所在容器未声明逻辑高度限制，且数据未分页。请添加分页适配器 (usePagination) 或添加视口约束类 (如 .list-viewport、max-h-[70vh] overflow-y-auto 或 flex-1 min-h-0)`
+          );
+        }
+      }
     }
 
     // FE-TERMINAL-SESSION-HEAL：TerminalView 必须具备失效会话自动重置与新建降级机制，防止服务重启后前端卡死
@@ -520,4 +554,14 @@ if (esmIntegrityResult.error || esmIntegrityResult.status !== 0) {
   process.exit(1);
 }
 console.log('✅ FE-IMPORT-EXPORT：ESM 导入导出符号完整性门禁通过');
+const containerHeightTests = path.resolve(__dirname, '../../../tests/frontend/container-height-guard.test.mjs');
+const containerHeightResult = spawnSync(process.execPath, ['--test', containerHeightTests], {
+  encoding: 'utf8', timeout: 30000, windowsHide: true,
+});
+if (containerHeightResult.error || containerHeightResult.status !== 0) {
+  console.error('[FE-CONTAINER-HEIGHT-LIMIT] 前端列表容器高度限制行为门禁失败');
+  console.error(containerHeightResult.stdout || containerHeightResult.stderr || containerHeightResult.error?.message);
+  process.exit(1);
+}
+console.log('✅ FE-CONTAINER-HEIGHT-LIMIT：前端列表容器逻辑高度限制门禁通过');
 console.log('✅ 前端架构门禁通过');

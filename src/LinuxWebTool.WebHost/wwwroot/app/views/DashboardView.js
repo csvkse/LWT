@@ -64,7 +64,7 @@ export default defineComponent({
             <h3 class="text-sm text-slate-300 font-medium">最近执行</h3>
             <button class="btn btn-xs" @click="goHistory()">全部历史</button>
           </div>
-          <div class="overflow-x-auto">
+          <div class="overflow-x-auto card-list-viewport">
             <table class="data-table min-w-[28rem]">
               <thead><tr><th>时间</th><th>名称</th><th>来源</th><th>状态</th><th>耗时</th></tr></thead>
               <tbody>
@@ -83,7 +83,7 @@ export default defineComponent({
 
         <div class="panel p-4">
           <h3 class="text-sm text-slate-300 font-medium mb-3">最近失败</h3>
-          <div class="overflow-x-auto">
+          <div class="overflow-x-auto card-list-viewport">
             <table class="data-table min-w-[24rem]">
               <thead><tr><th>时间</th><th>名称</th><th>状态</th><th>退出码</th></tr></thead>
               <tbody>
@@ -102,7 +102,7 @@ export default defineComponent({
 
       <div class="panel p-4">
         <h3 class="text-sm text-slate-300 font-medium mb-3">即将执行</h3>
-        <div class="flex flex-col gap-2">
+        <div class="flex flex-col gap-2 card-list-viewport">
           <p v-if="!data.nextRuns.length" class="text-slate-600 text-sm">没有启用中的定时任务</p>
           <div v-for="item in data.nextRuns" :key="item.id"
                class="flex items-center gap-2 sm:gap-3 text-sm border border-cyber-line/60 rounded-lg px-3 py-2 flex-wrap">

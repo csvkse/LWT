@@ -141,35 +141,33 @@ try {
     # Strategy A: Linux Fast Dev Pipeline (Local Git Bundle Sync + Fast JIT Build)
     # =========================================================================
     if ($Mode -eq "Dev") {
-        Write-Step "1/4 [Dev] Bundling local HEAD and syncing to $devWorkdir on remote host..."
+        Write-Step "1/4 [Dev] Bundling local HEAD and streaming directly to $devWorkdir on remote host..."
         $localBundle = "dev-bundle.tar.gz"
         try {
-            # 打包本地最新已提交代码（排除无关大文件，仅 3MB，毫秒级生成）
-            & git archive -o $localBundle HEAD
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to create local git archive bundle"
+            if (Test-Path $localBundle) { Remove-Item $localBundle -Force }
+            $p = Start-Process -FilePath "git" -ArgumentList "archive", "--output=$localBundle", "HEAD" -NoNewWindow -Wait -PassThru
+            if ($p.ExitCode -ne 0 -or -not (Test-Path $localBundle)) {
+                throw "Failed to create local git archive bundle at $localBundle"
             }
 
-            # 通过 SSH/SCP 高速推送至远程主机（免疫 GitHub GFW 网络抖动）
-            $remoteTarget = "{0}@{1}:/tmp/{2}" -f $deployUser, $deployHost, $localBundle
-            $scpArgs = @(
+            # 确保目标目录存在
+            Invoke-RemoteSsh "mkdir -p $devWorkdir"
+
+            # 使用 Start-Process -RedirectStandardInput 将二进制 tar 包直接输入 SSH stdin 并在远程内存解压
+            $streamArgs = @(
                 "-i", $tempKeyPath,
-                "-P", $deployPort,
+                "-p", "$deployPort",
                 "-o", "StrictHostKeyChecking=no",
                 "-o", "UserKnownHostsFile=/dev/null",
                 "-o", "LogLevel=ERROR",
-                $localBundle,
-                $remoteTarget
+                "$deployUser@$deployHost",
+                "tar -xzf - -C $devWorkdir"
             )
-            & scp @scpArgs
-            if ($LASTEXITCODE -ne 0) {
-                throw "SCP dev bundle failed with exit code $($LASTEXITCODE)"
+            $streamProc = Start-Process -FilePath "ssh" -ArgumentList $streamArgs -RedirectStandardInput $localBundle -NoNewWindow -Wait -PassThru
+            if ($streamProc.ExitCode -ne 0) {
+                throw "Direct SSH stream extraction failed with exit code $($streamProc.ExitCode)"
             }
-
-            # 远程解压至开发工作空间
-            $extractScript = "mkdir -p $devWorkdir && tar -xzf /tmp/$localBundle -C $devWorkdir && rm -f /tmp/$localBundle"
-            Invoke-RemoteSsh $extractScript
-            Write-Success "Source code bundle synchronized to $devWorkdir in <1s!"
+            Write-Success "Source code bundle synchronized and extracted to $devWorkdir in <1s!"
         }
         finally {
             if (Test-Path $localBundle) {

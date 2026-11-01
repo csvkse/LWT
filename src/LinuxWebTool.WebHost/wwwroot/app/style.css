@@ -192,3 +192,31 @@ button.badge:hover, .badge[role="button"]:hover, .badge.cursor-pointer:hover {
   overflow-y: auto !important;
 }
 
+/* 标准长列表高度限制视口类（配合 GPU 隔离与禁用滚动锚定跳动） */
+.list-viewport {
+  max-height: 70vh;
+  overflow-y: auto;
+  position: relative;
+  contain: paint layout;
+  overflow-anchor: none;
+}
+
+/* 模态弹窗内部列表自适应高度类 */
+.modal-list-viewport {
+  flex: 1 1 0%;
+  min-height: 0;
+  max-height: 65vh;
+  overflow-y: auto;
+  contain: paint layout;
+  overflow-anchor: none;
+}
+
+/* 紧凑型卡片内嵌列表类 */
+.card-list-viewport {
+  max-height: 24rem;
+  overflow-y: auto;
+  contain: paint layout;
+  overflow-anchor: none;
+}
+
+

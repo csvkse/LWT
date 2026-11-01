@@ -388,7 +388,7 @@ export default defineComponent({
         <button class="btn btn-xs ml-auto" @click="load()">重试</button>
       </div>
 
-      <div class="panel overflow-x-auto">
+      <div class="panel overflow-x-auto list-viewport">
         <table class="data-table min-w-[58rem]">
           <thead>
             <tr><th>状态</th><th>类型</th><th>名称</th><th>远端地址</th><th>本地挂载点</th><th>账户</th><th>选项</th><th>自挂</th><th class="text-right">操作</th></tr>

@@ -532,7 +532,7 @@ export default defineComponent({
         <div v-else-if="websites.length === 0" class="text-sm text-slate-400 py-12 text-center">
           暂未登记任何网站代理，点击右上角登记内网设备 Web 界面（如路由器、NAS、PVE、打印机等）。
         </div>
-        <div v-else class="overflow-x-auto">
+        <div v-else class="overflow-x-auto list-viewport">
           <table class="w-full text-left text-xs border-collapse min-w-[50rem]">
             <thead>
               <tr class="border-b border-slate-700/50 text-slate-400 font-medium">
@@ -606,7 +606,7 @@ export default defineComponent({
         <div v-else-if="routes.length === 0" class="text-sm text-slate-400 py-12 text-center">
           暂无自定义 L7 路由规则。
         </div>
-        <div v-else class="overflow-x-auto">
+        <div v-else class="overflow-x-auto list-viewport">
           <table class="w-full text-left text-xs border-collapse min-w-[54rem]">
             <thead>
               <tr class="border-b border-slate-700/50 text-slate-400 font-medium">
@@ -649,7 +649,7 @@ export default defineComponent({
         <div v-else-if="clusters.length === 0" class="text-sm text-slate-400 py-12 text-center">
           暂无集群配置。
         </div>
-        <div v-else class="overflow-x-auto">
+        <div v-else class="overflow-x-auto list-viewport">
           <table class="w-full text-left text-xs border-collapse min-w-[48rem]">
             <thead>
               <tr class="border-b border-slate-700/50 text-slate-400 font-medium">
@@ -693,7 +693,7 @@ export default defineComponent({
         <div v-else-if="tcpRoutes.length === 0" class="text-sm text-slate-400 py-12 text-center">
           暂无端口转发规则。
         </div>
-        <div v-else class="overflow-x-auto">
+        <div v-else class="overflow-x-auto list-viewport">
           <table class="w-full text-left text-xs border-collapse min-w-[46rem]">
             <thead>
               <tr class="border-b border-slate-700/50 text-slate-400 font-medium">

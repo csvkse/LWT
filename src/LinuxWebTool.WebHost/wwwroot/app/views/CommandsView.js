@@ -476,7 +476,7 @@ export default defineComponent({
           <button class="btn btn-primary sm:ml-auto" @click="openCreate()">＋ 新建</button>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 list-viewport p-1">
           <p v-if="!filteredCommands.length && !loading" class="text-slate-600 text-sm panel p-6 text-center">
             {{ keyword ? '没有匹配的指令' : '还没有保存指令，点右上角「新建」开始' }}
           </p>

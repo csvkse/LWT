@@ -592,7 +592,7 @@ export default defineComponent({
         </div>
 
         <!-- 工作流卡片列表 -->
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 list-viewport p-1">
           <div v-for="wf in filteredWorkflows" :key="wf.id"
                class="panel p-4 flex flex-col justify-between transition hover:border-cyan-500/40 relative">
             <!-- 头部：名称与状态 -->

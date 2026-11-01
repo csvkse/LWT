@@ -174,7 +174,7 @@ export default defineComponent({
         <div v-else-if="containers.length === 0" class="panel p-8 text-center text-slate-500 text-xs">
           暂未发现任何 Docker 容器。可检查 Docker Daemon 或启动新容器。
         </div>
-        <div v-else class="panel overflow-x-auto">
+        <div v-else class="panel overflow-x-auto list-viewport">
           <table class="data-table min-w-[52rem]">
             <thead>
               <tr>
@@ -268,7 +268,7 @@ export default defineComponent({
         <div v-else-if="images.length === 0" class="panel p-8 text-center text-slate-500 text-xs">
           未检索到本地 Docker 镜像。
         </div>
-        <div v-else class="panel overflow-x-auto">
+        <div v-else class="panel overflow-x-auto list-viewport">
           <table class="data-table min-w-[40rem]">
             <thead>
               <tr>

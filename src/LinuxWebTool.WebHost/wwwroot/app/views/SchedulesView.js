@@ -344,7 +344,7 @@ export default defineComponent({
         <button class="btn btn-primary ml-auto" @click="openCreate()">＋ 新建任务</button>
       </div>
 
-      <div class="panel overflow-x-auto">
+      <div class="panel overflow-x-auto list-viewport">
         <table class="data-table min-w-[58rem]">
           <thead>
             <tr>

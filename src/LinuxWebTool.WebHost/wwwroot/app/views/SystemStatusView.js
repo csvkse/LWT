@@ -419,7 +419,7 @@ export default defineComponent({
                       @click="overviewProcessSort = s.value">{{ s.label }}</button>
             </div>
           </div>
-          <div class="flex flex-col gap-1">
+          <div class="flex flex-col gap-1 card-list-viewport">
             <div v-for="p in overviewProcesses(status, overviewProcessSort)" :key="'o' + p.pid"
                  class="py-1 border-b border-cyber-line/40">
               <div class="flex justify-between text-xs">
@@ -511,7 +511,7 @@ export default defineComponent({
             </div>
 
             <div class="text-xs text-slate-500 mb-2">当时的 Top 进程</div>
-            <div class="flex flex-col gap-1">
+            <div class="flex flex-col gap-1 card-list-viewport">
               <div v-for="proc in sortedProcesses(selectedPoint.processes, processSort)" :key="proc.pid"
                    class="py-1 border-b border-cyber-line/40">
                 <div class="flex justify-between text-xs">

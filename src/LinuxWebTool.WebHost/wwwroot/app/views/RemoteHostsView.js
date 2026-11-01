@@ -1209,7 +1209,7 @@ export default defineComponent({
         <button class="btn btn-primary text-xs mt-2" @click="openAddModal()">立即添加</button>
       </div>
       <!-- 主机资产卡片网格 -->
-      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 list-viewport p-1">
         <div
           v-for="host in filteredHosts"
           :key="host.id"
