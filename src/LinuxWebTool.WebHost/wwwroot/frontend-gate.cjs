@@ -25,6 +25,7 @@
  *  FE-THEME-FORM-CONTROL-DARK 所有表单输入控件（input/select/textarea）必须显式具备暗黑主题类名或暗色底色，严禁回退至白底默认样式
  *  FE-PLUGIN-DATA-PURITY PluginsView 全局数据加载禁止传递响应式过滤参数，防止刷新冲垮宏观统计卡片与分类树事实源
  *  FE-PLUGIN-FILTER-FSM 插件中心策略模式多维过滤、有限状态机与暗黑搜索框契约行为门禁
+ *  FE-PLUGIN-FILE-TREE 插件代码编辑文件树适配器与折叠状态机行为门禁（树状展开/折叠、Folders-First 排序与祖先自动聚焦）
  *
  * 基线：frontend-gate-baseline.json 冻结存量债务，只允许删除条目，不允许新增。
  */
@@ -640,4 +641,15 @@ if (pluginResult.error || pluginResult.status !== 0) {
   process.exit(1);
 }
 console.log('✅ FE-PLUGIN-FILTER-FSM：插件策略过滤、状态机与暗黑主题门禁通过');
+
+const fileTreeTests = path.resolve(__dirname, '../../../tests/frontend/file-tree-adapter.test.mjs');
+const fileTreeResult = spawnSync(process.execPath, ['--experimental-vm-modules', '--test', fileTreeTests], {
+  encoding: 'utf8', timeout: 30000, windowsHide: true,
+});
+if (fileTreeResult.error || fileTreeResult.status !== 0) {
+  console.error('[FE-PLUGIN-FILE-TREE] 插件文件树适配器与状态机行为门禁失败');
+  console.error(fileTreeResult.stdout || fileTreeResult.stderr || fileTreeResult.error?.message);
+  process.exit(1);
+}
+console.log('✅ FE-PLUGIN-FILE-TREE：插件文件树适配器与状态机行为门禁通过');
 console.log('✅ 前端架构门禁通过');

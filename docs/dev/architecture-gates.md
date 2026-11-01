@@ -68,6 +68,7 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + MCP 端点
 | `FE-THEME-FORM-CONTROL-DARK` | 所有表单输入控件（input/select/textarea）必须显式具备暗黑主题类名（.input 等）或暗色底色，严禁回退至浏览器默认白底 | frontend-gate.cjs |
 | `FE-PLUGIN-DATA-PURITY` | PluginsView 全局数据加载函数禁止传递响应式过滤参数，防止增删改查刷新后冲垮宏观统计卡片与分类树事实源 | frontend-gate.cjs |
 | `FE-PLUGIN-FILTER-FSM` | 插件中心多维策略过滤、有限状态机生命周期守卫与暗黑搜索框契约行为门禁 | frontend-gate.cjs / node --test |
+| `FE-PLUGIN-FILE-TREE` | 插件中心代码编辑器文件树适配器与折叠状态机行为门禁（树状多叉构建、Folders-First 排序与祖先自动聚焦） | frontend-gate.cjs / node --test |
 
 
 ## 约定要点

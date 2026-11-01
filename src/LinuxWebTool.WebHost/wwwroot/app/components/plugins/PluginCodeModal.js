@@ -113,6 +113,19 @@ export default defineComponent({
       }
     }
 
+    async function onNodeClick(node) {
+      if (!node) return;
+      if (node.isDir) {
+        toggleFolder(node.fullPath);
+      } else {
+        await switchFile(node.fullPath);
+      }
+    }
+
+    function clearDebugResult() {
+      debugResult.value = null;
+    }
+
     function handleClose() {
       emit('close');
     }
@@ -126,6 +139,11 @@ export default defineComponent({
       codeContent,
       debugInput,
       debugResult,
+      visibleNodes,
+      onNodeClick,
+      expandAll,
+      collapseAll,
+      clearDebugResult,
       switchFile,
       handleSave,
       handleDebug,
@@ -181,20 +199,67 @@ export default defineComponent({
         <!-- 主体：左侧文件列表 + 右侧编辑/调试区 -->
         <div class="flex-1 flex min-h-0 overflow-hidden">
           <!-- 左侧文件树 -->
-          <div class="w-56 shrink-0 bg-slate-950 border-r border-cyber-line/60 p-2 overflow-y-auto">
-            <div class="text-[11px] font-semibold text-slate-400 px-2 py-1 uppercase tracking-wider">
-              插件文件 ({{ fileList.length }})
+          <div class="w-60 shrink-0 bg-slate-950 border-r border-cyber-line/60 flex flex-col overflow-hidden">
+            <!-- 头部操作栏 -->
+            <div class="px-2.5 py-1.5 bg-slate-900/80 border-b border-cyber-line/40 flex items-center justify-between shrink-0">
+              <span class="text-[11px] font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1">
+                <span>📁</span>
+                <span>插件文件 ({{ fileList.length }})</span>
+              </span>
+              <div class="flex items-center gap-1">
+                <button
+                  type="button"
+                  class="btn-ghost text-[10px] px-1.5 py-0.5 text-slate-400 hover:text-cyan-300"
+                  title="展开全部目录"
+                  @click="expandAll()"
+                >
+                  展开
+                </button>
+                <button
+                  type="button"
+                  class="btn-ghost text-[10px] px-1.5 py-0.5 text-slate-400 hover:text-cyan-300"
+                  title="折叠除当前文件外的所有目录"
+                  @click="collapseAll()"
+                >
+                  收起
+                </button>
+              </div>
             </div>
-            <div class="mt-1 space-y-0.5">
+
+            <!-- 树节点列表（高度受控，自适应滚动） -->
+            <div class="flex-1 min-h-0 overflow-y-auto list-viewport p-1 space-y-0.5 font-mono text-xs select-none">
+              <div v-if="visibleNodes.length === 0" class="p-3 text-center text-slate-500 text-xs italic">
+                暂无文件
+              </div>
               <button
-                v-for="f in fileList"
-                :key="f"
+                v-for="node in visibleNodes"
+                :key="node.fullPath"
                 type="button"
-                class="w-full text-left px-2 py-1.5 rounded text-xs truncate transition-colors font-mono"
-                :class="activeFile === f ? 'bg-cyan-500/20 text-cyan-300 font-semibold' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'"
-                @click="switchFile(f)"
+                class="w-full flex items-center text-left py-1 px-1.5 rounded transition-colors group"
+                :class="node.isDir
+                  ? 'text-slate-300 hover:bg-slate-900/80 font-medium'
+                  : (activeFile === node.fullPath
+                    ? 'bg-cyan-500/20 text-cyan-300 font-semibold'
+                    : 'text-slate-400 hover:bg-slate-900/80 hover:text-slate-200')"
+                :style="{ paddingLeft: (node.depth * 14 + 6) + 'px' }"
+                @click="onNodeClick(node)"
               >
-                📄 {{ f }}
+                <!-- 展开/折叠指示器 -->
+                <span v-if="node.isDir" class="w-3 text-center text-[10px] text-slate-500 group-hover:text-cyan-400 shrink-0 mr-1">
+                  {{ node.isExpanded ? '▾' : '▸' }}
+                </span>
+                <span v-else class="w-3 shrink-0 mr-1"></span>
+
+                <!-- 类型图标 -->
+                <span class="mr-1.5 text-xs shrink-0 select-none">{{ node.icon }}</span>
+
+                <!-- 节点名称 -->
+                <span class="truncate flex-1" :title="node.fullPath">{{ node.name }}</span>
+
+                <!-- 目录子项计数徽标 -->
+                <span v-if="node.isDir" class="text-[10px] text-slate-500 font-normal ml-1 shrink-0">
+                  ({{ node.childCount }})
+                </span>
               </button>
             </div>
           </div>
@@ -226,7 +291,7 @@ export default defineComponent({
                     退出码: {{ debugResult.exitCode }} | 耗时: {{ debugResult.durationMs }}ms
                   </span>
                 </span>
-                <button type="button" class="btn-ghost text-[11px] p-0.5 text-slate-400 hover:text-slate-200" @click="debugResult = null">
+                <button type="button" class="btn-ghost text-[11px] p-0.5 text-slate-400 hover:text-slate-200" @click="clearDebugResult()">
                   清除
                 </button>
               </div>
