@@ -2134,7 +2134,7 @@ public class ArchitectureTests
         Assert.True(File.Exists(preCommitFile), ".githooks/pre-commit 必须存在");
         Assert.True(File.Exists(baselineFile), ".githooks/security-gate-baseline.json 必须存在");
 
-        // 2. 验证 security-gate.cjs 规则完整性（覆盖已知泄露、隧道ID、OpenAI Key、管理员密码与 EasyTier）
+        // 2. 验证 security-gate.cjs 规则完整性（覆盖已知泄露、隧道ID、OpenAI Key、管理员密码、EasyTier、多字符集香农熵与脱敏合规）
         var gateContent = File.ReadAllText(securityGateFile);
         Assert.Contains("SEC-KNOWN-LEAKS", gateContent);
         Assert.Contains("SEC-TUNNEL-ID", gateContent);
@@ -2142,6 +2142,10 @@ public class ArchitectureTests
         Assert.Contains("SEC-ADMIN-PASSWORD", gateContent);
         Assert.Contains("SEC-EASYTIER-SECRET", gateContent);
         Assert.Contains("SEC-HIGH-ENTROPY-SECRET", gateContent);
+        Assert.Contains("SEC-ENTROPY-BASE64", gateContent);
+        Assert.Contains("SEC-ENTROPY-HEX", gateContent);
+        Assert.Contains("SEC-PSEUDO-MASKING", gateContent);
+        Assert.Contains("SEC-UNMASKED-NETWORK-ADDRESS", gateContent);
 
         // 3. 验证 .gitignore 强制隔离敏感目录 docs_secret/ 与 env/
         var gitignoreFile = Path.Combine(RepoRoot, ".gitignore");

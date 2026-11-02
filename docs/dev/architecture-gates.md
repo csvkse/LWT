@@ -73,7 +73,7 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + MCP 端点
 | `LinuxArch037` | 插件运行时生态一致性与多发行版包管理器适配门禁（统一 TargetFramework net10.0、Alpine 禁 apt、Debian 禁 apk） | xUnit（动态反射与指引矩阵验证） |
 | `FE-CRLF-FORBIDDEN` | 前端源码严禁包含 `\r` (CRLF)，防止 Windows 编辑器污染跨平台静态资产 | frontend-gate.cjs |
 | `FE-DISTRO-CMD-INTEGRITY` | 插件默认安装指引必须严格区分发行版包管理器（Alpine 禁 apt、Debian 禁 apk），且 .NET 必须与 net10 对齐 | frontend-gate.cjs / node --test |
-| `LinuxArch068` | 凭据安全防御：未脱敏明文密码、真实网络地址、隧道 ID 与私钥防泄露门禁（结合 .githooks 提交钩子） | xUnit / .githooks/security-gate.cjs |
+| `LinuxArch068` | 凭据安全防御：未脱敏明文密码、真实网络地址、隧道 ID、私钥、多字符集香农熵与脱敏合规防伪门禁（结合 .githooks 提交钩子） | xUnit / .githooks/security-gate.cjs |
 
 
 ## 约定要点

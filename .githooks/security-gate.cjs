@@ -40,8 +40,35 @@ function shannonEntropy(str) {
   return entropy;
 }
 
+// 归一化度量熵计算
+function metricEntropy(str, charsetSize) {
+  const ent = shannonEntropy(str);
+  const maxEnt = Math.log2(charsetSize);
+  return maxEnt > 0 ? ent / maxEnt : 0;
+}
+
 // 常见 Mock / 测试词典
 const MOCK_LEXICON = /mock|test|dummy|sample|example|placeholder|super-safe|super_sensitive|changeme|default|existing_header|your[-_]?key|123456/i;
+
+// IPv4 地址分类合规性引擎 (RFC 1918 / RFC 5737 / RFC 6598 / Loopback)
+function isSafeIPv4(ip) {
+  const parts = ip.split('.').map(p => parseInt(p, 10));
+  if (parts.length !== 4 || parts.some(p => isNaN(p) || p < 0 || p > 255)) return true;
+  const [a, b, c, d] = parts;
+  if (a === 127) return true; // Loopback
+  if (a === 0 || (a === 255 && b === 255 && c === 255 && d === 255)) return true; // 0.0.0.0, 255.255.255.255
+  if (a === 10) return true; // RFC 1918
+  if (a === 172 && b >= 16 && b <= 31) return true; // RFC 1918
+  if (a === 192 && b === 168) return true; // RFC 1918
+  if (a === 192 && b === 0 && c === 2) return true; // RFC 5737 TEST-NET-1
+  if (a === 198 && b === 51 && c === 100) return true; // RFC 5737 TEST-NET-2
+  if (a === 203 && b === 0 && c === 113) return true; // RFC 5737 TEST-NET-3
+  if (a === 169 && b === 254) return true; // RFC 3927 Link-Local
+  if (a === 198 && (b === 18 || b === 19)) return true; // RFC 2544 Benchmark
+  if (a === 100 && b >= 64 && b <= 127) return true; // RFC 6598 CGNAT / Shared Address Space
+  if (ip === '8.8.8.8' || ip === '8.8.4.4' || ip === '1.1.1.1' || ip === '1.2.3.4') return true; // Public DNS / Test Stubs
+  return false;
+}
 
 // 1. 策略模式：检测规则策略集
 const RULES = [
@@ -172,6 +199,114 @@ const RULES = [
         if (ent > 3.65 && !/^[0-9a-fA-F-]+$/.test(val)) { // 排除纯 Guid/Hex
           return { match: val, message: `高熵可疑凭据 (熵值: ${ent.toFixed(2)}): ${val}` };
         }
+      }
+      return null;
+    }
+  },
+  {
+    id: 'SEC-ENTROPY-BASE64',
+    name: '多字符集 Base64 / JWT / Bearer 高熵 Token 防泄露',
+    description: '通过自适应度量熵拦截未经脱敏的 JWT、Bearer 与高熵 Base64 凭据',
+    evaluate(line) {
+      if (MOCK_LEXICON.test(line)) return null;
+      // 1. JWT 深度识别
+      const jwtRe = /\beyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\b/g;
+      let m = jwtRe.exec(line);
+      if (m) {
+        return { match: m[0], message: `检测到疑似真实 JWT 凭据: ${m[0].substring(0, 20)}...` };
+      }
+      // 2. Bearer Token 识别
+      const bearerRe = /\bBearer\s+([a-zA-Z0-9_\-\.]{24,})\b/g;
+      while ((m = bearerRe.exec(line)) !== null) {
+        const val = m[1];
+        if (MOCK_LEXICON.test(val) || val.includes('...')) continue;
+        const ent = shannonEntropy(val);
+        if (ent > 4.55) {
+          return { match: val, message: `检测到高熵 Bearer Token (熵值: ${ent.toFixed(2)}): ${val.substring(0, 16)}...` };
+        }
+      }
+      // 3. 赋值语句高熵 Base64
+      const assignRe = /(?:secret|token|credential|api[-_]?key|private[-_]?key)\s*[:=]\s*["']?([A-Za-z0-9+/=_-]{24,})["']?/gi;
+      while ((m = assignRe.exec(line)) !== null) {
+        const val = m[1];
+        if (MOCK_LEXICON.test(val) || val.includes('${') || val.includes('...')) continue;
+        const ent = shannonEntropy(val);
+        const metric = metricEntropy(val, 64);
+        if (ent > 4.55 && metric > 0.75) {
+          return { match: val, message: `检测到高熵 Base64 敏感参数 (熵: ${ent.toFixed(2)}, Metric: ${metric.toFixed(2)}): ${val.substring(0, 16)}...` };
+        }
+      }
+      return null;
+    }
+  },
+  {
+    id: 'SEC-ENTROPY-HEX',
+    name: '32/64 位十六进制高熵私钥/哈希防泄露',
+    description: '通过字符集归一化度量熵拦截十六进制私钥与随机哈希',
+    evaluate(line) {
+      if (MOCK_LEXICON.test(line)) return null;
+      const hexRe = /(?:secret|key|token|auth|hash|hmac)\s*[:=]\s*["']?([0-9a-fA-F]{32,64})["']?/gi;
+      let m;
+      while ((m = hexRe.exec(line)) !== null) {
+        const val = m[1];
+        if (MOCK_LEXICON.test(val) || val.includes('...')) continue;
+        if (/^(.)\1+$/.test(val) || val.toLowerCase().includes('0123456789abcdef')) continue;
+        const ent = shannonEntropy(val);
+        const metric = metricEntropy(val, 16);
+        if (ent > 3.25 && metric > 0.81) {
+          return { match: val, message: `检测到高熵 Hex 密钥/哈希 (熵: ${ent.toFixed(2)}, Metric: ${metric.toFixed(2)}): ${val.substring(0, 16)}...` };
+        }
+      }
+      return null;
+    }
+  },
+  {
+    id: 'SEC-PSEUDO-MASKING',
+    name: '假脱敏/危险半脱敏模式防泄露',
+    description: '拦截带有掩码符号但依然泄露高熵随机前缀的假脱敏内容',
+    evaluate(line) {
+      if (!line.includes('...') && !line.includes('***')) return null;
+      const skMatch = /\bsk-[a-zA-Z0-9_\-]{12,}(?:\.\.\.|\*\*\*)/.exec(line);
+      if (skMatch && !MOCK_LEXICON.test(skMatch[0])) {
+        return { match: skMatch[0], message: `检测到危险的半脱敏 OpenAI 密钥: ${skMatch[0]}` };
+      }
+      const tunnelMatch = /\btunnel_[a-z0-9]{10,}(?:\.\.\.|\*\*\*)/.exec(line);
+      if (tunnelMatch && !MOCK_LEXICON.test(tunnelMatch[0])) {
+        return { match: tunnelMatch[0], message: `检测到危险的半脱敏 Tunnel ID: ${tunnelMatch[0]}` };
+      }
+      const pwdMatch = /\b(?:web_admin_password|admin_password)\s*[:=]\s*["']?([^\s"'`#;,]{6,})(?:\.\.\.|\*\*\*)/i.exec(line);
+      if (pwdMatch) {
+        const val = pwdMatch[1];
+        if (!MOCK_LEXICON.test(val) && !val.startsWith('your_')) {
+          return { match: pwdMatch[0], message: `检测到危险的半脱敏密码暴露: ${pwdMatch[0]}` };
+        }
+      }
+      return null;
+    }
+  },
+  {
+    id: 'SEC-UNMASKED-NETWORK-ADDRESS',
+    name: '公网真实 IPv4 与非标动态域名防泄露',
+    description: '校验网络地址上下文中的 IPv4 (须符合 RFC 5737 测试保留或 RFC 1918 私网) 与非标动态域名',
+    evaluate(line) {
+      const isNetContext = /(?:https?:\/\/|tcp:\/\/|udp:\/\/|\bhost\s*[:=]|\bip\s*[:=]|\bserver\s*[:=]|\bpeer\s*[:=])/i.test(line);
+      if (!isNetContext) return null;
+      if (MOCK_LEXICON.test(line)) return null;
+
+      const ipRe = /\b([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})\b/g;
+      let m;
+      while ((m = ipRe.exec(line)) !== null) {
+        const ip = m[1];
+        if (!isSafeIPv4(ip)) {
+          return { match: ip, message: `检测到未脱敏的公网 IPv4 地址: ${ip} (请改用 RFC 5737 示例 IP 如 203.0.113.1 或 127.0.0.1)` };
+        }
+      }
+
+      const domainRe = /\b([a-zA-Z0-9_\-]+\.(?:xyz|vip|dynv6\.net|f3322\.net|duckdns\.org|no-ip\.com))\b/gi;
+      while ((m = domainRe.exec(line)) !== null) {
+        const domain = m[1];
+        if (domain.includes('example.com') || domain.includes('public.easytier.top') || domain.includes('ghfast.top')) continue;
+        return { match: domain, message: `检测到疑似未脱敏的私有动态域名: ${domain} (请改用 example.com 或 easytier-peer.example.com)` };
       }
       return null;
     }
