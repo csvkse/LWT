@@ -9,6 +9,8 @@ public sealed record PluginCodeDto
     public IReadOnlyList<string> Files => FileTree;
     public bool HasBackup { get; init; }
     public DateTimeOffset? BackupTimestamp { get; init; }
+    public bool IsBinary { get; init; }
+    public long FileSizeBytes { get; init; }
 }
 
 public sealed record PluginCodeSaveRequest
@@ -93,8 +95,9 @@ public sealed record PluginCreateOrUpdateRequest
 public sealed record PluginActionRequest
 {
     public required string PluginId { get; init; }
-    public required string Action { get; init; }
+    public string? Action { get; init; } = "";
     public string? Param { get; init; }
+    public string? Target { get; init; }
 }
 
 public sealed record PluginSqliteInfo
@@ -109,4 +112,12 @@ public sealed record PluginKvItem
     public required string Key { get; init; }
     public required string Value { get; init; }
     public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
+}
+
+public sealed record PluginSystemModeDto
+{
+    public bool IsSafeMode { get; init; }
+    public bool IsAutoStartDisabled { get; init; }
+    public string Mode { get; init; } = "Normal"; // "Normal" | "SafeMode" | "NoAutoStart"
+    public string Message { get; init; } = "";
 }

@@ -32,18 +32,19 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
         // 3. 提取 API Key
         var rawKey = ExtractKey(context);
 
-        // 如果既非 API、非 MCP 也非网站代理路由，放行给后续管线（如 SPA fallback）
+        // 如果既非 API、非 MCP、非插件反代也非网站代理路由，放行给后续管线（如 SPA fallback）
         var isApi = path.StartsWith("/api", StringComparison.OrdinalIgnoreCase);
         var isMcp = path.StartsWith("/mcp", StringComparison.OrdinalIgnoreCase);
         var isProxy = path.StartsWith("/proxy", StringComparison.OrdinalIgnoreCase) ||
                       path.StartsWith("/s/", StringComparison.OrdinalIgnoreCase);
-        if (!isApi && !isMcp && !isProxy)
+        var isPlugin = path.StartsWith("/plugins", StringComparison.OrdinalIgnoreCase);
+        if (!isApi && !isMcp && !isProxy && !isPlugin)
         {
             await next(context);
             return;
         }
 
-        // 4. API / MCP / Proxy 请求缺少凭据处理
+        // 4. API / MCP / Proxy / Plugin 请求缺少凭据处理
         if (string.IsNullOrWhiteSpace(rawKey))
         {
             if (isMcp)
@@ -57,7 +58,7 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
                 return;
             }
 
-            // 普通 API 请求或 Proxy 请求未携带 API Key 时放行给后续标准管线（由 [Authorize] 或 WebsiteProxyTransformProvider 处理）
+            // 普通 API 请求、Proxy 请求或 Plugin 请求未携带 API Key 时放行给后续标准管线（由 [Authorize]、PluginAuthGatewayEvaluator 或 WebsiteProxyTransformProvider 处理）
             await next(context);
             return;
         }
@@ -99,7 +100,7 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
         }
 
         // 7. 模块权限检查 (Module Scope Checking)
-        if ((isApi || isProxy) && !CheckModulePermission(context, path, entity))
+        if ((isApi || isProxy || isPlugin) && !CheckModulePermission(context, path, entity))
         {
             logger.LogWarning("API Key '{Name}' 无权访问模块: {Path}", entity.Name, path);
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -145,15 +146,15 @@ public sealed class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddlew
         }
 
         if (path.StartsWith("/api/Plugins", StringComparison.OrdinalIgnoreCase) ||
-            path.StartsWith("/api/Workers", StringComparison.OrdinalIgnoreCase))
+            path.StartsWith("/api/Workers", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("/plugins", StringComparison.OrdinalIgnoreCase))
         {
-            return entity.AllowPlugins;
-        }
-
-        if (path.StartsWith("/api/McpBridge", StringComparison.OrdinalIgnoreCase))
-        {
-            // 管理员专属路由显式拒绝普通 API Key
-            return false;
+            if (!entity.AllowPlugins) return false;
+            if (!string.IsNullOrWhiteSpace(entity.AllowedPaths))
+            {
+                return ApiKeyPermissionMatrix.IsPathPermitted(entity.AllowedPaths, path);
+            }
+            return true;
         }
 
         if (path.StartsWith("/api/PluginOperations", StringComparison.OrdinalIgnoreCase))

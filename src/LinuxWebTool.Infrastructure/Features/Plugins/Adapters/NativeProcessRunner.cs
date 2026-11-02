@@ -47,6 +47,20 @@ public sealed class NativeProcessRunner : INativeProcessRunner
             psi.Environment[k] = v;
         }
 
+        if (File.Exists(spec.ExecutablePath))
+        {
+            var (isValid, reason) = NativeBinaryValidator.ValidateExecutable(spec.ExecutablePath);
+            if (!isValid)
+            {
+                return new NativeProcessResult
+                {
+                    Started = false,
+                    ExitCode = -1,
+                    StandardError = $"原生程序二进制格式校验失败: {reason}"
+                };
+            }
+        }
+
         using var process = new Process { StartInfo = psi };
 
         try

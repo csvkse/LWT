@@ -5,7 +5,7 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "=== 1. Verifying Go MCP Bridge Service ===" -ForegroundColor Cyan
-Push-Location "$PSScriptRoot\..\workers\mcp-bridge"
+Push-Location "$PSScriptRoot\..\plugins\mcp-bridge"
 try {
     go test ./... -count=1
     if ($LASTEXITCODE -ne 0) { throw "Go unit tests failed" }
@@ -27,7 +27,7 @@ node "$PSScriptRoot\..\src\LinuxWebTool.WebHost\wwwroot\frontend-gate.cjs"
 if ($LASTEXITCODE -ne 0) { throw "Frontend gate failed" }
 
 Write-Host "=== 5. Verifying Frontend Unit Tests ===" -ForegroundColor Cyan
-node --test "$PSScriptRoot\..\tests\frontend\*.test.mjs"
+node --experimental-vm-modules --test "$PSScriptRoot\..\tests\frontend\*.test.mjs"
 if ($LASTEXITCODE -ne 0) { throw "Frontend unit tests failed" }
 
 Write-Host "=== ALL VERIFICATIONS PASSED ===" -ForegroundColor Green

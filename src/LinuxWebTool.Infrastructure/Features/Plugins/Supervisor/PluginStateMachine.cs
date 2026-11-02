@@ -11,6 +11,7 @@ public sealed class PluginStateMachine
 
     public string PluginId { get; }
     public PluginState State { get; private set; } = PluginState.Stopped;
+    public PluginState CurrentState => State;
     public string Readiness { get; private set; } = "Unsupported";
     public long CurrentRunId { get; private set; }
     public bool IsStopRequested { get; private set; }
@@ -77,6 +78,17 @@ public sealed class PluginStateMachine
         {
             State = PluginState.MissingRuntime;
             Readiness = "MissingRuntime";
+            StartedAt = null;
+            LastError = missingReason;
+        }
+    }
+
+    public void MarkMissingDependencies(string missingReason)
+    {
+        lock (_lock)
+        {
+            State = PluginState.MissingDependencies;
+            Readiness = "MissingDependencies";
             StartedAt = null;
             LastError = missingReason;
         }

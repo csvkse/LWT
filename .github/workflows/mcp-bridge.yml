@@ -3,13 +3,13 @@ name: MCP Bridge CI
 on:
   push:
     paths:
-      - 'workers/mcp-bridge/**'
+      - 'plugins/mcp-bridge/**'
       - 'scripts/package-mcp-bridge.ps1'
       - 'scripts/verify-mcp-bridge.ps1'
       - '.github/workflows/mcp-bridge.yml'
   pull_request:
     paths:
-      - 'workers/mcp-bridge/**'
+      - 'plugins/mcp-bridge/**'
 
 jobs:
   test-and-package:
@@ -20,11 +20,11 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.27.x'
-          cache-dependency-path: workers/mcp-bridge/go.sum
+          go-version: '1.26.x'
+          cache-dependency-path: plugins/mcp-bridge/go.sum
 
       - name: Run Go tests
-        working-directory: workers/mcp-bridge
+        working-directory: plugins/mcp-bridge
         run: |
           go test -v -race ./... -count=1
 

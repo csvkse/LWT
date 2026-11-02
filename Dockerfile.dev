@@ -15,13 +15,14 @@ ENV TZ=Asia/Shanghai \
     LC_ALL=en_US.UTF-8 \
     DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
 
-# 配置中科大源并预装基础运维工具与全量插件运行时（Node, Python, .NET 8, PowerShell, Caddy）
+# 配置中科大源并预装基础运维工具与全量插件运行时（Node, Python, PowerShell, Caddy，.NET 10 SDK 由构建层无缝提供）
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
     apk update && \
     apk add --no-cache \
       bash procps usbutils pciutils kmod util-linux-misc cifs-utils rclone fuse3 nethogs findutils openssh-client \
       ffmpeg libva libva-utils tzdata icu-libs \
-      caddy nodejs python3 py3-pip dotnet8-sdk powershell && \
+      caddy nodejs npm python3 py3-pip powershell go && \
+    pip install --no-cache-dir uv --break-system-packages && \
     cp /usr/share/zoneinfo/$TZ /etc/localtime && \
     echo $TZ > /etc/timezone
 
@@ -29,27 +30,61 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositorie
 FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
 WORKDIR /src
 
-# 配置中科大源并安装编译 PTY 必需的 build-base
+# 配置中科大源并安装编译 PTY、Go 编译器与高性能内存分配器 mimalloc
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
-    apk update && apk add --no-cache build-base
+    apk update && apk add --no-cache build-base go mimalloc
+
+# 注入 mimalloc 替代 musl libc 的单全局锁堆分配器，释放多核 Roslyn 编译吞吐
+ENV LD_PRELOAD=/usr/lib/libmimalloc.so
 
 # 缓存依赖还原层
 COPY ["Directory.Build.props", "Directory.Packages.props", "./"]
 COPY ["src/LinuxWebTool.Contracts/LinuxWebTool.Contracts.csproj", "src/LinuxWebTool.Contracts/"]
+COPY ["src/LinuxWebTool.Application/LinuxWebTool.Application.csproj", "src/LinuxWebTool.Application/"]
 COPY ["src/LinuxWebTool.Infrastructure/LinuxWebTool.Infrastructure.csproj", "src/LinuxWebTool.Infrastructure/"]
 COPY ["src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj", "src/LinuxWebTool.WebHost/"]
 
 RUN dotnet restore "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj"
 
-COPY src ./src
+# ---------- 状态转移 1：预编译低频上游基础层 (Contracts / Application / Infrastructure) ----------
+COPY src/LinuxWebTool.Contracts ./src/LinuxWebTool.Contracts
+COPY src/LinuxWebTool.Application ./src/LinuxWebTool.Application
+COPY src/LinuxWebTool.Infrastructure ./src/LinuxWebTool.Infrastructure
 
-# 编译 PTY 原生动态库
+# 预先编译基础设施与应用层及其依赖，此层只要上游代码不改即可 100% 命中 Docker 缓存（节省 35 秒！）
+RUN dotnet build "src/LinuxWebTool.Application/LinuxWebTool.Application.csproj" \
+        -c Release \
+        --no-restore \
+        -m \
+        /p:PublishAot=false && \
+    dotnet build "src/LinuxWebTool.Infrastructure/LinuxWebTool.Infrastructure.csproj" \
+        -c Release \
+        --no-restore \
+        -m \
+        /p:PublishAot=false
+
+# 编译 PTY 原生动态库（位于 Infrastructure 目录下，与上游基础层一同完成）
 RUN cc -shared -fPIC -O2 -Wall -Wextra -Werror src/LinuxWebTool.Infrastructure/Features/Terminal/Platform/native/linuxwebtool_pty.c -o /tmp/liblinuxwebtool_pty.so -lutil
 
-# 标准 JIT 快速发布（禁用 PublishAot，约 10-15 秒完成）
+# ---------- 状态转移 2：编译高频变动宿主层 (WebHost / wwwroot / plugins) ----------
+COPY src/LinuxWebTool.WebHost ./src/LinuxWebTool.WebHost
+COPY plugins ./plugins
+
+# 编译 MCP Bridge 原生 Go 独立二进制微服务（优先复用有效 Linux ELF 预编译产物，否则从源码静态编译）
+RUN if [ -f plugins/mcp-bridge/mcp-bridge ] && [ "$(head -c 4 plugins/mcp-bridge/mcp-bridge 2>/dev/null)" = "$(printf '\177ELF')" ]; then \
+        echo "Using valid prebuilt Linux ELF mcp-bridge binary" && \
+        mkdir -p /app/publish && cp plugins/mcp-bridge/mcp-bridge /app/publish/mcp-bridge; \
+    else \
+        echo "Building mcp-bridge from source for Linux" && \
+        cd plugins/mcp-bridge && CGO_ENABLED=0 go build -ldflags "-s -w" -o /app/publish/mcp-bridge ./cmd/mcp-bridge; \
+    fi
+
+# 标准 JIT 快速发布（禁用 PublishAot，带 --no-restore 与 -m 并发，上游工程已就绪）
 RUN dotnet publish "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj" \
     -c Release \
     -o /app/publish \
+    --no-restore \
+    -m \
     /p:PublishAot=false
 
 RUN cp /tmp/liblinuxwebtool_pty.so /app/publish/liblinuxwebtool_pty.so
@@ -58,8 +93,22 @@ RUN cp /tmp/liblinuxwebtool_pty.so /app/publish/liblinuxwebtool_pty.so
 FROM base AS final
 WORKDIR /app
 
+# 内置完整微软官方 .NET 10 SDK（支持顶级语句与 C# 极速微服务原地编译运行）
+COPY --from=build /usr/share/dotnet /usr/share/dotnet
+ENV PATH="/usr/share/dotnet:$PATH" \
+    DOTNET_ROOT="/usr/share/dotnet"
+
 COPY --from=build /app/publish .
-COPY extensions ./extensions
+COPY plugins ./plugins
+
+# 注入已编译的原生 MCP Bridge 并软链接至系统 PATH 与内置插件目录
+RUN cp /app/mcp-bridge /usr/local/bin/mcp-bridge 2>/dev/null || true && \
+    chmod +x /usr/local/bin/mcp-bridge 2>/dev/null || true && \
+    cp /usr/local/bin/mcp-bridge /app/plugins/mcp-bridge/mcp-bridge 2>/dev/null || true
+
+# 确保脚本行尾纯净 (LF) 并软链接 dotnet
+RUN sed -i 's/\r$//' /app/terminal-bashrc.sh 2>/dev/null || true && \
+    ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet
 
 VOLUME ["/app/data"]
 

@@ -97,21 +97,76 @@ public static class PipelineExtensions
             string pluginId,
             HttpContext context,
             LinuxWebTool.Contracts.Features.Plugins.Contracts.IPluginManager pluginManager,
+            LinuxWebTool.WebHost.Features.Plugins.Auth.PluginAuthGatewayEvaluator authEvaluator,
             IHttpClientFactory httpClientFactory) =>
         {
-            var plugin = await pluginManager.GetByIdAsync(pluginId, context.RequestAborted);
-            if (plugin != null && plugin.State == LinuxWebTool.Contracts.Features.Plugins.Contracts.PluginState.Disabled)
+            var ct = context.RequestAborted;
+            var plugin = await pluginManager.GetByIdAsync(pluginId, ct);
+            if (plugin == null)
             {
-                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
                 context.Response.ContentType = "application/json; charset=utf-8";
-                await context.Response.WriteAsync($"{{\"code\":503,\"message\":\"Service Disabled: Plugin '{pluginId}' is explicitly disabled.\"}}");
+                await context.Response.WriteAsJsonAsync(
+                    new MessageResponse($"未找到插件: '{pluginId}'"),
+                    AppJsonSerializerContext.Default.MessageResponse);
                 return;
             }
-            if (plugin == null || !plugin.AllocatedPort.HasValue || plugin.AllocatedPort.Value <= 0)
+
+            // 1. 策略模式评估微服务鉴权决断
+            var authDecision = await authEvaluator.EvaluateAsync(context, plugin.Manifest);
+            if (!authDecision.IsAllowed)
+            {
+                context.Response.StatusCode = authDecision.StatusCode;
+                context.Response.ContentType = "application/json; charset=utf-8";
+                if (!string.IsNullOrEmpty(authDecision.ChallengeHeader))
+                {
+                    context.Response.Headers.WWWAuthenticate = authDecision.ChallengeHeader;
+                }
+                await context.Response.WriteAsJsonAsync(
+                    new MessageResponse(authDecision.FailureReason ?? "微服务访问拒绝：未授权"),
+                    AppJsonSerializerContext.Default.MessageResponse);
+                return;
+            }
+
+            // 2. 状态机模式联动微服务生命周期
+            if (plugin.State == LinuxWebTool.Contracts.Features.Plugins.Contracts.PluginState.Disabled)
             {
                 context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
                 context.Response.ContentType = "application/json; charset=utf-8";
-                await context.Response.WriteAsync($"{{\"code\":503,\"message\":\"Plugin '{pluginId}' is not running or has no declared HTTP port.\"}}");
+                await context.Response.WriteAsJsonAsync(
+                    new MessageResponse($"插件 '{pluginId}' 已被管理员显式禁用"),
+                    AppJsonSerializerContext.Default.MessageResponse);
+                return;
+            }
+
+            if (plugin.State == LinuxWebTool.Contracts.Features.Plugins.Contracts.PluginState.Starting)
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                context.Response.ContentType = "application/json; charset=utf-8";
+                context.Response.Headers.RetryAfter = "3";
+                await context.Response.WriteAsJsonAsync(
+                    new MessageResponse($"插件 '{pluginId}' 正在启动初始化中，请稍候重试"),
+                    AppJsonSerializerContext.Default.MessageResponse);
+                return;
+            }
+
+            if (plugin.State == LinuxWebTool.Contracts.Features.Plugins.Contracts.PluginState.Backoff)
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                context.Response.ContentType = "application/json; charset=utf-8";
+                await context.Response.WriteAsJsonAsync(
+                    new MessageResponse($"插件 '{pluginId}' 异常崩溃触发熔断保护 (Backoff)，暂停服务"),
+                    AppJsonSerializerContext.Default.MessageResponse);
+                return;
+            }
+
+            if (!plugin.AllocatedPort.HasValue || plugin.AllocatedPort.Value <= 0)
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                context.Response.ContentType = "application/json; charset=utf-8";
+                await context.Response.WriteAsJsonAsync(
+                    new MessageResponse($"插件 '{pluginId}' 未处于运行状态或未声明 HTTP 端口"),
+                    AppJsonSerializerContext.Default.MessageResponse);
                 return;
             }
 
@@ -126,6 +181,7 @@ public static class PipelineExtensions
             foreach (var h in context.Request.Headers)
             {
                 if (h.Key.Equals("Host", StringComparison.OrdinalIgnoreCase)) continue;
+                if (h.Key.StartsWith("X-LWT-Internal-", StringComparison.OrdinalIgnoreCase)) continue; // 剥离外部伪造的内部头
                 reqMsg.Headers.TryAddWithoutValidation(h.Key, h.Value.ToArray());
             }
 
@@ -133,6 +189,13 @@ public static class PipelineExtensions
             reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-Host", context.Request.Host.Value);
             reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-Prefix", $"/plugins/{pluginId}");
             reqMsg.Headers.TryAddWithoutValidation("X-LWT-Plugin-Id", pluginId);
+            reqMsg.Headers.TryAddWithoutValidation("X-LWT-Auth-User", authDecision.IdentityName ?? "anonymous");
+            reqMsg.Headers.TryAddWithoutValidation("X-LWT-Auth-Type", authDecision.AuthType ?? "Anonymous");
+
+            if (!string.IsNullOrEmpty(plugin.InternalSecret))
+            {
+                reqMsg.Headers.TryAddWithoutValidation("X-LWT-Internal-Secret", plugin.InternalSecret);
+            }
 
             if (HttpMethods.IsPost(context.Request.Method) ||
                 HttpMethods.IsPut(context.Request.Method) ||
@@ -165,9 +228,11 @@ public static class PipelineExtensions
             {
                 context.Response.StatusCode = StatusCodes.Status502BadGateway;
                 context.Response.ContentType = "application/json; charset=utf-8";
-                await context.Response.WriteAsync($"{{\"code\":502,\"message\":\"Failed to reach plugin backend: {ex.Message}\"}}");
+                await context.Response.WriteAsJsonAsync(
+                    new MessageResponse($"插件后端服务访问失败: {ex.Message}"),
+                    AppJsonSerializerContext.Default.MessageResponse);
             }
-        }).AllowAnonymous();
+        });
 
         // 未匹配的 API 必须返回 JSON 404，不能被 SPA fallback 返回 index.html（否则前端会把 HTML 当业务数据）。
         // 以 /api/{*path} 作为较具体的 fallback endpoint：正常 Controller 路由优先，未知 API 才落到这里。
@@ -177,6 +242,9 @@ public static class PipelineExtensions
             context.Response.ContentType = "application/json; charset=utf-8";
             await context.Response.WriteAsJsonAsync(new MessageResponse("API endpoint not found"), AppJsonSerializerContext.Default.MessageResponse);
         });
+
+        // 静默处理浏览器自动发起的 /favicon.ico 请求，避免无必要的控制台 404 错误
+        app.MapGet("/favicon.ico", () => Results.NoContent());
 
         app.MapFallbackToFile("app/index.html");
         return app;

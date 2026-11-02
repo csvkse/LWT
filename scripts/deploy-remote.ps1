@@ -231,11 +231,39 @@ try {
         }
 
         if ($effectiveSync -eq "Direct") {
+            # Precompile mcp-bridge Linux static binary if missing or outdated
+            $mcpSrc = "plugins/mcp-bridge/cmd/mcp-bridge/main.go"
+            $mcpBin = "plugins/mcp-bridge/mcp-bridge"
+            if ($mcpSrc -and (Test-Path -Path $mcpSrc)) {
+                $isElf = $false
+                if ($mcpBin -and (Test-Path -Path $mcpBin)) {
+                    try {
+                        $bytes = [System.IO.File]::ReadAllBytes($mcpBin)
+                        if ($bytes.Length -ge 4 -and $bytes[0] -eq 0x7F -and $bytes[1] -eq 0x45 -and $bytes[2] -eq 0x4C -and $bytes[3] -eq 0x46) {
+                            $isElf = $true
+                        }
+                    } catch { }
+                }
+                $needCompile = (-not $isElf)
+                if (-not $needCompile -and (Test-Path -Path $mcpBin) -and (Test-Path -Path "plugins/mcp-bridge")) {
+                    $latestSource = (Get-ChildItem -Path "plugins/mcp-bridge" -Recurse -File -Exclude "mcp-bridge","*.exe" | Measure-Object -Property LastWriteTime -Maximum).Maximum
+                    if ($latestSource -and ((Get-Item $mcpBin).LastWriteTime -lt $latestSource)) {
+                        $needCompile = $true
+                    }
+                }
+                if ($needCompile -and (Get-Command "go" -ErrorAction SilentlyContinue)) {
+                    Write-Step "Pre-compiling plugins/mcp-bridge for Linux x64 (CGO_ENABLED=0 GOOS=linux GOARCH=amd64)..."
+                    cmd /c "set CGO_ENABLED=0& set GOOS=linux& set GOARCH=amd64& cd plugins\mcp-bridge& go build -ldflags=""-s -w"" -o mcp-bridge ./cmd/mcp-bridge"
+                } elseif (-not $isElf -and (Test-Path -Path $mcpBin)) {
+                    Write-Warning "Local $mcpBin is not a Linux ELF binary; removing to avoid contaminating remote container."
+                    Remove-Item $mcpBin -Force -ErrorAction SilentlyContinue
+                }
+            }
+
             Write-Step "1/4 [Dev - Direct Sync] Packaging live working tree via native tar (decoupled from Git)..."
-            $localBundle = "dev-bundle.tar.gz"
+            $localBundle = "dev-bundle-$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()).tar.gz"
             try {
-                if (Test-Path $localBundle) { Remove-Item $localBundle -Force }
-                & tar.exe -czf $localBundle --exclude=.git --exclude=bin --exclude=obj --exclude=node_modules --exclude=env --exclude=*.tmp --exclude=*.tar.gz Directory.Build.props Directory.Packages.props Dockerfile.dev src extensions
+                & tar.exe -czf $localBundle --exclude=.git --exclude=bin --exclude=obj --exclude=node_modules --exclude=env --exclude=*.tmp --exclude=*.tar.gz Directory.Build.props Directory.Packages.props Dockerfile.dev src plugins
                 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $localBundle)) {
                     throw "Failed to create direct workspace bundle at $localBundle"
                 }
@@ -254,6 +282,7 @@ try {
                 if ($streamProc.ExitCode -ne 0) {
                     throw "Direct SSH stream extraction failed with exit code $($streamProc.ExitCode)"
                 }
+                Invoke-RemoteSsh "chmod -R +x $devWorkdir/plugins 2>/dev/null || true"
                 Write-Success "Live workspace synchronized to $devWorkdir in <1s (Uncommitted edits included, Git decoupled)!"
             }
             finally {
@@ -324,16 +353,17 @@ docker run -d \
   --device=/dev/net/tun \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p ${devPort}:5270 \
+  -p 18080-18090:18080-18090 \
   -v ${containerName}-data:/app/data \
   -v ${devWorkdir}/src/LinuxWebTool.WebHost/wwwroot:/app/wwwroot \
-  -v ${devWorkdir}/extensions:/app/extensions \
+  -v ${devWorkdir}/plugins:/app/plugins \
   -v /lwt:/lwt:rshared \
   -v /var/docker:/var/docker:rshared \
   -v /usr/local/bin:/usr/local/bin:ro \
   $devImage
 "@
         Invoke-RemoteSsh $devRunCmd
-        Write-Success "Dev container launched (Live volume mounts for wwwroot and extensions active)!"
+        Write-Success "Dev container launched (Live volume mounts for wwwroot and plugins active)!"
 
         Write-Step "4/4 [Dev] Waiting for dev container health..."
         $maxWaitSec = 30
@@ -374,6 +404,12 @@ docker run -d \
         } catch {
             Write-Warn "Failed to sync credentials, container will use its own admin.json."
         }
+
+        # Sync live plugins to data volume
+        try {
+            Invoke-RemoteSsh "docker exec $containerName sh -c 'mkdir -p /app/data/plugins && cp -rf /app/plugins/* /app/data/plugins/ 2>/dev/null || true && chmod -R +x /app/data/plugins 2>/dev/null || true'"
+            Write-Success "Synced live plugins to container data volume!"
+        } catch {}
 
         # Automated Smoke Test
         try {

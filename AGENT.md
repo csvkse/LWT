@@ -131,3 +131,48 @@ powershell -ExecutionPolicy Bypass -File scripts/deploy-remote.ps1 -RemoteExec "
    - 页面不得产生未捕获的 Console Error（`pageerror`）。
    - 列表容器不得突破逻辑视口高度限制（遵循 `FE-CONTAINER-HEIGHT-LIMIT` 门禁）。
    - 搜索框输入与一键清空不得破坏插件原始列表状态。
+
+---
+
+## 6. 容器运行时与终端环境防御规范
+
+### 1. 终端 Shell 脚本换行符防御（CRLF vs LF）
+- **背景**：Windows 环境下检出代码或直推时，若脚本携带 `\r\n` (CRLF)，Linux Bash 在加载 `--rcfile /app/terminal-bashrc.sh` 时会抛出 `syntax error near unexpected token $'{\r''` 语法错误。
+- **三重防御机制**：
+  1. **Git 属性约束**：根目录 [`.gitattributes`](file:///e:/WorkProject/CSharp/PrivateProject/Web/WebToolForLinux/.gitattributes) 强制声明 `*.sh text eol=lf`。
+  2. **镜像构建清理**：`Dockerfile` 与 `Dockerfile.dev` 阶段在生成最终镜像时统一执行 `sed -i 's/\r$//' /app/terminal-bashrc.sh`。
+  3. **C# 运行时自愈**：`CrossPlatformPtyEngine.DefaultLinuxArguments()` 在拉起终端前主动校验并清洗 `\r` 字符，彻底免疫外部文件写入污染。
+
+### 2. 插件生态与 .NET 10 SDK 原生支持
+- **统一目标版本**：插件中心微服务（如 `demo-dotnet-service`）全面升级至 `<TargetFramework>net10.0</TargetFramework>`，与主工程 .NET 10 架构对齐。
+- **开箱即用（Zero-Config）**：极速开发镜像 `Dockerfile.dev` 直接从官方 build 层无缝提取完整的 **.NET 10 SDK (10.0.403)**（预置于 `/usr/share/dotnet` 并配置 PATH），容器内开发插件完全无需手动执行 `apt` 或 `apk` 安装。
+- **发行版自适应引导**：若在无 SDK 环境运行，后端 `PluginManager.DetectCurrentDistroKey()` 会自动解析当前操作系统（Alpine / Debian / RHEL / Windows），精准输出该发行版的 .NET 10 安装指引，彻底消除在 Alpine 容器中误报 `apt: command not found` 的问题。
+
+---
+
+## 7. 凭据安全红线与脱敏规范 (Security & Credential Governance)
+
+在后续所有任务、功能开发、排障文档编写以及测试用例编写中，**必须严格遵守以下凭据安全红线**：
+
+### 1. 文档规范 (`docs/` 目录严禁真实凭据)
+- **严禁真实密钥与密码**：编写技术方案、排障复盘（Lessons Learned）、API 调研或 curl 示例时，绝对禁止将真实的 OpenAI Key、平台管理员密码（如 `WEB_ADMIN_PASSWORD`）、隧道 ID、EasyTier 组网密钥 (`network_secret`) 或公网对端域名写入文档。
+- **强制使用标准占位符**：
+  - **Tunnel ID**：统一使用符合格式校验的虚拟占位符 `tunnel_0123456789abcdef0123456789abcdef`。
+  - **API Key / Token**：使用 `sk-proj-test-secret-key-1234567890`、`sk-test-super-secret-12345` 或 `lwt_live_8f3a9e...`。
+  - **管理员/系统密码**：使用 `your_secure_password_here` 或 `<ADMIN_PASSWORD>`。
+  - **EasyTier 组网配置**：使用 `network_name = "demo_net"`, `network_secret = "demo_secret_token"`, `peers = ["wss://easytier-peer.example.com"]`。
+  - **网络地址**：使用 RFC 5737 示例域名 `example.com` 或 `127.0.0.1`。
+
+### 2. 测试用例规范 (`tests/` 与 `plugins/**/tests`)
+- **单元与集成测试夹具**：默认使用纯内存/本地 Mock 凭据（如 `mockPrivateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\nMOCK_KEY_DATA\n-----END OPENSSH PRIVATE KEY-----"`）。
+- **动态密码防泄露**：端到端集成测试若需生成真实密码，必须动态随机生成（如 `[guid]::NewGuid().ToString('N')`），并在测试日志持久化时显式执行脱敏过滤（如 `.Replace($password, '[REDACTED]')`）。
+
+### 3. 真实密钥与环境连接加载规范 (`/env/.envdev`)
+- **唯一合法来源**：若本地联调、端到端冒烟测试或远程诊断**确需使用真实密钥与宿主连接信息**，必须且只能从项目根目录的 `/env/.envdev` 文件（或读取系统当前环境变量）中动态提取。
+- **Git 隔离防护**：`/env/.envdev` 已被根目录 `.gitignore` 全局严格忽略（`env/`, `.envdev`, `*.envdev`），绝对禁止将其提交到版本库中。
+- **环境回退机制**：测试脚本在未检测到 `/env/.envdev` 中的特定凭据时，应设计优雅降级或跳过远程鉴权逻辑，绝不允许通过在代码中硬编码真实密钥来“临时跑通”测试。
+
+### 4. 自动化提交门禁与验证机制
+- **Git 预提交钩子 (Pre-commit Hook)**：仓库通过 `git config core.hooksPath .githooks` 启用了 `.githooks/pre-commit`。每次 `git commit` 时会自动调用 `.githooks/security-gate.cjs --staged` 对暂存区增量行进行香农熵与凭据规则检测，毫秒级阻断违规提交。
+- **架构测试与 CI 兜底**：后端架构门禁 `LinuxArch068`、本地验证脚本 `./scripts/verify-fast.ps1` 与 GitHub Actions CI 会执行 `node .githooks/security-gate.cjs --full` 进行全仓深度核验，确保即使绕过本地钩子亦无法合入主干。
+

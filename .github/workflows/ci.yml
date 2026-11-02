@@ -44,6 +44,9 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Security Gate (凭据安全与防泄密门禁)
+        run: node .githooks/security-gate.cjs --full
+
       - name: Restore & Build
         run: dotnet build LinuxWebTool.slnx -c Release --nologo
 

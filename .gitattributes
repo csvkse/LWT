@@ -1,0 +1,22 @@
+# Auto detect text files and perform LF normalization
+* text=auto eol=lf
+
+# Explicit LF for Linux/Shell scripts and cross-platform source files
+*.sh text eol=lf
+*.bash text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.cs text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.vue text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+Dockerfile* text eol=lf
+
+# Windows-specific scripts
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf

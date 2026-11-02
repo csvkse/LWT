@@ -74,37 +74,128 @@ public sealed class NodeRuntimeAdapter : IRuntimeAdapter
 
     internal static Dictionary<string, string> BuildStandardEnv(PluginManifest manifest, string pluginDir, int? port, IReadOnlyDictionary<string, string>? extraEnv)
     {
+        // 跨语言通用持久化架构：物理隔离数据卷与代码目录 (Code vs Volume Separation)
+        string volumeDir;
+        string runDir;
+        string pluginsParent = Path.GetDirectoryName(pluginDir) ?? "";
+        if (Path.GetFileName(pluginsParent).Equals("plugins", StringComparison.OrdinalIgnoreCase))
+        {
+            var dataRoot = Path.GetDirectoryName(pluginsParent) ?? pluginsParent;
+            volumeDir = Path.Combine(dataRoot, "plugins_data", "volumes", manifest.Id);
+            runDir = Path.Combine(dataRoot, "plugins_data", "run", manifest.Id);
+        }
+        else
+        {
+            volumeDir = pluginDir;
+            runDir = Path.Combine(pluginDir, "run");
+        }
+
+        var stateDir = Path.Combine(volumeDir, "state");
+        try
+        {
+            Directory.CreateDirectory(volumeDir);
+            Directory.CreateDirectory(stateDir);
+            Directory.CreateDirectory(runDir);
+        }
+        catch { }
+
+        // 历史平滑自愈迁移：若旧版路径下有数据文件，自动自愈同步至持久卷
+        MigrateLegacyPluginData(manifest.Id, pluginDir, volumeDir, stateDir);
+
         var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["LWT_PLUGIN_ID"] = manifest.Id,
-            ["LWT_DATA_DIR"] = pluginDir,
-            ["LWT_SQLITE_PATH"] = Path.Combine(pluginDir, "data.db"),
-            ["LWT_KV_PATH"] = Path.Combine(pluginDir, "kv.db")
+            ["LWT_CODE_DIR"] = pluginDir,
+            ["LWT_VOLUME_DIR"] = volumeDir,
+            ["LWT_STATE_DIR"] = stateDir,
+            ["LWT_RUN_DIR"] = runDir,
+            // 向下兼容历史 LWT_DATA_DIR
+            ["LWT_DATA_DIR"] = volumeDir,
+            ["LWT_SQLITE_PATH"] = Path.Combine(volumeDir, "data.db"),
+            ["LWT_KV_PATH"] = Path.Combine(volumeDir, "kv.db"),
+            ["HOST"] = "127.0.0.1",
+            ["BIND_IP"] = "127.0.0.1",
+            ["BIND_ADDRESS"] = "127.0.0.1"
         };
 
         if (port.HasValue)
         {
             var portKey = string.IsNullOrWhiteSpace(manifest.Network?.PortEnv) ? "PORT" : manifest.Network.PortEnv;
             dict[portKey] = port.Value.ToString();
+            dict["ASPNETCORE_URLS"] = $"http://127.0.0.1:{port.Value}";
         }
 
         if (manifest.Environment != null)
         {
-            foreach (var (k, v) in manifest.Environment)
-            {
-                dict[k] = v;
-            }
+            foreach (var (k, v) in manifest.Environment) dict[k] = v;
         }
 
         if (extraEnv != null)
         {
-            foreach (var (k, v) in extraEnv)
-            {
-                dict[k] = v;
-            }
+            foreach (var (k, v) in extraEnv) dict[k] = v;
         }
 
         return dict;
+    }
+
+    private static void MigrateLegacyPluginData(string pluginId, string pluginDir, string volumeDir, string stateDir)
+    {
+        try
+        {
+            // 0. 迁移过渡路径 /data/volumes/{pluginId}
+            var pluginsParent = Path.GetDirectoryName(pluginDir) ?? "";
+            if (Path.GetFileName(pluginsParent).Equals("plugins", StringComparison.OrdinalIgnoreCase))
+            {
+                var dataRoot = Path.GetDirectoryName(pluginsParent) ?? pluginsParent;
+                var oldVolumeDir = Path.Combine(dataRoot, "volumes", pluginId);
+                if (Directory.Exists(oldVolumeDir) && !string.Equals(oldVolumeDir, volumeDir, StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (var file in Directory.GetFiles(oldVolumeDir, "*", SearchOption.AllDirectories))
+                    {
+                        var rel = Path.GetRelativePath(oldVolumeDir, file);
+                        var dest = Path.Combine(volumeDir, rel);
+                        if (!File.Exists(dest))
+                        {
+                            var destDir = Path.GetDirectoryName(dest);
+                            if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
+                            File.Copy(file, dest, overwrite: false);
+                        }
+                    }
+                }
+            }
+
+            // 1. 迁移旧版 pluginDir/data 下的全部持久化文件
+            var legacyDataDir = Path.Combine(pluginDir, "data");
+            if (Directory.Exists(legacyDataDir) && !string.Equals(legacyDataDir, stateDir, StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var file in Directory.GetFiles(legacyDataDir, "*", SearchOption.AllDirectories))
+                {
+                    var rel = Path.GetRelativePath(legacyDataDir, file);
+                    var dest = Path.Combine(stateDir, rel);
+                    if (!File.Exists(dest))
+                    {
+                        var destDir = Path.GetDirectoryName(dest);
+                        if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
+                        File.Copy(file, dest, overwrite: false);
+                    }
+                }
+            }
+
+            // 2. 迁移旧版 pluginDir 根目录下的 kv.db 和 data.db
+            foreach (var dbName in new[] { "kv.db", "data.db" })
+            {
+                var legacyDb = Path.Combine(pluginDir, dbName);
+                var destDb = Path.Combine(volumeDir, dbName);
+                if (File.Exists(legacyDb) && !File.Exists(destDb))
+                {
+                    File.Copy(legacyDb, destDb, overwrite: false);
+                }
+            }
+        }
+        catch
+        {
+            // 自愈迁移非致命，静默跳过保护宿主主流程
+        }
     }
 }
 
@@ -202,30 +293,41 @@ public sealed class PythonRuntimeAdapter : IRuntimeAdapter
 public sealed class DotNetRuntimeAdapter : IRuntimeAdapter
 {
     public PluginRuntime RuntimeType => PluginRuntime.DotNet;
-    public string PrimaryExecutable => "dotnet";
-    public IReadOnlyList<string> CandidateExecutables => ["dotnet"];
+    public string PrimaryExecutable => FindDotNetExecutable() ?? "dotnet";
+    public IReadOnlyList<string> CandidateExecutables => ["dotnet", "/usr/share/dotnet/dotnet"];
+
+    public static string? FindDotNetExecutable()
+    {
+        if (PythonRuntimeAdapter.TestCommand("dotnet", "--version")) return "dotnet";
+        if (File.Exists("/usr/share/dotnet/dotnet") && PythonRuntimeAdapter.TestCommand("/usr/share/dotnet/dotnet", "--version"))
+            return "/usr/share/dotnet/dotnet";
+        return null;
+    }
 
     public bool CheckAvailable(out string? missingReason) => CheckAvailable(out missingReason, out _);
 
     public bool CheckAvailable(out string? missingReason, out IReadOnlyList<string> missingRunners)
     {
-        if (PythonRuntimeAdapter.TestCommand("dotnet", "--version"))
+        var exe = FindDotNetExecutable();
+        if (exe != null)
         {
             missingReason = null;
             missingRunners = [];
             return true;
         }
-        missingReason = "系统中未检测到 .NET 运行时或 SDK，请先安装 dotnet (如: sudo apt install dotnet-sdk-8.0 或更高版本)。";
+        missingReason = "系统中未检测到 .NET SDK，请先安装 .NET 10 SDK 或在极速开发镜像中直接运行。";
         missingRunners = ["dotnet"];
         return false;
     }
 
     public string ResolveInstallGuide(string distroKey) => distroKey switch
     {
-        "windows" => "winget install Microsoft.DotNet.SDK.8",
-        "alpine" => "apk add --no-cache dotnet8-sdk",
-        "rhel" => "dnf install -y dotnet-sdk-8.0",
-        _ => "apt update && apt install -y dotnet-sdk-8.0"
+        "windows" => "winget install Microsoft.DotNet.SDK.10",
+        "alpine" => "curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --install-dir /usr/share/dotnet && ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet",
+        "debian" => "apt update && apt install -y dotnet-sdk-10.0 || apt install -y dotnet-sdk-8.0",
+        "ubuntu" => "apt update && apt install -y dotnet-sdk-10.0 || apt install -y dotnet-sdk-8.0",
+        "rhel" => "dnf install -y dotnet-sdk-10.0 || dnf install -y dotnet-sdk-8.0",
+        _ => "curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --install-dir /usr/share/dotnet && ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet"
     };
 
     public PluginStartSpec BuildStartSpec(PluginManifest manifest, string pluginDir, int? port, IReadOnlyDictionary<string, string>? extraEnv = null)
@@ -253,7 +355,7 @@ public sealed class DotNetRuntimeAdapter : IRuntimeAdapter
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
@@ -265,9 +367,10 @@ public sealed class DotNetRuntimeAdapter : IRuntimeAdapter
             args = proj != null ? $"run --project \"{proj}\"" : $"run --project \"{pluginDir}\"";
         }
 
+        var dotnetExe = FindDotNetExecutable() ?? "dotnet";
         return new PluginStartSpec
         {
-            FileName = "dotnet",
+            FileName = dotnetExe,
             Arguments = args,
             WorkingDirectory = pluginDir,
             EnvironmentVariables = env
@@ -324,6 +427,21 @@ public sealed class ShellRuntimeAdapter : IRuntimeAdapter
     {
         var env = NodeRuntimeAdapter.BuildStandardEnv(manifest, pluginDir, port, extraEnv);
         var entry = Path.Combine(pluginDir, manifest.Entrypoint);
+        if (File.Exists(entry))
+        {
+            try
+            {
+                var content = File.ReadAllText(entry);
+                if (content.Contains('\r'))
+                {
+                    File.WriteAllText(entry, content.Replace("\r\n", "\n").Replace('\r', '\n'));
+                }
+            }
+            catch
+            {
+                // 忽略只读文件等清洗异常
+            }
+        }
         var shell = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "bash" : (File.Exists("/bin/bash") ? "/bin/bash" : "/bin/sh");
 
         return new PluginStartSpec
@@ -430,7 +548,46 @@ public sealed class NativeRuntimeAdapter : IRuntimeAdapter
             }
             else
             {
-                throw new FileNotFoundException($"原生程序文件不存在: {candidate}");
+                // 三级自愈探查：检查宿主静态模板目录 /app/plugins/<id>/<targetRef>
+                var templateCandidate = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "plugins", manifest.Id, targetRef));
+                if (!File.Exists(templateCandidate))
+                {
+                    var parentDir = Directory.GetParent(AppContext.BaseDirectory)?.FullName;
+                    if (parentDir != null)
+                    {
+                        var alt = Path.Combine(parentDir, "plugins", manifest.Id, targetRef);
+                        if (File.Exists(alt)) templateCandidate = alt;
+                    }
+                }
+
+                if (File.Exists(templateCandidate))
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(candidate)!);
+                        File.Copy(templateCandidate, candidate, overwrite: true);
+                        if (!OperatingSystem.IsWindows())
+                        {
+                            try
+                            {
+                                File.SetUnixFileMode(candidate,
+                                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                                    UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                                    UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+                            }
+                            catch { }
+                        }
+                        exe = candidate;
+                    }
+                    catch
+                    {
+                        throw new FileNotFoundException($"原生程序文件不存在: {candidate}");
+                    }
+                }
+                else
+                {
+                    throw new FileNotFoundException($"原生程序文件不存在: {candidate}");
+                }
             }
         }
         else
@@ -439,15 +596,72 @@ public sealed class NativeRuntimeAdapter : IRuntimeAdapter
             exe = File.Exists(entry) ? Path.GetFullPath(entry) : targetRef;
         }
 
-        var args = manifest.Arguments.Count > 0 ? string.Join(" ", manifest.Arguments) : "";
+        if (File.Exists(exe))
+        {
+            var (isValid, reason) = NativeBinaryValidator.ValidateExecutable(exe);
+            if (!isValid)
+            {
+                throw new InvalidOperationException($"原生程序二进制格式校验失败: {reason} (路径: {exe})");
+            }
+            if (!OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    File.SetUnixFileMode(exe,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                        UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                        UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+                }
+                catch { }
+            }
+        }
+
+        var portStr = port?.ToString() ?? "0";
+        var listenHost = "127.0.0.1";
+        var listenAddr = $"{listenHost}:{portStr}";
+        var volumeDir = env.TryGetValue("LWT_VOLUME_DIR", out var vDir) ? vDir : pluginDir;
+        var stateDir = env.TryGetValue("LWT_STATE_DIR", out var sDir) ? sDir : Path.Combine(volumeDir, "state");
+        var runDir = env.TryGetValue("LWT_RUN_DIR", out var rDir) ? rDir : Path.Combine(volumeDir, "run");
+        var resolvedArgs = new List<string>();
+        if (manifest.Arguments != null)
+        {
+            for (int i = 0; i < manifest.Arguments.Count; i++)
+            {
+                var arg = manifest.Arguments[i];
+                if (arg is "--control-token-file" or "-control-token-file")
+                {
+                    if (i + 1 < manifest.Arguments.Count && manifest.Arguments[i + 1].Contains("{controlTokenFile}", StringComparison.OrdinalIgnoreCase))
+                    {
+                        i++;
+                        continue;
+                    }
+                }
+                if (arg.Contains("{controlTokenFile}", StringComparison.OrdinalIgnoreCase)) continue;
+
+                arg = arg.Replace("0.0.0.0", "127.0.0.1", StringComparison.OrdinalIgnoreCase);
+
+                resolvedArgs.Add(arg
+                    .Replace("{port}", portStr, StringComparison.OrdinalIgnoreCase)
+                    .Replace("{listenAddr}", listenAddr, StringComparison.OrdinalIgnoreCase)
+                    .Replace("{listen}", listenAddr, StringComparison.OrdinalIgnoreCase)
+                    .Replace("{pluginDir}", pluginDir, StringComparison.OrdinalIgnoreCase)
+                    .Replace("{volumeDir}", volumeDir, StringComparison.OrdinalIgnoreCase)
+                    .Replace("{stateDir}", stateDir, StringComparison.OrdinalIgnoreCase)
+                    .Replace("{runDir}", runDir, StringComparison.OrdinalIgnoreCase)
+                    .Replace("{runId}", Guid.NewGuid().ToString("N")[..8], StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
+        var args = resolvedArgs.Count > 0 ? string.Join(" ", resolvedArgs) : "";
 
         return new PluginStartSpec
         {
             FileName = exe,
             Arguments = args,
-            ArgumentList = manifest.Arguments,
+            ArgumentList = resolvedArgs,
             WorkingDirectory = pluginDir,
             EnvironmentVariables = env
         };
     }
 }
+

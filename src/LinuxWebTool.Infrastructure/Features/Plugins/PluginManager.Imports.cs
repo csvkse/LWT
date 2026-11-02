@@ -66,6 +66,7 @@ public sealed partial class PluginManager
 
             string? backupDataDb = null;
             string? backupKvDb = null;
+            string? backupDataDir = null;
             bool wasDisabled = false;
 
             if (Directory.Exists(targetDir))
@@ -84,6 +85,14 @@ public sealed partial class PluginManager
                     File.Copy(srcKvDb, backupKvDb, overwrite: true);
                 }
 
+                var srcDataFolder = Path.Combine(targetDir, "data");
+                if (Directory.Exists(srcDataFolder))
+                {
+                    backupDataDir = Path.Combine(tempExtractDir, "__preserve_data_dir");
+                    Directory.CreateDirectory(backupDataDir);
+                    CopyDirectory(srcDataFolder, backupDataDir, overwrite: true);
+                }
+
                 wasDisabled = File.Exists(Path.Combine(targetDir, ".disabled"));
             }
 
@@ -97,6 +106,12 @@ public sealed partial class PluginManager
             if (backupKvDb != null && File.Exists(backupKvDb))
             {
                 File.Copy(backupKvDb, Path.Combine(targetDir, "kv.db"), overwrite: true);
+            }
+            if (backupDataDir != null && Directory.Exists(backupDataDir))
+            {
+                var targetDataFolder = Path.Combine(targetDir, "data");
+                Directory.CreateDirectory(targetDataFolder);
+                CopyDirectory(backupDataDir, targetDataFolder, overwrite: true);
             }
             if (wasDisabled)
             {

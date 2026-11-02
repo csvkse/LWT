@@ -114,6 +114,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<LinuxWebTool.Infrastructure.Features.Plugins.PluginManager>());
         builder.Services.AddHostedService(sp =>
             sp.GetRequiredService<LinuxWebTool.Infrastructure.Features.Plugins.PluginManager>());
+        builder.Services.AddSingleton<LinuxWebTool.WebHost.Features.Plugins.Auth.PluginAuthGatewayEvaluator>();
 
         // 原生工具服务化与插件异步操作支持 (Native Tool Services & Plugins)
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Plugins.Contracts.INativeProgramResolver, LinuxWebTool.Infrastructure.Features.Plugins.Adapters.NativeProgramResolver>();
@@ -153,10 +154,6 @@ public static class ServiceCollectionExtensions
                     }
                 });
         });
-
-        // MCP Bridge 长时函数服务编排 (MCP Bridge Orchestrator)
-        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.McpBridge.Contracts.IMcpBridgeControlActions, LinuxWebTool.Infrastructure.Features.McpBridge.Adapters.McpBridgeControlActions>();
-        builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.McpBridge.Contracts.IMcpBridgeOrchestrator, LinuxWebTool.Application.Features.McpBridge.McpBridgeOrchestrator>();
 
         // 统一执行引擎与工作流活动
         builder.Services.AddHttpClient();

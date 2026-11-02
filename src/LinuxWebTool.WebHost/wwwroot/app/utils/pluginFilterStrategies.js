@@ -31,6 +31,44 @@ export class CategoryFilterStrategy {
   }
 }
 
+export class StateFilterStrategy {
+  apply(plugin, context) {
+    if (!context || !context.state || context.state === 'all') {
+      return true;
+    }
+    const targetState = String(context.state).toLowerCase();
+    switch (targetState) {
+      case 'running':
+        return plugin.state === 2;
+      case 'ready':
+      case 'standby':
+        // 脚本轻量扩展在启用且非异常/缺少依赖时为就绪待命状态
+        if (plugin.profile === 1) {
+          const isDegradedOrMissing = plugin.state === 3 || plugin.state === 4 || plugin.state === 5 ||
+            plugin.state === 7 || plugin.state === 8 || Boolean(plugin.isMissingRuntime || plugin.isMissingDependencies);
+          return plugin.state !== 6 && plugin.manifest?.enabled !== false && !isDegradedOrMissing;
+        }
+        return false;
+      case 'degraded':
+      case 'error':
+        return plugin.state === 3 || plugin.state === 4 || plugin.state === 5;
+      case 'missing':
+        return plugin.state === 7 || plugin.state === 8 || Boolean(plugin.isMissingRuntime || plugin.isMissingDependencies);
+      case 'stopped':
+        // 已停止仅匹配常驻微服务人工停止/未启动；脚本轻量扩展若已启用属于 ready，不属于 stopped
+        if (plugin.profile === 1) {
+          return false;
+        }
+        return plugin.state === 0;
+      case 'disabled':
+        // 显式禁用的扩展
+        return plugin.state === 6 || plugin.manifest?.enabled === false;
+      default:
+        return true;
+    }
+  }
+}
+
 export class KeywordFilterStrategy {
   apply(plugin, context) {
     if (!context || !context.keyword) {
@@ -69,6 +107,7 @@ export class CompositePluginFilter {
       new ProfileFilterStrategy(),
       new CategoryFilterStrategy(),
       new KeywordFilterStrategy(),
+      new StateFilterStrategy(),
     ];
   }
 
@@ -90,15 +129,52 @@ export class CompositePluginFilter {
 }
 
 /**
+ * 计算插件状态排序权重（运行中优先置顶）
+ * 1: 运行中 (Running)
+ * 2: 启动中 (Starting)
+ * 3: 异常/降级 (Degraded/Backoff/Crashed)
+ * 4: 缺少依赖/环境 (Missing)
+ * 5: 已停止/已禁用 (Stopped/Disabled)
+ */
+export function getPluginStateWeight(plugin) {
+  if (!plugin) return 99;
+  if (plugin.state === 2) return 1;
+  if (plugin.state === 1) return 2;
+  if (plugin.profile === 1 && plugin.state !== 6 && plugin.manifest?.enabled !== false && !plugin.isMissingRuntime && !plugin.isMissingDependencies) {
+    return 3;
+  }
+  if (plugin.state === 3 || plugin.state === 4 || plugin.state === 5) return 4;
+  if (plugin.state === 7 || plugin.state === 8 || plugin.isMissingRuntime || plugin.isMissingDependencies) return 5;
+  if (plugin.state === 0) return 6;
+  return 7;
+}
+
+/**
+ * 按照运行状态优先级对插件进行稳定排序
+ */
+export function sortPluginsByState(plugins) {
+  if (!Array.isArray(plugins)) return [];
+  return [...plugins].sort((a, b) => {
+    const wa = getPluginStateWeight(a);
+    const wb = getPluginStateWeight(b);
+    if (wa !== wb) {
+      return wa - wb;
+    }
+    return String(a.id || '').localeCompare(String(b.id || ''));
+  });
+}
+
+/**
  * 默认单例组合过滤器
  */
 const defaultCompositeFilter = new CompositePluginFilter();
 
 /**
- * 统一快捷过滤函数（纯函数，零副作用）
+ * 统一快捷过滤函数（纯函数，零副作用，默认启动状态置顶）
  */
-export function filterPlugins(plugins, { profile = 'all', category = 'all', keyword = '' } = {}) {
-  return defaultCompositeFilter.filter(plugins, { profile, category, keyword });
+export function filterPlugins(plugins, { profile = 'all', category = 'all', keyword = '', state = 'all' } = {}) {
+  const filtered = defaultCompositeFilter.filter(plugins, { profile, category, keyword, state });
+  return sortPluginsByState(filtered);
 }
 
 /**

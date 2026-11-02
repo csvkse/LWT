@@ -27,7 +27,7 @@ public sealed class NativePluginAdapterTests
         try
         {
             var binPath = Path.Combine(tempDir, "mytool.exe");
-            File.WriteAllText(binPath, "dummy");
+            File.WriteAllText(binPath, "#!/bin/sh\nexit 0\n");
 
             var adapter = new NativeRuntimeAdapter();
             var manifest = new PluginManifest

@@ -1,0 +1,21 @@
+{
+  "manifestVersion": 1,
+  "id": "native-managed",
+  "name": "原生受控常驻微服务",
+  "category": "Native",
+  "version": "1.0.0",
+  "description": "原生常驻程序并启用 HTTP 管理协议接口 (handshake / health / invoke / shutdown)。",
+  "icon": "🕹️",
+  "profile": "resident",
+  "runtime": "native",
+  "source": "package",
+  "entrypoint": "bin/service",
+  "network": {
+    "mode": "path",
+    "portEnv": "PORT",
+    "pathPrefix": "/plugins/native-managed"
+  },
+  "supervision": {
+    "autoRestart": true
+  }
+}

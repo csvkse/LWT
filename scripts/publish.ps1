@@ -14,8 +14,8 @@ dotnet publish (Join-Path $root 'src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.c
     -o (Join-Path $root $OutputDir) --nologo
 if ($LASTEXITCODE -ne 0) { throw 'publish 失败' }
 
-if (Test-Path (Join-Path $root 'extensions')) {
-    Copy-Item -Path (Join-Path $root 'extensions') -Destination (Join-Path $root $OutputDir) -Recurse -Force
+if (Test-Path (Join-Path $root 'plugins')) {
+    Copy-Item -Path (Join-Path $root 'plugins') -Destination (Join-Path $root $OutputDir) -Recurse -Force
 }
 
 Write-Host "`n✅ 发布完成：$root/$OutputDir" -ForegroundColor Green

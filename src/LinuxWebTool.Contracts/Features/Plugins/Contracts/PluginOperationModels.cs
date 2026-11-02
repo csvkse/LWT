@@ -51,6 +51,20 @@ public sealed record PluginActionResult
     public string? ErrorCode { get; init; }
     public IReadOnlyList<PluginArtifactRef> ArtifactRefs { get; init; } = [];
     public bool EffectUncertain { get; init; }
+
+    public static PluginActionResult Ok(string message, System.Text.Json.JsonElement? data = null) => new()
+    {
+        Status = "succeeded",
+        Message = message,
+        Data = data
+    };
+
+    public static PluginActionResult Fail(string error, string? errorCode = null) => new()
+    {
+        Status = "failed",
+        Error = error,
+        ErrorCode = errorCode
+    };
 }
 
 /// <summary>

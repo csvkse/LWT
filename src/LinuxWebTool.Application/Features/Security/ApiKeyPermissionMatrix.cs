@@ -270,4 +270,44 @@ public static class ApiKeyPermissionMatrix
 
         return IsToolAllowed(allowedTools, toolName);
     }
+
+    /// <summary>
+    /// 校验当前 API Key 是否被授权访问特定请求路径（支持通配符、前缀及精确匹配）
+    /// </summary>
+    public static bool IsPathPermitted(string? allowedPaths, string path)
+    {
+        if (string.IsNullOrWhiteSpace(allowedPaths) || allowedPaths.Trim() == "*")
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(path)) return false;
+
+        var normalizedPath = path.Trim().TrimEnd('/');
+        var tokens = allowedPaths.Split(new[] { ',', ';', ' ', '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var rawToken in tokens)
+        {
+            var token = rawToken.Trim().Trim('"', '[', ']', '\'').TrimEnd('/');
+            if (token == "*" || string.Equals(token, normalizedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (token.EndsWith("/*", StringComparison.Ordinal))
+            {
+                var prefix = token[..^2].TrimEnd('/');
+                if (string.Equals(normalizedPath, prefix, StringComparison.OrdinalIgnoreCase) ||
+                    normalizedPath.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            else if (normalizedPath.StartsWith(token + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

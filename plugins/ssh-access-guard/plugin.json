@@ -1,0 +1,36 @@
+{
+  "manifestVersion": 1,
+  "id": "ssh-access-guard",
+  "name": "SSH 访问安全守卫",
+  "category": "Security",
+  "version": "1.0.0",
+  "description": "实时监控 SSH 成功与失败登录轨迹，支持恶意 IP/网段一键封禁与解封",
+  "icon": "🛡️",
+  "profile": "oneshot",
+  "runtime": "bash",
+  "target": "host",
+  "entrypoint": "hooks/records.sh",
+  "ui": {
+    "entry": "ui/index.html",
+    "title": "SSH 安全审计看板",
+    "icon": "🛡️"
+  },
+  "dependencies": {
+    "runners": ["bash"],
+    "binaries": ["ss", "who"]
+  },
+  "installGuide": {
+    "debian": "apt update && apt install -y util-linux coreutils iproute2",
+    "rhel": "dnf install -y util-linux coreutils iproute",
+    "alpine": "apk add --no-cache util-linux coreutils iproute2",
+    "windows": "winget install Git.Git"
+  },
+  "customActions": [
+    { "action": "status", "label": "守卫状态", "icon": "⚙️", "requireParam": false },
+    { "action": "records", "label": "登录审计记录", "icon": "📋", "requireParam": false },
+    { "action": "failed", "label": "爆破探测", "icon": "⚠️", "requireParam": false },
+    { "action": "banned_list", "label": "封禁名单列表", "icon": "🚫", "requireParam": false },
+    { "action": "ban_ip", "label": "一键封禁", "icon": "🚫", "requireParam": true, "paramPlaceholder": "请输入恶意 IP 地址" },
+    { "action": "unban_ip", "label": "解封 IP", "icon": "🔓", "requireParam": true, "paramPlaceholder": "输入要解封的 IP" }
+  ]
+}

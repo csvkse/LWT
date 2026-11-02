@@ -13,10 +13,6 @@ public sealed partial class PluginManager
         {
             return new PluginActionResult { Status = "failed", Message = $"非法插件 ID: {request.PluginId}" };
         }
-        if (!PluginSecurityGuard.IsValidActionName(request.Action))
-        {
-            return new PluginActionResult { Status = "failed", Message = $"非法动作名称: {request.Action}" };
-        }
 
         var dir = Path.Combine(_pluginsRoot, request.PluginId);
         if (!Directory.Exists(dir))
@@ -42,8 +38,20 @@ public sealed partial class PluginManager
             return new PluginActionResult { Status = "failed", Message = "解析插件清单失败" };
         }
 
+        var effectiveAction = request.Action;
+        if (string.IsNullOrWhiteSpace(effectiveAction))
+        {
+            effectiveAction = manifest.CustomActions?.FirstOrDefault()?.Action ?? "default";
+        }
+
+        if (!PluginSecurityGuard.IsValidActionName(effectiveAction) && effectiveAction != "default")
+        {
+            return new PluginActionResult { Status = "failed", Message = $"非法动作名称: {request.Action}" };
+        }
+
+        var effectiveRequest = request with { Action = effectiveAction };
         var strategy = GetStrategy(manifest.Profile);
-        return await strategy.ExecuteActionAsync(manifest, dir, request, _adapters, ct);
+        return await strategy.ExecuteActionAsync(manifest, dir, effectiveRequest, _adapters, ct);
     }
 
     public ValueTask<IReadOnlyList<string>> GetLogsAsync(string id, int limit = 200, CancellationToken ct = default)

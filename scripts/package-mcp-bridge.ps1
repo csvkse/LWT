@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Packages the Go MCP Bridge worker into standalone distribution archives for Linux and Windows.
+    Packages the Go MCP Bridge plugin into standalone distribution archives for Linux and Windows.
 #>
 param(
     [string]$OutputDir = "$PSScriptRoot\..\artifacts\mcp-bridge"
@@ -12,8 +12,8 @@ if (-not (Test-Path $OutputDir)) {
     New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 }
 
-$workersBridgeDir = "$PSScriptRoot\..\workers\mcp-bridge"
-Push-Location $workersBridgeDir
+$pluginBridgeDir = "$PSScriptRoot\..\plugins\mcp-bridge"
+Push-Location $pluginBridgeDir
 
 try {
     $targets = @(
@@ -38,15 +38,15 @@ try {
         go build -ldflags "-s -w" -o $binPath ./cmd/mcp-bridge
 
         # Copy manifest
-        $manifest = Get-Content "$workersBridgeDir\packaging\worker.json" -Raw
+        $manifest = Get-Content "$pluginBridgeDir\packaging\plugin.json" -Raw
         if ($t.OS -eq "windows") {
             $manifest = $manifest.Replace('"entrypoint": "mcp-bridge"', '"entrypoint": "mcp-bridge.exe"')
         }
-        Set-Content -Path "$stagingDir\worker.json" -Value $manifest -Encoding utf8
+        Set-Content -Path "$stagingDir\plugin.json" -Value $manifest -Encoding utf8
 
         # Copy docs & examples
-        Copy-Item "$workersBridgeDir\packaging\bridge.example.json" "$stagingDir\" -Force
-        Copy-Item "$workersBridgeDir\README.md" "$stagingDir\" -Force
+        Copy-Item "$pluginBridgeDir\packaging\bridge.example.json" "$stagingDir\" -Force
+        Copy-Item "$pluginBridgeDir\README.md" "$stagingDir\" -Force
 
         # Create zip
         $zipPath = "$OutputDir\mcp-bridge-$($t.Name).zip"

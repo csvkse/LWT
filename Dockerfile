@@ -106,6 +106,7 @@ WORKDIR /src
 # 先复制项目文件，充分利用依赖还原缓存。
 COPY ["Directory.Build.props", "Directory.Packages.props", "./"]
 COPY ["src/LinuxWebTool.Contracts/LinuxWebTool.Contracts.csproj", "src/LinuxWebTool.Contracts/"]
+COPY ["src/LinuxWebTool.Application/LinuxWebTool.Application.csproj", "src/LinuxWebTool.Application/"]
 COPY ["src/LinuxWebTool.Infrastructure/LinuxWebTool.Infrastructure.csproj", "src/LinuxWebTool.Infrastructure/"]
 COPY ["src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj", "src/LinuxWebTool.WebHost/"]
 
@@ -123,11 +124,20 @@ COPY src ./src
 
 RUN set -e; \
     for i in 1 2 3 4 5; do \
-      apk update && apk add --no-cache clang build-base zlib-dev && break || { \
+      apk update && apk add --no-cache clang build-base zlib-dev go && break || { \
         echo "apk add build tools failed, retrying ($i/5)..."; \
         sleep 3; \
       }; \
     done
+COPY plugins ./plugins
+# 编译 MCP Bridge 原生 Go 独立二进制微服务（优先复用有效 Linux ELF 预编译产物，否则从源码静态编译）
+RUN if [ -f plugins/mcp-bridge/mcp-bridge ] && [ "$(head -c 4 plugins/mcp-bridge/mcp-bridge 2>/dev/null)" = "$(printf '\177ELF')" ]; then \
+        echo "Using valid prebuilt Linux ELF mcp-bridge binary" && \
+        mkdir -p /app/publish && cp plugins/mcp-bridge/mcp-bridge /app/publish/mcp-bridge; \
+    else \
+        echo "Building mcp-bridge from source for Linux" && \
+        cd plugins/mcp-bridge && CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w" -o /app/publish/mcp-bridge ./cmd/mcp-bridge; \
+    fi
 RUN cc -shared -fPIC -O2 -Wall -Wextra -Werror src/LinuxWebTool.Infrastructure/Features/Terminal/Platform/native/linuxwebtool_pty.c -o /tmp/liblinuxwebtool_pty.so -lutil
 RUN set -e; \
     ARCH="${TARGETARCH:-$(uname -m)}"; \
@@ -140,6 +150,7 @@ RUN set -e; \
     dotnet publish "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj" \
       -c $BUILD_CONFIGURATION \
       -o /app/publish \
+      --no-restore \
       /p:PublishAot=true \
       -r "${RID}"
 
@@ -152,7 +163,14 @@ RUN find /app/publish -type f -name "*.pdb" -delete
 FROM base AS final
 WORKDIR /app
 COPY --from=build --chown=appuser:appgroup /app/publish .
-COPY --chown=appuser:appgroup extensions ./extensions
+COPY --chown=appuser:appgroup plugins ./plugins
+
+RUN cp /app/mcp-bridge /usr/local/bin/mcp-bridge 2>/dev/null || true && \
+    chmod +x /usr/local/bin/mcp-bridge 2>/dev/null || true && \
+    cp /usr/local/bin/mcp-bridge /app/plugins/mcp-bridge/mcp-bridge 2>/dev/null || true
+
+# 确保启动脚本与终端配置为 LF 纯净格式
+RUN sed -i 's/\r$//' /app/terminal-bashrc.sh 2>/dev/null || true
 
 # appsettings.json 已将 Urls 设为 http://0.0.0.0:5270，容器内直接生效，
 # 本地开发由 launchSettings.json 的 applicationUrl 覆盖，二者互不干扰。

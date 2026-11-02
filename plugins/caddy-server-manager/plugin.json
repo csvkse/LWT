@@ -1,0 +1,36 @@
+{
+  "manifestVersion": 1,
+  "id": "caddy-server-manager",
+  "name": "Caddy 现代 Web 服务器",
+  "category": "Web",
+  "version": "1.0.0",
+  "description": "基于 Node.js 原生驱动的 Caddy 服务生命周期控制、Admin API 探测与 Caddyfile 语法预检热重载",
+  "icon": "🌐",
+  "profile": "oneshot",
+  "runtime": "node",
+  "entrypoint": "hooks/status.js",
+  "network": {
+    "mode": "port",
+    "port": 2019
+  },
+  "dependencies": {
+    "runners": ["node"],
+    "binaries": ["caddy"]
+  },
+  "installGuide": {
+    "debian": "apt update && apt install -y nodejs caddy",
+    "rhel": "dnf install -y nodejs caddy",
+    "alpine": "apk add --no-cache nodejs caddy",
+    "windows": "winget install OpenJS.NodeJS.LTS ; winget install CaddyServer.Caddy"
+  },
+  "customActions": [
+    { "action": "status", "label": "服务状态", "icon": "🔍" },
+    { "action": "start", "label": "启动服务", "icon": "▶️" },
+    { "action": "stop", "label": "停止服务", "icon": "⏹️" },
+    { "action": "restart", "label": "平滑重启", "icon": "🔄" }
+  ],
+  "configForm": [
+    { "field": "caddyfile_path", "label": "Caddyfile 路径", "type": "text", "defaultValue": "/etc/caddy/Caddyfile", "required": true },
+    { "field": "admin_api_endpoint", "label": "Admin API 端点", "type": "text", "defaultValue": "http://127.0.0.1:2019", "required": false }
+  ]
+}

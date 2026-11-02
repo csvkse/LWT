@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SOCKS5 安全代理控制台</title>
+  <style>
+    :root {
+      --bg: #09090b;
+      --card-bg: #18181b;
+      --border: #27272a;
+      --text: #fafafa;
+      --text-muted: #a1a1aa;
+      --accent: #06b6d4;
+      --accent-glow: rgba(6, 182, 212, 0.2);
+      --success: #10b981;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      padding: 20px;
+      line-height: 1.5;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .badge {
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      background: rgba(6, 182, 212, 0.15);
+      color: var(--accent);
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      font-weight: 500;
+    }
+    .badge-lan {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .badge-auth {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--warning);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .card h2 {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .card .val {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #38bdf8;
+      font-family: monospace;
+    }
+    .tip {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .section-card {
+      background: var(--card-bg);
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 20px;
+    }
+    .section-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #38bdf8;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .presets {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .preset-pill {
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      color: #d4d4d8;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .preset-pill:hover {
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .preset-pill.active {
+      background: rgba(6, 182, 212, 0.2);
+      border-color: var(--accent);
+      color: #38bdf8;
+      font-weight: 600;
+    }
+    .form-group {
+      margin-bottom: 14px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: #e4e4e7;
+      margin-bottom: 4px;
+    }
+    .form-group input, .form-group textarea, .form-group select {
+      width: 100%;
+      background: #09090b;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: #fafafa;
+      font-family: monospace;
+      font-size: 0.8rem;
+    }
+    .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .auth-toggle-group {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .auth-btn-option {
+      flex: 1;
+      padding: 10px;
+      background: #27272a;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      text-align: center;
+      font-size: 0.85rem;
+      color: #d4d4d8;
+      transition: all 0.2s;
+    }
+    .auth-btn-option.active {
+      background: rgba(6, 182, 212, 0.15);
+      border-color: var(--accent);
+      color: #38bdf8;
+      font-weight: 600;
+    }
+    .auth-fields-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .btn {
+      padding: 7px 16px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 0.2s;
+    }
+    .btn-primary {
+      background: #0891b2;
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background: #06b6d4;
+    }
+    .btn-secondary {
+      background: #27272a;
+      color: #d4d4d8;
+      border-color: #3f3f46;
+    }
+    .btn-secondary:hover {
+      background: #3f3f46;
+      color: #fff;
+    }
+    .status-msg {
+      font-size: 0.75rem;
+      margin-top: 8px;
+    }
+    .status-msg.ok { color: var(--success); }
+    .status-msg.err { color: var(--danger); }
+    .instructions {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .instructions h3 {
+      font-size: 0.95rem;
+      margin-bottom: 10px;
+      color: var(--text);
+    }
+    .code-block {
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+      font-family: monospace;
+      font-size: 0.8rem;
+      color: #93c5fd;
+      margin-bottom: 10px;
+      word-break: break-all;
+      position: relative;
+    }
+    .input-wrapper {
+      position: relative;
+    }
+    .input-wrapper input {
+      padding-right: 36px;
+    }
+    .toggle-pwd-btn {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <h1>🧦 SOCKS5 安全代理微服务</h1>
+      <span class="badge">🐹 Go 运行引擎</span>
+      <span class="badge" id="active-auth-badge">🔑 无密码模式</span>
+    </div>
+    <span class="badge badge-lan" id="active-preset-badge">🛡️ 局域网专用模式</span>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>代理监听 & 模式</h2>
+      <div class="val" id="proxy-port">:18001</div>
+      <div class="tip" id="auth-mode-desc">模式: RFC 1928 (无需认证)</div>
+    </div>
+    <div class="card">
+      <h2>目标放行连接</h2>
+      <div class="val" style="color: #34d399;" id="allowed-count">0</div>
+      <div class="tip">已验证通过的内网代理连接</div>
+    </div>
+    <div class="card">
+      <h2>出站目标拦截</h2>
+      <div class="val" style="color: #f59e0b;" id="blocked-targets-count">0</div>
+      <div class="tip">拦截非允许网段/域名 (0x02)</div>
+    </div>
+    <div class="card">
+      <h2>入站 / 认证拒绝</h2>
+      <div class="val" style="color: #f87171;" id="security-rejections-count">0</div>
+      <div class="tip" id="security-breakdown">入站拦截: 0 | 认证失败: 0</div>
+    </div>
+  </div>
+
+  <!-- 维度一：用户身份认证 (RFC 1929) -->
+  <div class="section-card">
+    <div class="section-title">
+      <span>🔐 维度一：访问身份认证模式 (RFC 1929)</span>
+    </div>
+
+    <div class="auth-toggle-group">
+      <div class="auth-btn-option active" id="auth-opt-none" onclick="setAuthMode('none')">
+        🔓 无需认证 (None)
+      </div>
+      <div class="auth-btn-option" id="auth-opt-pass" onclick="setAuthMode('password')">
+        🔒 用户名 / 密码认证 (RFC 1929)
+      </div>
+    </div>
+
+    <div id="auth-fields" style="display: none;">
+      <div class="auth-fields-row">
+        <div class="form-group" style="margin-bottom: 0;">
+          <label>认证用户名 (Username):</label>
+          <input type="text" id="input-username" placeholder="请输入代理用户名 (如 proxyadmin)" />
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label>认证密码 (Password):</label>
+          <div class="input-wrapper">
+            <input type="password" id="input-password" placeholder="请输入代理认证密码" />
+            <button type="button" class="toggle-pwd-btn" onclick="togglePasswordVisibility()" title="显示/隐藏密码">👁️</button>
+          </div>
+        </div>
+        <button type="button" class="btn btn-secondary" onclick="generateRandomPassword()" style="height: 35px; white-space: nowrap;">
+          🎲 随机密码
+        </button>
+      </div>
+      <div class="tip" style="margin-top: 8px;">
+        提示：采用 Go <code>crypto/subtle.ConstantTimeCompare</code> 恒定时间比对，杜绝网络时序侧信道嗅探攻击。
+      </div>
+    </div>
+  </div>
+
+  <!-- 维度二：入站客户端来源 IP 白名单 -->
+  <div class="section-card">
+    <div class="section-title">
+      <span>🛡️ 维度二：入站客户端 IP 访问限制 (标准 CIDR)</span>
+    </div>
+
+    <div class="presets">
+      <span style="font-size: 0.8rem; color: var(--text-muted); align-self: center; margin-right: 4px;">来源快捷预设:</span>
+      <button class="preset-pill active" id="client-pill-lan" onclick="applyClientPreset('lan')">🟢 局域网私网来源 (推荐)</button>
+      <button class="preset-pill" id="client-pill-loopback" onclick="applyClientPreset('loopback')">🔒 仅限本机回环 (127.0.0.1/32)</button>
+      <button class="preset-pill" id="client-pill-all" onclick="applyClientPreset('all')">🌐 全网开放接入 (0.0.0.0/0)</button>
+    </div>
+
+    <div class="form-group">
+      <label>允许接入客户端 IP 或网段 (标准 CIDR 格式，逗号或换行分隔):</label>
+      <input type="text" id="input-clients" value="" placeholder="留空使用预设，或输入如: 127.0.0.1/32, 10.126.0.0/16" />
+      <div class="tip">在 TCP 握手前短路阻断未授权客户端 IP 连接，零资源占用防护网络端口扫描探测。</div>
+    </div>
+  </div>
+
+  <!-- 维度三：出站目标网段与域名白名单 (标准 CIDR) -->
+  <div class="section-card">
+    <div class="section-title">
+      <span>🎯 维度三：允许访问目标网段 (标准 CIDR) 与域名过滤</span>
+    </div>
+
+    <div class="presets">
+      <span style="font-size: 0.8rem; color: var(--text-muted); align-self: center; margin-right: 4px;">出站快捷预设:</span>
+      <button class="preset-pill active" id="pill-lan" onclick="applyPreset('lan')">🟢 局域网专用 (推荐)</button>
+      <button class="preset-pill" id="pill-loopback" onclick="applyPreset('loopback')">🔒 仅本机回环</button>
+      <button class="preset-pill" id="pill-all" onclick="applyPreset('all')">🌐 全网开放 (无限制)</button>
+      <button class="preset-pill" id="pill-custom" onclick="applyPreset('custom')">⚙️ 自定义规则</button>
+    </div>
+
+    <div class="form-group">
+      <label>允许访问目标网段 (标准 CIDR 格式，消除前缀歧义):</label>
+      <input type="text" id="input-subnets" value="10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1/128" placeholder="例如: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16" />
+      <div class="tip">严格采用标准 CIDR 掩码位校验。支持输入容错（如 10. 自动补齐为 10.0.0.0/8）。</div>
+    </div>
+
+    <div class="form-group">
+      <label>允许访问目标域名 (通配符 *.internal 或正则表达式 regex:^.*\.corp$):</label>
+      <input type="text" id="input-domains" value="*.local, *.internal, *.lan, localhost" placeholder="例如: *.internal, *.corp.local, regex:^.*\.corp$" />
+      <div class="tip">支持通配符与正则表达式。放行域名仍需进行 Anti-DNS-Rebinding 二次 IP 校验防重绑定穿透。</div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btn-save" onclick="saveAcl()">💾 保存三维策略并重启生效</button>
+      <button class="btn btn-secondary" onclick="resetDefaults()">🔄 恢复默认策略</button>
+    </div>
+    <div class="status-msg" id="status-msg"></div>
+  </div>
+
+  <div class="instructions">
+    <h3>快速连接与客户端配置指南</h3>
+    
+    <p class="tip" style="margin-bottom: 6px;">1. 通过 cURL 命令验证内网代理连通性：</p>
+    <div class="code-block" id="curl-preview">curl -x socks5://127.0.0.1:18001 http://127.0.0.1:5270/health</div>
+
+    <p class="tip" style="margin-bottom: 6px;">2. 为 Git 配置内网专用 SOCKS5 代理：</p>
+    <div class="code-block" id="git-preview">git config --global http.proxy socks5://127.0.0.1:18001</div>
+
+    <p class="tip" style="margin-bottom: 6px;">3. 环境变量导出配置（支持 Bash / Zsh 终端）：</p>
+    <div class="code-block" id="env-preview">export ALL_PROXY=socks5://127.0.0.1:18001</div>
+
+    <div class="tip" style="margin-top: 14px;">
+      💡 提示：本微服务采用 Go 原生 JIT 增量编译模式运行，策略保存后自动平滑重启，端口毫秒级恢复无悬挂。
+    </div>
+  </div>
+
+  <script>
+    let currentManifest = null;
+    let activePreset = 'lan';
+    let currentAuthMode = 'none';
+
+    function setStatus(msg, ok) {
+      const el = document.getElementById('status-msg');
+      el.textContent = msg;
+      el.className = 'status-msg ' + (ok ? 'ok' : 'err');
+      if (ok) setTimeout(() => { el.textContent = ''; }, 4000);
+    }
+
+    function setAuthMode(mode) {
+      currentAuthMode = mode;
+      document.getElementById('auth-opt-none').classList.toggle('active', mode === 'none');
+      document.getElementById('auth-opt-pass').classList.toggle('active', mode === 'password');
+      document.getElementById('auth-fields').style.display = mode === 'password' ? 'block' : 'none';
+      
+      const authBadge = document.getElementById('active-auth-badge');
+      const authDesc = document.getElementById('auth-mode-desc');
+      if (mode === 'password') {
+        authBadge.textContent = '🔒 RFC 1929 认证模式';
+        authBadge.className = 'badge badge-auth';
+        authDesc.textContent = '模式: RFC 1929 (密码认证)';
+      } else {
+        authBadge.textContent = '🔑 无密码模式';
+        authBadge.className = 'badge';
+        authDesc.textContent = '模式: RFC 1928 (无需认证)';
+      }
+      updateClientPreview();
+    }
+
+    function togglePasswordVisibility() {
+      const pwdInput = document.getElementById('input-password');
+      pwdInput.type = pwdInput.type === 'password' ? 'text' : 'password';
+    }
+
+    function generateRandomPassword() {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%^&*';
+      let pass = '';
+      for (let i = 0; i < 16; i++) {
+        pass += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      const pwdInput = document.getElementById('input-password');
+      pwdInput.value = pass;
+      pwdInput.type = 'text';
+      if (!document.getElementById('input-username').value.trim()) {
+        document.getElementById('input-username').value = 'proxyadmin';
+      }
+      updateClientPreview();
+    }
+
+    function applyClientPreset(preset) {
+      document.querySelectorAll('[id^="client-pill-"]').forEach(p => p.classList.remove('active'));
+      const pill = document.getElementById('client-pill-' + preset);
+      if (pill) pill.classList.add('active');
+
+      const clientsInput = document.getElementById('input-clients');
+      if (preset === 'lan') {
+        clientsInput.value = '10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1/128';
+      } else if (preset === 'loopback') {
+        clientsInput.value = '127.0.0.1/32, ::1/128';
+      } else if (preset === 'all') {
+        clientsInput.value = '0.0.0.0/0';
+      }
+    }
+
+    function applyPreset(preset) {
+      activePreset = preset;
+      document.querySelectorAll('.presets .preset-pill').forEach(p => {
+        if (p.id.startsWith('pill-')) p.classList.remove('active');
+      });
+      const pill = document.getElementById('pill-' + preset);
+      if (pill) pill.classList.add('active');
+
+      const subnetsInput = document.getElementById('input-subnets');
+      const domainsInput = document.getElementById('input-domains');
+      const badge = document.getElementById('active-preset-badge');
+
+      if (preset === 'lan') {
+        subnetsInput.value = '10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1/128';
+        domainsInput.value = '*.local, *.internal, *.lan, localhost';
+        badge.textContent = '🛡️ 局域网专用模式';
+        badge.className = 'badge badge-lan';
+      } else if (preset === 'loopback') {
+        subnetsInput.value = '127.0.0.0/8, ::1/128';
+        domainsInput.value = 'localhost';
+        badge.textContent = '🔒 本机回环模式';
+        badge.className = 'badge';
+      } else if (preset === 'all') {
+        subnetsInput.value = '*';
+        domainsInput.value = '*';
+        badge.textContent = '🌐 全网开放模式';
+        badge.className = 'badge';
+      } else {
+        badge.textContent = '⚙️ 自定义规则模式';
+        badge.className = 'badge';
+      }
+    }
+
+    function updateClientPreview() {
+      let authPrefix = '';
+      if (currentAuthMode === 'password') {
+        const user = document.getElementById('input-username').value.trim() || 'user';
+        const pass = document.getElementById('input-password').value || 'pass';
+        authPrefix = encodeURIComponent(user) + ':' + encodeURIComponent(pass) + '@';
+      }
+      const port = document.getElementById('proxy-port').textContent.replace(':', '') || '18001';
+      const proxyUrl = 'socks5://' + authPrefix + '127.0.0.1:' + port;
+
+      document.getElementById('curl-preview').textContent = 'curl -x ' + proxyUrl + ' http://127.0.0.1:5270/health';
+      document.getElementById('git-preview').textContent = 'git config --global http.proxy ' + proxyUrl;
+      document.getElementById('env-preview').textContent = 'export ALL_PROXY=' + proxyUrl;
+    }
+
+    document.getElementById('input-username')?.addEventListener('input', updateClientPreview);
+    document.getElementById('input-password')?.addEventListener('input', updateClientPreview);
+
+    function resetDefaults() {
+      setAuthMode('none');
+      applyClientPreset('lan');
+      applyPreset('lan');
+      saveAcl();
+    }
+
+    async function loadPluginInfo() {
+      try {
+        const token = localStorage.getItem('lwt_token');
+        const res = await fetch('/api/plugins/socks5-proxy', {
+          headers: token ? { 'Authorization': 'Bearer ' + token } : {}
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const p = data?.data || data;
+        currentManifest = p?.manifest;
+
+        if (p?.port) {
+          document.getElementById('proxy-port').textContent = ':' + p.port;
+        }
+
+        if (currentManifest && Array.isArray(currentManifest.arguments)) {
+          const args = currentManifest.arguments;
+          for (let i = 0; i < args.length; i++) {
+            if (args[i] === '--acl-preset' && args[i+1]) {
+              applyPreset(args[i+1]);
+            }
+            if (args[i] === '--allowed-subnets' && args[i+1]) {
+              document.getElementById('input-subnets').value = args[i+1];
+            }
+            if (args[i] === '--allowed-domains' && args[i+1]) {
+              document.getElementById('input-domains').value = args[i+1];
+            }
+            if (args[i] === '--allowed-clients' && args[i+1]) {
+              document.getElementById('input-clients').value = args[i+1];
+            }
+            if (args[i] === '--auth-mode' && args[i+1]) {
+              setAuthMode(args[i+1]);
+            }
+            if (args[i] === '--username' && args[i+1]) {
+              document.getElementById('input-username').value = args[i+1];
+            }
+            if (args[i] === '--password' && args[i+1]) {
+              document.getElementById('input-password').value = args[i+1];
+            }
+          }
+        }
+        updateClientPreview();
+      } catch (err) {
+        console.warn('load plugin info failed', err);
+      }
+    }
+
+    async function saveAcl() {
+      const btn = document.getElementById('btn-save');
+      btn.disabled = true;
+      btn.textContent = '⏳ 保存中...';
+      try {
+        const token = localStorage.getItem('lwt_token');
+        if (!token) {
+          setStatus('未检测到认证 Token，请在面板登录后操作', false);
+          return;
+        }
+
+        const subnets = document.getElementById('input-subnets').value.trim();
+        const domains = document.getElementById('input-domains').value.trim();
+        const clients = document.getElementById('input-clients').value.trim();
+        const authMode = currentAuthMode;
+        const username = document.getElementById('input-username').value.trim();
+        const password = document.getElementById('input-password').value;
+        const preset = activePreset;
+
+        if (authMode === 'password' && (!username || !password)) {
+          setStatus('启用密码认证模式时，用户名与密码均不能为空', false);
+          btn.disabled = false;
+          btn.textContent = '💾 保存三维策略并重启生效';
+          return;
+        }
+
+        const newArgs = [
+          '--listen', '0.0.0.0:{port}',
+          '--auth-mode', authMode,
+          '--username', username,
+          '--password', password,
+          '--acl-preset', preset,
+          '--allowed-subnets', subnets,
+          '--allowed-domains', domains,
+          '--allowed-clients', clients
+        ];
+
+        const manifest = {
+          ...(currentManifest || {}),
+          id: 'socks5-proxy',
+          name: 'SOCKS5 安全代理微服务',
+          category: 'Network',
+          version: '1.0.0',
+          description: '基于 Go 原生运行引擎的极速高并发 SOCKS5 代理服务，支持 RFC 1928 / RFC 1929 规范与身份认证',
+          icon: '🧦',
+          profile: 0,
+          runtime: 6,
+          entrypoint: 'cmd/socks5-proxy/main.go',
+          arguments: newArgs
+        };
+
+        const res = await fetch('/api/plugins', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ manifest })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || '更新清单失败');
+        }
+
+        // Trigger restart to apply new arguments instantly
+        const restartRes = await fetch('/api/plugins/socks5-proxy/Restart', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+
+        if (restartRes.ok) {
+          setStatus('✅ 三维安全防御策略已保存并平滑重启生效！', true);
+        } else {
+          setStatus('清单已保存，但自动重启失败，请在卡片手动重启微服务', false);
+        }
+      } catch (err) {
+        setStatus('保存失败: ' + err.message, false);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '💾 保存三维策略并重启生效';
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', loadPluginInfo);
+  </script>
+</body>
+</html>

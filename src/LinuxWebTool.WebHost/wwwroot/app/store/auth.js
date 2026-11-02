@@ -7,8 +7,23 @@ export const auth = reactive({
   userName: localStorage.getItem(LS_KEYS.user) || '',
 });
 
+function syncCookie(token) {
+  if (typeof document !== 'undefined') {
+    if (token) {
+      document.cookie = `lwt_token=${encodeURIComponent(token)}; path=/; SameSite=Lax; max-age=${7 * 86400};`;
+    } else {
+      document.cookie = 'lwt_token=; path=/; max-age=0; SameSite=Lax;';
+    }
+  }
+}
+
+if (auth.token) {
+  syncCookie(auth.token);
+}
+
 onTokenRenewed((newToken) => {
   auth.token = newToken;
+  syncCookie(newToken);
 });
 
 export function isLoggedIn() {
@@ -48,6 +63,7 @@ export async function renewToken() {
     auth.userName = result.data.userName || auth.userName;
     localStorage.setItem(LS_KEYS.token, auth.token);
     localStorage.setItem(LS_KEYS.user, auth.userName);
+    syncCookie(auth.token);
     return true;
   }
   return false;
@@ -60,6 +76,7 @@ export async function login(userName, password) {
     auth.userName = result.data.userName || userName;
     localStorage.setItem(LS_KEYS.token, auth.token);
     localStorage.setItem(LS_KEYS.user, auth.userName);
+    syncCookie(auth.token);
   }
   return result;
 }
@@ -69,6 +86,7 @@ export function logout() {
   auth.userName = '';
   localStorage.removeItem(LS_KEYS.token);
   localStorage.removeItem(LS_KEYS.user);
+  syncCookie('');
 }
 
 export async function check() {

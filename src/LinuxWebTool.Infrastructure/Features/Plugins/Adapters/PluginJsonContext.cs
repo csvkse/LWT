@@ -3,7 +3,7 @@ using LinuxWebTool.Contracts.Features.Plugins.Contracts;
 
 namespace LinuxWebTool.Infrastructure.Features.Plugins.Adapters;
 
-[JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true, WriteIndented = true)]
+[JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true, WriteIndented = true, UseStringEnumConverter = true)]
 [JsonSerializable(typeof(CommandArgumentBinding))]
 [JsonSerializable(typeof(CommandStdinBinding))]
 [JsonSerializable(typeof(CommandArtifactRule))]
@@ -19,6 +19,7 @@ namespace LinuxWebTool.Infrastructure.Features.Plugins.Adapters;
 [JsonSerializable(typeof(List<PluginOperationDto>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
+[JsonSerializable(typeof(PluginSystemModeDto))]
 [JsonSerializable(typeof(PluginManifest))]
 [JsonSerializable(typeof(List<PluginManifest>))]
 [JsonSerializable(typeof(PluginInstanceDto))]
@@ -37,6 +38,10 @@ namespace LinuxWebTool.Infrastructure.Features.Plugins.Adapters;
 [JsonSerializable(typeof(List<PluginConfigField>))]
 [JsonSerializable(typeof(IReadOnlyList<PluginConfigField>))]
 [JsonSerializable(typeof(PluginDependencies))]
+[JsonSerializable(typeof(PluginDependencyProbeConfig))]
+[JsonSerializable(typeof(PluginDependencyConfig))]
+[JsonSerializable(typeof(List<PluginDependencyConfig>))]
+[JsonSerializable(typeof(IReadOnlyList<PluginDependencyConfig>))]
 [JsonSerializable(typeof(PluginCodeDto))]
 [JsonSerializable(typeof(PluginCodeSaveRequest))]
 [JsonSerializable(typeof(PluginDebugRunRequest))]
@@ -51,6 +56,9 @@ namespace LinuxWebTool.Infrastructure.Features.Plugins.Adapters;
 [JsonSerializable(typeof(PluginCreateOrUpdateRequest))]
 [JsonSerializable(typeof(PluginActionRequest))]
 [JsonSerializable(typeof(PluginSqliteInfo))]
+[JsonSerializable(typeof(PluginPortCheckResult))]
+[JsonSerializable(typeof(PluginPortSwitchRequest))]
+[JsonSerializable(typeof(PluginPortSwitchResult))]
 [JsonSerializable(typeof(PluginKvItem))]
 [JsonSerializable(typeof(List<PluginKvItem>))]
 internal partial class PluginJsonContext : JsonSerializerContext

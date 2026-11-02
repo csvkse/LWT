@@ -15,10 +15,16 @@ public sealed class ResidentExecutionStrategy : IExecutionProfileStrategy
     public PluginProfile Profile => PluginProfile.Resident;
 
     private readonly ConcurrentDictionary<string, Process> _processes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string> _internalSecrets = new(StringComparer.OrdinalIgnoreCase);
 
     public int? GetProcessId(string pluginId)
     {
         return _processes.TryGetValue(pluginId, out var proc) && !proc.HasExited ? proc.Id : null;
+    }
+
+    public string? GetInternalSecret(string pluginId)
+    {
+        return _internalSecrets.TryGetValue(pluginId, out var secret) ? secret : null;
     }
 
     public ValueTask<(bool Success, string? ErrorMessage)> StartAsync(
@@ -48,12 +54,33 @@ public sealed class ResidentExecutionStrategy : IExecutionProfileStrategy
             return ValueTask.FromResult((false, missingReason));
         }
 
+        var rawDeps = manifest.GetUnifiedDependencies();
+        foreach (var dep in rawDeps)
+        {
+            if (dep.Required)
+            {
+                var cmd = !string.IsNullOrWhiteSpace(dep.Probe?.Command) ? dep.Probe.Command : dep.Id;
+                if (!PluginManager.CheckBinaryAvailable(cmd, dep.Probe?.Args))
+                {
+                    var depErr = $"缺少必要二进制依赖: {dep.Name}";
+                    stateMachine.MarkMissingDependencies(depErr);
+                    return ValueTask.FromResult((false, (string?)depErr));
+                }
+            }
+        }
+
         int? allocatedPort = null;
+        PluginPortManager.PortAllocationResult? portResult = null;
         if (manifest.Network != null && manifest.Network.Mode is "path" or "port")
         {
             try
             {
-                allocatedPort = portManager.AllocatePort(manifest.Id, manifest.Network.Port);
+                portResult = portManager.AllocatePortWithDetails(manifest.Id, manifest.Network.Port, manifest.Network.PortConflictPolicy);
+                allocatedPort = portResult.Port;
+                if (portResult.WasAvoided && !string.IsNullOrEmpty(portResult.ConflictReason))
+                {
+                    ringBuffer.Append($"[{DateTime.Now:HH:mm:ss}] [WARN] {portResult.ConflictReason}");
+                }
             }
             catch (Exception ex)
             {
@@ -61,10 +88,62 @@ public sealed class ResidentExecutionStrategy : IExecutionProfileStrategy
             }
         }
 
+        // 启动前探测并清理历史遗留孤儿进程
+        var runtimeDir = Path.Combine(pluginDir, ".runtime");
+        var pidFile = Path.Combine(runtimeDir, "process.pid");
+        if (File.Exists(pidFile))
+        {
+            try
+            {
+                var pidText = File.ReadAllText(pidFile).Trim();
+                if (int.TryParse(pidText, out var oldPid))
+                {
+                    try
+                    {
+                        var oldProc = Process.GetProcessById(oldPid);
+                        if (!oldProc.HasExited)
+                        {
+                            ringBuffer.Append($"[{DateTime.Now:HH:mm:ss}] [SYSTEM] 探测到历史遗留孤儿进程 (PID: {oldPid})，执行自愈清理...");
+                            oldProc.Kill(entireProcessTree: true);
+                            oldProc.WaitForExit(1000);
+                        }
+                    }
+                    catch (ArgumentException) { }
+                }
+            }
+            catch { }
+            try { File.Delete(pidFile); } catch { }
+        }
+
         var runId = DateTime.UtcNow.Ticks;
         stateMachine.NotifyStarting(runId);
 
-        var spec = adapter.BuildStartSpec(manifest, pluginDir, allocatedPort);
+        var secret = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+        _internalSecrets[manifest.Id] = secret;
+
+        PluginStartSpec spec;
+        try
+        {
+            spec = adapter.BuildStartSpec(manifest, pluginDir, allocatedPort);
+        }
+        catch (FileNotFoundException ex)
+        {
+            _internalSecrets.TryRemove(manifest.Id, out _);
+            if (allocatedPort.HasValue) portManager.ReleasePort(manifest.Id);
+            var err = $"原生程序文件不存在: {ex.Message}";
+            stateMachine.MarkMissingRuntime(err);
+            ringBuffer.Append($"[{DateTime.Now:HH:mm:ss}] [ERROR] {err}");
+            return ValueTask.FromResult((false, (string?)err));
+        }
+        catch (Exception ex)
+        {
+            _internalSecrets.TryRemove(manifest.Id, out _);
+            if (allocatedPort.HasValue) portManager.ReleasePort(manifest.Id);
+            stateMachine.RecordExit(-1, runId, ex.Message);
+            ringBuffer.Append($"[{DateTime.Now:HH:mm:ss}] [ERROR] 构造启动参数异常: {ex.Message}");
+            return ValueTask.FromResult((false, (string?)$"构造启动参数异常: {ex.Message}"));
+        }
+
         var psi = new ProcessStartInfo
         {
             FileName = spec.FileName,
@@ -91,6 +170,7 @@ public sealed class ResidentExecutionStrategy : IExecutionProfileStrategy
         {
             psi.EnvironmentVariables[k] = v;
         }
+        psi.EnvironmentVariables["LWT_INTERNAL_SECRET"] = secret;
 
         try
         {
@@ -115,22 +195,35 @@ public sealed class ResidentExecutionStrategy : IExecutionProfileStrategy
             {
                 var exitCode = proc.ExitCode;
                 _processes.TryRemove(manifest.Id, out _);
+                _internalSecrets.TryRemove(manifest.Id, out _);
+                try { if (File.Exists(pidFile)) File.Delete(pidFile); } catch { }
                 ringBuffer.Append($"[{DateTime.Now:HH:mm:ss}] [SYSTEM] 进程已退出，退出码: {exitCode}");
                 stateMachine.RecordExit(exitCode, runId);
             };
 
             if (!proc.Start())
             {
+                _internalSecrets.TryRemove(manifest.Id, out _);
                 stateMachine.RecordExit(-1, runId, "无法启动底层系统进程");
                 return ValueTask.FromResult((false, (string?)"启动进程失败"));
             }
+
+            try
+            {
+                Directory.CreateDirectory(runtimeDir);
+                File.WriteAllText(pidFile, proc.Id.ToString());
+            }
+            catch { }
 
             proc.BeginOutputReadLine();
             proc.BeginErrorReadLine();
 
             _processes[manifest.Id] = proc;
             stateMachine.NotifyRunning(runId, readiness: "Ready");
-            ringBuffer.Append($"[{DateTime.Now:HH:mm:ss}] [SYSTEM] 插件微服务启动成功 (PID: {proc.Id}, 端口: {allocatedPort?.ToString() ?? "无"})");
+            var portSuffix = portResult?.WasAvoided == true
+                ? $"{allocatedPort} [自动避让原端口 {manifest.Network?.Port}]"
+                : (allocatedPort?.ToString() ?? "无");
+            ringBuffer.Append($"[{DateTime.Now:HH:mm:ss}] [SYSTEM] 插件微服务启动成功 (PID: {proc.Id}, 端口: {portSuffix})");
 
             return ValueTask.FromResult((true, (string?)null));
         }
@@ -151,6 +244,10 @@ public sealed class ResidentExecutionStrategy : IExecutionProfileStrategy
     {
         stateMachine.NotifyStopped();
         portManager.ReleasePort(manifest.Id);
+        _internalSecrets.TryRemove(manifest.Id, out _);
+
+        var pidFile = Path.Combine(pluginDir, ".runtime", "process.pid");
+        try { if (File.Exists(pidFile)) File.Delete(pidFile); } catch { }
 
         if (_processes.TryRemove(manifest.Id, out var proc))
         {
@@ -265,7 +362,31 @@ public sealed class ResidentExecutionStrategy : IExecutionProfileStrategy
 
                         if (p.ExitCode == 0)
                         {
-                            return new PluginActionResult { Status = "succeeded", ExitCode = 0, Message = stdout.Trim() };
+                            System.Text.Json.JsonElement? dataElement = null;
+                            var trimmed = stdout?.Trim();
+                            if (!string.IsNullOrWhiteSpace(trimmed) && (trimmed.StartsWith('{') || trimmed.StartsWith('[')))
+                            {
+                                try
+                                {
+                                    using var doc = System.Text.Json.JsonDocument.Parse(trimmed);
+                                    dataElement = doc.RootElement.Clone();
+                                }
+                                catch
+                                {
+                                    // 非合法 JSON，保持 null
+                                }
+                            }
+
+                            var msg = string.IsNullOrWhiteSpace(stdout) ? "执行成功" : stdout.Trim();
+                            if (dataElement.HasValue && dataElement.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
+                            {
+                                if (dataElement.Value.TryGetProperty("message", out var msgProp) && msgProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                                {
+                                    msg = msgProp.GetString() ?? msg;
+                                }
+                            }
+
+                            return new PluginActionResult { Status = "succeeded", ExitCode = 0, Data = dataElement, Message = msg };
                         }
                         return new PluginActionResult { Status = "failed", ExitCode = p.ExitCode, Message = stderr.Trim(), Error = stderr.Trim() };
                     }

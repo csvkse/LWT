@@ -1,0 +1,23 @@
+{
+  "manifestVersion": 1,
+  "id": "sample-healthcheck",
+  "name": "系统健康守护扩展",
+  "category": "Monitoring",
+  "version": "1.0.0",
+  "description": "基于脚本扩展的轻量系统健康自检守护服务示例",
+  "icon": "🩺",
+  "profile": "oneshot",
+  "runtime": "bash",
+  "entrypoint": "hooks/status.sh",
+  "dependencies": {
+    "runners": ["bash"]
+  },
+  "installGuide": {
+    "debian": "apt update && apt install -y bash",
+    "alpine": "apk add --no-cache bash",
+    "windows": "winget install Git.Git"
+  },
+  "customActions": [
+    { "action": "status", "label": "检查系统健康", "icon": "🩺" }
+  ]
+}

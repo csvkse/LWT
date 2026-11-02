@@ -14,6 +14,7 @@ export const PLUGIN_STATE = {
   DEGRADED: 5,
   DISABLED: 6,
   MISSING_RUNTIME: 7,
+  MISSING_DEPENDENCIES: 8,
 };
 
 export const RUNTIME_MAP = {
@@ -23,6 +24,7 @@ export const RUNTIME_MAP = {
   3: { label: 'Bash', icon: '🐚', color: 'text-sky-400 border-sky-500/30 bg-sky-500/10' },
   4: { label: 'PowerShell', icon: '💻', color: 'text-blue-400 border-blue-500/30 bg-blue-500/10' },
   5: { label: 'Native', icon: '⚙️', color: 'text-slate-300 border-slate-500/30 bg-slate-500/10' },
+  6: { label: 'Go', icon: '🐹', color: 'text-cyan-400 border-cyan-500/30 bg-cyan-500/10' },
 };
 
 export const STATE_META_MAP = {
@@ -33,7 +35,8 @@ export const STATE_META_MAP = {
   4: { label: '重试等待', color: 'bg-amber-700/30 text-amber-400 border border-amber-600/50', isAnimated: false },
   5: { label: '降级', color: 'bg-amber-700/30 text-amber-400 border border-amber-600/50', isAnimated: false },
   6: { label: '已禁用', color: 'bg-slate-700 text-slate-400', isAnimated: false },
-  7: { label: '缺少依赖', color: 'bg-amber-500/20 text-amber-300 border border-amber-500/40', isAnimated: false },
+  7: { label: '缺少环境', color: 'bg-amber-500/20 text-amber-300 border border-amber-500/40', isAnimated: false },
+  8: { label: '缺少依赖', color: 'bg-rose-500/20 text-rose-300 border border-rose-500/40', isAnimated: false },
 };
 
 export class PluginStateMachine {
@@ -43,6 +46,7 @@ export class PluginStateMachine {
   static canStart(plugin) {
     if (!plugin) return false;
     if (plugin.isMissingRuntime || plugin.state === PLUGIN_STATE.MISSING_RUNTIME) return false;
+    if (plugin.isMissingDependencies || plugin.state === PLUGIN_STATE.MISSING_DEPENDENCIES) return false;
     if (plugin.manifest?.enabled === false) return false;
 
     // 常驻微服务：已停止、崩溃、重试退避、降级状态下允许启动
@@ -61,11 +65,18 @@ export class PluginStateMachine {
 
   /**
    * 判断插件当前是否允许执行【停止】操作
+   * 支持运行中、启动中以及降级/崩溃/退避状态下的手动停止与熔断重置
    */
   static canStop(plugin) {
     if (!plugin) return false;
     if (plugin.profile !== 0) return false; // 仅常驻微服务具有长期运行和停止概念
-    return plugin.state === PLUGIN_STATE.RUNNING || plugin.state === PLUGIN_STATE.STARTING;
+    return (
+      plugin.state === PLUGIN_STATE.RUNNING ||
+      plugin.state === PLUGIN_STATE.STARTING ||
+      plugin.state === PLUGIN_STATE.CRASHED ||
+      plugin.state === PLUGIN_STATE.BACKOFF ||
+      plugin.state === PLUGIN_STATE.DEGRADED
+    );
   }
 
   /**
@@ -75,6 +86,7 @@ export class PluginStateMachine {
     if (!plugin) return false;
     if (plugin.profile !== 0) return false;
     if (plugin.isMissingRuntime || plugin.state === PLUGIN_STATE.MISSING_RUNTIME) return false;
+    if (plugin.isMissingDependencies || plugin.state === PLUGIN_STATE.MISSING_DEPENDENCIES) return false;
     return plugin.state === PLUGIN_STATE.RUNNING || plugin.state === PLUGIN_STATE.STARTING;
   }
 
@@ -84,6 +96,9 @@ export class PluginStateMachine {
   static getStateMeta(plugin) {
     if (!plugin) return STATE_META_MAP[PLUGIN_STATE.STOPPED];
 
+    if (plugin.isMissingDependencies || plugin.state === PLUGIN_STATE.MISSING_DEPENDENCIES) {
+      return STATE_META_MAP[PLUGIN_STATE.MISSING_DEPENDENCIES];
+    }
     const isMissing = Boolean(plugin.isMissingRuntime || plugin.state === PLUGIN_STATE.MISSING_RUNTIME);
     if (isMissing) {
       return STATE_META_MAP[PLUGIN_STATE.MISSING_RUNTIME];

@@ -289,6 +289,12 @@ for (const file of files) {
     if (!['client.js', 'auth.js'].includes(path.basename(rel)) && /\blocalStorage\b|\bsessionStorage\b/.test(content)) {
       add('FE-STORAGE', file, 'Web Storage 只允许在 api/client.js 与 store/auth.js 中访问');
     }
+    // FE-WEBVIEW-SANDBOX-MODALS: PluginWebview 弹窗的 iframe sandbox 必须显式声明 allow-modals 权限
+    if (rel.includes('PluginWebviewModal.js') && content.includes('<iframe')) {
+      if (!content.includes('allow-modals')) {
+        add('FE-WEBVIEW-SANDBOX-MODALS', file, 'PluginWebviewModal 的 iframe sandbox 必须声明 allow-modals 权限');
+      }
+    }
     // FE-IMPORT-BOUNDARY
     const imports = [...content.matchAll(/import\s+(?:[\s\S]*?from\s+)?["'](\.[^"']+)["']/g)].map((m) => m[1]);
     for (const spec of imports) {
@@ -548,6 +554,57 @@ try {
   }
 } catch (error) {
   add('FE-API-METHOD', configFile, `契约检查失败：${error.message}`);
+}
+
+// FE-CRLF-FORBIDDEN：前端源码严禁包含 \r (CRLF)，防止 Windows 检出污染跨平台静态资产与脚本。
+for (const file of files) {
+  const buf = fs.readFileSync(file);
+  if (buf.includes(0x0d)) {
+    add('FE-CRLF-FORBIDDEN', file, '文件包含 CRLF(\\r\\n) 换行符，必须规范为 Unix LF(\\n)');
+  }
+}
+
+// FE-DISTRO-CMD-INTEGRITY：插件依赖安装指引必须严格区分 Linux 发行版包管理器，严禁 Alpine 混入 apt、Debian 混入 apk，且 .NET 必须与 net10 对齐。
+const installGuideModalFile = path.join(__dirname, 'app', 'components', 'plugins', 'PluginInstallGuideModal.js');
+if (fs.existsSync(installGuideModalFile)) {
+  const content = fs.readFileSync(installGuideModalFile, 'utf8');
+  const match = content.match(/const RUNTIME_DEFAULT_COMMANDS\s*=\s*(\{[\s\S]*?\n\};)/);
+  if (match) {
+    try {
+      const fn = new Function(`return ${match[1]}`);
+      const commands = fn();
+      for (const [rtKey, distroMap] of Object.entries(commands)) {
+        if (distroMap.alpine && (distroMap.alpine.includes('apt ') || distroMap.alpine.includes('apt-get '))) {
+          add('FE-DISTRO-CMD-INTEGRITY', installGuideModalFile, `运行时 ${rtKey} 的 alpine 命令误用 apt：${distroMap.alpine}`);
+        }
+        if (distroMap.debian && distroMap.debian.includes('apk add')) {
+          add('FE-DISTRO-CMD-INTEGRITY', installGuideModalFile, `运行时 ${rtKey} 的 debian 命令误用 apk：${distroMap.debian}`);
+        }
+        if (distroMap.rhel && (distroMap.rhel.includes('apk ') || distroMap.rhel.includes('apt '))) {
+          add('FE-DISTRO-CMD-INTEGRITY', installGuideModalFile, `运行时 ${rtKey} 的 rhel 命令误用 apk/apt：${distroMap.rhel}`);
+        }
+      }
+      if (commands[2]) {
+        if (!commands[2].alpine?.includes('10') || !commands[2].debian?.includes('10')) {
+          add('FE-DISTRO-CMD-INTEGRITY', installGuideModalFile, '.NET SDK 安装指引必须指向 .NET 10，严禁回退为 net8');
+        }
+      }
+    } catch (e) {
+      add('FE-DISTRO-CMD-INTEGRITY', installGuideModalFile, `解析 RUNTIME_DEFAULT_COMMANDS 失败：${e.message}`);
+    }
+  }
+}
+
+// FE-MCP-BRIDGE-ACTION-URL-PURITY：MCP Bridge 内嵌控制台严禁在 apiCall 首参拼接 ? 造成多问号畸变
+const mcpBridgeHtmlFile = path.resolve(__dirname, '../../../../plugins/mcp-bridge/internal/web/index.html');
+if (fs.existsSync(mcpBridgeHtmlFile)) {
+  const mcpHtml = fs.readFileSync(mcpBridgeHtmlFile, 'utf8');
+  const dirtyCallMatch = mcpHtml.match(/apiCall\(\s*['"][^'"]*?\?[^'"]*?['"]/g);
+  if (dirtyCallMatch) {
+    for (const matchStr of dirtyCallMatch) {
+      add('FE-MCP-BRIDGE-ACTION-URL-PURITY', mcpBridgeHtmlFile, `apiCall 首参包含 '?' 畸变 URL 拼接：${matchStr}，必须使用第三参 queryParams 传递`);
+    }
+  }
 }
 
 // 基线比对

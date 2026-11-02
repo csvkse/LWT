@@ -25,8 +25,6 @@ using LinuxWebTool.WebHost.Features.Services.Routes;
 using LinuxWebTool.Contracts.Features.Services.Contracts;
 using LinuxWebTool.WebHost.Features.Plugins.Routes;
 using LinuxWebTool.Contracts.Features.Plugins.Contracts;
-using LinuxWebTool.WebHost.Features.McpBridge.Routes;
-using LinuxWebTool.Contracts.Features.McpBridge.Contracts;
 using LinuxWebTool.WebHost.Features.Security.Routes;
 using LinuxWebTool.Contracts.Features.Security.Contracts;
 
@@ -62,7 +60,6 @@ namespace LinuxWebTool.WebHost.MinimalApi
             services.AddScoped<ServicesController>();
             services.AddScoped<PluginsController>();
             services.AddScoped<PluginOperationsController>();
-            services.AddScoped<McpBridgeController>();
         }
 
         public static void MapAutoControllers(this WebApplication app)
@@ -386,27 +383,34 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_ServicesController.MapPost("Config/Firewall/Rule", async ([FromServices] ServicesController ctrl, HttpContext ctx, [FromBody] UpdateFirewallRuleRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.UpdateFirewallRule(request, ct); });
             var group_PluginsController = app.MapGroup("/api/Plugins");
             group_PluginsController.RequireAuthorization();
+            group_PluginsController.MapGet("SystemMode", ([FromServices] PluginsController ctrl, HttpContext ctx) => { ctrl.HttpContext = ctx; return ctrl.GetSystemMode(); });
             group_PluginsController.MapGet("", async ([FromServices] PluginsController ctrl, HttpContext ctx, [FromQuery] string? profile, [FromQuery] string? search, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetAll(profile, search, ct); });
             group_PluginsController.MapGet("{id}", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetById(id, ct); });
             group_PluginsController.MapPost("{id}/Start", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.Start(id, ct); });
-            group_PluginsController.MapPost("{id}/Stop", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.Stop(id, ct); });
+            group_PluginsController.MapPost("{id}/Stop", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, [FromQuery] bool? manual, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.Stop(id, manual, ct); });
             group_PluginsController.MapPost("{id}/Restart", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.Restart(id, ct); });
+            group_PluginsController.MapGet("{id}/Port/Check", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, [FromQuery] int port, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.CheckPort(id, port, ct); });
+            group_PluginsController.MapPost("{id}/Port/Switch", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, [FromBody] PluginPortSwitchRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.SwitchPort(id, request, ct); });
             group_PluginsController.MapDelete("{id}", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.Delete(id, ct); });
             group_PluginsController.MapPost("", async ([FromServices] PluginsController ctrl, HttpContext ctx, [FromBody] PluginCreateOrUpdateRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.CreateOrUpdate(request, ct); });
-            group_PluginsController.MapPost("{id}/SetEnabled", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, [FromQuery] bool enabled, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.SetEnabled(id, enabled, ct); });
+            group_PluginsController.MapPost("{id}/SetEnabled", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, [FromQuery] bool? enabled = null, CancellationToken ct = default) => { ctrl.HttpContext = ctx; return await ctrl.SetEnabled(id, enabled, ct); });
             group_PluginsController.MapGet("{id}/Logs", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, [FromQuery] int limit = 200, CancellationToken ct = default) => { ctrl.HttpContext = ctx; return await ctrl.GetLogs(id, limit, ct); });
             group_PluginsController.MapPost("Action", async ([FromServices] PluginsController ctrl, HttpContext ctx, [FromBody] PluginActionRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.ExecuteAction(request, ct); });
-            group_PluginsController.MapGet("{id}/Assets/{**filePath}", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, string? filePath = null, CancellationToken ct = default) => { ctrl.HttpContext = ctx; return await ctrl.GetAsset(id, filePath, ct); });
-            group_PluginsController.MapGet("{id}/Assets", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetAsset(id, null, ct); });
+            group_PluginsController.MapGet("{id}/Assets/{**filePath}", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, string? filePath = null, CancellationToken ct = default) => { ctrl.HttpContext = ctx; return await ctrl.GetAsset(id, filePath, ct); }).AllowAnonymous();
+            group_PluginsController.MapGet("{id}/Assets", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetAsset(id, null, ct); }).AllowAnonymous();
             group_PluginsController.MapGet("{id}/Code", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, [FromQuery] string? file, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetCode(id, file, ct); });
             group_PluginsController.MapPost("{id}/Code", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, [FromBody] PluginCodeSaveRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.SaveCode(id, request, ct); });
+            group_PluginsController.MapPost("{id}/Files/Upload", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, [FromQuery] string? path, IFormFile file, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.UploadFile(id, path, file, ct); }).DisableAntiforgery();
+            group_PluginsController.MapGet("{id}/Files/Download", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, [FromQuery] string file, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.DownloadFile(id, file, ct); });
+            group_PluginsController.MapDelete("{id}/Files", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, [FromQuery] string file, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.DeleteFile(id, file, ct); });
             group_PluginsController.MapPost("{id}/Debug", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, [FromBody] PluginDebugRunRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.DebugRun(id, request, ct); });
-            group_PluginsController.MapPost("Import/Zip", async ([FromServices] PluginsController ctrl, HttpContext ctx, IFormFile file, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.ImportZip(file, ct); });
+            group_PluginsController.MapPost("Import/Zip", async ([FromServices] PluginsController ctrl, HttpContext ctx, IFormFile file, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.ImportZip(file, ct); }).DisableAntiforgery();
             group_PluginsController.MapPost("Repo/Scan", async ([FromServices] PluginsController ctrl, HttpContext ctx, [FromBody] PluginRepoScanRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.ScanRepo(request, ct); });
             group_PluginsController.MapPost("Repo/Apply", async ([FromServices] PluginsController ctrl, HttpContext ctx, [FromBody] PluginRepoApplyRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.ApplyRepoModules(request, ct); });
             group_PluginsController.MapGet("{id}/Source", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetSource(id, ct); });
             group_PluginsController.MapGet("{id}/Storage/Sqlite", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetSqliteInfo(id, ct); });
             group_PluginsController.MapGet("{id}/Storage/Kv", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetKvList(id, ct); });
+            group_PluginsController.MapGet("{id}/Storage/Kv/{key}", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, string key, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetKvItem(id, key, ct); });
             group_PluginsController.MapPost("{id}/Storage/Kv", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, [FromBody] PluginKvItem item, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.SetKv(id, item, ct); });
             group_PluginsController.MapDelete("{id}/Storage/Kv/{key}", async ([FromServices] PluginsController ctrl, HttpContext ctx, string id, string key, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.DeleteKv(id, key, ct); });
             var group_PluginOperationsController = app.MapGroup("/api/PluginOperations");
@@ -415,21 +419,6 @@ namespace LinuxWebTool.WebHost.MinimalApi
             group_PluginOperationsController.MapGet("{operationId}", async ([FromServices] PluginOperationsController ctrl, HttpContext ctx, string operationId, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetById(operationId, ct); });
             group_PluginOperationsController.MapPost("{operationId}/Cancel", async ([FromServices] PluginOperationsController ctrl, HttpContext ctx, string operationId, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.Cancel(operationId, ct); });
             group_PluginOperationsController.MapGet("{operationId}/Artifacts/{artifactId}", async ([FromServices] PluginOperationsController ctrl, HttpContext ctx, string operationId, string artifactId, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.DownloadArtifact(operationId, artifactId, ct); });
-            var group_McpBridgeController = app.MapGroup("/api/McpBridge");
-            group_McpBridgeController.RequireAuthorization();
-            group_McpBridgeController.MapGet("Status", async ([FromServices] McpBridgeController ctrl, HttpContext ctx, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetStatus(ct); });
-            group_McpBridgeController.MapPut("Tunnel", async ([FromServices] McpBridgeController ctrl, HttpContext ctx, [FromBody] SaveTunnelRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.SaveTunnel(request, ct); });
-            group_McpBridgeController.MapPost("Tunnel/Start", async ([FromServices] McpBridgeController ctrl, HttpContext ctx, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.StartTunnel(ct); });
-            group_McpBridgeController.MapPost("Tunnel/Stop", async ([FromServices] McpBridgeController ctrl, HttpContext ctx, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.StopTunnel(ct); });
-            group_McpBridgeController.MapGet("Servers", async ([FromServices] McpBridgeController ctrl, HttpContext ctx, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetServers(ct); });
-            group_McpBridgeController.MapPut("Servers/{id}", async ([FromServices] McpBridgeController ctrl, HttpContext ctx, string id, [FromBody] SaveServerRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.SaveServer(id, request, ct); });
-            group_McpBridgeController.MapDelete("Servers/{id}", async ([FromServices] McpBridgeController ctrl, HttpContext ctx, string id, [FromQuery] ulong expectedRevision, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.DeleteServer(id, expectedRevision, ct); });
-            group_McpBridgeController.MapPost("Servers/{id}/Probe", async ([FromServices] McpBridgeController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.Probe(id, ct); });
-            group_McpBridgeController.MapPost("Servers/{id}/Discover", async ([FromServices] McpBridgeController ctrl, HttpContext ctx, string id, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.Discover(id, ct); });
-            group_McpBridgeController.MapGet("Servers/{id}/Tools", async ([FromServices] McpBridgeController ctrl, HttpContext ctx, string id, [FromQuery] string? cursor, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetTools(id, cursor, ct); });
-            group_McpBridgeController.MapPut("Servers/{id}/Selection", async ([FromServices] McpBridgeController ctrl, HttpContext ctx, string id, [FromBody] SaveSelectionRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.SaveSelection(id, request, ct); });
-            group_McpBridgeController.MapPost("Apply", async ([FromServices] McpBridgeController ctrl, HttpContext ctx, [FromBody] ApplyConfigRequest request, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.Apply(request, ct); });
-            group_McpBridgeController.MapGet("Audit", async ([FromServices] McpBridgeController ctrl, HttpContext ctx, [FromQuery] string? cursor, [FromQuery] int limit, CancellationToken ct) => { ctrl.HttpContext = ctx; return await ctrl.GetAudit(cursor, limit, ct); });
         }
     }
 }

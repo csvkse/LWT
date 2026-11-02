@@ -1,0 +1,17 @@
+{
+  "manifestVersion": 1,
+  "id": "native-resident",
+  "name": "原生常驻守护服务",
+  "category": "Native",
+  "version": "1.0.0",
+  "description": "基于原生已编译可执行文件的常驻后台守护服务，直接以操作系统子进程托管，无需运行时环境。",
+  "icon": "⚙️",
+  "profile": "resident",
+  "runtime": "native",
+  "source": "package",
+  "entrypoint": "bin/daemon",
+  "arguments": ["--mode=resident", "--interval=10"],
+  "supervision": {
+    "autoRestart": true
+  }
+}

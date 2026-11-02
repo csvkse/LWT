@@ -37,6 +37,14 @@ public class AuthController(
 
         Failures.TryRemove(ip, out _);
         var (token, expiresAt) = jwtIssuer.Issue(userName, adminCredential.Account.SecurityStamp);
+        Response.Cookies.Append("lwt_token", token, new CookieOptions
+        {
+            Path = "/",
+            SameSite = SameSiteMode.Lax,
+            HttpOnly = false,
+            Secure = false,
+            Expires = DateTimeOffset.UtcNow.AddDays(7)
+        });
         await operationLogger.LogAsync("登录", "认证", userName, "登录成功", clientIp: ip);
         return Ok(new LoginResult(token, expiresAt, userName));
     }
@@ -70,6 +78,14 @@ public class AuthController(
         }
 
         var (token, expiresAt) = jwtIssuer.Issue(userName, adminCredential.Account.SecurityStamp);
+        Response.Cookies.Append("lwt_token", token, new CookieOptions
+        {
+            Path = "/",
+            SameSite = SameSiteMode.Lax,
+            HttpOnly = false,
+            Secure = false,
+            Expires = DateTimeOffset.UtcNow.AddDays(7)
+        });
         await operationLogger.LogAsync("续期", "认证", userName, "Token 续期成功", clientIp: HttpContext.GetClientIp());
         return Ok(new LoginResult(token, expiresAt, userName));
     }

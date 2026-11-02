@@ -1,5 +1,6 @@
 using LinuxWebTool.Contracts.Features.Plugins.Contracts;
 using LinuxWebTool.Contracts.Shared.Support;
+using LinuxWebTool.Infrastructure.Features.Plugins;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -13,12 +14,28 @@ namespace LinuxWebTool.WebHost.Features.Plugins.Routes;
 [Authorize]
 public class PluginsController(IPluginManager pluginManager) : MinimalApi.ControllerBase
 {
+    [HttpGet("SystemMode")]
+    [AllowAnonymous]
+    public IResult GetSystemMode()
+    {
+        var status = PluginSafeModeGuard.GetSystemMode();
+        if (status.IsSafeMode)
+        {
+            Response.Headers["X-LWT-Safe-Mode"] = "true";
+        }
+        return Ok(status);
+    }
+
     [HttpGet]
     public async Task<IResult> GetAll(
         [FromQuery] string? profile,
         [FromQuery] string? search,
         CancellationToken ct)
     {
+        if (HttpContext != null)
+        {
+            HttpContext.Response.Headers["X-LWT-Safe-Mode"] = PluginSafeModeGuard.IsSafeModeEnabled() ? "true" : "false";
+        }
         PluginProfile? profileFilter = null;
         if (!string.IsNullOrWhiteSpace(profile))
         {
@@ -50,6 +67,21 @@ public class PluginsController(IPluginManager pluginManager) : MinimalApi.Contro
     [HttpPost("{id}/Start")]
     public async Task<IResult> Start(string id, CancellationToken ct)
     {
+        var plugin = await pluginManager.GetByIdAsync(id, ct);
+        if (plugin?.Profile == PluginProfile.OneShot)
+        {
+            var defaultAction = plugin.Manifest.CustomActions?.FirstOrDefault()?.Action ?? "";
+            var actResult = await pluginManager.ExecuteActionAsync(new PluginActionRequest
+            {
+                PluginId = id,
+                Action = defaultAction
+            }, ct);
+
+            return actResult.Success
+                ? Ok(new MessageResponse(actResult.Message ?? "轻量脚本任务已执行完成"))
+                : BadRequest(new MessageResponse(actResult.Message ?? "轻量脚本执行失败"));
+        }
+
         var (success, errorMsg) = await pluginManager.StartWithResultAsync(id, ct);
         return success
             ? Ok(new MessageResponse("插件已启动"))
@@ -57,9 +89,10 @@ public class PluginsController(IPluginManager pluginManager) : MinimalApi.Contro
     }
 
     [HttpPost("{id}/Stop")]
-    public async Task<IResult> Stop(string id, CancellationToken ct)
+    public async Task<IResult> Stop(string id, [FromQuery] bool? manual = null, CancellationToken ct = default)
     {
-        var success = await pluginManager.StopAsync(id, ct);
+        var isManual = manual ?? true;
+        var success = await pluginManager.StopAsync(id, isManual, ct);
         return Ok(new MessageResponse(success ? "插件已停止" : "停止失败"));
     }
 
@@ -68,6 +101,20 @@ public class PluginsController(IPluginManager pluginManager) : MinimalApi.Contro
     {
         var success = await pluginManager.RestartAsync(id, ct);
         return success ? Ok(new MessageResponse("插件已重启")) : BadRequest(new MessageResponse("重启失败"));
+    }
+
+    [HttpGet("{id}/Port/Check")]
+    public async Task<IResult> CheckPort(string id, [FromQuery] int port, CancellationToken ct)
+    {
+        var result = await pluginManager.CheckPortAsync(id, port, ct);
+        return Ok(result);
+    }
+
+    [HttpPost("{id}/Port/Switch")]
+    public async Task<IResult> SwitchPort(string id, [FromBody] PluginPortSwitchRequest request, CancellationToken ct)
+    {
+        var result = await pluginManager.SwitchPortAsync(id, request.NewPort, request.RestartIfRunning, ct);
+        return result.Success ? Ok(result) : BadRequest(result);
     }
 
     [HttpDelete("{id}")]
@@ -89,10 +136,12 @@ public class PluginsController(IPluginManager pluginManager) : MinimalApi.Contro
     }
 
     [HttpPost("{id}/SetEnabled")]
-    public async Task<IResult> SetEnabled(string id, [FromQuery] bool enabled, CancellationToken ct)
+    public async Task<IResult> SetEnabled(string id, [FromQuery] bool? enabled, CancellationToken ct)
     {
-        var success = await pluginManager.SetEnabledAsync(id, enabled, ct);
-        return Ok(new MessageResponse(success ? (enabled ? "插件已启用" : "插件已禁用") : "更新状态失败"));
+        var plugin = await pluginManager.GetByIdAsync(id, ct);
+        var targetEnabled = enabled ?? !(plugin?.Manifest.IsEnabled ?? true);
+        var success = await pluginManager.SetEnabledAsync(id, targetEnabled, ct);
+        return Ok(new MessageResponse(success ? (targetEnabled ? "插件已启用" : "插件已禁用") : "更新状态失败"));
     }
 
     [HttpGet("{id}/Logs")]
@@ -106,11 +155,12 @@ public class PluginsController(IPluginManager pluginManager) : MinimalApi.Contro
     public async Task<IResult> ExecuteAction([FromBody] PluginActionRequest request, CancellationToken ct)
     {
         var result = await pluginManager.ExecuteActionAsync(request, ct);
-        return result.Status == "succeeded" ? Ok(result) : BadRequest(result);
+        return Ok(result);
     }
 
     [HttpGet("{id}/Assets")]
     [HttpGet("{id}/Assets/{**filePath}")]
+    [AllowAnonymous]
     public async Task<IResult> GetAsset(string id, string? filePath = null, CancellationToken ct = default)
     {
         if (!PluginSecurityGuard.IsValidPluginId(id))
@@ -172,6 +222,70 @@ public class PluginsController(IPluginManager pluginManager) : MinimalApi.Contro
         {
             var success = await pluginManager.SaveCodeAsync(id, request, ct);
             return Ok(new MessageResponse(success ? "代码已保存" : "保存失败"));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new MessageResponse(ex.Message));
+        }
+    }
+
+    [HttpPost("{id}/Files/Upload")]
+    [Consumes("multipart/form-data")]
+    public async Task<IResult> UploadFile(string id, [FromQuery] string? path, IFormFile file, CancellationToken ct)
+    {
+        if (file == null || file.Length == 0)
+        {
+            return BadRequest(new MessageResponse("请选择要上传的文件"));
+        }
+
+        var relativePath = string.IsNullOrWhiteSpace(path) ? file.FileName : path;
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            var success = await pluginManager.UploadFileAsync(id, relativePath, stream, ct);
+            return success ? Ok(new MessageResponse("文件上传成功")) : BadRequest(new MessageResponse("文件上传失败"));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new MessageResponse(ex.Message));
+        }
+    }
+
+    [HttpGet("{id}/Files/Download")]
+    public async Task<IResult> DownloadFile(string id, [FromQuery] string file, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(file))
+        {
+            return BadRequest(new MessageResponse("文件名不能为空"));
+        }
+
+        try
+        {
+            var (stream, fileName, contentType) = await pluginManager.DownloadFileAsync(id, file, ct);
+            return Results.File(stream, contentType, fileDownloadName: fileName);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound(new MessageResponse($"未找到文件: {file}"));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new MessageResponse(ex.Message));
+        }
+    }
+
+    [HttpDelete("{id}/Files")]
+    public async Task<IResult> DeleteFile(string id, [FromQuery] string file, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(file))
+        {
+            return BadRequest(new MessageResponse("文件名不能为空"));
+        }
+
+        try
+        {
+            var success = await pluginManager.DeleteFileAsync(id, file, ct);
+            return success ? Ok(new MessageResponse("文件已删除")) : BadRequest(new MessageResponse("文件删除失败"));
         }
         catch (Exception ex)
         {
@@ -245,23 +359,46 @@ public class PluginsController(IPluginManager pluginManager) : MinimalApi.Contro
         return Ok(info);
     }
 
+    private bool IsStorageAuthorized(string id)
+    {
+        if (User.Identity?.IsAuthenticated == true) return true;
+        var incomingSecret = Request.Headers["X-Lwt-Storage-Secret"].FirstOrDefault();
+        var validSecret = pluginManager.GetInternalSecret(id);
+        return !string.IsNullOrEmpty(incomingSecret) && !string.IsNullOrEmpty(validSecret) && string.Equals(incomingSecret, validSecret, StringComparison.Ordinal);
+    }
+
     [HttpGet("{id}/Storage/Kv")]
+    [AllowAnonymous]
     public async Task<IResult> GetKvList(string id, CancellationToken ct)
     {
+        if (!IsStorageAuthorized(id)) return Unauthorized(new MessageResponse("未授权访问插件存储"));
         var list = await pluginManager.GetKvListAsync(id, ct);
         return Ok(list);
     }
 
+    [HttpGet("{id}/Storage/Kv/{key}")]
+    [AllowAnonymous]
+    public async Task<IResult> GetKvItem(string id, string key, CancellationToken ct)
+    {
+        if (!IsStorageAuthorized(id)) return Unauthorized(new MessageResponse("未授权访问插件存储"));
+        var item = await pluginManager.GetKvAsync(id, key, ct);
+        return item != null ? Ok(item) : NotFound(new MessageResponse($"未找到 Key: {key}"));
+    }
+
     [HttpPost("{id}/Storage/Kv")]
+    [AllowAnonymous]
     public async Task<IResult> SetKv(string id, [FromBody] PluginKvItem item, CancellationToken ct)
     {
+        if (!IsStorageAuthorized(id)) return Unauthorized(new MessageResponse("未授权访问插件存储"));
         var ok = await pluginManager.SetKvAsync(id, item, ct);
         return ok ? Ok(new MessageResponse("写入 KV 成功")) : BadRequest(new MessageResponse("写入 KV 失败"));
     }
 
     [HttpDelete("{id}/Storage/Kv/{key}")]
+    [AllowAnonymous]
     public async Task<IResult> DeleteKv(string id, string key, CancellationToken ct)
     {
+        if (!IsStorageAuthorized(id)) return Unauthorized(new MessageResponse("未授权访问插件存储"));
         var ok = await pluginManager.DeleteKvAsync(id, key, ct);
         return ok ? Ok(new MessageResponse("删除 KV 成功")) : BadRequest(new MessageResponse("删除 KV 失败"));
     }

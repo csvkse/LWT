@@ -35,6 +35,12 @@ body {
 select.input option,
 select.input-base option { background: #0d1526; }
 
+.select-compact,
+select.select-compact {
+  width: auto !important;
+  min-width: 90px;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;

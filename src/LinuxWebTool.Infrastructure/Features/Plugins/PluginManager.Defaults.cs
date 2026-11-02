@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using LinuxWebTool.Contracts.Features.Plugins.Contracts;
 using LinuxWebTool.Infrastructure.Features.Plugins.Adapters;
@@ -21,260 +22,13 @@ public sealed partial class PluginManager
             EnsureShDaemonCreated();
             EnsurePsDaemonCreated();
             EnsureChatGptChannelCreated();
+            EnsureMcpBridgeCreated();
+            EnsureSocks5ProxyCreated();
         }
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "创建默认插件示例异常");
         }
-    }
-
-    private void EnsureHealthcheckCreated()
-    {
-        var id = "sample-healthcheck";
-        var dir = Path.Combine(_pluginsRoot, id);
-        if (Directory.Exists(dir)) return;
-
-        Directory.CreateDirectory(dir);
-        var hooksDir = Path.Combine(dir, "hooks");
-        Directory.CreateDirectory(hooksDir);
-
-        var manifest = new PluginManifest
-        {
-            Id = id,
-            Name = "系统健康守护扩展",
-            Category = "Monitoring",
-            Version = "1.0.0",
-            Description = "基于脚本扩展的轻量系统健康自检守护服务示例",
-            Icon = "🩺",
-            Profile = PluginProfile.OneShot,
-            Runtime = PluginRuntime.Bash,
-            Entrypoint = "hooks/status.sh",
-            CustomActions = [new PluginCustomAction { Action = "status", Label = "检查系统健康", Icon = "🩺" }]
-        };
-
-        File.WriteAllText(Path.Combine(dir, "plugin.json"), JsonSerializer.Serialize(manifest, PluginJsonContext.Default.PluginManifest));
-        File.WriteAllText(Path.Combine(hooksDir, "status.ps1"), "Write-Output '{\"status\":\"Running\",\"message\":\"系统健康，运行正常\",\"time\":\"' (Get-Date -Format 's') '\"}'");
-        File.WriteAllText(Path.Combine(hooksDir, "status.sh"), "echo '{\"status\":\"Running\",\"message\":\"系统健康，运行正常\"}'");
-    }
-
-    private void EnsureSshGuardCreated()
-    {
-        var id = "ssh-access-guard";
-        var dir = Path.Combine(_pluginsRoot, id);
-        if (Directory.Exists(dir)) return;
-
-        Directory.CreateDirectory(dir);
-        var hooksDir = Path.Combine(dir, "hooks");
-        var uiDir = Path.Combine(dir, "ui");
-        Directory.CreateDirectory(hooksDir);
-        Directory.CreateDirectory(uiDir);
-
-        var manifest = new PluginManifest
-        {
-            Id = id,
-            Name = "SSH 访问安全守卫",
-            Category = "Security",
-            Version = "1.0.0",
-            Description = "实时监控 SSH 成功与失败登录轨迹，支持恶意 IP/网段一键封禁与解封",
-            Icon = "🛡️",
-            Profile = PluginProfile.OneShot,
-            Runtime = PluginRuntime.Bash,
-            Entrypoint = "hooks/records.sh",
-            Ui = new PluginUiConfig { Entry = "ui/index.html", Title = "SSH 安全审计看板", Icon = "🛡️" },
-            CustomActions =
-            [
-                new PluginCustomAction { Action = "records", Label = "登录记录", Icon = "📋" },
-                new PluginCustomAction { Action = "failed", Label = "爆破探测", Icon = "⚠️" },
-                new PluginCustomAction { Action = "ban_ip", Label = "一键封禁", Icon = "🚫", RequireParam = true, ParamPlaceholder = "请输入恶意 IP 地址" }
-            ]
-        };
-
-        File.WriteAllText(Path.Combine(dir, "plugin.json"), JsonSerializer.Serialize(manifest, PluginJsonContext.Default.PluginManifest));
-        File.WriteAllText(Path.Combine(hooksDir, "records.ps1"), "Write-Output '{\"records\":[{\"user\":\"root\",\"ip\":\"192.168.1.100\",\"time\":\"' (Get-Date -Format 's') '\",\"status\":\"Accepted\"}]}'");
-        File.WriteAllText(Path.Combine(hooksDir, "records.sh"), "echo '{\"records\":[{\"user\":\"root\",\"ip\":\"192.168.1.100\",\"time\":\"2026-11-01T20:00:00Z\",\"status\":\"Accepted\"}]}'");
-        File.WriteAllText(Path.Combine(hooksDir, "failed.ps1"), "Write-Output '{\"failed\":[{\"ip\":\"203.0.113.42\",\"count\":17,\"last_attempt\":\"' (Get-Date -Format 's') '\"}]}'");
-        File.WriteAllText(Path.Combine(hooksDir, "failed.sh"), "echo '{\"failed\":[{\"ip\":\"203.0.113.42\",\"count\":17,\"last_attempt\":\"2026-11-01T20:15:00Z\"}]}'");
-        File.WriteAllText(Path.Combine(hooksDir, "ban_ip.ps1"), "param($Param) Write-Output ('{\"banned\":true,\"ip\":\"' + $env:LWT_PARAM + '\",\"message\":\"IP 已成功加入安全防护黑名单\"}')");
-        File.WriteAllText(Path.Combine(hooksDir, "ban_ip.sh"), "echo '{\"banned\":true,\"ip\":\"'\"$LWT_PARAM\"'\",\"message\":\"IP 已成功加入安全防护黑名单\"}'");
-
-        var html = """
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"/><title>SSH 安全看板</title>
-<style>body{font-family:system-ui;padding:20px;background:#18181b;color:#f4f4f5;}h2{color:#38bdf8;}.card{background:#27272a;padding:16px;border-radius:8px;margin-bottom:12px;}</style>
-</head>
-<body>
-<h2>🛡️ SSH 访问安全审计看板</h2>
-<div class="card">
-<p>当前处于安全监控状态，可使用上方快捷动作执行查询或封禁操作。</p>
-</div>
-</body>
-</html>
-""";
-        File.WriteAllText(Path.Combine(uiDir, "index.html"), html);
-    }
-
-    private void EnsureCaddyManagerCreated()
-    {
-        var id = "caddy-manager";
-        var dir = Path.Combine(_pluginsRoot, id);
-        if (Directory.Exists(dir)) return;
-
-        Directory.CreateDirectory(dir);
-        var hooksDir = Path.Combine(dir, "hooks");
-        Directory.CreateDirectory(hooksDir);
-
-        var manifest = new PluginManifest
-        {
-            Id = id,
-            Name = "Caddy 反向代理网关",
-            Category = "Network",
-            Version = "1.0.0",
-            Description = "Caddy Web Server 原生网关管理，支持配置文件语法校验与零停机平滑重载",
-            Icon = "🌐",
-            Profile = PluginProfile.OneShot,
-            Runtime = PluginRuntime.Native,
-            Entrypoint = "caddy",
-            Source = "system",
-            Dependencies = new PluginDependencies { Binaries = ["caddy"] },
-            InstallGuide = new Dictionary<string, string>
-            {
-                ["alpine"] = "apk add --no-cache caddy",
-                ["debian"] = "apt update && apt install -y caddy",
-                ["rhel"] = "dnf install -y caddy",
-                ["windows"] = "winget install CaddyServer.Caddy"
-            },
-            Network = new PluginNetworkConfig { Mode = "port", Port = 2019 },
-            CustomActions =
-            [
-                new PluginCustomAction { Action = "validate", Label = "校验配置语法", Icon = "✅" },
-                new PluginCustomAction { Action = "reload", Label = "平滑热重载", Icon = "🔄" }
-            ]
-        };
-
-        File.WriteAllText(Path.Combine(dir, "plugin.json"), JsonSerializer.Serialize(manifest, PluginJsonContext.Default.PluginManifest));
-        File.WriteAllText(Path.Combine(hooksDir, "validate.ps1"), "Write-Output '{\"valid\":true,\"message\":\"Caddyfile 语法校验通过\"}'");
-        File.WriteAllText(Path.Combine(hooksDir, "validate.sh"), "echo '{\"valid\":true,\"message\":\"Caddyfile 语法校验通过\"}'");
-        File.WriteAllText(Path.Combine(hooksDir, "reload.ps1"), "Write-Output '{\"reloaded\":true,\"message\":\"Caddy 配置平滑热重载成功\"}'");
-        File.WriteAllText(Path.Combine(hooksDir, "reload.sh"), "echo '{\"reloaded\":true,\"message\":\"Caddy 配置平滑热重载成功\"}'");
-    }
-
-    private void EnsureNativeCommandDemoCreated()
-    {
-        var id = "native-command-demo";
-        var dir = Path.Combine(_pluginsRoot, id);
-        if (Directory.Exists(dir))
-        {
-            var existingInfo = Path.Combine(dir, "hooks", "info.sh");
-            if (File.Exists(existingInfo) && File.ReadAllText(existingInfo).Contains("''}'"))
-            {
-                File.WriteAllText(existingInfo, "echo \"{\\\"os\\\":\\\"Linux\\\",\\\"message\\\":\\\"Kernel: $(uname -r)\\\"}\"");
-            }
-            return;
-        }
-
-        Directory.CreateDirectory(dir);
-        var hooksDir = Path.Combine(dir, "hooks");
-        Directory.CreateDirectory(hooksDir);
-
-        var manifest = new PluginManifest
-        {
-            Id = id,
-            Name = "原生命令扩展演示",
-            Category = "System",
-            Version = "1.0.0",
-            Description = "免解释器原生可执行文件与系统命令直接调用执行演示",
-            Icon = "⚡",
-            Profile = PluginProfile.OneShot,
-            Runtime = PluginRuntime.Native,
-            Entrypoint = OperatingSystem.IsWindows() ? "cmd.exe" : "uname",
-            Source = "system",
-            CustomActions = [new PluginCustomAction { Action = "info", Label = "系统信息", Icon = "💻" }]
-        };
-
-        File.WriteAllText(Path.Combine(dir, "plugin.json"), JsonSerializer.Serialize(manifest, PluginJsonContext.Default.PluginManifest));
-        File.WriteAllText(Path.Combine(hooksDir, "info.ps1"), "Write-Output ('{\"os\":\"' + [System.Environment]::OSVersion.ToString() + '\",\"cores\":' + [System.Environment]::ProcessorCount + '}')");
-        File.WriteAllText(Path.Combine(hooksDir, "info.sh"), "echo \"{\\\"os\\\":\\\"Linux\\\",\\\"message\\\":\\\"Kernel: $(uname -r)\\\"}\"");
-    }
-
-    private void EnsureJsWebhookCreated()
-    {
-        var id = "demo-js-webhook";
-        var dir = Path.Combine(_pluginsRoot, id);
-        if (Directory.Exists(dir)) return;
-
-        Directory.CreateDirectory(dir);
-        var manifest = new PluginManifest
-        {
-            Id = id,
-            Name = "Node.js 自动化 Webhook 微服务",
-            Category = "Integration",
-            Version = "1.0.0",
-            Description = "基于轻量 http 模块的事件接收与告警转发常驻微服务",
-            Icon = "⚡",
-            Profile = PluginProfile.Resident,
-            Runtime = PluginRuntime.Node,
-            Entrypoint = "index.js",
-            Network = new PluginNetworkConfig { Mode = "path", Port = 18001, PortEnv = "PORT", PathPrefix = $"/plugins/{id}" },
-            Storage = new PluginStorageConfig { EnableSqlite = true, EnableKv = true },
-            Supervision = new PluginSupervisionConfig { AutoRestart = true }
-        };
-
-        File.WriteAllText(Path.Combine(dir, "plugin.json"), JsonSerializer.Serialize(manifest, PluginJsonContext.Default.PluginManifest));
-        var js = """
-const http = require('http');
-const port = process.env.PORT || 18001;
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ status: 'ok', worker: process.env.LWT_PLUGIN_ID || 'demo-js-webhook', time: new Date() }));
-});
-server.listen(port, () => console.log(`[JS-Webhook] Service listening on port ${port}`));
-""";
-        File.WriteAllText(Path.Combine(dir, "index.js"), js);
-    }
-
-    private void EnsurePyApiCreated()
-    {
-        var id = "demo-py-api";
-        var dir = Path.Combine(_pluginsRoot, id);
-        if (Directory.Exists(dir)) return;
-
-        Directory.CreateDirectory(dir);
-        var manifest = new PluginManifest
-        {
-            Id = id,
-            Name = "Python 数据分析守护微服务",
-            Category = "Data",
-            Version = "1.0.0",
-            Description = "后台周期性采集并汇总分析系统负载与指标的常驻 Python 服务",
-            Icon = "🐍",
-            Profile = PluginProfile.Resident,
-            Runtime = PluginRuntime.Python,
-            Entrypoint = "main.py",
-            Network = new PluginNetworkConfig { Mode = "path", Port = 18002, PortEnv = "PORT", PathPrefix = $"/plugins/{id}" },
-            Supervision = new PluginSupervisionConfig { AutoRestart = true }
-        };
-
-        File.WriteAllText(Path.Combine(dir, "plugin.json"), JsonSerializer.Serialize(manifest, PluginJsonContext.Default.PluginManifest));
-        var py = """
-import os, time
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import json
-
-port = int(os.environ.get("PORT", "18002"))
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.end_headers()
-        data = {"service": os.environ.get("LWT_PLUGIN_ID", "demo-py-api"), "time": time.time(), "status": "active"}
-        self.wfile.write(json.dumps(data).encode('utf-8'))
-
-httpd = HTTPServer(('0.0.0.0', port), Handler)
-print(f"[Python-API] Listening on port {port}...")
-httpd.serve_forever()
-""";
-        File.WriteAllText(Path.Combine(dir, "main.py"), py);
     }
 
     private void EnsureDotnetServiceCreated()
@@ -290,12 +44,24 @@ httpd.serve_forever()
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
 </Project>
 """);
+            }
+            else
+            {
+                try
+                {
+                    var content = File.ReadAllText(existingProj);
+                    if (content.Contains("<TargetFramework>net8.0</TargetFramework>"))
+                    {
+                        File.WriteAllText(existingProj, content.Replace("<TargetFramework>net8.0</TargetFramework>", "<TargetFramework>net10.0</TargetFramework>"));
+                    }
+                }
+                catch { }
             }
             return;
         }
@@ -348,7 +114,7 @@ try {
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
@@ -358,157 +124,371 @@ try {
         File.WriteAllText(Path.Combine(dir, "Program.cs"), cs);
     }
 
-    private void EnsureShDaemonCreated()
+    private void EnsureMcpBridgeCreated()
     {
-        var id = "demo-sh-daemon";
+        var id = "mcp-bridge";
         var dir = Path.Combine(_pluginsRoot, id);
-        if (Directory.Exists(dir)) return;
-
-        Directory.CreateDirectory(dir);
-        var manifest = new PluginManifest
+        if (Directory.Exists(dir))
         {
-            Id = id,
-            Name = "Shell 轮询状态采集守护",
-            Category = "Ops",
-            Version = "1.0.0",
-            Description = "Shell 编写的后台健康巡检与状态指标定时采样守护进程",
-            Icon = "🐚",
-            Profile = PluginProfile.Resident,
-            Runtime = PluginRuntime.Bash,
-            Entrypoint = "daemon.sh",
-            Network = new PluginNetworkConfig { Mode = "none" },
-            Supervision = new PluginSupervisionConfig { AutoRestart = true }
-        };
+            EnsureMcpBridgeBinaryPresent(dir);
+            // 兼容性自愈迁移：若历史部署持久化卷中残留未绑定的宏占位符或缺失生态依赖，自动自愈升级
+            var pJson = Path.Combine(dir, "plugin.json");
+            if (File.Exists(pJson))
+            {
+                try
+                {
+                    var text = File.ReadAllText(pJson);
+                    var m = JsonSerializer.Deserialize(text, PluginJsonContext.Default.PluginManifest);
+                    if (m != null)
+                    {
+                        var needsUpdate = false;
+                        var updatedArgs = m.Arguments;
+                        if (text.Contains("{controlTokenFile}") || text.Contains("data/mcp-bridge") || text.Contains("{pluginDir}/data"))
+                        {
+                            updatedArgs = ["serve", "--state-dir", "{stateDir}"];
+                            needsUpdate = true;
+                        }
 
-        File.WriteAllText(Path.Combine(dir, "plugin.json"), JsonSerializer.Serialize(manifest, PluginJsonContext.Default.PluginManifest));
-        var sh = """
-#!/bin/bash
-count=0
-while true; do
-  count=$((count + 1))
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [Shell-Daemon] Tick #$count - Plugin: ${LWT_PLUGIN_ID:-demo-sh-daemon}"
-  sleep 30
-done
-""";
-        File.WriteAllText(Path.Combine(dir, "daemon.sh"), sh);
-    }
+                        var updatedDeps = m.Dependencies;
+                        if (updatedDeps == null || updatedDeps.Items.Count == 0)
+                        {
+                            updatedDeps = BuildDefaultMcpBridgeDependencies();
+                            needsUpdate = true;
+                        }
 
-    private void EnsurePsDaemonCreated()
-    {
-        var id = "demo-ps-daemon";
-        var dir = Path.Combine(_pluginsRoot, id);
-        if (Directory.Exists(dir)) return;
-
-        Directory.CreateDirectory(dir);
-        var manifest = new PluginManifest
-        {
-            Id = id,
-            Name = "PowerShell 系统资源监控守护",
-            Category = "Ops",
-            Version = "1.0.0",
-            Description = "PowerShell 编写的主机资源采集与磁盘告警长时守护进程",
-            Icon = "💙",
-            Profile = PluginProfile.Resident,
-            Runtime = PluginRuntime.PowerShell,
-            Entrypoint = "daemon.ps1",
-            Network = new PluginNetworkConfig { Mode = "none" },
-            Supervision = new PluginSupervisionConfig { AutoRestart = true }
-        };
-
-        File.WriteAllText(Path.Combine(dir, "plugin.json"), JsonSerializer.Serialize(manifest, PluginJsonContext.Default.PluginManifest));
-        var ps = """
-$counter = 0
-while ($true) {
-    $counter++
-    $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    Write-Output "[$time] [PS-Daemon] Heartbeat tick #$counter - Plugin: $env:LWT_PLUGIN_ID"
-    Start-Sleep -Seconds 30
-}
-""";
-        File.WriteAllText(Path.Combine(dir, "daemon.ps1"), ps);
-    }
-
-    private void EnsureChatGptChannelCreated()
-    {
-        var id = "chatgpt-channel";
-        var dir = Path.Combine(_pluginsRoot, id);
-        if (Directory.Exists(dir)) return;
+                        if (needsUpdate)
+                        {
+                            var updated = m with { Arguments = updatedArgs, Dependencies = updatedDeps };
+                            File.WriteAllText(pJson, JsonSerializer.Serialize(updated, PluginJsonContext.Default.PluginManifest));
+                        }
+                    }
+                }
+                catch { }
+            }
+            return;
+        }
 
         Directory.CreateDirectory(dir);
-        var uiDir = Path.Combine(dir, "ui");
-        var hooksDir = Path.Combine(dir, "hooks");
+        var uiDir = Path.Combine(dir, "web");
         Directory.CreateDirectory(uiDir);
-        Directory.CreateDirectory(hooksDir);
 
         var manifest = new PluginManifest
         {
             Id = id,
-            Name = "ChatGPT 渠道网关微服务",
+            Name = "MCP 智能安全网关桥接服务",
             Category = "AI",
             Version = "1.0.0",
-            Description = "聚合多渠道大模型网关微服务，支持动态负载均衡与流式代理",
-            Icon = "🤖",
+            Description = "Go 高性能单进程 OpenAI Secure MCP Tunnel 与第三方 MCP 工具纳管网关",
+            Icon = "🌉",
             Profile = PluginProfile.Resident,
-            Runtime = PluginRuntime.Python,
-            Entrypoint = "worker.py",
-            Network = new PluginNetworkConfig { Mode = "path", Port = 18010, PortEnv = "PORT", PathPrefix = $"/plugins/{id}" },
-            Storage = new PluginStorageConfig { EnableSqlite = true, EnableKv = true },
-            Supervision = new PluginSupervisionConfig { AutoRestart = true },
-            Ui = new PluginUiConfig { Entry = "ui/index.html", Title = "渠道网关控制台", Icon = "🤖" },
-            CustomActions =
+            Runtime = PluginRuntime.Native,
+            Entrypoint = OperatingSystem.IsWindows() ? "mcp-bridge.exe" : "mcp-bridge",
+            Source = "package",
+            Arguments =
             [
-                new PluginCustomAction { Action = "health", Label = "渠道健康自检", Icon = "🩺" },
-                new PluginCustomAction { Action = "sync_models", Label = "拉取可用模型", Icon = "🔄" }
+                "serve",
+                "--state-dir",
+                "{stateDir}"
             ],
-            ConfigForm =
-            [
-                new PluginConfigField { Field = "api_key", Label = "OpenAI API 密钥", Type = "password", Required = true }
-            ]
+            Network = new PluginNetworkConfig
+            {
+                Mode = "path",
+                PortEnv = "PORT",
+                PathPrefix = $"/plugins/{id}"
+            },
+            Supervision = new PluginSupervisionConfig
+            {
+                AutoRestart = false,
+                FlappingThresholdSec = 10,
+                MaxCrashRetries = 3
+            },
+            Ui = new PluginUiConfig
+            {
+                Entry = "web/index.html",
+                Title = "MCP Bridge 控制台",
+                Icon = "🌉"
+            },
+            Dependencies = BuildDefaultMcpBridgeDependencies()
         };
 
         File.WriteAllText(Path.Combine(dir, "plugin.json"), JsonSerializer.Serialize(manifest, PluginJsonContext.Default.PluginManifest));
-
-        var py = """
-import os, time
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import json
-
-port = int(os.environ.get("PORT", "18010"))
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.end_headers()
-        data = {"channel": "ChatGPT Multi-Model Gateway", "status": "online", "time": time.time()}
-        self.wfile.write(json.dumps(data).encode('utf-8'))
-
-httpd = HTTPServer(('0.0.0.0', port), Handler)
-print(f"[ChatGPT-Channel] Gateway running on port {port}...")
-httpd.serve_forever()
-""";
-        File.WriteAllText(Path.Combine(dir, "worker.py"), py);
-
-        File.WriteAllText(Path.Combine(hooksDir, "health.py"), "print('{\"status\":\"healthy\",\"latency_ms\":12,\"channel\":\"ChatGPT Multi-Model Gateway\"}')");
-        File.WriteAllText(Path.Combine(hooksDir, "health.sh"), "echo '{\"status\":\"healthy\",\"latency_ms\":12,\"channel\":\"ChatGPT Multi-Model Gateway\"}'");
-        File.WriteAllText(Path.Combine(hooksDir, "health.ps1"), "Write-Output '{\"status\":\"healthy\",\"latency_ms\":12,\"channel\":\"ChatGPT Multi-Model Gateway\"}'");
-        File.WriteAllText(Path.Combine(hooksDir, "sync_models.py"), "print('{\"models\":[\"gpt-4o\",\"gpt-4o-mini\",\"o1-preview\",\"o3-mini\"],\"synced_at\":\"2026-11-02T01:30:00Z\"}')");
-        File.WriteAllText(Path.Combine(hooksDir, "sync_models.sh"), "echo '{\"models\":[\"gpt-4o\",\"gpt-4o-mini\",\"o1-preview\",\"o3-mini\"],\"synced_at\":\"2026-11-02T01:30:00Z\"}'");
-        File.WriteAllText(Path.Combine(hooksDir, "sync_models.ps1"), "Write-Output '{\"models\":[\"gpt-4o\",\"gpt-4o-mini\",\"o1-preview\",\"o3-mini\"],\"synced_at\":\"2026-11-02T01:30:00Z\"}'");
 
         var html = """
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"/><title>ChatGPT 渠道网关控制台</title>
-<style>body{font-family:system-ui;padding:20px;background:#09090b;color:#fafafa;}h2{color:#10b981;}.card{background:#18181b;padding:16px;border-radius:8px;border:1px solid #27272a;}</style>
+<head><meta charset="utf-8"/><title>MCP Bridge 控制台</title>
+<style>body{font-family:system-ui;padding:20px;background:#09090b;color:#fafafa;}h2{color:#a855f7;}.card{background:#18181b;padding:16px;border-radius:8px;border:1px solid #27272a;}</style>
 </head>
 <body>
-<h2>🤖 ChatGPT 渠道网关控制台</h2>
+<h2>🌉 MCP 智能安全网关控制台</h2>
 <div class="card">
-<p>微服务已正常运行，提供动态渠道转发与流式补全。</p>
+<p>MCP Tunnel 与第三方工具纳管网关已就绪。支持通过 REST / SSE 安全穿透外部大模型与客户端。</p>
 </div>
 </body>
 </html>
 """;
         File.WriteAllText(Path.Combine(uiDir, "index.html"), html);
+        EnsureMcpBridgeBinaryPresent(dir);
+    }
+
+    private static void EnsureMcpBridgeBinaryPresent(string dir)
+    {
+        var binName = OperatingSystem.IsWindows() ? "mcp-bridge.exe" : "mcp-bridge";
+        var binDest = Path.Combine(dir, binName);
+
+        // 1. 若宿主目标二进制已存在，使用 NativeBinaryValidator 严格校验
+        if (File.Exists(binDest))
+        {
+            var (isValid, _) = Adapters.NativeBinaryValidator.ValidateExecutable(binDest);
+            if (!isValid)
+            {
+                // 检测到毒化或损坏的二进制，立刻删除以触发自愈
+                try { File.Delete(binDest); } catch { }
+            }
+            else
+            {
+                if (!OperatingSystem.IsWindows())
+                {
+                    try
+                    {
+                        File.SetUnixFileMode(binDest,
+                            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                            UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+                    }
+                    catch { }
+                }
+                return;
+            }
+        }
+
+        // 2. 依次探查宿主内置候选二进制（仅接受格式合规的产物）
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, binName),
+            Path.Combine("/app", binName),
+            Path.Combine("/usr/local/bin", binName),
+            Path.Combine(AppContext.BaseDirectory, "plugins", "mcp-bridge", binName),
+            Path.Combine(Directory.GetParent(AppContext.BaseDirectory)?.FullName ?? "", "plugins", "mcp-bridge", binName)
+        };
+
+        var deployed = false;
+        foreach (var c in candidates)
+        {
+            if (File.Exists(c))
+            {
+                var (isValid, _) = Adapters.NativeBinaryValidator.ValidateExecutable(c);
+                if (!isValid) continue;
+
+                // 若目标不存在，或候选二进制更新/尺寸不同，则执行智能覆盖同步
+                if (!File.Exists(binDest) || File.GetLastWriteTimeUtc(c) > File.GetLastWriteTimeUtc(binDest) || new FileInfo(c).Length != new FileInfo(binDest).Length)
+                {
+                    try
+                    {
+                        File.Copy(c, binDest, true);
+                        if (!OperatingSystem.IsWindows())
+                        {
+                            try
+                            {
+                                File.SetUnixFileMode(binDest,
+                                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                                    UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                                    UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+                            }
+                            catch { }
+                        }
+                        deployed = true;
+                        break;
+                    }
+                    catch { }
+                }
+                else
+                {
+                    deployed = true;
+                    break;
+                }
+            }
+        }
+
+        // 3. 运行时自愈编译：若无有效预置二进制，且在 Linux 下检测到 Go 源码与编译器，原地编译
+        if (!deployed && !File.Exists(binDest) && !OperatingSystem.IsWindows())
+        {
+            TryCompileMcpBridgeFromSource(dir, binDest);
+        }
+    }
+
+    private static void TryCompileMcpBridgeFromSource(string dir, string binDest)
+    {
+        try
+        {
+            var candidates = new[]
+            {
+                Path.Combine(dir, "cmd", "mcp-bridge", "main.go"),
+                Path.Combine(AppContext.BaseDirectory, "plugins", "mcp-bridge", "cmd", "mcp-bridge", "main.go"),
+                Path.Combine("/app", "plugins", "mcp-bridge", "cmd", "mcp-bridge", "main.go")
+            };
+            var src = candidates.FirstOrDefault(File.Exists);
+            if (src == null) return;
+            var modDir = Directory.GetParent(Directory.GetParent(src)?.FullName ?? "")?.FullName;
+            if (modDir == null || !File.Exists(Path.Combine(modDir, "go.mod"))) return;
+
+            using var p = Process.Start(new ProcessStartInfo
+            {
+                FileName = "go",
+                Arguments = $"build -ldflags=\"-s -w\" -o \"{binDest}\" ./cmd/mcp-bridge",
+                WorkingDirectory = modDir,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                EnvironmentVariables =
+                {
+                    ["CGO_ENABLED"] = "0",
+                    ["GOOS"] = "linux"
+                }
+            });
+            if (p != null)
+            {
+                p.WaitForExit(30000);
+                if (p.ExitCode == 0 && File.Exists(binDest))
+                {
+                    try
+                    {
+                        if (!OperatingSystem.IsWindows())
+                        {
+                            File.SetUnixFileMode(binDest,
+                                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                                UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                                UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+                        }
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch { }
+    }
+
+    private static PluginDependencies BuildDefaultMcpBridgeDependencies()
+    {
+        return new PluginDependencies
+        {
+            Items =
+            [
+                new PluginDependencyConfig
+                {
+                    Id = "node-ecosystem",
+                    Name = "Node.js & npx 工具链",
+                    Required = false,
+                    Recommended = true,
+                    Description = "用于执行 GitHub、Filesystem、PostgreSQL 等基于 JavaScript/TypeScript 开发的标准 MCP 服务",
+                    Probe = new PluginDependencyProbeConfig { Command = "npx", Args = ["--version"] },
+                    InstallGuide = new Dictionary<string, string>
+                    {
+                        ["alpine"] = "apk add --no-cache nodejs npm",
+                        ["debian"] = "apt update && apt install -y nodejs npm",
+                        ["rhel"] = "dnf install -y nodejs npm",
+                        ["windows"] = "winget install OpenJS.NodeJS.LTS"
+                    }
+                },
+                new PluginDependencyConfig
+                {
+                    Id = "python-uv",
+                    Name = "Python 3 & uv/uvx 工具链",
+                    Required = false,
+                    Recommended = true,
+                    Description = "用于极速冷启动 Fetch、Git、Puppeteer 等基于 Python 生态开发的高性能 MCP 服务",
+                    Probe = new PluginDependencyProbeConfig { Command = "uvx", Args = ["--version"] },
+                    InstallGuide = new Dictionary<string, string>
+                    {
+                        ["alpine"] = "apk add --no-cache python3 py3-pip && pip install --no-cache-dir uv --break-system-packages",
+                        ["debian"] = "apt update && apt install -y python3 python3-pip && pip3 install uv",
+                        ["rhel"] = "dnf install -y python3 python3-pip && pip3 install uv",
+                        ["windows"] = "winget install astral-sh.uv"
+                    }
+                }
+            ]
+        };
+    }
+
+    private void EnsureSocks5ProxyCreated()
+    {
+        var id = "socks5-proxy";
+        var dir = Path.Combine(_pluginsRoot, id);
+        if (Directory.Exists(dir)) return;
+
+        // 优先从应用根目录的 plugins/socks5-proxy 模板同步
+        var templateDir = Path.Combine(AppContext.BaseDirectory, "plugins", id);
+        if (!Directory.Exists(templateDir))
+        {
+            var parentDir = Directory.GetParent(AppContext.BaseDirectory)?.FullName;
+            if (parentDir != null)
+            {
+                var alt = Path.Combine(parentDir, "plugins", id);
+                if (Directory.Exists(alt)) templateDir = alt;
+            }
+        }
+
+        if (Directory.Exists(templateDir))
+        {
+            CopyDirectoryRecursively(templateDir, dir);
+            return;
+        }
+
+        Directory.CreateDirectory(dir);
+        var cmdDir = Path.Combine(dir, "cmd", "socks5-proxy");
+        var uiDir = Path.Combine(dir, "ui");
+        Directory.CreateDirectory(cmdDir);
+        Directory.CreateDirectory(uiDir);
+
+        var manifest = new PluginManifest
+        {
+            Id = id,
+            Name = "SOCKS5 安全代理微服务",
+            Category = "Network",
+            Version = "1.0.0",
+            Description = "基于 Go 原生运行引擎的极速高并发 SOCKS5 代理服务，支持 RFC 1928 / RFC 1929 规范与身份认证",
+            Icon = "🧦",
+            Profile = PluginProfile.Resident,
+            Runtime = PluginRuntime.Go,
+            Entrypoint = "cmd/socks5-proxy/main.go",
+            Arguments = ["--listen", "0.0.0.0:{port}", "--state-dir", "{stateDir}", "--auth-mode", "none", "--username", "", "--password", "", "--acl-preset", "lan", "--allowed-subnets", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128", "--allowed-domains", "*.local,*.internal,*.lan,localhost", "--allowed-clients", ""],
+            Network = new PluginNetworkConfig
+            {
+                Mode = "port",
+                Port = 18080,
+                PortEnv = "SOCKS5_PORT",
+                PortConflictPolicy = "avoid"
+            },
+            Supervision = new PluginSupervisionConfig
+            {
+                AutoRestart = true,
+                FlappingThresholdSec = 10,
+                MaxCrashRetries = 3
+            },
+            Ui = new PluginUiConfig
+            {
+                Entry = "ui/index.html",
+                Title = "SOCKS5 代理控制台",
+                Icon = "🧦"
+            }
+        };
+
+        File.WriteAllText(Path.Combine(dir, "plugin.json"), JsonSerializer.Serialize(manifest, PluginJsonContext.Default.PluginManifest));
+    }
+
+    private static void CopyDirectoryRecursively(string sourceDir, string targetDir)
+    {
+        Directory.CreateDirectory(targetDir);
+        foreach (var file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var relPath = Path.GetRelativePath(sourceDir, file);
+            if (relPath.Contains(".cache", StringComparison.OrdinalIgnoreCase) ||
+                relPath.Contains("bin", StringComparison.OrdinalIgnoreCase) ||
+                relPath.Contains("obj", StringComparison.OrdinalIgnoreCase)) continue;
+            var destPath = Path.Combine(targetDir, relPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+            File.Copy(file, destPath, true);
+        }
     }
 }

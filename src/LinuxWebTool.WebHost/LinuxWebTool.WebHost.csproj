@@ -9,9 +9,19 @@
     <NoWarn>$(NoWarn);IL2026;IL3050</NoWarn>
   </PropertyGroup>
 
+  <!-- 非 AOT 模式（极速开发/测试构建）下解耦重型生成器、裁剪分析器、资源嵌入与调试符号 -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'false'">
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableRequestDelegateGenerator>false</EnableRequestDelegateGenerator>
+    <!-- 开发环境直读物理磁盘 wwwroot，关闭内嵌资源生成，大幅降低 Csc 与静态资源计算开销 -->
+    <GenerateEmbeddedFilesManifest>false</GenerateEmbeddedFilesManifest>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
   <ItemGroup>
-    <!-- 发布时将前端资源嵌入主程序；开发环境仍保留物理 wwwroot 便于调试。 -->
-    <EmbeddedResource Include="wwwroot\**" Exclude="wwwroot\node_modules\**" />
+    <!-- 仅在生产 AOT 模式下将前端静态文件打包嵌入程序集；开发模式物理 wwwroot 已随目录同步直读 -->
+    <EmbeddedResource Include="wwwroot\**" Exclude="wwwroot\node_modules\**" Condition="'$(PublishAot)' != 'false'" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" />

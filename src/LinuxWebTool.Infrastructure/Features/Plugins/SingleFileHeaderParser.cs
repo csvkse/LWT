@@ -55,6 +55,7 @@ public static partial class SingleFileHeaderParser
             ".cs" or ".csproj" => PluginRuntime.DotNet,
             ".sh" => PluginRuntime.Bash,
             ".ps1" => PluginRuntime.PowerShell,
+            ".go" => PluginRuntime.Go,
             _ => PluginRuntime.Node
         };
 
@@ -68,6 +69,7 @@ public static partial class SingleFileHeaderParser
                 "bash" or "sh" or "shell" => PluginRuntime.Bash,
                 "powershell" or "pwsh" or "ps1" => PluginRuntime.PowerShell,
                 "native" or "binary" => PluginRuntime.Native,
+                "go" or "golang" => PluginRuntime.Go,
                 _ => PluginRuntime.Node
             };
         }

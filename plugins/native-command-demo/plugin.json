@@ -1,0 +1,16 @@
+{
+  "manifestVersion": 1,
+  "id": "native-command-demo",
+  "name": "原生命令扩展演示",
+  "category": "System",
+  "version": "1.0.0",
+  "description": "免解释器原生可执行文件与系统命令直接调用执行演示",
+  "icon": "⚡",
+  "profile": "oneshot",
+  "runtime": "native",
+  "entrypoint": "uname",
+  "source": "system",
+  "customActions": [
+    { "action": "info", "label": "系统信息", "icon": "💻" }
+  ]
+}

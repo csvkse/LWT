@@ -93,45 +93,110 @@ public sealed class OneShotExecutionStrategy : IExecutionProfileStrategy
             };
         }
 
+        var effectiveTarget = !string.IsNullOrWhiteSpace(request.Target)
+            ? request.Target
+            : (manifest.Target ?? "container");
+        var isHost = string.Equals(effectiveTarget, "host", StringComparison.OrdinalIgnoreCase) && OperatingSystem.IsLinux();
+
         var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrEmpty(request.Param))
         {
             env["LWT_PARAM"] = request.Param;
             env["LWT_PARAM_VALUE"] = request.Param;
+            env["LWT_PARAM_IP"] = request.Param;
         }
+        env["LWT_TARGET"] = effectiveTarget;
 
-        var actionManifest = manifest with
-        {
-            Entrypoint = targetEntry,
-            Runtime = runtime
-        };
+        var nsenterPath = isHost ? (File.Exists("/usr/bin/nsenter") ? "/usr/bin/nsenter" : (File.Exists("/bin/nsenter") ? "/bin/nsenter" : null)) : null;
+        var canPierce = isHost && nsenterPath != null && Directory.Exists("/proc/1/ns");
 
-        var spec = adapter.BuildStartSpec(actionManifest, pluginDir, null, env);
-        var psi = new ProcessStartInfo
+        ProcessStartInfo psi;
+        if (canPierce && runtime == PluginRuntime.Bash)
         {
-            FileName = spec.FileName,
-            WorkingDirectory = spec.WorkingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        if (spec.ArgumentList != null && spec.ArgumentList.Count > 0)
-        {
-            foreach (var arg in spec.ArgumentList)
+            psi = new ProcessStartInfo
             {
-                psi.ArgumentList.Add(arg);
+                FileName = nsenterPath!,
+                WorkingDirectory = pluginDir,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            psi.ArgumentList.Add("-t");
+            psi.ArgumentList.Add("1");
+            psi.ArgumentList.Add("-m");
+            psi.ArgumentList.Add("-u");
+            psi.ArgumentList.Add("-i");
+            psi.ArgumentList.Add("-n");
+            psi.ArgumentList.Add("-p");
+            psi.ArgumentList.Add("--");
+            psi.ArgumentList.Add("/bin/bash");
+            psi.ArgumentList.Add("-c");
+
+            var scriptPath = scriptFile ?? Path.Combine(pluginDir, manifest.Entrypoint);
+            var scriptContent = File.Exists(scriptPath) ? await File.ReadAllTextAsync(scriptPath, ct) : "";
+            var normalized = scriptContent.Replace("\r\n", "\n").Replace("\r", "\n");
+
+            var envPrefix = "export LWT_TARGET='host'";
+            if (!string.IsNullOrEmpty(request.Param))
+            {
+                var escapedParam = request.Param.Replace("'", "'\\''");
+                envPrefix += $" LWT_PARAM='{escapedParam}' LWT_PARAM_VALUE='{escapedParam}' LWT_PARAM_IP='{escapedParam}'; set -- '{escapedParam}';";
+            }
+            else
+            {
+                envPrefix += ";";
+            }
+
+            psi.ArgumentList.Add(envPrefix + "\n" + normalized);
+            foreach (var (k, v) in env)
+            {
+                psi.EnvironmentVariables[k] = v;
             }
         }
-        else if (!string.IsNullOrEmpty(spec.Arguments))
+        else
         {
-            psi.Arguments = spec.Arguments;
-        }
+            var actionManifest = manifest with
+            {
+                Entrypoint = targetEntry,
+                Runtime = runtime
+            };
 
-        foreach (var (k, v) in spec.EnvironmentVariables)
-        {
-            psi.EnvironmentVariables[k] = v;
+            var spec = adapter.BuildStartSpec(actionManifest, pluginDir, null, env);
+            psi = new ProcessStartInfo
+            {
+                FileName = spec.FileName,
+                WorkingDirectory = spec.WorkingDirectory,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            if (spec.ArgumentList != null && spec.ArgumentList.Count > 0)
+            {
+                foreach (var arg in spec.ArgumentList)
+                {
+                    psi.ArgumentList.Add(arg);
+                }
+                if (!string.IsNullOrEmpty(request.Param))
+                {
+                    psi.ArgumentList.Add(request.Param);
+                }
+            }
+            else if (!string.IsNullOrEmpty(spec.Arguments))
+            {
+                psi.Arguments = spec.Arguments;
+                if (!string.IsNullOrEmpty(request.Param))
+                {
+                    psi.Arguments += $" \"{request.Param}\"";
+                }
+            }
+
+            foreach (var (k, v) in spec.EnvironmentVariables)
+            {
+                psi.EnvironmentVariables[k] = v;
+            }
         }
 
         try
@@ -154,19 +219,63 @@ public sealed class OneShotExecutionStrategy : IExecutionProfileStrategy
 
             if (p.ExitCode == 0)
             {
+                System.Text.Json.JsonElement? dataElement = null;
+                var trimmed = stdout?.Trim();
+                if (!string.IsNullOrWhiteSpace(trimmed) && (trimmed.StartsWith('{') || trimmed.StartsWith('[')))
+                {
+                    try
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(trimmed);
+                        dataElement = doc.RootElement.Clone();
+                    }
+                    catch
+                    {
+                        // 非合法 JSON，保持 dataElement 为 null
+                    }
+                }
+
+                var msg = string.IsNullOrWhiteSpace(stdout) ? "执行成功" : stdout.Trim();
+                if (dataElement.HasValue && dataElement.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    if (dataElement.Value.TryGetProperty("message", out var msgProp) && msgProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        msg = msgProp.GetString() ?? msg;
+                    }
+                }
+
                 return new PluginActionResult
                 {
                     Status = "succeeded",
                     ExitCode = 0,
-                    Message = string.IsNullOrWhiteSpace(stdout) ? "执行成功" : stdout.Trim()
+                    Data = dataElement,
+                    Message = msg
                 };
+            }
+
+            System.Text.Json.JsonElement? errData = null;
+            var errTrimmed = !string.IsNullOrWhiteSpace(stderr) ? stderr.Trim() : stdout.Trim();
+            var errMsg = $"执行失败 (退出码 {p.ExitCode}): {errTrimmed}";
+            if (!string.IsNullOrWhiteSpace(errTrimmed) && (errTrimmed.StartsWith('{') || errTrimmed.StartsWith('[')))
+            {
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(errTrimmed);
+                    errData = doc.RootElement.Clone();
+                    if (errData.Value.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                        errData.Value.TryGetProperty("message", out var errProp) && errProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        errMsg = errProp.GetString() ?? errMsg;
+                    }
+                }
+                catch { }
             }
 
             return new PluginActionResult
             {
                 Status = "failed",
                 ExitCode = p.ExitCode,
-                Message = $"执行失败 (退出码 {p.ExitCode}): {stderr.Trim()}",
+                Data = errData,
+                Message = errMsg,
                 Error = stderr.Trim()
             };
         }

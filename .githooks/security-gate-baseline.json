@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "安全门禁存量合法测试夹具豁免基线。严禁用于生产代码或真实密钥；修复或删除后若未从基线移除将触发失效报警（防假绿）。",
+  "exemptions": [
+    {
+      "file": "tests/LinuxWebTool.UnitTests/RemoteHostConnectionTestUnitTests.cs",
+      "rule": "SEC-PRIVATE-KEY",
+      "reason": "单元测试隔离内存公私钥夹具"
+    },
+    {
+      "file": "tests/LinuxWebTool.IntegrationTests/ApiIntegrationTests.cs",
+      "rule": "SEC-PRIVATE-KEY",
+      "reason": "集成测试私钥解析断言夹具"
+    },
+    {
+      "file": "tests/LinuxWebTool.UnitTests/SshHostKeyProbeTests.cs",
+      "rule": "SEC-PRIVATE-KEY",
+      "reason": "SSH 探测测试内存伪密钥夹具"
+    }
+  ]
+}

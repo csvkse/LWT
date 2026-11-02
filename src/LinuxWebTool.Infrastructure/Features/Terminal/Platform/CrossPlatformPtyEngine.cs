@@ -140,7 +140,28 @@ public sealed class CrossPlatformPtyEngine : IPtyEngine
     private static IReadOnlyList<string> DefaultLinuxArguments(string shell)
     {
         var rc = Path.Combine(AppContext.BaseDirectory, "terminal-bashrc.sh");
-        return Path.GetFileName(shell) == "bash" && File.Exists(rc) ? ["--rcfile", rc, "-i"] : ["-i"];
+        if (Path.GetFileName(shell) == "bash" && File.Exists(rc))
+        {
+            SanitizeBashRc(rc);
+            return ["--rcfile", rc, "-i"];
+        }
+        return ["-i"];
+    }
+
+    private static void SanitizeBashRc(string rcPath)
+    {
+        try
+        {
+            var content = File.ReadAllText(rcPath);
+            if (content.Contains('\r'))
+            {
+                File.WriteAllText(rcPath, content.Replace("\r\n", "\n").Replace('\r', '\n'));
+            }
+        }
+        catch
+        {
+            // Read-only filesystem or concurrency guard
+        }
     }
 
     private static string? FindExecutableInPath(string fileName)

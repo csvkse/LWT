@@ -1,0 +1,106 @@
+{
+  "manifestVersion": 1,
+  "id": "socks5-proxy",
+  "name": "SOCKS5 安全代理微服务",
+  "category": "Network",
+  "version": "1.0.0",
+  "description": "基于 Go 原生运行引擎的极速高并发 SOCKS5 代理服务，支持 RFC 1928 / RFC 1929 规范与身份认证",
+  "icon": "🧦",
+  "profile": "resident",
+  "runtime": "go",
+  "entrypoint": "cmd/socks5-proxy/main.go",
+  "arguments": [
+    "--listen",
+    "0.0.0.0:{port}",
+    "--state-dir",
+    "{stateDir}",
+    "--auth-mode",
+    "none",
+    "--username",
+    "",
+    "--password",
+    "",
+    "--acl-preset",
+    "lan",
+    "--allowed-subnets",
+    "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128",
+    "--allowed-domains",
+    "*.local,*.internal,*.lan,localhost",
+    "--allowed-clients",
+    ""
+  ],
+  "configForm": [
+    {
+      "field": "auth_mode",
+      "label": "认证安全模式 (Authentication)",
+      "type": "select",
+      "options": [
+        "none",
+        "password"
+      ],
+      "defaultValue": "none"
+    },
+    {
+      "field": "username",
+      "label": "SOCKS5 认证用户名",
+      "type": "text",
+      "defaultValue": "",
+      "placeholder": "若开启密码认证则必填"
+    },
+    {
+      "field": "password",
+      "label": "SOCKS5 认证密码",
+      "type": "password",
+      "defaultValue": "",
+      "placeholder": "若开启密码认证则必填"
+    },
+    {
+      "field": "acl_preset",
+      "label": "访问控制预设模式 (ACL Preset)",
+      "type": "select",
+      "options": [
+        "lan",
+        "loopback",
+        "all"
+      ],
+      "defaultValue": "lan"
+    },
+    {
+      "field": "allowed_clients",
+      "label": "入站客户端 IP 访问限制 (标准 CIDR，空则使用预设)",
+      "type": "text",
+      "defaultValue": "",
+      "placeholder": "例如: 127.0.0.1/32, 10.126.0.0/16 或留空使用预设"
+    },
+    {
+      "field": "allowed_subnets",
+      "label": "允许目标网段 (标准 CIDR)",
+      "type": "text",
+      "defaultValue": "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128",
+      "placeholder": "例如: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16"
+    },
+    {
+      "field": "allowed_domains",
+      "label": "允许目标域名 (通配符或正则)",
+      "type": "text",
+      "defaultValue": "*.local,*.internal,*.lan,localhost",
+      "placeholder": "例如: *.internal, *.corp.local, regex:^.*\\.corp$"
+    }
+  ],
+  "network": {
+    "mode": "port",
+    "port": 18080,
+    "portEnv": "SOCKS5_PORT",
+    "portConflictPolicy": "avoid"
+  },
+  "supervision": {
+    "autoRestart": true,
+    "flappingThresholdSec": 10,
+    "maxCrashRetries": 3
+  },
+  "ui": {
+    "entry": "ui/index.html",
+    "title": "SOCKS5 代理控制台",
+    "icon": "🧦"
+  }
+}

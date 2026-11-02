@@ -1,0 +1,68 @@
+{
+  "manifestVersion": 1,
+  "id": "mcp-bridge",
+  "name": "MCP 智能安全网关桥接服务",
+  "category": "AI",
+  "version": "1.0.0",
+  "description": "Go 高性能单进程 OpenAI Secure MCP Tunnel 与第三方 MCP 工具纳管网关",
+  "icon": "🌉",
+  "profile": "resident",
+  "runtime": "native",
+  "entrypoint": "mcp-bridge",
+  "arguments": [
+    "serve",
+    "--state-dir",
+    "{stateDir}"
+  ],
+  "network": {
+    "mode": "path",
+    "portEnv": "PORT",
+    "pathPrefix": "/plugins/mcp-bridge"
+  },
+  "supervision": {
+    "autoRestart": false,
+    "flappingThresholdSec": 10,
+    "maxCrashRetries": 3
+  },
+  "ui": {
+    "entry": "web",
+    "title": "MCP Bridge 控制台",
+    "icon": "🌉"
+  },
+  "dependencies": [
+    {
+      "id": "node-ecosystem",
+      "name": "Node.js & npx 工具链",
+      "required": false,
+      "recommended": true,
+      "description": "用于执行 GitHub、Filesystem 等基于 JavaScript/TypeScript 开发的标准 MCP 服务",
+      "probe": {
+        "command": "npx",
+        "args": ["--version"]
+      },
+      "installGuide": {
+        "alpine": "apk add --no-cache nodejs npm",
+        "debian": "apt update && apt install -y nodejs npm",
+        "rhel": "dnf install -y nodejs npm",
+        "windows": "winget install OpenJS.NodeJS.LTS"
+      }
+    },
+    {
+      "id": "python-uv",
+      "name": "Python 3 & uv/uvx 工具链",
+      "required": false,
+      "recommended": true,
+      "description": "用于极速冷启动 Fetch 等基于 Python 生态开发的高性能 MCP 服务",
+      "probe": {
+        "command": "uvx",
+        "args": ["--version"]
+      },
+      "installGuide": {
+        "alpine": "apk add --no-cache python3 py3-pip && pip install --no-cache-dir uv --break-system-packages",
+        "debian": "apt update && apt install -y python3 python3-pip && pip3 install uv",
+        "rhel": "dnf install -y python3 python3-pip && pip3 install uv",
+        "windows": "winget install astral-sh.uv"
+      }
+    }
+  ]
+}

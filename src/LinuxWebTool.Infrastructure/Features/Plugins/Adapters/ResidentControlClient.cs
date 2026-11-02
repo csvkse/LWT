@@ -1,5 +1,4 @@
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Text.Json;
 using LinuxWebTool.Contracts.Features.Plugins.Contracts;
 
@@ -29,7 +28,7 @@ public sealed class ResidentControlClient : IResidentControlClient
 
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
         AddControlHeaders(request, spec, runId);
-        request.Content = JsonContent.Create(new { runId, timestamp = DateTimeOffset.UtcNow });
+        request.Content = new StringContent($"{{\"runId\":\"{runId}\",\"timestamp\":\"{DateTimeOffset.UtcNow:O}\"}}", System.Text.Encoding.UTF8, "application/json");
 
         try
         {
@@ -108,7 +107,7 @@ public sealed class ResidentControlClient : IResidentControlClient
 
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
         AddControlHeaders(request, spec, runId);
-        request.Content = JsonContent.Create(payload);
+        request.Content = new StringContent(payload.GetRawText(), System.Text.Encoding.UTF8, "application/json");
 
         try
         {
@@ -164,7 +163,7 @@ public sealed class ResidentControlClient : IResidentControlClient
 
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
         AddControlHeaders(request, spec, runId);
-        request.Content = JsonContent.Create(new { timeoutSeconds = timeout.TotalSeconds });
+        request.Content = new StringContent($"{{\"timeoutSeconds\":{timeout.TotalSeconds}}}", System.Text.Encoding.UTF8, "application/json");
 
         using var timeoutCts = new CancellationTokenSource(timeout);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
@@ -217,6 +216,7 @@ public sealed class ResidentControlClient : IResidentControlClient
     private static void AddControlHeaders(HttpRequestMessage request, ResidentControlSpec spec, string runId)
     {
         request.Headers.Add("X-LWT-Run-Id", runId);
+        request.Headers.Add("X-LWT-Plugin-Id", "mcp-bridge");
         if (!string.IsNullOrEmpty(spec.Token))
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", spec.Token);

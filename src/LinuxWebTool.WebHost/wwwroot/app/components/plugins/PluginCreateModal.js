@@ -20,7 +20,7 @@ export default defineComponent({
       description: '',
       category: '自定义',
       profile: 0, // 0: Resident, 1: OneShot
-      runtime: 1, // 0: Node, 1: Python, 2: DotNet, 3: Bash, 4: PowerShell, 5: Native
+      runtime: 1, // 0: Node, 1: Python, 2: DotNet, 3: Bash, 4: PowerShell, 5: Native, 6: Go
       entrypoint: 'main.py',
       supportHttp: false,
       initialPort: 0,
@@ -38,6 +38,9 @@ export default defineComponent({
       } else if (rt === 1) {
         form.value.entrypoint = 'main.py';
         form.value.codeTemplate = '#!/usr/bin/env python3\nprint("Hello from Python plugin!")\n';
+      } else if (rt === 6) {
+        form.value.entrypoint = 'main.go';
+        form.value.codeTemplate = 'package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("Hello from Go plugin!")\n}\n';
       } else if (rt === 3) {
         form.value.entrypoint = 'run.sh';
         form.value.codeTemplate = '#!/usr/bin/env bash\necho "Hello from Bash plugin!"\n';
@@ -182,6 +185,7 @@ export default defineComponent({
               <select v-model.number="form.runtime" class="input-base text-xs w-full mt-1" @change="onRuntimeChange()">
                 <option :value="1">🐍 Python 3</option>
                 <option :value="0">🟢 Node.js</option>
+                <option :value="6">🐹 Go</option>
                 <option :value="3">🐚 Bash</option>
                 <option :value="4">💻 PowerShell</option>
                 <option :value="2">⚡ .NET AOT</option>

@@ -1,5 +1,6 @@
 import { computed, defineComponent } from 'vue';
 import { PluginStateMachine } from '../../utils/pluginStateMachine.js';
+import { auth } from '../../store/auth.js';
 
 export default defineComponent({
   name: 'PluginCard',
@@ -21,13 +22,22 @@ export default defineComponent({
     'delete',
     'toggle-enabled',
     'install-guide',
+    'switch-port',
   ],
   setup(props, { emit }) {
     const isResident = computed(() => props.plugin.profile === 0);
     const isRunning = computed(() => props.plugin.state === 2);
     const isStarting = computed(() => props.plugin.state === 1);
-    const isDegradedOrError = computed(() => props.plugin.state === 4 || props.plugin.state === 5);
+    const isDegradedOrError = computed(() => props.plugin.state === 3 || props.plugin.state === 4 || props.plugin.state === 5);
     const isMissingRuntime = computed(() => Boolean(props.plugin.isMissingRuntime || props.plugin.state === 7));
+    const isMissingDependencies = computed(() => Boolean(props.plugin.isMissingDependencies || props.plugin.state === 8));
+    const hasMissingPrerequisites = computed(() => isMissingRuntime.value || isMissingDependencies.value);
+    const missingPrerequisitesMessage = computed(() => {
+      if (props.plugin.missingDependenciesMessage) return props.plugin.missingDependenciesMessage;
+      if (props.plugin.missingRuntimeMessage) return props.plugin.missingRuntimeMessage;
+      return '缺少运行环境或必要依赖';
+    });
+    const isAutoStart = computed(() => props.plugin.autoStart !== false);
 
     const runtimeMeta = computed(() => PluginStateMachine.getRuntimeMeta(props.plugin.runtime));
     const stateMeta = computed(() => PluginStateMachine.getStateMeta(props.plugin));
@@ -49,11 +59,27 @@ export default defineComponent({
     function handleWebview() { emit('webview', props.plugin); }
     function handleDelete() { emit('delete', props.plugin); }
     function handleToggleEnabled() { emit('toggle-enabled', props.plugin); }
+    function handleExecute() {
+      if (customActions.value && customActions.value.length > 0) {
+        emit('action', { plugin: props.plugin, action: customActions.value[0] });
+      } else {
+        emit('action', {
+          plugin: props.plugin,
+          action: { action: 'default', label: props.plugin.name || '默认执行', icon: '⚡' }
+        });
+      }
+    }
     function handleInstallGuide() { emit('install-guide', props.plugin); }
+    function handleSwitchPort() { emit('switch-port', props.plugin); }
 
     function openGateway() {
       if (props.plugin.gatewayUrl) {
-        window.open(props.plugin.gatewayUrl, '_blank');
+        let url = props.plugin.gatewayUrl;
+        if (auth.token) {
+          const sep = url.includes('?') ? '&' : '?';
+          url = `${url}${sep}token=${encodeURIComponent(auth.token)}`;
+        }
+        window.open(url, '_blank');
       }
     }
 
@@ -63,6 +89,10 @@ export default defineComponent({
       isStarting,
       isDegradedOrError,
       isMissingRuntime,
+      isMissingDependencies,
+      hasMissingPrerequisites,
+      missingPrerequisitesMessage,
+      isAutoStart,
       runtimeMeta,
       stateMeta,
       canStart,
@@ -81,7 +111,9 @@ export default defineComponent({
       handleWebview,
       handleDelete,
       handleToggleEnabled,
+      handleExecute,
       handleInstallGuide,
+      handleSwitchPort,
       openGateway,
     };
   },
@@ -113,9 +145,16 @@ export default defineComponent({
             <span class="text-[10px] px-2 py-0.5 rounded-full font-medium" :class="stateMeta.color">
               {{ stateMeta.label }}
             </span>
-            <span class="text-[10px] px-1.5 py-0.5 rounded border" :class="runtimeMeta.color">
-              {{ runtimeMeta.icon }} {{ runtimeMeta.label }}
-            </span>
+            <div class="flex items-center gap-1">
+              <span v-if="isResident" class="text-[9px] px-1.5 py-0.5 rounded border"
+                :class="isAutoStart ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-slate-800 border-slate-700 text-slate-400'"
+                :title="isAutoStart ? '开机自启动已启用' : '已关闭开机自启动'">
+                {{ isAutoStart ? '⚡ 自启' : '⏸ 手动' }}
+              </span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded border" :class="runtimeMeta.color">
+                {{ runtimeMeta.icon }} {{ runtimeMeta.label }}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -136,10 +175,23 @@ export default defineComponent({
             分类:
             <span class="text-slate-200">{{ plugin.manifest?.category || '默认' }}</span>
           </div>
-          <div v-if="isResident" class="text-slate-400 truncate">
-            端口:
-            <span v-if="plugin.allocatedPort" class="text-cyan-300 font-mono font-medium">
+          <div v-if="isResident" class="text-slate-400 truncate flex items-center gap-1">
+            <span>端口:</span>
+            <span v-if="plugin.allocatedPort"
+              class="font-mono font-medium inline-flex items-center gap-1 cursor-pointer hover:underline"
+              :class="plugin.isPortAvoided ? 'text-amber-400' : 'text-cyan-300'"
+              :title="plugin.isPortAvoided ? (plugin.portConflictReason || '声明端口冲突，已自动避让') : '点击快速切换端口'"
+              @click="handleSwitchPort()">
               :{{ plugin.allocatedPort }}
+              <span v-if="plugin.isPortAvoided" class="text-[9px] px-1 py-0.2 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300">避让</span>
+              <span class="text-[10px] opacity-60 hover:opacity-100">🔀</span>
+            </span>
+            <span v-else-if="plugin.manifest?.network?.port"
+              class="font-mono text-slate-400 inline-flex items-center gap-1 cursor-pointer hover:underline"
+              title="预设端口（未启动），点击快速切换"
+              @click="handleSwitchPort()">
+              :{{ plugin.manifest.network.port }}
+              <span class="text-[10px] opacity-60 hover:opacity-100">⚙️</span>
             </span>
             <span v-else class="text-slate-500">未分配</span>
           </div>
@@ -152,15 +204,29 @@ export default defineComponent({
           </div>
         </div>
 
-        <!-- 异常提示 -->
-        <div v-if="plugin.lastError" class="mt-2 text-[11px] text-red-400 bg-red-950/30 border border-red-800/40 rounded px-2 py-1 line-clamp-2" :title="plugin.lastError">
-          ⚠️ {{ plugin.lastError }}
+        <!-- 降级/崩溃告警横幅与原因透出 -->
+        <div v-if="isDegradedOrError && (plugin.statusMessage || plugin.lastError)"
+          class="mt-2.5 p-2 rounded bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300">
+          <div class="font-semibold flex items-center gap-1 text-amber-200 mb-0.5">
+            <span>⚠️</span>
+            <span>{{ plugin.state === 5 ? '服务已降级（熔断保护）' : (plugin.state === 3 ? '服务异常崩溃' : '重试等待中') }}</span>
+          </div>
+          <div class="font-mono break-all opacity-90" :title="plugin.statusMessage || plugin.lastError">
+            {{ plugin.statusMessage || plugin.lastError }}
+          </div>
         </div>
 
-        <!-- 缺失依赖引导横幅 -->
-        <div v-if="isMissingRuntime" class="mt-2.5 p-2 rounded bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2">
-          <div class="text-[11px] text-amber-300 font-mono truncate" :title="plugin.missingRuntimeMessage || '缺少运行环境或必要依赖'">
-            ⚠️ {{ plugin.missingRuntimeMessage || '缺少运行环境或依赖' }}
+        <!-- 一般异常提示（如启动失败、停止失败） -->
+        <div v-else-if="(plugin.statusMessage || plugin.lastError) && !isRunning && !hasMissingPrerequisites"
+          class="mt-2 text-[11px] text-red-400 bg-red-950/30 border border-red-800/40 rounded px-2 py-1 line-clamp-2"
+          :title="plugin.statusMessage || plugin.lastError">
+          ⚠️ {{ plugin.statusMessage || plugin.lastError }}
+        </div>
+
+        <!-- 缺失运行环境或二进制依赖引导横幅 -->
+        <div v-if="hasMissingPrerequisites" class="mt-2.5 p-2 rounded bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2">
+          <div class="text-[11px] text-amber-300 font-mono truncate" :title="missingPrerequisitesMessage">
+            ⚠️ {{ missingPrerequisitesMessage }}
           </div>
           <button
             type="button"
@@ -224,11 +290,11 @@ export default defineComponent({
             :disabled="!canStart"
             @click="handleStart()"
           >
-            <span>▶</span>
-            <span>启动</span>
+            <span>{{ isDegradedOrError ? '🔄' : '▶' }}</span>
+            <span>{{ isDegradedOrError ? '重新拉起' : '启动' }}</span>
           </button>
           <button
-            v-if="isRunning"
+            v-if="canStop && (isRunning || isDegradedOrError)"
             type="button"
             class="btn-ghost px-2 py-1 text-xs text-orange-400 hover:bg-orange-500/10 rounded flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
             :disabled="!canStop"
@@ -253,7 +319,18 @@ export default defineComponent({
         <div v-else class="flex items-center gap-1">
           <button
             type="button"
+            class="btn-ghost px-2 py-1 text-xs text-emerald-400 hover:bg-emerald-500/10 rounded flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            :disabled="plugin.manifest?.enabled === false"
+            title="运行/触发一次性脚本任务"
+            @click="handleExecute()"
+          >
+            <span>▶</span>
+            <span>运行</span>
+          </button>
+          <button
+            type="button"
             class="btn-ghost px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 rounded flex items-center gap-1"
+            title="切换脚本扩展启用状态"
             @click="handleToggleEnabled()"
           >
             <span>{{ plugin.manifest?.enabled !== false ? '🟢 已启用' : '⚪ 已禁用' }}</span>
@@ -288,10 +365,9 @@ export default defineComponent({
             <span>🗄️</span>
           </button>
           <button
-            v-if="plugin.runtime !== 5"
             type="button"
             class="btn-ghost p-1 text-slate-400 hover:text-blue-300 rounded"
-            title="在线编辑代码与调试"
+            title="在线文件管理与代码编辑"
             @click="handleCode()"
           >
             <span>✏️</span>

@@ -128,11 +128,27 @@ export default defineComponent({
       return API.pluginOperations.artifactDownload(operationStatus.value.operationId, artifactId);
     }
 
+    function stripAnsi(text) {
+      if (!text) return '';
+      return String(text)
+        .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)/g, '')
+        .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+        .replace(/\]133;[A-Za-z0-9;=._-]*/g, '')
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+        .trim();
+    }
+
+    const formattedOutput = computed(() => {
+      const raw = executionResult.value?.output || executionResult.value?.message || '';
+      return stripAnsi(raw) || '（无输出）';
+    });
+
     return {
       executing,
       formValues,
       executionResult,
       operationStatus,
+      formattedOutput,
       handleExecute,
       handleClose,
       getArtifactDownloadUrl,
@@ -268,7 +284,7 @@ export default defineComponent({
                 耗时: {{ executionResult.durationMs || 0 }}ms | 退出码: {{ executionResult.exitCode ?? 0 }}
               </span>
             </div>
-            <pre class="p-2.5 rounded bg-slate-950 border border-cyber-line/60 font-mono text-xs text-slate-300 overflow-x-auto max-h-48 whitespace-pre-wrap">{{ executionResult.output || executionResult.message || '（无输出）' }}</pre>
+            <pre class="p-2.5 rounded bg-slate-950 border border-cyber-line/60 font-mono text-xs text-slate-300 overflow-x-auto max-h-48 whitespace-pre-wrap">{{ formattedOutput }}</pre>
           </div>
         </div>
 

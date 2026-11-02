@@ -18,3 +18,9 @@ env/
 *.envdev
 scratch/
 artifacts/
+docs_secret/
+/plugins/mcp-bridge/mcp-bridge
+/plugins/mcp-bridge/mcp-bridge.exe
+/plugins/mcp-bridge/stdiofixture
+/plugins/mcp-bridge/stdiofixture.exe
+
