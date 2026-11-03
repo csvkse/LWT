@@ -2307,5 +2307,42 @@ public class ArchitectureTests
         var webviewContent = File.ReadAllText(webviewModalFile);
         Assert.Contains("hostname: window.location.hostname", webviewContent);
     }
+
+    [Fact]
+    public void LinuxArch072_SOCKS5安全代理DNS缓存与直连已解析IP门禁()
+    {
+        // 1. 验证 dns_cache.go 存在，且具备策略模式接口、LRU缓存与Singleflight并发合并
+        var dnsCacheFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "dns_cache.go");
+        Assert.True(File.Exists(dnsCacheFile), "dns_cache.go 必须存在");
+        var dnsCacheContent = File.ReadAllText(dnsCacheFile);
+
+        Assert.Contains("type IDnsResolverStrategy interface", dnsCacheContent);
+        Assert.Contains("type DnsLruCache struct", dnsCacheContent);
+        Assert.Contains("type SingleflightGroup struct", dnsCacheContent);
+        Assert.Contains("type Ipv4PreferResolver struct", dnsCacheContent);
+        Assert.Contains("type CachedDnsResolver struct", dnsCacheContent);
+        Assert.Contains("func NormalizeDomain(domain string) string", dnsCacheContent);
+
+        // 2. 验证 main.go 建立上游连接时直连已解析 IP，严禁二次传递域名触发重复 DNS 解析
+        var mainGoFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "main.go");
+        var mainGoContent = File.ReadAllText(mainGoFile);
+
+        Assert.Contains("upstreamDialTarget := targetAddr", mainGoContent);
+        Assert.Contains("net.JoinHostPort(resolvedIP.String(), strconv.Itoa(int(targetPort)))", mainGoContent);
+        Assert.Contains("NewCachedDnsResolver", mainGoContent);
+        Assert.Contains("NormalizeDomain(string(domain))", mainGoContent);
+
+        // 3. 验证专属一键热更脚本 scripts/hot-update-socks5-proxy.ps1 存在
+        var hotUpdateScript = Path.Combine(RepoRoot, "scripts", "hot-update-socks5-proxy.ps1");
+        Assert.True(File.Exists(hotUpdateScript), "scripts/hot-update-socks5-proxy.ps1 必须存在");
+        var scriptContent = File.ReadAllText(hotUpdateScript);
+        Assert.Contains("-HotUpdatePlugin \"socks5-proxy\"", scriptContent);
+
+        // 4. 验证 ui/index.html 支持并明确展示 socks5h:// 远端域名代解指南
+        var uiFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "ui", "index.html");
+        var uiContent = File.ReadAllText(uiFile);
+        Assert.Contains("curl -x socks5h://", uiContent);
+        Assert.Contains("curl-remote-dns-preview", uiContent);
+    }
 }
 

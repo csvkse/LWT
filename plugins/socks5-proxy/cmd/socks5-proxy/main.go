@@ -97,6 +97,7 @@ type Server struct {
 	acl        *AclEngine
 	stateDir   string
 	configPath string
+	resolver   IDnsResolverStrategy
 }
 
 func (s *Server) persistConfigAtomic() error {
@@ -303,6 +304,9 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 
+	dnsStrategy := NewIpv4PreferResolver(time.Duration(*timeoutSec) * time.Second)
+	cachedResolver := NewCachedDnsResolver(dnsStrategy, 2048, 5*time.Minute, 5*time.Second)
+
 	srv := &Server{
 		cfg: Config{
 			ListenAddr:     addr,
@@ -319,6 +323,7 @@ func main() {
 		acl:        aclEngine,
 		stateDir:   stateDir,
 		configPath: configPath,
+		resolver:   cachedResolver,
 	}
 
 	// 首次启动时若尚未落盘，立即初始化持久化文件
@@ -482,7 +487,7 @@ func (s *Server) handleConn(conn net.Conn) error {
 		if _, err := io.ReadFull(conn, domain); err != nil {
 			return err
 		}
-		targetHost = string(domain)
+		targetHost = NormalizeDomain(string(domain))
 	case atypIPv6:
 		ipv6 := make([]byte, 16)
 		if _, err := io.ReadFull(conn, ipv6); err != nil {
@@ -501,7 +506,28 @@ func (s *Server) handleConn(conn net.Conn) error {
 	targetPort := binary.BigEndian.Uint16(portBuf)
 	targetAddr := net.JoinHostPort(targetHost, strconv.Itoa(int(targetPort)))
 
-	// 4. Target ACL Evaluation & Anti-DNS-Rebinding Defense
+	// 4. Target Host Resolution & Anti-DNS-Rebinding Defense
+	var resolvedIP net.IP
+	if ip := net.ParseIP(targetHost); ip != nil {
+		resolvedIP = ip
+	} else {
+		resolver := s.resolver
+		if resolver == nil {
+			resolver = NewCachedDnsResolver(NewIpv4PreferResolver(s.cfg.ConnectTimeout), 2048, 5*time.Minute, 5*time.Second)
+		}
+		resolveCtx, cancel := context.WithTimeout(context.Background(), s.cfg.ConnectTimeout)
+		ips, err := resolver.Resolve(resolveCtx, targetHost)
+		cancel()
+		if err != nil || len(ips) == 0 {
+			_ = s.sendReply(conn, repHostUnreach, nil)
+			if s.acl != nil {
+				s.acl.RecordTargetResult(false)
+			}
+			return fmt.Errorf("dns lookup failed for %s: %w", targetHost, err)
+		}
+		resolvedIP = ips[0]
+	}
+
 	if s.acl != nil {
 		allowed, needDns := s.acl.EvaluateTarget(targetHost)
 		if !allowed && !needDns {
@@ -512,19 +538,6 @@ func (s *Server) handleConn(conn net.Conn) error {
 			_ = s.sendReply(conn, repRuleViolation, nil)
 			s.acl.RecordTargetResult(false)
 			return fmt.Errorf("target %s rejected by domain whitelist policy", targetHost)
-		}
-
-		var resolvedIP net.IP
-		if ip := net.ParseIP(targetHost); ip != nil {
-			resolvedIP = ip
-		} else {
-			ips, err := net.LookupIP(targetHost)
-			if err != nil || len(ips) == 0 {
-				_ = s.sendReply(conn, repHostUnreach, nil)
-				s.acl.RecordTargetResult(false)
-				return fmt.Errorf("dns lookup failed for %s: %w", targetHost, err)
-			}
-			resolvedIP = ips[0]
 		}
 
 		// Anti-DNS-Rebinding dual-check: ensure resolved IP is within allowed subnets
@@ -543,10 +556,16 @@ func (s *Server) handleConn(conn net.Conn) error {
 	}
 
 	// 5. Connect to upstream target
-	upstream, err := net.DialTimeout("tcp", targetAddr, s.cfg.ConnectTimeout)
+	// 核心性能优化：若已解析出目标 IP，上游直接绑定已解析的 IP 直连，彻底消除二次 DNS 解析并杜绝 Rebinding 竞态
+	upstreamDialTarget := targetAddr
+	if resolvedIP != nil {
+		upstreamDialTarget = net.JoinHostPort(resolvedIP.String(), strconv.Itoa(int(targetPort)))
+	}
+
+	upstream, err := net.DialTimeout("tcp", upstreamDialTarget, s.cfg.ConnectTimeout)
 	if err != nil {
 		_ = s.sendReply(conn, repConnRefused, nil)
-		return fmt.Errorf("upstream dial to %s failed: %w", targetAddr, err)
+		return fmt.Errorf("upstream dial to %s (%s) failed: %w", targetAddr, upstreamDialTarget, err)
 	}
 	defer upstream.Close()
 
@@ -680,6 +699,16 @@ func (s *Server) startMetricsHttp(boundAddr string) {
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		authMode, username, _ := s.GetAuthConfig()
+		var dnsStats map[string]any
+		if cr, ok := s.resolver.(*CachedDnsResolver); ok {
+			hits, misses, evictions, size := cr.CacheStats()
+			dnsStats = map[string]any{
+				"hits":      hits,
+				"misses":    misses,
+				"evictions": evictions,
+				"cacheSize": size,
+			}
+		}
 		resp := map[string]any{
 			"status":      "ok",
 			"listen":      boundAddr,
@@ -690,6 +719,7 @@ func (s *Server) startMetricsHttp(boundAddr string) {
 			"bytesRx":     atomic.LoadInt64(&s.metrics.BytesRx),
 			"bytesTx":     atomic.LoadInt64(&s.metrics.BytesTx),
 			"acl":         s.acl.GetStats(),
+			"dns":         dnsStats,
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	})

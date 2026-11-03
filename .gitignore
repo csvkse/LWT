@@ -23,4 +23,6 @@ docs_secret/
 /plugins/mcp-bridge/mcp-bridge.exe
 /plugins/mcp-bridge/stdiofixture
 /plugins/mcp-bridge/stdiofixture.exe
+/plugins/socks5-proxy/socks5-proxy
+/plugins/socks5-proxy/socks5-proxy.exe
 

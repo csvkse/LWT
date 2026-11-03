@@ -112,12 +112,14 @@ async function runAcceptance() {
   await frame.waitForSelector('#proxy-port', { timeout: 10000 });
   const displayPort = await frame.locator('#proxy-port').innerText();
   const curlPreview = await frame.locator('#curl-preview').innerText();
+  const curlRemoteDns = await frame.locator('#curl-remote-dns-preview').innerText();
   const gitPreview = await frame.locator('#git-preview').innerText();
   const envPreview = await frame.locator('#env-preview').innerText();
 
   console.log('----------------------------------------------------');
   console.log(`📌 Webview 模态框展示端口: "${displayPort}"`);
   console.log(`📌 cURL 连接指引: "${curlPreview}"`);
+  console.log(`📌 cURL Remote DNS (socks5h) 指引: "${curlRemoteDns}"`);
   console.log(`📌 Git 代理配置指引: "${gitPreview}"`);
   console.log(`📌 环境变量指引: "${envPreview}"`);
   console.log('----------------------------------------------------');
@@ -127,14 +129,19 @@ async function runAcceptance() {
   const no18001 = !displayPort.includes('18001') && !curlPreview.includes('18001');
   const expectedHost = new URL(baseUrl).hostname;
   const hostDynamic = curlPreview.includes(expectedHost);
+  const socks5hCorrect = curlRemoteDns.includes(`socks5h://`) && curlRemoteDns.includes(expectedHost) && curlRemoteDns.includes('18080');
 
   console.log(`🎯 检验 1: Webview 端口显示 :18080 -> ${portCorrect ? '✅ 成功' : '❌ 失败'}`);
   console.log(`🎯 检验 2: cURL 指引动态绑定 :18080 -> ${curlCorrect ? '✅ 成功' : '❌ 失败'}`);
   console.log(`🎯 检验 3: 绝无 18001 历史错误硬编码残留 -> ${no18001 ? '✅ 成功' : '❌ 失败'}`);
   console.log(`🎯 检验 4: cURL 动态绑定当前宿主主机 (${expectedHost}) -> ${hostDynamic ? '✅ 成功' : '❌ 失败'}`);
+  console.log(`🎯 检验 5: cURL socks5h 远端域名代解指引包含 ${expectedHost}:18080 -> ${socks5hCorrect ? '✅ 成功' : '❌ 失败'}`);
 
   if (!hostDynamic) {
     throw new Error(`cURL 指引未动态绑定当前宿主主机 ${expectedHost}: ${curlPreview}`);
+  }
+  if (!socks5hCorrect) {
+    throw new Error(`cURL socks5h 远端解析指引异常: ${curlRemoteDns}`);
   }
 
   await saveScreenshot(page, '04-acceptance-success.png');

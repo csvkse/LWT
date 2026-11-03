@@ -404,17 +404,20 @@
   <div class="instructions">
     <h3>快速连接与客户端配置指南</h3>
     
-    <p class="tip" style="margin-bottom: 6px;">1. 通过 cURL 命令验证内网代理连通性：</p>
+    <p class="tip" style="margin-bottom: 6px;">1. 通过 cURL 命令验证内网代理连通性 (本地 DNS 解析模式)：</p>
     <div class="code-block" id="curl-preview">curl -x socks5://127.0.0.1:18080 http://127.0.0.1:5270/health</div>
 
-    <p class="tip" style="margin-bottom: 6px;">2. 为 Git 配置内网专用 SOCKS5 代理：</p>
+    <p class="tip" style="margin-bottom: 6px;">2. 浏览器与远程域名代解推荐协议 (socks5h 模式，内置 LRU 高速缓存)：</p>
+    <div class="code-block" id="curl-remote-dns-preview">curl -x socks5h://127.0.0.1:18080 http://127.0.0.1:5270/health</div>
+
+    <p class="tip" style="margin-bottom: 6px;">3. 为 Git 配置专用 SOCKS5 代理：</p>
     <div class="code-block" id="git-preview">git config --global http.proxy socks5://127.0.0.1:18080</div>
 
-    <p class="tip" style="margin-bottom: 6px;">3. 环境变量导出配置（支持 Bash / Zsh 终端）：</p>
+    <p class="tip" style="margin-bottom: 6px;">4. 环境变量导出配置（支持 Bash / Zsh 终端）：</p>
     <div class="code-block" id="env-preview">export ALL_PROXY=socks5://127.0.0.1:18080</div>
 
     <div class="tip" style="margin-top: 14px;">
-      💡 提示：本微服务采用 Go 原生 JIT 增量编译模式运行，策略保存后自动平滑重启，端口毫秒级恢复无悬挂。
+      💡 提示：本微服务已内置 LRU DNS 高并发缓存池与 Singleflight 并发请求合并，完整支持 socks5h:// 远端域名代解，上游直连已解析目标 IP 杜绝二次 DNS 解析时延。
     </div>
   </div>
 
@@ -548,6 +551,11 @@
 
       const healthHost = (host === '127.0.0.1' || host === 'localhost') ? '127.0.0.1:5270' : `${host}:${window.location.port || '5271'}`;
       document.getElementById('curl-preview').textContent = 'curl -x ' + proxyUrl + ' http://' + healthHost + '/health';
+      const remoteProxyUrl = 'socks5h://' + authPrefix + host + ':' + port;
+      const remoteDnsEl = document.getElementById('curl-remote-dns-preview');
+      if (remoteDnsEl) {
+        remoteDnsEl.textContent = 'curl -x ' + remoteProxyUrl + ' http://' + healthHost + '/health';
+      }
       document.getElementById('git-preview').textContent = 'git config --global http.proxy ' + proxyUrl;
       document.getElementById('env-preview').textContent = 'export ALL_PROXY=' + proxyUrl;
     }
