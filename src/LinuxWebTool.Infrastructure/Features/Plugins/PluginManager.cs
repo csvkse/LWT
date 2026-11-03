@@ -225,12 +225,23 @@ public sealed partial class PluginManager : IPluginManager, IHostedService
         var dir = Path.Combine(_pluginsRoot, manifest.Id);
         Directory.CreateDirectory(dir);
 
-        var manifestJson = JsonSerializer.Serialize(manifest, PluginJsonContext.Default.PluginManifest);
-        await File.WriteAllTextAsync(Path.Combine(dir, "plugin.json"), manifestJson, ct);
+        var manifestPath = Path.Combine(dir, "plugin.json");
+        var oldManifest = File.Exists(manifestPath)
+            ? JsonSerializer.Deserialize(await File.ReadAllTextAsync(manifestPath, ct), PluginJsonContext.Default.PluginManifest)
+            : null;
 
-        if (!string.IsNullOrWhiteSpace(request.InitialCode) && !string.IsNullOrWhiteSpace(manifest.Entrypoint))
+        var finalManifest = manifest;
+        if (finalManifest.Network == null && oldManifest?.Network != null)
         {
-            var entryPath = Path.Combine(dir, manifest.Entrypoint);
+            finalManifest = finalManifest with { Network = oldManifest.Network };
+        }
+
+        var manifestJson = JsonSerializer.Serialize(finalManifest, PluginJsonContext.Default.PluginManifest);
+        await File.WriteAllTextAsync(manifestPath, manifestJson, ct);
+
+        if (!string.IsNullOrWhiteSpace(request.InitialCode) && !string.IsNullOrWhiteSpace(finalManifest.Entrypoint))
+        {
+            var entryPath = Path.Combine(dir, finalManifest.Entrypoint);
             var entryDir = Path.GetDirectoryName(entryPath);
             if (!string.IsNullOrEmpty(entryDir) && !Directory.Exists(entryDir))
             {
@@ -239,7 +250,7 @@ public sealed partial class PluginManager : IPluginManager, IHostedService
             await File.WriteAllTextAsync(entryPath, request.InitialCode, ct);
         }
 
-        return BuildInstanceDto(manifest, dir);
+        return BuildInstanceDto(finalManifest, dir);
     }
 
     public async ValueTask<bool> SetEnabledAsync(string id, bool enabled, CancellationToken ct = default)

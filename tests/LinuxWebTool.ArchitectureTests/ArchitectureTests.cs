@@ -2198,5 +2198,41 @@ public class ArchitectureTests
             }
         }
     }
+
+    [Fact]
+    public void LinuxArch069_微服务Webview控制台端口契约对齐与抗覆盖门禁()
+    {
+        // 1. 验证 PluginInstanceDto 暴露 Port 兼容性别名 (AllocatedPort ?? ConfiguredPort)
+        var modelsFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.Contracts", "Features", "Plugins", "Contracts", "PluginModels.cs");
+        Assert.True(File.Exists(modelsFile), "PluginModels.cs 必须存在");
+        var modelsContent = File.ReadAllText(modelsFile);
+        Assert.Contains("public int? Port => AllocatedPort ?? ConfiguredPort;", modelsContent);
+
+        // 2. 验证 SOCKS5 代理控制台 ui/index.html 杜绝死端口 18001 硬编码与具备 token 兼容
+        var uiFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "ui", "index.html");
+        Assert.True(File.Exists(uiFile), "ui/index.html 必须存在");
+        var uiContent = File.ReadAllText(uiFile);
+
+        // 严禁以 18001 作为写死的最终展示端口
+        Assert.DoesNotContain("<div class=\"val\" id=\"proxy-port\">:18001</div>", uiContent);
+        // 必须具备 allocatedPort 判定与 URL token 容错提取
+        Assert.Contains("allocatedPort", uiContent);
+        Assert.Contains("URLSearchParams", uiContent);
+        Assert.Contains("LWT_PLUGIN_ENV", uiContent);
+
+        // 3. 验证 saveAcl 具备 network 清单防丢失继承切面
+        Assert.Contains("network: existingNetwork", uiContent);
+
+        // 4. 验证 PluginManager.CreateOrUpdateAsync 具备网络配置继承防护
+        var pmFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure", "Features", "Plugins", "PluginManager.cs");
+        var pmContent = File.ReadAllText(pmFile);
+        Assert.Contains("finalManifest.Network == null && oldManifest?.Network != null", pmContent);
+
+        // 5. 验证 PluginWebviewModal.js 具备 postMessage 广播通道下发
+        var webviewModalFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "wwwroot", "app", "components", "plugins", "PluginWebviewModal.js");
+        var webviewContent = File.ReadAllText(webviewModalFile);
+        Assert.Contains("LWT_PLUGIN_ENV", webviewContent);
+        Assert.Contains("handleIframeLoad", webviewContent);
+    }
 }
 

@@ -2,6 +2,9 @@
   "name": "linuxwebtool-browser-smoke",
   "private": true,
   "type": "module",
-  "scripts": { "test": "playwright test" },
+  "scripts": {
+    "test": "playwright test",
+    "test:socks5": "node acceptance-socks5-webview.mjs"
+  },
   "devDependencies": { "@playwright/test": "1.56.1" }
 }

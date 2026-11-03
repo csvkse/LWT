@@ -278,10 +278,19 @@
     <span class="badge badge-lan" id="active-preset-badge">🛡️ 局域网专用模式</span>
   </div>
 
+  <!-- 四层协议防呆提示 -->
+  <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 6px; padding: 8px 12px; margin-bottom: 16px; font-size: 0.75rem; color: #fbbf24; display: flex; align-items: center; gap: 8px;">
+    <span>⚠️</span>
+    <span><b>四层代理协议须知</b>：SOCKS5 为四层 TCP 会话协议（RFC 1928），非 HTTP 七层网页服务，不可在浏览器地址栏直接打开。请通过终端命令或客户端网络代理接入。</span>
+  </div>
+
   <div class="grid">
     <div class="card">
       <h2>代理监听 & 模式</h2>
-      <div class="val" id="proxy-port">:18001</div>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <div class="val" id="proxy-port">:18080</div>
+        <span id="port-avoided-badge" style="display: none; font-size: 0.7rem; padding: 1px 6px; border-radius: 4px; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; font-weight: normal;">已避让</span>
+      </div>
       <div class="tip" id="auth-mode-desc">模式: RFC 1928 (无需认证)</div>
     </div>
     <div class="card">
@@ -396,13 +405,13 @@
     <h3>快速连接与客户端配置指南</h3>
     
     <p class="tip" style="margin-bottom: 6px;">1. 通过 cURL 命令验证内网代理连通性：</p>
-    <div class="code-block" id="curl-preview">curl -x socks5://127.0.0.1:18001 http://127.0.0.1:5270/health</div>
+    <div class="code-block" id="curl-preview">curl -x socks5://127.0.0.1:18080 http://127.0.0.1:5270/health</div>
 
     <p class="tip" style="margin-bottom: 6px;">2. 为 Git 配置内网专用 SOCKS5 代理：</p>
-    <div class="code-block" id="git-preview">git config --global http.proxy socks5://127.0.0.1:18001</div>
+    <div class="code-block" id="git-preview">git config --global http.proxy socks5://127.0.0.1:18080</div>
 
     <p class="tip" style="margin-bottom: 6px;">3. 环境变量导出配置（支持 Bash / Zsh 终端）：</p>
-    <div class="code-block" id="env-preview">export ALL_PROXY=socks5://127.0.0.1:18001</div>
+    <div class="code-block" id="env-preview">export ALL_PROXY=socks5://127.0.0.1:18080</div>
 
     <div class="tip" style="margin-top: 14px;">
       💡 提示：本微服务采用 Go 原生 JIT 增量编译模式运行，策略保存后自动平滑重启，端口毫秒级恢复无悬挂。
@@ -509,6 +518,11 @@
       }
     }
 
+    function getAuthToken() {
+      const urlParams = new URLSearchParams(window.location.search);
+      return urlParams.get('token') || localStorage.getItem('lwt_token') || '';
+    }
+
     function updateClientPreview() {
       let authPrefix = '';
       if (currentAuthMode === 'password') {
@@ -516,7 +530,7 @@
         const pass = document.getElementById('input-password').value || 'pass';
         authPrefix = encodeURIComponent(user) + ':' + encodeURIComponent(pass) + '@';
       }
-      const port = document.getElementById('proxy-port').textContent.replace(':', '') || '18001';
+      const port = document.getElementById('proxy-port').textContent.replace(':', '').trim() || '18080';
       const proxyUrl = 'socks5://' + authPrefix + '127.0.0.1:' + port;
 
       document.getElementById('curl-preview').textContent = 'curl -x ' + proxyUrl + ' http://127.0.0.1:5270/health';
@@ -536,7 +550,7 @@
 
     async function loadPluginInfo() {
       try {
-        const token = localStorage.getItem('lwt_token');
+        const token = getAuthToken();
         const res = await fetch('/api/plugins/socks5-proxy', {
           headers: token ? { 'Authorization': 'Bearer ' + token } : {}
         });
@@ -545,8 +559,20 @@
         const p = data?.data || data;
         currentManifest = p?.manifest;
 
-        if (p?.port) {
-          document.getElementById('proxy-port').textContent = ':' + p.port;
+        const activePort = p?.allocatedPort || p?.port || p?.configuredPort || p?.manifest?.network?.port || 18080;
+        const portEl = document.getElementById('proxy-port');
+        if (portEl) {
+          portEl.textContent = ':' + activePort;
+        }
+
+        const avoidedBadge = document.getElementById('port-avoided-badge');
+        if (avoidedBadge) {
+          if (p?.isPortAvoided) {
+            avoidedBadge.style.display = 'inline-block';
+            avoidedBadge.title = p.portConflictReason || '声明目标端口被占用，系统已自动避让启动';
+          } else {
+            avoidedBadge.style.display = 'none';
+          }
         }
 
         if (currentManifest && Array.isArray(currentManifest.arguments)) {
@@ -586,7 +612,7 @@
       btn.disabled = true;
       btn.textContent = '⏳ 保存中...';
       try {
-        const token = localStorage.getItem('lwt_token');
+        const token = getAuthToken();
         if (!token) {
           setStatus('未检测到认证 Token，请在面板登录后操作', false);
           return;
@@ -618,6 +644,13 @@
           '--allowed-clients', clients
         ];
 
+        const existingNetwork = currentManifest?.network || {
+          mode: 'port',
+          port: 18080,
+          portEnv: 'SOCKS5_PORT',
+          portConflictPolicy: 'avoid'
+        };
+
         const manifest = {
           ...(currentManifest || {}),
           id: 'socks5-proxy',
@@ -629,7 +662,8 @@
           profile: 0,
           runtime: 6,
           entrypoint: 'cmd/socks5-proxy/main.go',
-          arguments: newArgs
+          arguments: newArgs,
+          network: existingNetwork
         };
 
         const res = await fetch('/api/plugins', {
@@ -664,6 +698,24 @@
         btn.textContent = '💾 保存三维策略并重启生效';
       }
     }
+
+    // 接收父窗口通过 postMessage 下发的基础环境信息
+    window.addEventListener('message', (event) => {
+      if (event.data && (event.data.type === 'LWT_PLUGIN_ENV' || event.data.allocatedPort)) {
+        const { allocatedPort, configuredPort, isPortAvoided, portConflictReason } = event.data;
+        const port = allocatedPort || configuredPort;
+        if (port) {
+          const portEl = document.getElementById('proxy-port');
+          if (portEl) portEl.textContent = ':' + port;
+          const avoidedBadge = document.getElementById('port-avoided-badge');
+          if (avoidedBadge) {
+            avoidedBadge.style.display = isPortAvoided ? 'inline-block' : 'none';
+            if (portConflictReason) avoidedBadge.title = portConflictReason;
+          }
+          updateClientPreview();
+        }
+      }
+    });
 
     window.addEventListener('DOMContentLoaded', loadPluginInfo);
   </script>

@@ -58,6 +58,24 @@ export default defineComponent({
       }
     }
 
+    function handleIframeLoad() {
+      try {
+        if (iframeRef.value?.contentWindow && props.plugin) {
+          iframeRef.value.contentWindow.postMessage({
+            type: 'LWT_PLUGIN_ENV',
+            pluginId: props.plugin.id,
+            allocatedPort: props.plugin.allocatedPort,
+            configuredPort: props.plugin.configuredPort || props.plugin.manifest?.network?.port,
+            isPortAvoided: Boolean(props.plugin.isPortAvoided),
+            portConflictReason: props.plugin.portConflictReason,
+            token: auth.token || ''
+          }, '*');
+        }
+      } catch {
+        // Cross-origin fallback
+      }
+    }
+
     return {
       iframeRef,
       iframeKey,
@@ -66,6 +84,7 @@ export default defineComponent({
       handleClose,
       handleReload,
       handleOpenTab,
+      handleIframeLoad,
     };
   },
   template: `
@@ -123,6 +142,7 @@ export default defineComponent({
             :src="assetUrl"
             class="w-full h-full border-0"
             sandbox="allow-scripts allow-forms allow-same-origin allow-downloads allow-modals"
+            @load="handleIframeLoad()"
           ></iframe>
         </div>
       </div>

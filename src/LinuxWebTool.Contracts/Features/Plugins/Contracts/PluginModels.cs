@@ -181,6 +181,13 @@ public sealed record PluginInstanceDto
     public int? AllocatedPort { get; init; }
     public bool IsPortAvoided { get; init; }
     public int? ConfiguredPort { get; init; }
+
+    /// <summary>
+    /// 兼容性运行端口：优先取运行时分配端口，未启动时取预设配置端口。
+    /// 解决 Webview 控制台及外部客户端序列化取值字段不匹配问题。
+    /// </summary>
+    public int? Port => AllocatedPort ?? ConfiguredPort;
+
     public string? PortConflictReason { get; init; }
     public int? ProcessId { get; init; }
     public string? AccessUrl { get; init; }
