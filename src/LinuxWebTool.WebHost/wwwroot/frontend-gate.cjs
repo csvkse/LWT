@@ -614,7 +614,8 @@ for (const file of files) {
   const relPath = path.relative(appDir, file).replace(/\\/g, '/');
   if (relPath === 'utils/pluginUrlResolver.js' || relPath === 'config.js') continue;
   const content = fs.readFileSync(file, 'utf8');
-  if (/\.gatewayUrl\b/.test(content)) {
+  const codeWithoutComments = content.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '');
+  if (/\.gatewayUrl\b/.test(codeWithoutComments)) {
     add('FE-PLUGIN-GATEWAY-FALLBACK', file, '禁止直接读取 .gatewayUrl，必须使用 PluginUrlResolver 解析与自动降级');
   }
 }

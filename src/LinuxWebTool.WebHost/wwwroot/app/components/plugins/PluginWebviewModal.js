@@ -21,7 +21,7 @@ export default defineComponent({
 
     const assetUrl = computed(() => {
       if (!props.plugin) return '';
-      // Webview 路由通过 PluginUrlResolver 统一解析，涵盖常驻微服务网关 (API.plugins.gatewayUrl) 与静态资产端点
+      // Webview 路由通过 PluginUrlResolver 统一解析，涵盖常驻微服务网关与静态资产端点
       return PluginUrlResolver.getWebviewUrl(props.plugin, auth.token);
     });
 
