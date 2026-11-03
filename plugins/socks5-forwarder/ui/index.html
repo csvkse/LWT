@@ -149,9 +149,15 @@
             <input type="text" id="inName" required placeholder="如: 办公电脑专用" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
           </div>
           <div>
-            <label class="block text-slate-400 mb-1">本地监听端口 (Listen Port)</label>
+            <label class="block text-slate-400 mb-1">主监听端口 (Primary Port)</label>
             <input type="number" id="inPort" required min="1024" max="65535" placeholder="10801" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono">
           </div>
+        </div>
+
+        <div>
+          <label class="block text-slate-400 mb-1">附加监听端口 (Additional Ports，多端口入站)</label>
+          <input type="text" id="inAdditionalPorts" placeholder="如: 10802, 10803 (多个端口用逗号分隔，共享此规则策略)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]">
+          <p class="text-[10px] text-slate-500 mt-0.5">主端口与附加端口均会启动独立 TCP 监听，便于外部不同端口映射直接复用当前 ACL 白名单与上游分流策略</p>
         </div>
 
         <div class="grid grid-cols-2 gap-3">

@@ -183,13 +183,17 @@
 
       const aclPreview = (p.allowedCidr || []).slice(0, 3).join(', ') + ((p.allowedCidr || []).length > 3 ? '...' : '');
 
+      const allPorts = [p.listenPort, ...(p.additionalPorts || [])].filter((v, i, a) => v && a.indexOf(v) === i);
+      const portBadges = allPorts.map(pt => `<span class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-cyan-950/80 text-cyan-300 border border-cyan-800/40">:${pt}</span>`).join(' ');
+      const lanAccessCodes = allPorts.map(pt => `<code class="font-mono text-slate-200 select-all">${hostIP}:${pt}</code>`).join('<span class="text-slate-600 mx-1">|</span>');
+
       card.innerHTML = `
         <div>
           <div class="flex items-start justify-between gap-3">
             <div>
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 flex-wrap">
                 <h3 class="font-bold text-sm text-slate-100">${escapeHtml(p.name)}</h3>
-                <span class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-cyan-950/80 text-cyan-300 border border-cyan-800/40">:${p.listenPort}</span>
+                ${portBadges}
               </div>
               <p class="text-[11px] text-slate-400 mt-0.5">协议模式: <span class="text-slate-300 font-medium">${p.protocol.toUpperCase()}</span> | 策略: <span class="text-slate-300">${p.upstreamStrategy}</span></p>
             </div>
@@ -208,11 +212,11 @@
           </div>
 
           <div class="mt-2.5 bg-slate-800/40 px-2.5 py-1.5 rounded border border-slate-800/60 flex items-center justify-between text-[11px]">
-            <div class="truncate text-slate-400">
-              <span class="text-cyan-400 font-medium">局域网接入:</span> 
-              <code class="font-mono text-slate-200 select-all">${hostIP}:${p.listenPort}</code>
+            <div class="truncate text-slate-400 flex items-center gap-1.5 flex-wrap">
+              <span class="text-cyan-400 font-medium whitespace-nowrap">局域网接入:</span> 
+              <div class="flex items-center gap-1 flex-wrap">${lanAccessCodes}</div>
             </div>
-            <button class="btn-copy-proxy text-xs text-cyan-400 hover:text-cyan-300 ml-2" data-proxy="socks5://${hostIP}:${p.listenPort}">复制</button>
+            <button class="btn-copy-proxy text-xs text-cyan-400 hover:text-cyan-300 ml-2 whitespace-nowrap" data-proxy="socks5://${hostIP}:${p.listenPort}">复制主端口</button>
           </div>
         </div>
 
@@ -296,6 +300,7 @@
     document.getElementById('inId').value = p ? p.id : '';
     document.getElementById('inName').value = p ? p.name : '';
     document.getElementById('inPort').value = p ? p.listenPort : (10800 + state.inbounds.length + 1);
+    document.getElementById('inAdditionalPorts').value = p && p.additionalPorts && p.additionalPorts.length > 0 ? p.additionalPorts.join(', ') : '';
     document.getElementById('inProtocol').value = p ? p.protocol : 'mixed';
     document.getElementById('inStrategy').value = p ? p.upstreamStrategy : 'single';
     document.getElementById('inAcl').value = p ? (p.allowedCidr || []).join(', ') : '10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1/32';
@@ -372,11 +377,17 @@
     const rawAcl = document.getElementById('inAcl').value.trim();
     const allowedCidr = rawAcl ? rawAcl.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean) : ['*'];
 
+    const rawAdditional = document.getElementById('inAdditionalPorts').value.trim();
+    const additionalPorts = rawAdditional
+      ? rawAdditional.split(/[\s,;]+/).map(s => parseInt(s.trim(), 10)).filter(pt => !isNaN(pt) && pt > 0 && pt <= 65535)
+      : [];
+
     const profile = {
       id: document.getElementById('inId').value || undefined,
       name: document.getElementById('inName').value.trim(),
       enabled: true,
       listenPort: parseInt(document.getElementById('inPort').value, 10),
+      additionalPorts: additionalPorts,
       protocol: document.getElementById('inProtocol').value,
       upstreamStrategy: document.getElementById('inStrategy').value,
       upstreamNodes: checkedNodes,

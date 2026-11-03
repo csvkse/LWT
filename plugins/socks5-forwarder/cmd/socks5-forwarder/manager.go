@@ -121,10 +121,30 @@ func (m *ProfileManager) UpsertInbound(p InboundProfile) (*InboundProfile, error
 		p.ID = fmt.Sprintf("inbound-%d", time.Now().UnixNano()%100000)
 	}
 
-	// 端口冲突校验：确保没有其他 Profile 占用相同端口
+	if p.ListenPort <= 0 || p.ListenPort > 65535 {
+		return nil, fmt.Errorf("主监听端口 :%d 无效，端口范围必须在 1-65535", p.ListenPort)
+	}
+
+	// 端口校验：确保自身端口列表无重复，且没有被其他规则占用
+	portSet := make(map[int]bool)
+	portSet[p.ListenPort] = true
+	for _, addPort := range p.AdditionalPorts {
+		if addPort <= 0 || addPort > 65535 {
+			return nil, fmt.Errorf("附加监听端口 :%d 无效，端口范围必须在 1-65535", addPort)
+		}
+		if portSet[addPort] {
+			return nil, fmt.Errorf("规则自身包含重复端口 :%d", addPort)
+		}
+		portSet[addPort] = true
+	}
+
 	for _, existing := range m.cfg.Inbounds {
-		if existing.ID != p.ID && existing.ListenPort == p.ListenPort {
-			return nil, fmt.Errorf("端口 :%d 已被规则 '%s' 占用", p.ListenPort, existing.Name)
+		if existing.ID != p.ID {
+			for _, existPort := range existing.GetEffectivePorts() {
+				if portSet[existPort] {
+					return nil, fmt.Errorf("端口 :%d 已被规则 '%s' 占用", existPort, existing.Name)
+				}
+			}
 		}
 	}
 

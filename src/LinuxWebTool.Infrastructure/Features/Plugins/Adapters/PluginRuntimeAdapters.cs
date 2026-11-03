@@ -118,6 +118,39 @@ public sealed class NodeRuntimeAdapter : IRuntimeAdapter
             ["BIND_ADDRESS"] = "127.0.0.1"
         };
 
+        // 宿主元数据向下投影模型 (Host Metadata Downward Projection)
+        var hostInternalPort = Environment.GetEnvironmentVariable("LWT_HOST_INTERNAL_PORT");
+        if (string.IsNullOrWhiteSpace(hostInternalPort))
+        {
+            var aspnetUrls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? Environment.GetEnvironmentVariable("URLS") ?? "";
+            hostInternalPort = aspnetUrls.Contains(":5270") ? "5270" : "5270";
+        }
+
+        var hostExternalPort = Environment.GetEnvironmentVariable("LWT_HOST_EXTERNAL_PORT");
+        if (string.IsNullOrWhiteSpace(hostExternalPort))
+        {
+            hostExternalPort = hostInternalPort;
+        }
+
+        var hostPublicIp = Environment.GetEnvironmentVariable("LWT_HOST_PUBLIC_IP");
+        if (string.IsNullOrWhiteSpace(hostPublicIp))
+        {
+            hostPublicIp = "127.0.0.1";
+        }
+
+        dict["LWT_HOST_INTERNAL_PORT"] = hostInternalPort;
+        dict["LWT_HOST_EXTERNAL_PORT"] = hostExternalPort;
+        dict["LWT_HOST_PUBLIC_IP"] = hostPublicIp;
+        dict["LWT_HOST_INTERNAL_URL"] = $"http://127.0.0.1:{hostInternalPort}";
+        dict["LWT_HOST_PUBLIC_URL"] = $"http://{hostPublicIp}:{hostExternalPort}";
+        dict["LWT_PLUGIN_INGRESS_PREFIX"] = $"/plugins/{manifest.Id}";
+        dict["LWT_HOST_OS"] = OperatingSystem.IsLinux() ? "linux" : (OperatingSystem.IsWindows() ? "windows" : "macos");
+        dict["LWT_HOST_DISTRO"] = PluginManager.DetectCurrentDistroKey();
+        dict["LWT_HOST_ARCH"] = RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant();
+        dict["LWT_HAS_TUN"] = File.Exists("/dev/net/tun") ? "true" : "false";
+        dict["LWT_VERSION"] = "1.0.0";
+        dict["LWT_ENV_MODE"] = hostExternalPort == "5271" ? "dev" : "production";
+
         if (port.HasValue)
         {
             var portKey = string.IsNullOrWhiteSpace(manifest.Network?.PortEnv) ? "PORT" : manifest.Network.PortEnv;

@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-// InboundListener 单端口入站监听实例
+// InboundListener 组合入站监听实例（支持单规则绑定多端口）
 type InboundListener struct {
 	profile    InboundProfile
-	listener   net.Listener
+	listeners  []net.Listener
 	acl        *ACLManager
 	mgr        *ProfileManager
 	ctx        context.Context
@@ -28,37 +28,51 @@ type InboundListener struct {
 func NewInboundListener(p InboundProfile, mgr *ProfileManager) *InboundListener {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &InboundListener{
-		profile: p,
-		acl:     NewACLManager(p.AllowedCIDR),
-		mgr:     mgr,
-		ctx:     ctx,
-		cancel:  cancel,
+		profile:   p,
+		listeners: make([]net.Listener, 0),
+		acl:       NewACLManager(p.AllowedCIDR),
+		mgr:       mgr,
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 }
 
-// Start 启动 TCP 监听套接字并开始循环接收客户端连接
+// Start 启动 TCP 监听套接字（主端口 + 所有附加端口）并开始循环接收客户端连接
 func (l *InboundListener) Start() error {
-	addr := fmt.Sprintf("0.0.0.0:%d", l.profile.ListenPort)
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("绑定端口 :%d 失败: %w", l.profile.ListenPort, err)
+	ports := l.profile.GetEffectivePorts()
+	if len(ports) == 0 {
+		return fmt.Errorf("入站规则未配置任何有效监听端口")
 	}
 
-	l.listener = listener
-	log.Printf("[Listener:%s] 成功监听在 %s (协议: %s, ACL 规则数: %d)",
-		l.profile.Name, addr, l.profile.Protocol, len(l.profile.AllowedCIDR))
+	l.listeners = make([]net.Listener, 0, len(ports))
+	for _, port := range ports {
+		addr := fmt.Sprintf("0.0.0.0:%d", port)
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			// 回滚已启动的 listener
+			for _, prev := range l.listeners {
+				_ = prev.Close()
+			}
+			l.listeners = nil
+			return fmt.Errorf("绑定端口 :%d 失败: %w", port, err)
+		}
 
-	l.wg.Add(1)
-	go l.acceptLoop()
+		l.listeners = append(l.listeners, ln)
+		log.Printf("[Listener:%s] 成功监听在 %s (协议: %s, ACL 规则数: %d)",
+			l.profile.Name, addr, l.profile.Protocol, len(l.profile.AllowedCIDR))
+
+		l.wg.Add(1)
+		go l.acceptLoop(ln, port)
+	}
 
 	return nil
 }
 
-func (l *InboundListener) acceptLoop() {
+func (l *InboundListener) acceptLoop(ln net.Listener, port int) {
 	defer l.wg.Done()
 
 	for {
-		conn, err := l.listener.Accept()
+		conn, err := ln.Accept()
 		if err != nil {
 			l.mu.Lock()
 			stopping := l.isStopping
@@ -66,13 +80,13 @@ func (l *InboundListener) acceptLoop() {
 			if stopping {
 				return
 			}
-			log.Printf("[Listener:%s] Accept 异常: %v", l.profile.Name, err)
+			log.Printf("[Listener:%s] 端口 :%d Accept 异常: %v", l.profile.Name, port, err)
 			return
 		}
 
 		// 维度二防护：握手前立即核验入站客户端 IP
 		if !l.acl.IsAllowed(conn.RemoteAddr()) {
-			log.Printf("[Listener:%s] 拒绝非白名单客户端连接: %s", l.profile.Name, conn.RemoteAddr())
+			log.Printf("[Listener:%s] 端口 :%d 拒绝非白名单客户端连接: %s", l.profile.Name, port, conn.RemoteAddr())
 			_ = conn.Close() // 0 字节掐断，消除指纹
 			continue
 		}
@@ -121,9 +135,11 @@ func (l *InboundListener) Stop() {
 	l.mu.Unlock()
 
 	l.cancel()
-	if l.listener != nil {
-		_ = l.listener.Close()
+	for _, ln := range l.listeners {
+		if ln != nil {
+			_ = ln.Close()
+		}
 	}
 	l.wg.Wait()
-	log.Printf("[Listener:%s] 已停止监听端口 :%d", l.profile.Name, l.profile.ListenPort)
+	log.Printf("[Listener:%s] 已停止监听所有端口: %v", l.profile.Name, l.profile.GetEffectivePorts())
 }

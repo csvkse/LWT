@@ -514,7 +514,7 @@ git -C "$devWorkdir" log -1 --oneline
         Write-Success "Fast dev image built successfully!"
 
         Write-Step "3/4 [Dev] Launching development container ($containerName on port $devPort)..."
-        $devRunCmd = "docker rm -f $containerName 2>/dev/null || true; docker run -d --name $containerName --restart unless-stopped --privileged --pid=host --user root --device /dev/fuse --device=/dev/net/tun -v /var/run/docker.sock:/var/run/docker.sock -p ${devPort}:5270 -p 18080-18090:18080-18090 -v ${containerName}-data:/app/data -v ${devWorkdir}/src/LinuxWebTool.WebHost/wwwroot:/app/wwwroot -v ${devWorkdir}/plugins:/app/plugins -v /lwt:/lwt:rshared -v /var/docker:/var/docker:rshared -v /usr/local/bin:/usr/local/bin:ro $devImage"
+        $devRunCmd = "docker rm -f $containerName 2>/dev/null || true; docker run -d --name $containerName --restart unless-stopped --privileged --pid=host --user root --device /dev/fuse --device=/dev/net/tun -v /var/run/docker.sock:/var/run/docker.sock -p ${devPort}:5270 -p 18080-18090:18080-18090 -p 10801-10815:10801-10815 -e LWT_HOST_EXTERNAL_PORT=${devPort} -e LWT_HOST_INTERNAL_PORT=5270 -e LWT_HOST_PUBLIC_IP=${deployHost} -v ${containerName}-data:/app/data -v ${devWorkdir}/src/LinuxWebTool.WebHost/wwwroot:/app/wwwroot -v ${devWorkdir}/plugins:/app/plugins -v /lwt:/lwt:rshared -v /var/docker:/var/docker:rshared -v /usr/local/bin:/usr/local/bin:ro $devImage"
         Invoke-RemoteSsh $devRunCmd
         Write-Success "Dev container launched (Live volume mounts for wwwroot and plugins active)!"
 
@@ -589,7 +589,7 @@ git -C "$devWorkdir" log -1 --oneline
     Write-Success "Docker pull finished!"
 
     Write-Step "2/4 Recreating production container with privileged and host network mode..."
-    $dockerRunCmd = "docker rm -f $containerName 2>/dev/null || true; docker run -d --name $containerName --restart unless-stopped --privileged --pid=host --user root --device /dev/fuse --device=/dev/net/tun -v /var/run/docker.sock:/var/run/docker.sock -p ${webPort}:${webPort} --net=host -v linuxwebtool-data:/app/data -v /lwt:/lwt:rshared -v /var/docker:/var/docker:rshared -v /usr/local/bin:/usr/local/bin:ro $dockerImage"
+    $dockerRunCmd = "docker rm -f $containerName 2>/dev/null || true; docker run -d --name $containerName --restart unless-stopped --privileged --pid=host --user root --device /dev/fuse --device=/dev/net/tun -v /var/run/docker.sock:/var/run/docker.sock -p ${webPort}:${webPort} --net=host -e LWT_HOST_EXTERNAL_PORT=${webPort} -e LWT_HOST_INTERNAL_PORT=${webPort} -e LWT_HOST_PUBLIC_IP=${deployHost} -v linuxwebtool-data:/app/data -v /lwt:/lwt:rshared -v /var/docker:/var/docker:rshared -v /usr/local/bin:/usr/local/bin:ro $dockerImage"
     Invoke-RemoteSsh $dockerRunCmd
     Write-Success "Container recreated!"
 

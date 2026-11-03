@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net"
 	"path/filepath"
 	"testing"
@@ -171,5 +172,131 @@ func TestProfileManagerLifecycle(t *testing.T) {
 	toggledOff, _ := mgr.ToggleInbound("test-profile-1")
 	if toggledOff.Enabled || toggledOff.Status != "stopped" {
 		t.Errorf("再次 Toggle 后应为 stopped, 实际: %+v", toggledOff)
+	}
+}
+
+// 5. 测试 GetEffectivePorts 多端口计算与去重过滤
+func TestGetEffectivePorts(t *testing.T) {
+	p := InboundProfile{
+		ListenPort:      10808,
+		AdditionalPorts: []int{10809, 10810, 10808, -1, 70000, 0, 10811},
+	}
+	ports := p.GetEffectivePorts()
+	expected := []int{10808, 10809, 10810, 10811}
+	if len(ports) != len(expected) {
+		t.Fatalf("有效端口数量不符合预期: 期望 %v, 实际 %v", expected, ports)
+	}
+	for i, v := range expected {
+		if ports[i] != v {
+			t.Errorf("索引 %d 端口不符合预期: 期望 %d, 实际 %d", i, v, ports[i])
+		}
+	}
+}
+
+// 6. 测试组合监听器多端口同时拉起与连接验证
+func TestCompositeListenerMultiPort(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := filepath.Join(tmpDir, "composite_config.json")
+	cfg, _ := LoadConfig(cfgFile)
+
+	p := InboundProfile{
+		ID:               "composite-multi-port",
+		Name:             "多端口测试规则",
+		Enabled:          false,
+		ListenPort:       28092,
+		AdditionalPorts:  []int{28093, 28094},
+		Protocol:         "mixed",
+		AllowedCIDR:      []string{"127.0.0.1/32"},
+		UpstreamStrategy: "single",
+		UpstreamNodes:    []string{"default-lwt-node"},
+	}
+	cfg.Inbounds = []InboundProfile{p}
+
+	mgr := NewProfileManager(cfg)
+	mgr.StartAll()
+	defer mgr.StopAll()
+
+	toggled, err := mgr.ToggleInbound("composite-multi-port")
+	if err != nil {
+		t.Fatalf("启动多端口规则失败: %v", err)
+	}
+	if !toggled.Enabled || toggled.Status != "running" {
+		t.Fatalf("规则未能成功运行: %+v", toggled)
+	}
+
+	// 验证所有 3 个端口是否均已成功监听
+	testPorts := []int{28092, 28093, 28094}
+	for _, port := range testPorts {
+		addr := fmt.Sprintf("127.0.0.1:%d", port)
+		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		if err != nil {
+			t.Errorf("无法连接多端口之一 %s: %v", addr, err)
+		} else {
+			conn.Close()
+		}
+	}
+
+	// 停止规则后所有 3 个端口均应关闭
+	toggledOff, _ := mgr.ToggleInbound("composite-multi-port")
+	if toggledOff.Enabled || toggledOff.Status != "stopped" {
+		t.Fatalf("停止规则失败: %+v", toggledOff)
+	}
+
+	for _, port := range testPorts {
+		addr := fmt.Sprintf("127.0.0.1:%d", port)
+		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			t.Errorf("端口 %s 在停止后仍处于连接状态，未能正确关闭", addr)
+		}
+	}
+}
+
+// 7. 测试多端口跨规则与同规则内的冲突检测
+func TestMultiPortConflictDetection(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := filepath.Join(tmpDir, "conflict_config.json")
+	cfg, _ := LoadConfig(cfgFile)
+
+	cfg.Inbounds = []InboundProfile{
+		{
+			ID:              "profile-a",
+			Name:            "规则A",
+			ListenPort:      28095,
+			AdditionalPorts: []int{28096, 28097},
+		},
+	}
+	mgr := NewProfileManager(cfg)
+
+	// 情况 1: 自身包含重复端口
+	_, errSelfDup := mgr.UpsertInbound(InboundProfile{
+		ID:              "profile-b",
+		Name:            "规则B-自重复",
+		ListenPort:      28098,
+		AdditionalPorts: []int{28098},
+	})
+	if errSelfDup == nil {
+		t.Errorf("自身端口重复时应报错，但未报错")
+	}
+
+	// 情况 2: 与已有规则的附加端口冲突
+	_, errConflict := mgr.UpsertInbound(InboundProfile{
+		ID:              "profile-c",
+		Name:            "规则C-冲突",
+		ListenPort:      28096, // 已被 profile-a 作为 additionalPort 占用
+	})
+	if errConflict == nil {
+		t.Errorf("与规则A附加端口冲突时应报错，但未报错")
+	}
+
+	// 情况 3: 无冲突合法保存
+	saved, errOk := mgr.UpsertInbound(InboundProfile{
+		ID:              "profile-d",
+		Name:            "规则D-合法",
+		ListenPort:      28099,
+		AdditionalPorts: []int{28100},
+	})
+	if errOk != nil || saved == nil {
+		t.Errorf("无冲突规则保存失败: %v", errOk)
 	}
 }
