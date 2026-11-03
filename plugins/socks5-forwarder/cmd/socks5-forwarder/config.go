@@ -62,13 +62,13 @@ func LoadConfig(filePath string) (*Config, error) {
 		}
 	}
 
-	// 初始化默认演示配置
+	// 初始化默认演示配置 (自适应容器内直通端口 5270 与 socks5-proxy 真实 Ingress Token)
 	cfg.Upstreams = []UpstreamNode{
 		{
 			ID:            "default-lwt-node",
 			Name:          "远程 LWT 默认宿主节点",
-			URL:           "ws://127.0.0.1:5271/telemetry/metrics",
-			Token:         "lwt_live_test_token_abcdef123456",
+			URL:           "ws://127.0.0.1:5270/telemetry/metrics",
+			Token:         "lwt_live_stream_token_8f3a9e",
 			SkipTLSVerify: true,
 			Status:        "unknown",
 		},

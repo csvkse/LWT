@@ -86,8 +86,14 @@
       } else if (node.status === 'degraded') {
         statusBadge = `<span class="px-2 py-0.5 text-[10px] rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">🟡 ${node.latencyMs} ms</span>`;
       } else if (node.status === 'dead') {
-        statusBadge = '<span class="px-2 py-0.5 text-[10px] rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30">🔴 离线</span>';
+        const errTitle = node.lastError ? ` title="${escapeHtml(node.lastError)}"` : '';
+        statusBadge = `<span class="px-2 py-0.5 text-[10px] rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 cursor-help"${errTitle}>🔴 离线</span>`;
       }
+
+      const errSnippet = node.status === 'dead' && node.lastError ? `
+        <div class="text-[10px] text-rose-400/90 font-mono truncate bg-rose-950/30 px-1.5 py-0.5 rounded border border-rose-900/30" title="${escapeHtml(node.lastError)}">
+          ⚠️ ${escapeHtml(node.lastError)}
+        </div>` : '';
 
       card.innerHTML = `
         <div class="flex items-start justify-between gap-2">
@@ -97,6 +103,8 @@
           </div>
           <div>${statusBadge}</div>
         </div>
+
+        ${errSnippet}
 
         <div class="flex items-center justify-between pt-2 border-t border-slate-800/80 text-[11px]">
           <span class="text-slate-500 text-[10px]">${node.skipTlsVerify ? '⚠️ 免证书校验' : '🔒 TLS 严密校验'}</span>
