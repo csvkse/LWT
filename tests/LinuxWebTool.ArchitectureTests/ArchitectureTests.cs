@@ -2384,5 +2384,38 @@ public class ArchitectureTests
         Assert.Contains("curl -x http://", uiContent);
         Assert.Contains("curl-http-preview", uiContent);
     }
+
+    [Fact]
+    public void LinuxArch074_网络代理性能基准度量与传输优化防回归门禁()
+    {
+        // 1. 验证微秒级多协议基准评测套件 tests/benchmark/proxy-benchmark.mjs 存在并包含各项指标度量
+        var benchFile = Path.Combine(RepoRoot, "tests", "benchmark", "proxy-benchmark.mjs");
+        Assert.True(File.Exists(benchFile), "tests/benchmark/proxy-benchmark.mjs 必须存在");
+        var benchContent = File.ReadAllText(benchFile);
+        Assert.Contains("measureDirectTcp", benchContent);
+        Assert.Contains("measureSocks5Handshake", benchContent);
+        Assert.Contains("measureSocks5hHandshake", benchContent);
+        Assert.Contains("measureHttpConnectHandshake", benchContent);
+        Assert.Contains("measureTtfbHttpProxy", benchContent);
+        Assert.Contains("calcStats", benchContent);
+
+        // 2. 验证基于 Playwright 的真实网页加载性能评测套件 tests/benchmark/proxy-web-performance.mjs 存在
+        var webBenchFile = Path.Combine(RepoRoot, "tests", "benchmark", "proxy-web-performance.mjs");
+        Assert.True(File.Exists(webBenchFile), "tests/benchmark/proxy-web-performance.mjs 必须存在");
+        var webBenchContent = File.ReadAllText(webBenchFile);
+        Assert.Contains("measurePagePerformance", webBenchContent);
+        Assert.Contains("first-contentful-paint", webBenchContent);
+        Assert.Contains("domContentLoadedEventEnd", webBenchContent);
+        Assert.Contains("loadEventEnd", webBenchContent);
+
+        // 3. 验证调研文档存在，系统分析了性能评测维度与 Linux Splice 零拷贝等深度优化空间
+        var docFile = Path.Combine(RepoRoot, "docs", "network-proxy-performance-testing-and-optimization-research.md");
+        Assert.True(File.Exists(docFile), "docs/network-proxy-performance-testing-and-optimization-research.md 必须存在");
+        var docContent = File.ReadAllText(docFile);
+        Assert.Contains("splice(2)", docContent);
+        Assert.Contains("Stale-While-Revalidate", docContent);
+        Assert.Contains("TCP_NODELAY", docContent);
+        Assert.Contains("Navigation Timing", docContent);
+    }
 }
 
