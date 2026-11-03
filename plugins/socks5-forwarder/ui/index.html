@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SOCKS5 客户端边缘中继网关</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            cyber: {
+              bg: '#0f172a',
+              card: '#1e293b',
+              line: '#334155',
+              accent: '#06b6d4',
+              hover: '#0891b2'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background-color: #0b1120; color: #e2e8f0; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+    .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scroll::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    .custom-scroll::-webkit-scrollbar-thumb:hover { background: #475569; }
+  </style>
+</head>
+<body class="p-4 sm:p-6 custom-scroll min-h-screen">
+
+  <div id="app" class="max-w-6xl mx-auto space-y-6">
+    <!-- 头部横幅 -->
+    <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-900/80 border border-slate-800 shadow-xl backdrop-blur">
+      <div class="flex items-center gap-3">
+        <div class="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-2xl shadow-inner shadow-cyan-500/20">
+          🌐
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg font-bold text-slate-100">SOCKS5 客户端边缘中继网关</h1>
+            <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">v1.0.0</span>
+          </div>
+          <p class="text-xs text-slate-400 mt-0.5">多端口、多节点 SOCKS5 over WSS 伪装中继网关，为局域网设备提供免客户端加密出海与访问控制</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <button id="btnRefresh" class="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg flex items-center gap-1.5 transition">
+          🔄 刷新数据
+        </button>
+        <button id="btnAddUpstream" class="px-3 py-1.5 text-xs font-medium bg-blue-600/30 hover:bg-blue-600/40 text-blue-300 border border-blue-500/40 rounded-lg flex items-center gap-1.5 transition">
+          + 添加上游服务节点
+        </button>
+        <button id="btnAddInbound" class="px-3 py-1.5 text-xs font-medium bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg flex items-center gap-1.5 shadow-md shadow-cyan-600/20 transition">
+          + 新建入站中继
+        </button>
+      </div>
+    </header>
+
+    <!-- 上半部分: 已连接上游服务器节点列表 -->
+    <section class="space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-cyan-400 text-sm">📡</span>
+          <h2 class="text-sm font-semibold text-slate-200">远端上游服务节点 (Upstream Nodes)</h2>
+          <span id="upstreamCount" class="text-xs px-2 py-0.2 rounded-full bg-slate-800 text-slate-400">0</span>
+        </div>
+        <span class="text-xs text-slate-500">所有入站流量通过 WSS 伪装隧道加密穿透至以下节点</span>
+      </div>
+
+      <div id="upstreamList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <!-- 动态渲染上游节点卡片 -->
+      </div>
+    </section>
+
+    <!-- 下半部分: 本地入站中继规则列表 -->
+    <section class="space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-cyan-400 text-sm">🔀</span>
+          <h2 class="text-sm font-semibold text-slate-200">本地多入站中继规则 (Inbound Profiles)</h2>
+          <span id="inboundCount" class="text-xs px-2 py-0.2 rounded-full bg-slate-800 text-slate-400">0</span>
+        </div>
+        <span class="text-xs text-slate-500">为局域网不同设备分配独立端口、ACL 白名单与路由策略</span>
+      </div>
+
+      <div id="inboundList" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- 动态渲染入站规则卡片 -->
+      </div>
+    </section>
+  </div>
+
+  <!-- 模态框: 新建/编辑上游节点 -->
+  <div id="modalUpstream" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-lg shadow-2xl p-5 space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 id="modalUpstreamTitle" class="text-sm font-bold text-slate-100">添加上游服务节点</h3>
+        <button class="text-slate-400 hover:text-slate-200 text-lg modal-close">✕</button>
+      </div>
+      <form id="formUpstream" class="space-y-3 text-xs">
+        <input type="hidden" id="upId">
+        <div>
+          <label class="block text-slate-400 mb-1">节点显示名称</label>
+          <input type="text" id="upName" required placeholder="如: 东京优化节点 (VPS-1)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1">上游 WSS 伪装隧道地址 (URL)</label>
+          <input type="text" id="upUrl" required placeholder="如: wss://jp.example.com:5271/telemetry/metrics" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]">
+          <p class="text-[10px] text-slate-500 mt-0.5">支持 ws:// (明文) 或 wss:// (TLS 伪装)，路径需与远端 Ingress 混淆别名一致</p>
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1">Ingress 访问令牌 (Token)</label>
+          <input type="password" id="upToken" placeholder="留空则无鉴权" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1">自定义 TLS SNI (可选)</label>
+            <input type="text" id="upSni" placeholder="与证书域名一致" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
+          </div>
+          <div class="flex items-center gap-2 pt-6">
+            <input type="checkbox" id="upSkipTls" class="rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-0">
+            <label for="upSkipTls" class="text-slate-300">跳过 TLS 证书校验</label>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+          <button type="button" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg modal-close">取消</button>
+          <button type="submit" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-lg shadow">保存节点</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 模态框: 新建/编辑入站中继 Profile -->
+  <div id="modalInbound" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-xl shadow-2xl p-5 space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 id="modalInboundTitle" class="text-sm font-bold text-slate-100">新建入站中继规则</h3>
+        <button class="text-slate-400 hover:text-slate-200 text-lg modal-close">✕</button>
+      </div>
+      <form id="formInbound" class="space-y-3 text-xs">
+        <input type="hidden" id="inId">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1">规则名称</label>
+            <input type="text" id="inName" required placeholder="如: 办公电脑专用" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1">本地监听端口 (Listen Port)</label>
+            <input type="number" id="inPort" required min="1024" max="65535" placeholder="10801" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1">协议识别类型</label>
+            <select id="inProtocol" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
+              <option value="mixed">Mixed (SOCKS5 / HTTP 智能自适应)</option>
+              <option value="socks5">纯 SOCKS5 代理</option>
+              <option value="http">纯 HTTP CONNECT 代理</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1">上游调度策略</label>
+            <select id="inStrategy" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
+              <option value="single">固定单节点 (首选 + 故障转移)</option>
+              <option value="best_latency">最低延迟优先 (自动挑选最低 RTT)</option>
+              <option value="round_robin">轮询分流 (Round-Robin 均衡出网)</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-slate-400 mb-1">关联上游服务器节点</label>
+          <div id="inboundUpstreamCheckboxes" class="grid grid-cols-2 gap-2 bg-slate-800/60 p-2.5 rounded-lg border border-slate-800 max-h-32 overflow-y-auto">
+            <!-- 动态生成复选框 -->
+          </div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-slate-400">入站客户端 IP 访问限制 (CIDR 格式)</label>
+            <div class="flex items-center gap-1.5 text-[10px]">
+              <button type="button" id="btnAclLan" class="text-cyan-400 hover:underline">局域网私网</button>
+              <span class="text-slate-600">|</span>
+              <button type="button" id="btnAclLocal" class="text-slate-400 hover:underline">仅本机</button>
+              <span class="text-slate-600">|</span>
+              <button type="button" id="btnAclAll" class="text-amber-400 hover:underline">全网放开</button>
+            </div>
+          </div>
+          <textarea id="inAcl" rows="2" placeholder="10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1/32" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]"></textarea>
+          <p class="text-[10px] text-slate-500 mt-0.5">支持多个 CIDR，用逗号或换行分隔。未授权 IP 连接将在 TCP 握手前被 0 字节掐断</p>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+          <button type="button" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg modal-close">取消</button>
+          <button type="submit" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-lg shadow">保存规则</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

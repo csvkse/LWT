@@ -1,0 +1,41 @@
+{
+  "$schema": "https://raw.githubusercontent.com/csvkse/lwt/main/schemas/plugin.schema.json",
+  "id": "socks5-forwarder",
+  "name": "SOCKS5 客户端边缘中继网关",
+  "version": "1.0.0",
+  "author": "LWT Team",
+  "description": "多端口、多节点 SOCKS5 over WSS 伪装中继网关，为局域网设备提供免客户端加密出海与访问控制",
+  "type": "resident",
+  "category": "Network",
+  "icon": "🌐",
+  "entry": "./socks5-forwarder",
+  "args": ["-config", "/app/data/plugins/socks5-forwarder/config.json", "-port", "18090"],
+  "env": {
+    "FORWARDER_LOG_LEVEL": "info"
+  },
+  "autoStart": true,
+  "restartPolicy": "on-failure",
+  "network": {
+    "mode": "path",
+    "port": 18090,
+    "path": "/plugins/socks5-forwarder/",
+    "scope": "standard",
+    "supportHttp": true
+  },
+  "ui": {
+    "hasWebview": true,
+    "entry": "ui/index.html"
+  },
+  "customActions": [
+    {
+      "id": "reload_profiles",
+      "name": "重载中继规则",
+      "command": "./socks5-forwarder",
+      "args": ["-action", "reload"]
+    }
+  ],
+  "dependencies": {
+    "runtime": "none",
+    "binaries": []
+  }
+}
