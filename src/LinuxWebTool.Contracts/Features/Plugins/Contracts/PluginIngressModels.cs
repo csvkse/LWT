@@ -27,6 +27,7 @@ public sealed record IngressMatchConfig
 {
     public string Path { get; init; } = "/";
     public string PathType { get; init; } = "Prefix"; // "Prefix" | "Exact"
+    public IReadOnlyList<string> Aliases { get; init; } = [];
     public IReadOnlyDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>();
 }
 
@@ -48,6 +49,7 @@ public sealed record IngressSecurityConfig
     public string Auth { get; init; } = "inherit"; // "inherit" | "platform_session" | "secret_token" | "none"
     public string TokenHeader { get; init; } = "X-LWT-Token";
     public string? TokenQuery { get; init; } = "token";
+    public string? TokenSubprotocolPrefix { get; init; } = "lwt-token.";
     public string? SecretValue { get; init; }
     public string AllowedSubnets { get; init; } = "*";
 }

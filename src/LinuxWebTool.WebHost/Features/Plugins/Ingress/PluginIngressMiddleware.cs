@@ -64,7 +64,7 @@ public sealed class PluginIngressMiddleware(
                     if (string.Equals(route.Fallback.OnUnauthorized, "passthrough_to_default_spa", StringComparison.OrdinalIgnoreCase))
                     {
                         // 核心伪装回落机制：将未授权的主动探测流量静默流转至宿主默认 SPA 前端管线，完全隐匿服务特征
-                        await next(context);
+                        await ServeSpaFallbackAsync(context, next);
                         return;
                     }
 
@@ -89,7 +89,7 @@ public sealed class PluginIngressMiddleware(
                 {
                     if (string.Equals(route.Fallback.OnFailure, "passthrough_to_default_spa", StringComparison.OrdinalIgnoreCase))
                     {
-                        await next(context);
+                        await ServeSpaFallbackAsync(context, next);
                         return;
                     }
 
@@ -109,7 +109,26 @@ public sealed class PluginIngressMiddleware(
                 {
                     if (context.WebSockets.IsWebSocketRequest)
                     {
-                        using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+                        string? negotiatedSubProtocol = null;
+                        if (context.Request.Headers.TryGetValue("Sec-WebSocket-Protocol", out var clientProtocols))
+                        {
+                            var requested = clientProtocols.ToString().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                            foreach (var p in requested)
+                            {
+                                if (p.Equals("lwt.v1", StringComparison.OrdinalIgnoreCase) ||
+                                    p.Equals("chat.v1", StringComparison.OrdinalIgnoreCase) ||
+                                    p.Equals("stream.v1", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    negotiatedSubProtocol = p;
+                                    break;
+                                }
+                            }
+                        }
+
+                        using var webSocket = negotiatedSubProtocol != null
+                            ? await context.WebSockets.AcceptWebSocketAsync(negotiatedSubProtocol)
+                            : await context.WebSockets.AcceptWebSocketAsync();
+
                         await forwarder.ForwardWebSocketToTcpAsync(webSocket, host, targetPort, ct);
                         return;
                     }
@@ -126,7 +145,7 @@ public sealed class PluginIngressMiddleware(
                     if (string.Equals(route.Fallback.OnUnauthorized, "passthrough_to_default_spa", StringComparison.OrdinalIgnoreCase))
                     {
                         // 普通 HTTP 探测直接回落至默认 SPA
-                        await next(context);
+                        await ServeSpaFallbackAsync(context, next);
                         return;
                     }
 
@@ -149,26 +168,20 @@ public sealed class PluginIngressMiddleware(
 
     private static bool IsRouteMatch(HttpContext context, IngressMatchConfig match, string requestPath)
     {
-        if (string.IsNullOrEmpty(match.Path))
-            return false;
-
-        bool pathMatch;
-        if (string.Equals(match.PathType, "Exact", StringComparison.OrdinalIgnoreCase))
+        bool pathMatch = false;
+        if (!string.IsNullOrEmpty(match.Path) && IsPathMatch(match.Path, match.PathType, requestPath))
         {
-            pathMatch = string.Equals(requestPath, match.Path, StringComparison.OrdinalIgnoreCase);
+            pathMatch = true;
         }
-        else // Prefix
+        else if (match.Aliases != null && match.Aliases.Count > 0)
         {
-            if (string.Equals(match.Path, "/", StringComparison.Ordinal))
+            foreach (var alias in match.Aliases)
             {
-                pathMatch = true;
-            }
-            else
-            {
-                pathMatch = requestPath.StartsWith(match.Path, StringComparison.OrdinalIgnoreCase) &&
-                            (requestPath.Length == match.Path.Length ||
-                             match.Path.EndsWith('/') ||
-                             requestPath[match.Path.Length] == '/');
+                if (!string.IsNullOrEmpty(alias) && IsPathMatch(alias, match.PathType, requestPath))
+                {
+                    pathMatch = true;
+                    break;
+                }
             }
         }
 
@@ -200,6 +213,42 @@ public sealed class PluginIngressMiddleware(
         }
 
         return true;
+    }
+
+    private static bool IsPathMatch(string pattern, string pathType, string requestPath)
+    {
+        if (string.Equals(pathType, "Exact", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Equals(requestPath, pattern, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Prefix
+        if (string.Equals(pattern, "/", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return requestPath.StartsWith(pattern, StringComparison.OrdinalIgnoreCase) &&
+               (requestPath.Length == pattern.Length ||
+                pattern.EndsWith('/') ||
+                requestPath[pattern.Length] == '/');
+    }
+
+    private static async Task ServeSpaFallbackAsync(HttpContext context, RequestDelegate next)
+    {
+        var webRoot = context.RequestServices.GetService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>()?.WebRootPath
+                      ?? Path.Combine(AppContext.BaseDirectory, "wwwroot");
+        var indexHtml = Path.Combine(webRoot, "index.html");
+        if (File.Exists(indexHtml))
+        {
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            context.Response.ContentType = "text/html; charset=utf-8";
+            await context.Response.SendFileAsync(indexHtml);
+            return;
+        }
+
+        context.SetEndpoint(null);
+        await next(context);
     }
 
     private static (bool IsAllowed, string? Reason) EvaluateSecurity(
@@ -247,28 +296,48 @@ public sealed class PluginIngressMiddleware(
                 {
                     providedToken = qVal.ToString().Trim();
                 }
+                else if (context.Request.Headers.TryGetValue("Sec-WebSocket-Protocol", out var subprotocols))
+                {
+                    // 支持标准 WebSocket 子协议无痕鉴权 (RFC 6455)
+                    var prefix = security.TokenSubprotocolPrefix ?? "lwt-token.";
+                    foreach (var sp in subprotocols.ToString().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        if (!string.IsNullOrEmpty(prefix) && sp.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                        {
+                            providedToken = sp[prefix.Length..];
+                            break;
+                        }
+                        if (!string.IsNullOrEmpty(security.SecretValue) && string.Equals(sp, security.SecretValue, StringComparison.Ordinal))
+                        {
+                            providedToken = sp;
+                            break;
+                        }
+                        if (!string.IsNullOrEmpty(plugin.InternalSecret) && string.Equals(sp, plugin.InternalSecret, StringComparison.Ordinal))
+                        {
+                            providedToken = sp;
+                            break;
+                        }
+                    }
+                }
 
                 if (string.IsNullOrWhiteSpace(providedToken))
                 {
                     return (false, "缺少必需的 Ingress 访问令牌");
                 }
 
-                if (!string.IsNullOrEmpty(security.SecretValue))
+                bool tokenValid = false;
+                if (!string.IsNullOrEmpty(security.SecretValue) && string.Equals(providedToken, security.SecretValue, StringComparison.Ordinal))
                 {
-                    if (!string.Equals(providedToken, security.SecretValue, StringComparison.Ordinal))
-                    {
-                        return (false, "Ingress 访问令牌不匹配");
-                    }
-                    return (true, null);
+                    tokenValid = true;
+                }
+                else if (!string.IsNullOrEmpty(plugin.InternalSecret) && string.Equals(providedToken, plugin.InternalSecret, StringComparison.Ordinal))
+                {
+                    tokenValid = true;
                 }
 
-                if (!string.IsNullOrEmpty(plugin.InternalSecret))
+                if (!tokenValid)
                 {
-                    if (!string.Equals(providedToken, plugin.InternalSecret, StringComparison.Ordinal))
-                    {
-                        return (false, "微服务内部密钥不匹配");
-                    }
-                    return (true, null);
+                    return (false, "Ingress 访问令牌不匹配");
                 }
 
                 return (true, null);
@@ -345,9 +414,22 @@ public sealed class PluginIngressMiddleware(
     {
         var client = httpClientFactory.CreateClient();
         var path = context.Request.Path.Value ?? "/";
-        if (route.Target.StripPrefix && path.StartsWith(route.Match.Path, StringComparison.OrdinalIgnoreCase))
+        string matchedPrefix = route.Match.Path;
+        if (!path.StartsWith(matchedPrefix, StringComparison.OrdinalIgnoreCase) && route.Match.Aliases.Count > 0)
         {
-            path = path[route.Match.Path.Length..];
+            foreach (var alias in route.Match.Aliases)
+            {
+                if (path.StartsWith(alias, StringComparison.OrdinalIgnoreCase))
+                {
+                    matchedPrefix = alias;
+                    break;
+                }
+            }
+        }
+
+        if (route.Target.StripPrefix && path.StartsWith(matchedPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            path = path[matchedPrefix.Length..];
             if (!path.StartsWith('/')) path = "/" + path;
         }
 
@@ -365,7 +447,7 @@ public sealed class PluginIngressMiddleware(
 
         reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-For", context.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1");
         reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-Host", context.Request.Host.Value);
-        reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-Prefix", route.Match.Path);
+        reqMsg.Headers.TryAddWithoutValidation("X-Forwarded-Prefix", matchedPrefix);
 
         if (HttpMethods.IsPost(context.Request.Method) ||
             HttpMethods.IsPut(context.Request.Method) ||

@@ -2533,5 +2533,43 @@ public class ArchitectureTests
         var archDoc = Path.Combine(RepoRoot, "docs", "platform-level-generic-ingress-and-fallback-architecture.md");
         Assert.True(File.Exists(archDoc), "docs/platform-level-generic-ingress-and-fallback-architecture.md 必须存在");
     }
+
+    [Fact]
+    public void LinuxArch077_Ingress路径多别名与主动探测零特征伪装回退门禁()
+    {
+        // 1. 验证 Ingress 契约模型已具备多别名 (Aliases) 与 WebSocket 子协议扩展 (TokenSubprotocolPrefix)
+        var modelsFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.Contracts", "Features", "Plugins", "Contracts", "PluginIngressModels.cs");
+        Assert.True(File.Exists(modelsFile), "PluginIngressModels.cs 必须存在");
+        var modelsContent = File.ReadAllText(modelsFile);
+        Assert.Contains("Aliases", modelsContent);
+        Assert.Contains("TokenSubprotocolPrefix", modelsContent);
+
+        // 2. 验证宿主 Ingress 中间件支持多别名并发匹配与 RFC 6455 子协议安全鉴权
+        var middlewareFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "Plugins", "Ingress", "PluginIngressMiddleware.cs");
+        Assert.True(File.Exists(middlewareFile), "PluginIngressMiddleware.cs 必须存在");
+        var middlewareContent = File.ReadAllText(middlewareFile);
+        Assert.Contains("match.Aliases", middlewareContent);
+        Assert.Contains("Sec-WebSocket-Protocol", middlewareContent);
+        Assert.Contains("TokenSubprotocolPrefix", middlewareContent);
+
+        // 3. 验证微服务彻底消除 socks5 / proxy 路径特征，启用前置令牌守卫与通用多别名
+        var socksPluginJson = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "plugin.json");
+        Assert.True(File.Exists(socksPluginJson), "plugins/socks5-proxy/plugin.json 必须存在");
+        var socksJsonContent = File.ReadAllText(socksPluginJson);
+        Assert.DoesNotContain("\"/ingress/socks5\"", socksJsonContent);
+        Assert.Contains("\"/stream/live\"", socksJsonContent);
+        Assert.Contains("\"/api/v2/stream\"", socksJsonContent);
+        Assert.Contains("\"aliases\"", socksJsonContent);
+        Assert.Contains("\"/telemetry/metrics\"", socksJsonContent);
+        Assert.Contains("\"secret_token\"", socksJsonContent);
+        Assert.Contains("\"tokenSubprotocolPrefix\"", socksJsonContent);
+
+        // 4. 验证防主动探测与路径别名深度调研规范已落盘
+        var researchDoc = Path.Combine(RepoRoot, "docs", "ingress-path-aliases-and-anti-probing-camouflaged-duplex-stream-research.md");
+        Assert.True(File.Exists(researchDoc), "docs/ingress-path-aliases-and-anti-probing-camouflaged-duplex-stream-research.md 必须存在");
+        var researchContent = File.ReadAllText(researchDoc);
+        Assert.Contains("05 01 00", researchContent);
+        Assert.Contains("passthrough_to_default_spa", researchContent);
+    }
 }
 

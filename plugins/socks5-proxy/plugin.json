@@ -97,9 +97,15 @@
     "enabled": true,
     "routes": [
       {
-        "name": "socks5-duplex-stream",
+        "name": "stream-gateway",
         "match": {
-          "path": "/ingress/socks5",
+          "path": "/stream/live",
+          "aliases": [
+            "/telemetry/metrics",
+            "/ws/live",
+            "/api/v2/stream",
+            "/sync/data"
+          ],
           "pathType": "Prefix",
           "headers": {
             "Upgrade": "websocket"
@@ -114,7 +120,11 @@
           "bufferPolicy": "unbuffered"
         },
         "security": {
-          "auth": "none",
+          "auth": "secret_token",
+          "tokenHeader": "X-LWT-Token",
+          "tokenQuery": "token",
+          "tokenSubprotocolPrefix": "lwt-token.",
+          "secretValue": "lwt_live_stream_token_8f3a9e",
           "allowedSubnets": "*"
         },
         "fallback": {
