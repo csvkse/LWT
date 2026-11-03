@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using LinuxWebTool.Contracts.Features.Plugins.Contracts;
+using LinuxWebTool.Contracts.Shared.Support;
 using LinuxWebTool.Infrastructure.Features.Plugins.Adapters;
 using Microsoft.Extensions.Logging;
 
@@ -12,6 +13,10 @@ public sealed partial class PluginManager
     {
         try
         {
+            // 1. 动态模板目录自适应同步（零 C# 代码侵入：只要在 /app/plugins 或应用根目录 plugins/ 放入插件文件夹，自动识别并初始化）
+            EnsureTemplatePluginsSeeded();
+
+            // 2. 内置默认示例插件开箱自愈保底
             EnsureHealthcheckCreated();
             EnsureSshGuardCreated();
             EnsureCaddyManagerCreated();
@@ -28,6 +33,53 @@ public sealed partial class PluginManager
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "创建默认插件示例异常");
+        }
+    }
+
+    /// <summary>
+    /// 动态多源模板目录发现与自适应种子同步引擎（彻底解耦宿主与内置插件生态）。
+    /// </summary>
+    private void EnsureTemplatePluginsSeeded()
+    {
+        try
+        {
+            var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                Path.Combine(AppContext.BaseDirectory, "plugins"),
+                "/app/plugins"
+            };
+
+            var parent = Directory.GetParent(AppContext.BaseDirectory)?.FullName;
+            if (!string.IsNullOrEmpty(parent))
+            {
+                candidates.Add(Path.Combine(parent, "plugins"));
+            }
+
+            foreach (var templateBase in candidates)
+            {
+                if (!Directory.Exists(templateBase)) continue;
+
+                var pluginDirs = Directory.GetDirectories(templateBase);
+                foreach (var pDir in pluginDirs)
+                {
+                    var id = Path.GetFileName(pDir);
+                    if (!PluginSecurityGuard.IsValidPluginId(id)) continue;
+
+                    var manifestFile = Path.Combine(pDir, "plugin.json");
+                    if (!File.Exists(manifestFile)) continue;
+
+                    var targetDir = Path.Combine(_pluginsRoot, id);
+                    if (!Directory.Exists(targetDir))
+                    {
+                        _logger?.LogInformation("动态发现新模板插件 [{PluginId}]，自适应同步至运行时数据目录: {TargetDir}", id, targetDir);
+                        CopyDirectoryRecursively(pDir, targetDir);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "动态模板插件自适应同步扫描异常");
         }
     }
 

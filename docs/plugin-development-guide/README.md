@@ -8,7 +8,7 @@
 
 ## 1. 规范体系全景图
 
-LinuxWebTool (LWT) 拥有高度模块化与隔离度的插件系统，将系统底层能力（PTY 终端、网络转发、组网）与高层业务（AI 网关、代理穿透、自动化运维）进行解耦。本规范体系将历史沉淀的工程经验、协议契约、安全治理与避坑方案固化为 6 大标准分册：
+LinuxWebTool (LWT) 拥有高度模块化与隔离度的插件系统，将系统底层能力（PTY 终端、网络转发、组网）与高层业务（AI 网关、代理穿透、自动化运维）进行解耦。本规范体系将历史沉淀的工程经验、协议契约、安全治理、导入优先流与避坑方案固化为 7 大标准分册：
 
 ```mermaid
 graph TD
@@ -18,12 +18,14 @@ graph TD
     A --> E["04. 三维安全防火墙与凭据治理 (Security & Governance)"]
     A --> F["05. 极速研发与在线热更新 (HotUpdate & Pipeline)"]
     A --> G["06. 质量门禁与浏览器验收 (Testing & DevTools)"]
+    A --> H["07. 标准打包、导入优先流与实战避坑 (Packaging & Lessons)"]
 
     B -->|声明网络与UI| C
     B -->|声明路由与端口| D
     D -->|集成认证与防护| E
     F -->|无停机代码直更| E
     G -->|自动化阻断缺陷| A
+    H -->|解耦开发与极速导入| F
 ```
 
 ---
@@ -38,10 +40,11 @@ graph TD
 | [**04. 三维安全防火墙与凭据治理**](./04-security-firewall-and-credentials.md) | 三维多层防护网（协议身份认证、入站客户端 CIDR 限制、出站目标网段与域名通配符白名单）、RFC 5737 凭据脱敏规范、Git 预提交安全门禁 | 暴露网络接口、设计访问控制策略、编写测试用例与开发文档 |
 | [**05. 极速研发与在线热更新**](./05-fast-development-and-hotupdate.md) | 开发运维双轨制（`-Mode Dev` vs `-Mode Official`）、5秒在线热更新（`-HotUpdatePlugin` 零容器停机）、原子 Inode 替换防 `ETXTBSY`、LF 换行符跨平台防御 | 日常功能迭代、Bug 修复排障、代码推送与部署发布 |
 | [**06. 质量门禁与浏览器验收**](./06-testing-and-browser-acceptance.md) | C# 架构测试（`LinuxArch*`）、前端架构与行为门禁（`frontend-gate.cjs`）、Chrome DevTools MCP 内置浏览器无感验收规范 | 功能交付验收、合并分支、CI/CD 自动化检测 |
+| [**07. 标准打包、导入优先流与实战避坑**](./07-packaging-import-and-forwarder-lessons.md) | 标准 Zip 文件布局规范、一键打包工具（`scripts/pack-plugin.ps1`）、Web/API 导入流、数据保护机制及 `socks5-forwarder` 6 大经典踩坑复盘 | 插件跨平台分发、第三方生态接入、离线部署与日常排障 |
 
 ---
 
-## 3. 插件开发十项军规 (Ten Golden Rules)
+## 3. 插件开发十二项军规 (Twelve Golden Rules)
 
 在 LWT 插件的设计、编码与维护过程中，所有开发者及 AI Coding Agent 必须时刻牢记以下红线准则：
 
@@ -54,4 +57,6 @@ graph TD
 7. **三维访问防护一体化**：网络类插件必须同时具备三维控制网（身份鉴权、入站 CIDR IP 白名单、出站目标网段与域名白名单），杜绝内网穿透安全放大效应。
 8. **跨平台换行符严格归一**：所有 Shell 脚本、HTML、CSS 与 JavaScript 源码必须采用 Unix LF (`\n`) 换行符，严禁携带 Windows CRLF (`\r\n`)。
 9. **Linux 静态 ELF 预编译与原子 Inode 替换**：Go 语言插件在本地更新时必须交叉编译 Linux 架构的 ELF 静态二进制（`CGO_ENABLED=0 GOOS=linux GOARCH=amd64`），覆盖运行时使用 `cp -> chmod +x -> mv -f` 原子操作，杜绝 `Text file busy` (ETXTBSY)。
-10. **代码入库双重门禁阻断**：任何改动提交前，必须运行全仓凭据扫描（`node .githooks/security-gate.cjs --full`）与前端架构门禁（`node src/LinuxWebTool.WebHost/wwwroot/frontend-gate.cjs`）。
+10. **导入优先与零宿主侵入**：生态扩展与新功能插件开发优先遵循独立打包与 ZIP 导入规范（`scripts/pack-plugin.ps1`），严禁非必要侵入宿主 C# 代码；内置插件由目录提供者自适应同步。
+11. **Webview 路径自适应与 Localhost 禁令**：插件前端与后端通信必须采用相对反代路径（`/plugins/{id}/api`），严禁向前端直接暴露裸 `http://localhost:<port>` 造成远程客户端拒绝连接。
+12. **代码入库双重门禁阻断**：任何改动提交前，必须运行全仓凭据扫描（`node .githooks/security-gate.cjs --full`）与前端架构门禁（`node src/LinuxWebTool.WebHost/wwwroot/frontend-gate.cjs`）。
