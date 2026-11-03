@@ -93,6 +93,37 @@
     "portEnv": "SOCKS5_PORT",
     "portConflictPolicy": "avoid"
   },
+  "ingress": {
+    "enabled": true,
+    "routes": [
+      {
+        "name": "socks5-duplex-stream",
+        "match": {
+          "path": "/ingress/socks5",
+          "pathType": "Prefix",
+          "headers": {
+            "Upgrade": "websocket"
+          }
+        },
+        "target": {
+          "type": "allocatedPort",
+          "destination": "127.0.0.1:{port}"
+        },
+        "transport": {
+          "mode": "duplex_stream",
+          "bufferPolicy": "unbuffered"
+        },
+        "security": {
+          "auth": "none",
+          "allowedSubnets": "*"
+        },
+        "fallback": {
+          "onUnauthorized": "passthrough_to_default_spa",
+          "onFailure": "passthrough_to_default_spa"
+        }
+      }
+    ]
+  },
   "supervision": {
     "autoRestart": true,
     "flappingThresholdSec": 10,

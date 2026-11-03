@@ -115,6 +115,7 @@ public static class ServiceCollectionExtensions
         builder.Services.AddHostedService(sp =>
             sp.GetRequiredService<LinuxWebTool.Infrastructure.Features.Plugins.PluginManager>());
         builder.Services.AddSingleton<LinuxWebTool.WebHost.Features.Plugins.Auth.PluginAuthGatewayEvaluator>();
+        builder.Services.AddSingleton<LinuxWebTool.WebHost.Features.Plugins.Ingress.IDuplexStreamForwarder, LinuxWebTool.WebHost.Features.Plugins.Ingress.DuplexStreamForwarder>();
 
         // 原生工具服务化与插件异步操作支持 (Native Tool Services & Plugins)
         builder.Services.AddSingleton<LinuxWebTool.Contracts.Features.Plugins.Contracts.INativeProgramResolver, LinuxWebTool.Infrastructure.Features.Plugins.Adapters.NativeProgramResolver>();

@@ -134,6 +134,7 @@ public sealed record PluginManifest
     public string ProgramRef { get; init; } = "";
 
     public PluginNetworkConfig? Network { get; init; }
+    public PluginIngressConfig? Ingress { get; init; }
     public PluginStorageConfig? Storage { get; init; }
     public PluginSupervisionConfig? Supervision { get; init; }
     public PluginUiConfig? Ui { get; init; }

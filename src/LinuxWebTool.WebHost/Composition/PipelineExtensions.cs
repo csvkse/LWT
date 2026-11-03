@@ -86,6 +86,7 @@ public static class PipelineExtensions
         app.UseAuthorization();
         app.UseMiddleware<JwtRenewalMiddleware>();
         app.UseAntiforgery();
+        app.UseMiddleware<LinuxWebTool.WebHost.Features.Plugins.Ingress.PluginIngressMiddleware>();
         app.MapAutoControllers();
         app.MapTerminalEndpoints();
         app.MapRemoteTerminalEndpoints();

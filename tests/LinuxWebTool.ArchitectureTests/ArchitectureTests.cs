@@ -2473,5 +2473,65 @@ public class ArchitectureTests
         Assert.Contains("Happy Eyeballs", docContent);
         Assert.Contains("IntersectionObserver", docContent);
     }
+
+    [Fact]
+    public void LinuxArch076_插件平台级声明式Ingress路由与通用流式直通门禁()
+    {
+        // 1. 验证通用 Ingress 契约模型存在且保持业务中立性（严禁代理特化词汇）
+        var modelsFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.Contracts", "Features", "Plugins", "Contracts", "PluginIngressModels.cs");
+        Assert.True(File.Exists(modelsFile), "PluginIngressModels.cs 必须存在");
+        var modelsContent = File.ReadAllText(modelsFile);
+        Assert.Contains("PluginIngressConfig", modelsContent);
+        Assert.Contains("PluginIngressRoute", modelsContent);
+        Assert.Contains("IngressMatchConfig", modelsContent);
+        Assert.Contains("IngressTargetConfig", modelsContent);
+        Assert.Contains("IngressTransportConfig", modelsContent);
+        Assert.Contains("IngressSecurityConfig", modelsContent);
+        Assert.Contains("IngressFallbackConfig", modelsContent);
+
+        // 验证中立性：严禁出现 proxyAuth, socksStream, gfwFallback 等特化词汇
+        Assert.DoesNotContain("proxyAuth", modelsContent);
+        Assert.DoesNotContain("socksStream", modelsContent);
+        Assert.DoesNotContain("gfwFallback", modelsContent);
+
+        // 2. 验证宿主通用 Ingress 中间件与全双工转发器实现
+        var middlewareFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "Plugins", "Ingress", "PluginIngressMiddleware.cs");
+        Assert.True(File.Exists(middlewareFile), "PluginIngressMiddleware.cs 必须存在");
+        var middlewareContent = File.ReadAllText(middlewareFile);
+        Assert.Contains("passthrough_to_default_spa", middlewareContent);
+        Assert.Contains("ForwardWebSocketToTcpAsync", middlewareContent);
+        Assert.Contains("EvaluateSecurity", middlewareContent);
+
+        // 宿主中间件必须 100% 声明式驱动，严禁硬编码特定插件 ID 或特定业务路由
+        Assert.DoesNotContain("\"socks5-proxy\"", middlewareContent);
+        Assert.DoesNotContain("\"/ingress/socks5\"", middlewareContent);
+
+        var forwarderFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "Plugins", "Ingress", "DuplexStreamForwarder.cs");
+        Assert.True(File.Exists(forwarderFile), "DuplexStreamForwarder.cs 必须存在");
+        var forwarderContent = File.ReadAllText(forwarderFile);
+        Assert.Contains("ArrayPool<byte>.Shared", forwarderContent);
+        Assert.Contains("ForwardWebSocketToTcpAsync", forwarderContent);
+
+        // 3. 验证宿主 DI 与管线注册
+        var pipelineFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Composition", "PipelineExtensions.cs");
+        var pipelineContent = File.ReadAllText(pipelineFile);
+        Assert.Contains("PluginIngressMiddleware", pipelineContent);
+
+        var diFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Composition", "ServiceCollectionExtensions.cs");
+        var diContent = File.ReadAllText(diFile);
+        Assert.Contains("IDuplexStreamForwarder", diContent);
+
+        // 4. 验证微服务声明式 Ingress 配置生效
+        var socksPluginJson = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "plugin.json");
+        Assert.True(File.Exists(socksPluginJson), "plugins/socks5-proxy/plugin.json 必须存在");
+        var socksJsonContent = File.ReadAllText(socksPluginJson);
+        Assert.Contains("\"ingress\"", socksJsonContent);
+        Assert.Contains("\"duplex_stream\"", socksJsonContent);
+        Assert.Contains("\"passthrough_to_default_spa\"", socksJsonContent);
+
+        // 5. 验证通用化架构设计文档已落盘
+        var archDoc = Path.Combine(RepoRoot, "docs", "platform-level-generic-ingress-and-fallback-architecture.md");
+        Assert.True(File.Exists(archDoc), "docs/platform-level-generic-ingress-and-fallback-architecture.md 必须存在");
+    }
 }
 
