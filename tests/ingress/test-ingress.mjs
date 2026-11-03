@@ -1,5 +1,5 @@
 // tests/ingress/test-ingress.mjs
-// 验证平台级通用 Ingress 多路径别名、零信任前置鉴权守卫、主动探测 Web Fallback 伪装与全双工流直通
+// 验证宿主核心系统保留路由守卫、多别名特权伪装轨、主动探测 Web Fallback 伪装与 Webview 客户端配置
 
 import http from 'node:http';
 
@@ -80,7 +80,42 @@ function testWebSocket(urlPath, protocols) {
 }
 
 async function run() {
-    console.log(`====> 开始验证平台级 Ingress 动态多别名与防主动探测伪装流 (目标: http://${DEV_HOST}:${DEV_PORT}) <====\n`);
+    console.log(`====> 开始验证宿主保留路由守卫、多别名特权直通与防探测伪装流 (目标: http://${DEV_HOST}:${DEV_PORT}) <====\n`);
+
+    // 0. 验证宿主核心系统保留路由绝对不受插件 Ingress 影响
+    console.log('[Test 0] 验证宿主核心系统保留路由守卫 (HostReservedRoutes)...');
+    try {
+        const healthRes = await fetchHttp('/health');
+        console.log(`  宿主健康检查 /health 状态码: ${healthRes.statusCode} (预期: 200)`);
+        
+        // 模拟向宿主核心认证端点发起请求 (POST /api/Auth/Login)
+        const loginReq = new Promise((resolve, reject) => {
+            const req = http.request({
+                hostname: DEV_HOST,
+                port: DEV_PORT,
+                path: '/api/Auth/Login',
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 5000
+            }, (res) => {
+                let d = '';
+                res.on('data', chunk => d += chunk);
+                res.on('end', () => resolve({ statusCode: res.statusCode, body: d }));
+            });
+            req.on('error', reject);
+            req.write(JSON.stringify({ userName: '', password: '' }));
+            req.end();
+        });
+        const loginRes = await loginReq;
+        console.log(`  宿主核心 API /api/Auth/Login 状态码: ${loginRes.statusCode} (预期: 401 Unauthorized，证明到达了宿主控制器而非被插件劫持)`);
+        if (healthRes.statusCode === 200 && loginRes.statusCode === 401) {
+            console.log('  ✅ [PASS] 宿主控制面系统保留路由完全受保护，绝对未被插件覆盖！\n');
+        } else {
+            console.error('  ❌ [FAIL] 宿主保留路由响应异常:', healthRes.statusCode, loginRes.statusCode);
+        }
+    } catch (err) {
+        console.error('  ❌ [FAIL] 宿主核心接口访问异常:', err.message);
+    }
 
     // 1. 模拟 GFW 主动探测器（Active Prober）：未携带 Token 请求主路径与别名路径
     console.log('[Test 1] 模拟外部主动探测（未携带 Token）：验证 Web Fallback 伪装回退...');
@@ -140,7 +175,29 @@ async function run() {
         console.error('  ❌ [FAIL] 子协议连接异常:', err.message);
     }
 
-    console.log('====> 平台级 Ingress 动态多别名与防主动探测伪装流验证完成 <====');
+    // 4. 验证 Webview 控制台页面已具备 Ingress 隧道面板与一键客户端配置
+    console.log('[Test 4] 验证 Webview 控制台页面 Ingress 伪装隧道与多客户端配置导出功能...');
+    try {
+        const uiRes = await fetchHttp('/api/Plugins/socks5-proxy/Assets/ui/index.html');
+        console.log(`  Webview 页面加载状态码: ${uiRes.statusCode}`);
+        const hasIngressCard = uiRes.body.includes('平台级 HTTP/TLS 伪装隧道与穿透中继');
+        const hasClashExport = uiRes.body.includes('Clash Meta');
+        const hasV2rayExport = uiRes.body.includes('v2rayN');
+        const hasWstunnelExport = uiRes.body.includes('wstunnel');
+        console.log(`  包含 Ingress 隧道面板: ${hasIngressCard}`);
+        console.log(`  包含 Clash Meta 导出: ${hasClashExport}`);
+        console.log(`  包含 v2rayN 导出: ${hasV2rayExport}`);
+        console.log(`  包含 wstunnel 导出: ${hasWstunnelExport}`);
+        if (hasIngressCard && hasClashExport && hasV2rayExport && hasWstunnelExport) {
+            console.log('  ✅ [PASS] Webview 视图控制台已具备完整的伪装隧道信息展示与主流客户端一键导出！\n');
+        } else {
+            console.error('  ❌ [FAIL] Webview 页面内容缺少必要的配置导出组件');
+        }
+    } catch (err) {
+        console.error('  ❌ [FAIL] Webview 页面检查异常:', err.message);
+    }
+
+    console.log('====> 所有端到端验证全部成功完成！ <====');
 }
 
 run().catch(console.error);

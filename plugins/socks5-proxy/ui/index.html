@@ -266,6 +266,51 @@
       color: var(--text-muted);
       font-size: 0.9rem;
     }
+    .tab-group {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+    .tab-btn {
+      background: none;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .tab-btn:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .tab-btn.active {
+      color: #38bdf8;
+      background: rgba(6, 182, 212, 0.15);
+      border-color: rgba(6, 182, 212, 0.4);
+      font-weight: 600;
+    }
+    .copy-btn {
+      position: absolute;
+      right: 8px;
+      top: 8px;
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      color: #d4d4d8;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      z-index: 2;
+    }
+    .copy-btn:hover {
+      background: var(--accent);
+      color: #000;
+    }
   </style>
 </head>
 <body>
@@ -399,6 +444,50 @@
       <button class="btn btn-secondary" onclick="resetDefaults()">🔄 恢复默认策略</button>
     </div>
     <div class="status-msg" id="status-msg"></div>
+  </div>
+
+  <!-- HTTP/TLS 伪装隧道与跨网穿透 (Ingress Camouflage Tunnel) -->
+  <div class="section-card" style="border-color: rgba(168, 85, 247, 0.4);">
+    <div class="section-title" style="color: #c084fc;">
+      <span>🌐 平台级 HTTP/TLS 伪装隧道与穿透中继 (Ingress Tunnel)</span>
+      <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border-color: rgba(168, 85, 247, 0.3);">
+        🛡️ SPA 伪装回落已激活
+      </span>
+    </div>
+
+    <div style="background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 0.75rem; color: #e9d5ff; line-height: 1.6;">
+      <div>• <b>无特征隐身直通</b>：无需开放额外的 TCP 代理端口，由宿主 Web 端口（5270 / 5271）在 HTTP/TLS 443 外层直接进行 WSS 全双工流解封与桥接。</div>
+      <div>• <b>防主动探测机制 (Active Probing Immune)</b>：未携带合法子协议凭据的探测流量静默回退至真实 Web 页面（返回 200 OK text/html），绝对不暴露 SOCKS5 握手特征。</div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 14px;">
+      <div class="form-group" style="margin-bottom: 0;">
+        <label>选择当前伪装混淆别名 (Anti-DPI Aliases):</label>
+        <select id="select-ingress-alias" onchange="updateIngressPreview()">
+          <option value="/stream/live">主路径: /stream/live</option>
+          <option value="/telemetry/metrics" selected>混淆别名 1: /telemetry/metrics (推荐, 指标上报伪装)</option>
+          <option value="/ws/live">混淆别名 2: /ws/live (实时流伪装)</option>
+          <option value="/channel/stream">混淆别名 3: /channel/stream (通信信道伪装)</option>
+          <option value="/sync/data">混淆别名 4: /sync/data (数据同步伪装)</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom: 0;">
+        <label>鉴权子协议 (RFC 6455 Subprotocol):</label>
+        <input type="text" id="input-subprotocol" readonly value="Sec-WebSocket-Protocol: lwt-token.lwt_live_stream_token_8f3a9e" />
+      </div>
+    </div>
+
+    <div class="tab-group">
+      <button class="tab-btn active" id="tab-btn-clash" onclick="switchExportTab('clash')">Clash Meta (Mihomo)</button>
+      <button class="tab-btn" id="tab-btn-v2ray" onclick="switchExportTab('v2ray')">v2rayN / Xray</button>
+      <button class="tab-btn" id="tab-btn-wstunnel" onclick="switchExportTab('wstunnel')">wstunnel 命令行</button>
+      <button class="tab-btn" id="tab-btn-surge" onclick="switchExportTab('surge')">Surge / 小火箭</button>
+    </div>
+
+    <div style="position: relative;">
+      <button class="copy-btn" onclick="copyIngressConfig()">📋 复制配置</button>
+      <div class="code-block" id="ingress-config-preview" style="min-height: 100px; white-space: pre; font-size: 0.75rem; color: #a5f3fc; line-height: 1.45;"></div>
+    </div>
   </div>
 
   <div class="instructions">
@@ -566,6 +655,124 @@
       }
       document.getElementById('git-preview').textContent = 'git config --global http.proxy ' + proxyUrl;
       document.getElementById('env-preview').textContent = 'export ALL_PROXY=' + proxyUrl;
+      updateIngressPreview();
+    }
+
+    let currentExportTab = 'clash';
+
+    function switchExportTab(tab) {
+      currentExportTab = tab;
+      document.querySelectorAll('.tab-group .tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('tab-btn-' + tab)?.classList.add('active');
+      updateIngressPreview();
+    }
+
+    function updateIngressPreview() {
+      const aliasSelect = document.getElementById('select-ingress-alias');
+      const chosenPath = aliasSelect ? aliasSelect.value : '/telemetry/metrics';
+      const host = getHostName();
+      const hostPort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+      const isHttps = window.location.protocol === 'https:';
+      const subprotocolToken = 'lwt-token.lwt_live_stream_token_8f3a9e';
+      
+      const user = currentAuthMode === 'password' ? (document.getElementById('input-username').value.trim() || 'proxyuser') : '';
+      const pass = currentAuthMode === 'password' ? (document.getElementById('input-password').value || 'secretpass123') : '';
+
+      const previewEl = document.getElementById('ingress-config-preview');
+      if (!previewEl) return;
+
+      if (currentExportTab === 'clash') {
+        let authLines = '';
+        if (currentAuthMode === 'password') {
+          authLines = `  username: "${user}"\n  password: "${pass}"\n`;
+        }
+        previewEl.textContent = 
+`# Clash Meta / Mihomo 节点配置片段
+proxies:
+  - name: "LWT-Camouflage-${host}"
+    type: socks5
+    server: "${host}"
+    port: ${hostPort}
+    tls: ${isHttps}
+    skip-cert-verify: true
+    network: ws
+    ws-opts:
+      path: "${chosenPath}"
+      headers:
+        Host: "${host}"
+        Sec-WebSocket-Protocol: "${subprotocolToken}"
+${authLines}`;
+      } else if (currentExportTab === 'v2ray') {
+        const userObj = currentAuthMode === 'password' ? [{ user, pass }] : [];
+        const v2rayCfg = {
+          tag: "lwt-ws-tunnel",
+          protocol: "socks",
+          settings: {
+            servers: [
+              {
+                address: host,
+                port: parseInt(hostPort, 10),
+                users: userObj
+              }
+            ]
+          },
+          streamSettings: {
+            network: "ws",
+            security: isHttps ? "tls" : "none",
+            wsSettings: {
+              path: chosenPath,
+              headers: {
+                Host: host,
+                "Sec-WebSocket-Protocol": subprotocolToken
+              }
+            }
+          }
+        };
+        previewEl.textContent = JSON.stringify(v2rayCfg, null, 2);
+      } else if (currentExportTab === 'wstunnel') {
+        const proto = isHttps ? 'wss' : 'ws';
+        previewEl.textContent = 
+`# wstunnel 极速反向中继为本地 SOCKS5 (:1080)
+wstunnel client \\
+  -L socks5://127.0.0.1:1080 \\
+  --header "Sec-WebSocket-Protocol: ${subprotocolToken}" \\
+  ${proto}://${host}:${hostPort}${chosenPath}`;
+      } else if (currentExportTab === 'surge') {
+        let authPart = currentAuthMode === 'password' ? `${encodeURIComponent(user)}:${encodeURIComponent(pass)}@` : '';
+        const tlsFlag = isHttps ? 'tls=true' : 'tls=false';
+        previewEl.textContent = 
+`# Surge / Shadowrocket 节点配置
+LWT-Camouflage = socks5, ${host}, ${hostPort}, ${authPart ? authPart : ''}ws=true, ws-path=${chosenPath}, ws-headers=Sec-WebSocket-Protocol:${subprotocolToken}, ${tlsFlag}, skip-cert-verify=true`;
+      }
+    }
+
+    function copyIngressConfig() {
+      const text = document.getElementById('ingress-config-preview').textContent;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          setStatus('✅ 客户端配置已成功复制到剪贴板！', true);
+        }).catch(() => {
+          fallbackCopyText(text);
+        });
+      } else {
+        fallbackCopyText(text);
+      }
+    }
+
+    function fallbackCopyText(text) {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.position = "fixed";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        setStatus('✅ 客户端配置已成功复制到剪贴板！', true);
+      } catch (err) {
+        setStatus('复制失败，请手动全选复制', false);
+      }
+      document.body.removeChild(textArea);
     }
 
     document.getElementById('input-username')?.addEventListener('input', updateClientPreview);

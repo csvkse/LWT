@@ -7,6 +7,14 @@ namespace LinuxWebTool.Contracts.Features.Plugins.Contracts;
 public sealed record PluginIngressConfig
 {
     public bool Enabled { get; init; } = true;
+
+    /// <summary>
+    /// 路由作用域模式：
+    /// "standard" (默认): 自动挂载统一插件前缀 /plugins/{pluginId}/...，实现 100% 命名空间隔离；
+    /// "stealth": 特权伪装模式，专门用于网络代理/防 DPI 审查微服务，允许申请全局根路径与混淆别名，受保留字守卫与冲突仲裁约束。
+    /// </summary>
+    public string Scope { get; init; } = "standard"; // "standard" | "stealth"
+
     public IReadOnlyList<PluginIngressRoute> Routes { get; init; } = [];
 }
 

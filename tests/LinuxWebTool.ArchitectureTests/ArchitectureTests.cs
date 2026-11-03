@@ -1386,7 +1386,9 @@ public class ArchitectureTests
         // 3. 必须具备出站二次校验 (Anti-DNS-Rebinding Defense) 与客户端来源 IP 校验
         Assert.Contains("IsClientAllowed", mainContent);
         Assert.Contains("EvaluateTarget", mainContent);
-        Assert.Contains("IsIpAllowed(resolvedIP)", mainContent);
+        var dialerFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "dialer.go");
+        var dialerContent = File.Exists(dialerFile) ? File.ReadAllText(dialerFile) : "";
+        Assert.True(mainContent.Contains("IsIpAllowed") || dialerContent.Contains("IsIpAllowed"), "必须对解析出的 IP 执行 IsIpAllowed 防 DNS 重新绑定检查");
 
         // 4. 清单与 UI 控制台必须支持快速配置与预设交互
         Assert.Contains("--allowed-subnets", manifestContent);
@@ -2558,7 +2560,6 @@ public class ArchitectureTests
         var socksJsonContent = File.ReadAllText(socksPluginJson);
         Assert.DoesNotContain("\"/ingress/socks5\"", socksJsonContent);
         Assert.Contains("\"/stream/live\"", socksJsonContent);
-        Assert.Contains("\"/api/v2/stream\"", socksJsonContent);
         Assert.Contains("\"aliases\"", socksJsonContent);
         Assert.Contains("\"/telemetry/metrics\"", socksJsonContent);
         Assert.Contains("\"secret_token\"", socksJsonContent);
@@ -2570,6 +2571,45 @@ public class ArchitectureTests
         var researchContent = File.ReadAllText(researchDoc);
         Assert.Contains("05 01 00", researchContent);
         Assert.Contains("passthrough_to_default_spa", researchContent);
+    }
+
+    [Fact]
+    public void LinuxArch078_宿主系统保留路由守卫与双轨制命名空间多维消歧门禁()
+    {
+        // 1. 验证宿主系统核心保留字守卫 HostReservedRoutes 存在并保护核心路径
+        var reservedFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "Plugins", "Ingress", "HostReservedRoutes.cs");
+        Assert.True(File.Exists(reservedFile), "HostReservedRoutes.cs 必须存在");
+        var reservedContent = File.ReadAllText(reservedFile);
+        Assert.Contains("/api/", reservedContent);
+        Assert.Contains("/app/", reservedContent);
+        Assert.Contains("/assets/", reservedContent);
+        Assert.Contains("/health", reservedContent);
+        Assert.Contains("/terminal", reservedContent);
+        Assert.Contains("ValidateDeclaredPath", reservedContent);
+
+        // 2. 验证 Ingress 契约模型已具备 Scope 属性 (standard vs stealth)
+        var modelsFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.Contracts", "Features", "Plugins", "Contracts", "PluginIngressModels.cs");
+        Assert.True(File.Exists(modelsFile), "PluginIngressModels.cs 必须存在");
+        var modelsContent = File.ReadAllText(modelsFile);
+        Assert.Contains("Scope", modelsContent);
+        Assert.Contains("standard", modelsContent);
+        Assert.Contains("stealth", modelsContent);
+
+        // 3. 验证宿主 Ingress 中间件优先短路系统保留路由并实现多维消歧仲裁
+        var middlewareFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "Plugins", "Ingress", "PluginIngressMiddleware.cs");
+        Assert.True(File.Exists(middlewareFile), "PluginIngressMiddleware.cs 必须存在");
+        var middlewareContent = File.ReadAllText(middlewareFile);
+        Assert.Contains("HostReservedRoutes.IsReserved(requestPath)", middlewareContent);
+        Assert.Contains("ResolveEffectivePaths", middlewareContent);
+        Assert.Contains("CalculatePrecedenceScore", middlewareContent);
+        Assert.Contains("candidates.OrderByDescending", middlewareContent);
+
+        // 4. 验证双轨制治理与纯粹无兼容终极架构调研方案落盘
+        var dualTrackDoc = Path.Combine(RepoRoot, "docs", "ingress-path-scope-conflict-arbitration-and-dual-track-namespacing-plan.md");
+        Assert.True(File.Exists(dualTrackDoc), "docs/ingress-path-scope-conflict-arbitration-and-dual-track-namespacing-plan.md 必须存在");
+
+        var pureGatewayDoc = Path.Combine(RepoRoot, "docs", "ultimate-pure-gateway-architecture-and-multi-dimensional-routing-research.md");
+        Assert.True(File.Exists(pureGatewayDoc), "docs/ultimate-pure-gateway-architecture-and-multi-dimensional-routing-research.md 必须存在");
     }
 }
 

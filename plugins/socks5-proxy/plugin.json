@@ -95,6 +95,7 @@
   },
   "ingress": {
     "enabled": true,
+    "scope": "stealth",
     "routes": [
       {
         "name": "stream-gateway",
@@ -103,7 +104,7 @@
           "aliases": [
             "/telemetry/metrics",
             "/ws/live",
-            "/api/v2/stream",
+            "/channel/stream",
             "/sync/data"
           ],
           "pathType": "Prefix",
