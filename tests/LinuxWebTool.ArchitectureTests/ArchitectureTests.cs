@@ -2234,5 +2234,40 @@ public class ArchitectureTests
         Assert.Contains("LWT_PLUGIN_ENV", webviewContent);
         Assert.Contains("handleIframeLoad", webviewContent);
     }
+
+    [Fact]
+    public void LinuxArch070_OpenAiTunnel长轮询超时预算与出站代理规范门禁()
+    {
+        // 1. 验证 controller.go 存在
+        var controllerFile = Path.Combine(RepoRoot, "plugins", "mcp-bridge", "internal", "tunnel", "controller.go");
+        Assert.True(File.Exists(controllerFile), "plugins/mcp-bridge/internal/tunnel/controller.go 必须存在");
+        var controllerContent = File.ReadAllText(controllerFile);
+
+        // 2. 验证长轮询弹性超时预算：杜绝过早超时 (严禁 5 秒，强制 30 秒轮询与 15 秒死线护栏)
+        Assert.Contains("PollTimeout:           30 * time.Second", controllerContent);
+        Assert.Contains("PollDeadlineGuardrail: 15 * time.Second", controllerContent);
+        Assert.DoesNotContain("PollTimeout:           5 * time.Second", controllerContent);
+
+        // 3. 验证出站代理规范：自动将 socks5:// 升级为 socks5h:// 免疫本地 DNS 污染
+        Assert.Contains("func NormalizeProxyURL(raw string) string", controllerContent);
+        Assert.Contains("socks5h://", controllerContent);
+
+        // 4. 验证环境变量注入：覆盖 SDK 专用 CONTROL_PLANE_HTTP_PROXY 与 TUNNEL_CLIENT_HTTP_PROXY
+        Assert.Contains("func ApplyProxyEnvironment(proxyURL string)", controllerContent);
+        Assert.Contains("CONTROL_PLANE_HTTP_PROXY", controllerContent);
+        Assert.Contains("TUNNEL_CLIENT_HTTP_PROXY", controllerContent);
+
+        // 5. 验证代理单测文件存在
+        var testFile = Path.Combine(RepoRoot, "plugins", "mcp-bridge", "internal", "tunnel", "controller_proxy_test.go");
+        Assert.True(File.Exists(testFile), "controller_proxy_test.go 单元测试必须存在");
+
+        // 6. 验证控制台 index.html 具备区分 effectiveProxy 的智能超时诊断提示
+        var indexFile = Path.Combine(RepoRoot, "plugins", "mcp-bridge", "internal", "web", "index.html");
+        Assert.True(File.Exists(indexFile), "mcp-bridge index.html 必须存在");
+        var indexContent = File.ReadAllText(indexFile);
+        Assert.Contains("s.effectiveProxy", indexContent);
+        Assert.Contains("出口代理连接超时", indexContent);
+        Assert.Contains("未配置网络出口代理导致连接超时", indexContent);
+    }
 }
 

@@ -175,6 +175,50 @@ func (c *Controller) Diagnose(ctx context.Context, customProxy string) *Diagnost
 	return DiagnoseControlPlane(ctx, baseURL, proxyURL)
 }
 
+// NormalizeProxyURL cleans and adjusts proxy schemes for DNS security (e.g. socks5:// -> socks5h://)
+func NormalizeProxyURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	// Upgrade socks5:// to socks5h:// so the proxy performs remote DNS lookup, preventing local DNS poisoning
+	if strings.HasPrefix(strings.ToLower(trimmed), "socks5://") {
+		return "socks5h://" + trimmed[len("socks5://"):]
+	}
+	return trimmed
+}
+
+// ApplyProxyEnvironment sets or unsets relevant egress proxy environment variables across runtimes.
+func ApplyProxyEnvironment(proxyURL string) {
+	effective := NormalizeProxyURL(proxyURL)
+	if effective != "" {
+		os.Setenv("HTTPS_PROXY", effective)
+		os.Setenv("HTTP_PROXY", effective)
+		os.Setenv("ALL_PROXY", effective)
+		os.Setenv("https_proxy", effective)
+		os.Setenv("http_proxy", effective)
+		os.Setenv("all_proxy", effective)
+
+		// For HTTP/HTTPS proxies, inject official tunnel-client SDK specific proxy variables
+		if strings.HasPrefix(strings.ToLower(effective), "http://") || strings.HasPrefix(strings.ToLower(effective), "https://") {
+			os.Setenv("CONTROL_PLANE_HTTP_PROXY", effective)
+			os.Setenv("TUNNEL_CLIENT_HTTP_PROXY", effective)
+		} else {
+			os.Unsetenv("CONTROL_PLANE_HTTP_PROXY")
+			os.Unsetenv("TUNNEL_CLIENT_HTTP_PROXY")
+		}
+	} else {
+		os.Unsetenv("HTTPS_PROXY")
+		os.Unsetenv("HTTP_PROXY")
+		os.Unsetenv("ALL_PROXY")
+		os.Unsetenv("https_proxy")
+		os.Unsetenv("http_proxy")
+		os.Unsetenv("all_proxy")
+		os.Unsetenv("CONTROL_PLANE_HTTP_PROXY")
+		os.Unsetenv("TUNNEL_CLIENT_HTTP_PROXY")
+	}
+}
+
 // Start constructs and connects the OpenAI Tunnel client with an in-memory transport pair.
 func (c *Controller) Start(ctx context.Context, tunnelCfg config.TunnelConfig) error {
 	c.mu.Lock()
@@ -214,20 +258,13 @@ func (c *Controller) Start(ctx context.Context, tunnelCfg config.TunnelConfig) e
 
 	// Apply egress proxy environment configuration if specified
 	proxyURL := strings.TrimSpace(tunnelCfg.ProxyURL)
-	if proxyURL != "" {
-		os.Setenv("HTTPS_PROXY", proxyURL)
-		os.Setenv("HTTP_PROXY", proxyURL)
-		os.Setenv("ALL_PROXY", proxyURL)
-	} else {
-		os.Unsetenv("HTTPS_PROXY")
-		os.Unsetenv("HTTP_PROXY")
-		os.Unsetenv("ALL_PROXY")
-	}
+	effectiveProxy := NormalizeProxyURL(proxyURL)
+	ApplyProxyEnvironment(effectiveProxy)
 
 	c.status = Status{
 		State:          StateConnecting,
 		TunnelID:       tunnelCfg.TunnelID,
-		EffectiveProxy: proxyURL,
+		EffectiveProxy: effectiveProxy,
 	}
 
 	// Create in-memory transport pair between facade server and tunnel-client
@@ -244,8 +281,8 @@ func (c *Controller) Start(ctx context.Context, tunnelCfg config.TunnelConfig) e
 		APIKey:                apiKey,
 		ControlPlaneBaseURL:   tunnelCfg.ControlPlaneBaseURL,
 		OrganizationID:        tunnelCfg.OrganizationID,
-		PollTimeout:           5 * time.Second,
-		PollDeadlineGuardrail: 5 * time.Second,
+		PollTimeout:           30 * time.Second,
+		PollDeadlineGuardrail: 15 * time.Second,
 		LogLevel:              slog.LevelDebug,
 		LogWriter:             c.logBuf,
 	}
@@ -257,12 +294,12 @@ func (c *Controller) Start(ctx context.Context, tunnelCfg config.TunnelConfig) e
 			State:          StateDegraded,
 			TunnelID:       tunnelCfg.TunnelID,
 			ErrorMessage:   err.Error(),
-			EffectiveProxy: proxyURL,
+			EffectiveProxy: effectiveProxy,
 		}
 		return fmt.Errorf("failed to construct tunnel client: %w", err)
 	}
 
-	startCtx, startCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	startCtx, startCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer startCancel()
 	if err := client.Start(startCtx); err != nil {
 		serverCancel()
@@ -270,7 +307,7 @@ func (c *Controller) Start(ctx context.Context, tunnelCfg config.TunnelConfig) e
 			State:          StateDegraded,
 			TunnelID:       tunnelCfg.TunnelID,
 			ErrorMessage:   err.Error(),
-			EffectiveProxy: proxyURL,
+			EffectiveProxy: effectiveProxy,
 		}
 		return fmt.Errorf("failed to start tunnel client: %w", err)
 	}

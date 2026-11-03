@@ -897,7 +897,11 @@
             } else if (errText.includes('429') || errText.includes('rate')) {
               pollHintVal.textContent = '💡 提示: 命中 OpenAI 速率限制 (429)，看门狗守护正在执行智能指数退避重试，无需频繁刷新。';
             } else if (errText.includes('proxy') || errText.includes('dial') || errText.includes('timeout')) {
-              pollHintVal.textContent = '💡 排查建议: 连接超时或无法触达 OpenAI 控制面，请检查上方【网络出口代理】是否已填入有效可用节点。';
+              if (s.effectiveProxy) {
+                pollHintVal.textContent = '💡 排查建议: 出口代理连接超时。请检查代理节点 (' + s.effectiveProxy + ') 是否可用、端口是否正确，或点击上方【🔍 诊断】获取握手详情。';
+              } else {
+                pollHintVal.textContent = '💡 排查建议: 未配置网络出口代理导致连接超时。当前网络环境无法直连 OpenAI 控制面，请检查上方【网络出口代理】并填入有效节点（如 socks5://127.0.0.1:10808 或 http://127.0.0.1:7890）。';
+              }
             } else {
               pollHintVal.textContent = '💡 提示: 请点击上方【🔍 诊断】按钮进行 OpenAI 控制平面与出口代理联通性探测。';
             }

@@ -74,6 +74,8 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + MCP 端点
 | `FE-CRLF-FORBIDDEN` | 前端源码严禁包含 `\r` (CRLF)，防止 Windows 编辑器污染跨平台静态资产 | frontend-gate.cjs |
 | `FE-DISTRO-CMD-INTEGRITY` | 插件默认安装指引必须严格区分发行版包管理器（Alpine 禁 apt、Debian 禁 apk），且 .NET 必须与 net10 对齐 | frontend-gate.cjs / node --test |
 | `LinuxArch068` | 凭据安全防御：未脱敏明文密码、真实网络地址、隧道 ID、私钥、多字符集香农熵与脱敏合规防伪门禁（结合 .githooks 提交钩子） | xUnit / .githooks/security-gate.cjs |
+| `LinuxArch069` | 微服务 Webview 控制台端口契约对齐与抗覆盖门禁（动态分配端口、防止 18001 硬编码、保留网络配置切面） | xUnit / AST & 文件扫描 |
+| `LinuxArch070` | OpenAI MCP Tunnel 长轮询弹性超时预算（>= 15s）与出站代理规范（socks5h 远程解析与全量环境注入）门禁 | xUnit / Go 源码与契约扫描 |
 
 
 ## 约定要点
