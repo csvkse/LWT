@@ -582,9 +582,9 @@ func (s *Server) handleSocks5(conn net.Conn) error {
 	targetAddr := net.JoinHostPort(targetHost, strconv.Itoa(int(targetPort)))
 
 	// 4. Target Host Resolution & Anti-DNS-Rebinding Defense
-	var resolvedIP net.IP
+	var candidateIPs []net.IP
 	if ip := net.ParseIP(targetHost); ip != nil {
-		resolvedIP = ip
+		candidateIPs = []net.IP{ip}
 	} else {
 		resolver := s.resolver
 		if resolver == nil {
@@ -600,7 +600,7 @@ func (s *Server) handleSocks5(conn net.Conn) error {
 			}
 			return fmt.Errorf("dns lookup failed for %s: %w", targetHost, err)
 		}
-		resolvedIP = ips[0]
+		candidateIPs = ips
 	}
 
 	if s.acl != nil {
@@ -614,35 +614,27 @@ func (s *Server) handleSocks5(conn net.Conn) error {
 			s.acl.RecordTargetResult(false)
 			return fmt.Errorf("target %s rejected by domain whitelist policy", targetHost)
 		}
-
-		// Anti-DNS-Rebinding dual-check: ensure resolved IP is within allowed subnets
-		if !s.acl.IsIpAllowed(resolvedIP) {
-			s.logger.Warn("connect target rejected by subnet policy (anti-rebinding)",
-				"client", conn.RemoteAddr().String(),
-				"target", targetHost,
-				"resolvedIp", resolvedIP.String(),
-			)
-			_ = s.sendReply(conn, repRuleViolation, nil)
-			s.acl.RecordTargetResult(false)
-			return fmt.Errorf("resolved IP %s is disbarred by subnet policy", resolvedIP.String())
-		}
-
-		s.acl.RecordTargetResult(true)
 	}
 
-	// 5. Connect to upstream target
-	// 核心性能优化：若已解析出目标 IP，上游直接绑定已解析的 IP 直连，彻底消除二次 DNS 解析并杜绝 Rebinding 竞态
-	upstreamDialTarget := targetAddr
-	if resolvedIP != nil {
-		upstreamDialTarget = net.JoinHostPort(resolvedIP.String(), strconv.Itoa(int(targetPort)))
-	}
-
-	upstream, err := net.DialTimeout("tcp", upstreamDialTarget, s.cfg.ConnectTimeout)
+	// 5. Connect to upstream target via Happy Eyeballs Race (RFC 8305)
+	upstream, winningIP, err := dialUpstreamWithRace(context.Background(), candidateIPs, int(targetPort), s.cfg.ConnectTimeout, s.acl)
 	if err != nil {
-		_ = s.sendReply(conn, repConnRefused, nil)
-		return fmt.Errorf("upstream dial to %s (%s) failed: %w", targetAddr, upstreamDialTarget, err)
+		if errors.Is(err, ErrAclForbidden) {
+			_ = s.sendReply(conn, repRuleViolation, nil)
+		} else {
+			_ = s.sendReply(conn, repConnRefused, nil)
+		}
+		if s.acl != nil {
+			s.acl.RecordTargetResult(false)
+		}
+		return fmt.Errorf("upstream dial to %s failed: %w", targetAddr, err)
 	}
 	defer upstream.Close()
+
+	if s.acl != nil {
+		s.acl.RecordTargetResult(true)
+	}
+	_ = winningIP
 
 	localBind := upstream.LocalAddr().(*net.TCPAddr)
 	if err := s.sendReply(conn, repSuccess, localBind); err != nil {

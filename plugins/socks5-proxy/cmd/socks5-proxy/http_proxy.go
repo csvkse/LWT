@@ -118,9 +118,9 @@ func (s *Server) handleHttpProxy(bConn net.Conn, br *bufio.Reader) error {
 	}
 
 	// 4. Resolve Target IP (LRU Cache + Singleflight + IPv4-prefer)
-	var resolvedIP net.IP
+	var candidateIPs []net.IP
 	if ip := net.ParseIP(targetHost); ip != nil {
-		resolvedIP = ip
+		candidateIPs = []net.IP{ip}
 	} else {
 		resolver := s.resolver
 		if resolver == nil {
@@ -136,32 +136,31 @@ func (s *Server) handleHttpProxy(bConn net.Conn, br *bufio.Reader) error {
 			}
 			return fmt.Errorf("dns lookup failed for %s: %w", targetHost, err)
 		}
-		resolvedIP = ips[0]
+		candidateIPs = ips
 	}
 
-	// 5. Anti-DNS-Rebinding dual check on resolved IP
-	if s.acl != nil {
-		if !s.acl.IsIpAllowed(resolvedIP) {
-			s.logger.Warn("http target rejected by subnet policy (anti-rebinding)",
-				"client", bConn.RemoteAddr().String(),
-				"target", targetHost,
-				"resolvedIp", resolvedIP.String(),
-			)
-			_, _ = bConn.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Length: 35\r\nConnection: close\r\n\r\nResolved IP disallowed by subnet.\n"))
-			s.acl.RecordTargetResult(false)
-			return fmt.Errorf("resolved IP %s is disbarred by subnet policy", resolvedIP.String())
-		}
-		s.acl.RecordTargetResult(true)
-	}
-
-	// 6. Connect to upstream target directly via resolved IP (no second DNS query!)
-	upstreamDialTarget := net.JoinHostPort(resolvedIP.String(), targetPortStr)
-	upstream, err := net.DialTimeout("tcp", upstreamDialTarget, s.cfg.ConnectTimeout)
+	// 5. Connect to upstream target via Happy Eyeballs Race (RFC 8305)
+	upstream, winningIP, err := dialUpstreamWithRace(context.Background(), candidateIPs, targetPort, s.cfg.ConnectTimeout, s.acl)
 	if err != nil {
+		if errors.Is(err, ErrAclForbidden) {
+			_, _ = bConn.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Length: 35\r\nConnection: close\r\n\r\nResolved IP disallowed by subnet.\n"))
+			if s.acl != nil {
+				s.acl.RecordTargetResult(false)
+			}
+			return fmt.Errorf("resolved IP for %s is disbarred by subnet policy: %w", targetHost, err)
+		}
 		_, _ = bConn.Write([]byte("HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 24\r\nConnection: close\r\n\r\nUpstream connect failed.\n"))
-		return fmt.Errorf("upstream dial to %s (%s) failed: %w", targetHost, upstreamDialTarget, err)
+		if s.acl != nil {
+			s.acl.RecordTargetResult(false)
+		}
+		return fmt.Errorf("upstream dial to %s failed: %w", targetHost, err)
 	}
 	defer upstream.Close()
+
+	if s.acl != nil {
+		s.acl.RecordTargetResult(true)
+	}
+	_ = winningIP
 
 	// 7. Branch: CONNECT tunnel vs Standard HTTP Forward
 	if req.Method == http.MethodConnect {

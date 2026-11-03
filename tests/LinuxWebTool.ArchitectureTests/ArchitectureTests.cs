@@ -2323,12 +2323,16 @@ public class ArchitectureTests
         Assert.Contains("type CachedDnsResolver struct", dnsCacheContent);
         Assert.Contains("func NormalizeDomain(domain string) string", dnsCacheContent);
 
-        // 2. 验证 main.go 建立上游连接时直连已解析 IP，严禁二次传递域名触发重复 DNS 解析
+        // 2. 验证建立上游连接时直连已解析 IP，严禁二次传递域名触发重复 DNS 解析
+        var dialerFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "dialer.go");
+        var dialerContent = File.ReadAllText(dialerFile);
+        Assert.Contains("net.JoinHostPort(candidates[0].String(), strconv.Itoa(port))", dialerContent);
+        Assert.Contains("net.JoinHostPort(ip.String(), strconv.Itoa(port))", dialerContent);
+
         var mainGoFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "main.go");
         var mainGoContent = File.ReadAllText(mainGoFile);
 
-        Assert.Contains("upstreamDialTarget := targetAddr", mainGoContent);
-        Assert.Contains("net.JoinHostPort(resolvedIP.String(), strconv.Itoa(int(targetPort)))", mainGoContent);
+        Assert.Contains("dialUpstreamWithRace", mainGoContent);
         Assert.Contains("NewCachedDnsResolver", mainGoContent);
         Assert.Contains("NormalizeDomain(string(domain))", mainGoContent);
 
@@ -2432,6 +2436,42 @@ public class ArchitectureTests
         Assert.Contains("measureDirectTcp", compBenchContent);
         Assert.Contains("measureDirectTtfb", compBenchContent);
         Assert.Contains("measureBrowserPage", compBenchContent);
+    }
+
+    [Fact]
+    public void LinuxArch075_多IP并发竞速拨号与CDN抗长尾延迟调优门禁()
+    {
+        // 1. 验证 dialer.go 存在并包含 RFC 8305 阶梯并发拨号竞速实现
+        var dialerFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "dialer.go");
+        Assert.True(File.Exists(dialerFile), "dialer.go 必须存在");
+        var dialerContent = File.ReadAllText(dialerFile);
+        Assert.Contains("dialUpstreamWithRace", dialerContent);
+        Assert.Contains("Happy Eyeballs", dialerContent);
+        Assert.Contains("staggerDelay", dialerContent);
+        Assert.Contains("ErrAclForbidden", dialerContent);
+
+        // 2. 验证 main.go 与 http_proxy.go 均采用 dialUpstreamWithRace 并消除孤立 ips[0]
+        var mainGoFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "main.go");
+        var mainGoContent = File.ReadAllText(mainGoFile);
+        Assert.Contains("dialUpstreamWithRace", mainGoContent);
+
+        var httpProxyFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "http_proxy.go");
+        var httpProxyContent = File.ReadAllText(httpProxyFile);
+        Assert.Contains("dialUpstreamWithRace", httpProxyContent);
+
+        // 3. 验证多 IP CDN 域名测试套件 tests/benchmark/test-cdn-multihoming.mjs 存在
+        var cdnBenchFile = Path.Combine(RepoRoot, "tests", "benchmark", "test-cdn-multihoming.mjs");
+        Assert.True(File.Exists(cdnBenchFile), "tests/benchmark/test-cdn-multihoming.mjs 必须存在");
+        var cdnBenchContent = File.ReadAllText(cdnBenchFile);
+        Assert.Contains("CDN_TARGETS", cdnBenchContent);
+        Assert.Contains("measureHttpConnect", cdnBenchContent);
+
+        // 4. 验证 B站评论区懒加载深度调研文档存在
+        var docFile = Path.Combine(RepoRoot, "docs", "bilibili-comment-lazy-load-slowdown-proxy-research.md");
+        Assert.True(File.Exists(docFile), "docs/bilibili-comment-lazy-load-slowdown-proxy-research.md 必须存在");
+        var docContent = File.ReadAllText(docFile);
+        Assert.Contains("Happy Eyeballs", docContent);
+        Assert.Contains("IntersectionObserver", docContent);
     }
 }
 
