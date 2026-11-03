@@ -148,6 +148,16 @@ plugins/socks5-proxy/
 | **`ui.hasWebview`** | `boolean` | 否 | `false` | 是否在卡片上提供专属的 Webview 弹窗。 |
 | **`ui.entry`** | `string` | 否 | `""` | Webview 入口模式：填 `"web"` 表示反代微服务的 Web 站点；填相对文件路径（如 `"ui/index.html"`）表示托管宿主静态 UI 资产。 |
 
+### 3.2 宿主标准元数据与环境变量向下投影契约 (`LWT_*`)
+
+微服务进程启动时，宿主底层通过 `PluginStandardEnvBuilder` 自动向其子进程注入五大维度（网络拓扑、存储持久卷、硬件特权、平台身份、通信安全）的标准环境变量：
+- **双端口感知**：`LWT_HOST_INTERNAL_PORT` (5270 内部极速直连) 与 `LWT_HOST_EXTERNAL_PORT` (5271 外部客户端访问/二维码)；
+- **存储与数据持久化隔离**：`LWT_CODE_DIR` (只读代码) 与 `LWT_VOLUME_DIR` / `LWT_STATE_DIR` (独占持久卷，升级不丢失)；
+- **硬件特权自省**：`LWT_HOST_DISTRO` (发行版) 与 `LWT_HAS_TUN` (TUN 设备可用性)；
+- **宿主反代前缀**：`LWT_PLUGIN_INGRESS_PREFIX` (`/plugins/{id}`)。
+
+完整的 20+ 个元数据字典定义表及 Go / Node / Python / C# 消费 SDK 范例，请详见：[08. 控制面与数据面双平面端口模型、宿主元数据感知与极速 Ingress 实战 - 第 2 节](./08-control-plane-ports-metadata-projection-and-sub-1ms-routing.md#2-宿主元数据向下投影机制-host-metadata-downward-projection)。
+
 ---
 
 ## 4. 多语言运行时环境矩阵 (Zero-Config Environment)

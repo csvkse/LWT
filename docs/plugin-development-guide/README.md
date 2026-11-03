@@ -47,7 +47,7 @@ graph TD
 
 ---
 
-## 3. 插件开发十六项军规 (Sixteen Golden Rules)
+## 3. 插件开发十七项军规 (Seventeen Golden Rules)
 
 在 LWT 插件的设计、编码与维护过程中，所有开发者及 AI Coding Agent 必须时刻牢记以下红线准则：
 
@@ -67,3 +67,4 @@ graph TD
 14. **控制面与数据面端口严格物理分离**：网络微服务清单的 `manifest.port` 必须明确绑定至微服务的 **控制面端口**（提供 Webview 和 RESTful API）；多入站数据面端口池由服务内部动态管理并按需在宿主端口池中声明。
 15. **宿主双端口感知与动态自适应**：严禁在插件后端与 Webview 中硬编码宿主端口。必须动态读取 `LWT_HOST_PORT`（内部直通）与 `LWT_HOST_EXTERNAL_PORT`（外部发布），确保容器内外均能准确通信。
 16. **动态监听器热重载防端口泄露**：在支持动态增删端口的微服务中，当配置发生热重载时，必须在释放锁前安全关闭旧 `net.Listener` 句柄，杜绝孤儿监听器导致的 `address already in use` 故障。
+17. **持久卷存储与代码目录物理隔离**：插件微服务绝对禁止在当前代码目录（`LWT_CODE_DIR`）中保存持久化状态或业务数据库（热更新会整包覆写代码资产）；持久配置与数据库必须写入受系统保护的独立持久卷（`LWT_VOLUME_DIR` 或 `LWT_STATE_DIR`）。
