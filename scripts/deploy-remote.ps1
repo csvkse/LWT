@@ -311,16 +311,28 @@ try {
             $swapCmd = "sh -c 'mkdir -p /app/data/plugins/$HotUpdatePlugin && if [ -f /app/plugins/$HotUpdatePlugin/$HotUpdatePlugin ]; then cp -f /app/plugins/$HotUpdatePlugin/$HotUpdatePlugin /app/data/plugins/$HotUpdatePlugin/${HotUpdatePlugin}.hot && chmod +x /app/data/plugins/$HotUpdatePlugin/${HotUpdatePlugin}.hot && mv -f /app/data/plugins/$HotUpdatePlugin/${HotUpdatePlugin}.hot /app/data/plugins/$HotUpdatePlugin/$HotUpdatePlugin; fi && cp -rf /app/plugins/$HotUpdatePlugin/* /app/data/plugins/$HotUpdatePlugin/ 2>/dev/null || true && chmod -R +x /app/data/plugins/$HotUpdatePlugin 2>/dev/null || true'"
             Invoke-RemoteSsh "docker exec $containerName $swapCmd"
 
-            # 优雅终止旧进程以触发插件框架/看门狗自动重拉
-            if ($oldPid) {
-                Write-Step "Signaling microservice (PID $oldPid) to reload with new binary..."
-                Invoke-RemoteSsh "docker exec $containerName kill -TERM $oldPid || true"
-            } else {
-                Write-Step "Signaling microservice via pattern to reload..."
-                Invoke-RemoteSsh "docker exec $containerName pkill -TERM -f '$HotUpdatePlugin serve' || true"
-            }
+            # 4. 触发微服务平台平滑重拉 (使用统一 REST API)
+            Write-Step "Triggering microservice restart via Unified Plugin Platform REST API..."
+            $reloadScript = @"
+python3 - << 'EOF'
+import json, urllib.request, os
+try:
+    with open('/var/lib/docker/volumes/${containerName}-data/_data/admin.json') as f:
+        pwd = json.load(f).get('generatedPassword')
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    req = urllib.request.Request('http://127.0.0.1:${devPort}/api/Auth/Login', data=json.dumps({'userName':'admin','password':pwd}).encode(), headers={'Content-Type':'application/json'})
+    token = json.loads(opener.open(req).read().decode()).get('token')
+    endpoint = 'Restart' if '$oldPid' != '' else 'Start'
+    r_req = urllib.request.Request(f'http://127.0.0.1:${devPort}/api/Plugins/${HotUpdatePlugin}/' + endpoint, data=b'', headers={'Authorization': 'Bearer ' + token})
+    print(opener.open(r_req).read().decode())
+except Exception as ex:
+    print('RELOAD_API_FALLBACK:', ex)
+EOF
+"@
+            $reloadOutput = Invoke-RemoteSsh $reloadScript
+            Write-Host "Reload API result: $reloadOutput" -ForegroundColor DarkCyan
 
-            # 等待微服务拉起并探活
+            # 5. 等待微服务拉起并探活
             $newPid = ""
             $retryCount = 0
             $maxRetries = 15
@@ -347,7 +359,7 @@ try {
             }
 
             if ($newPid) {
-                Write-Success "Microservice reloaded successfully! Old PID: $oldPid -> New PID: $newPid (Reload Latency: $($sw.ElapsedMilliseconds) ms)"
+                Write-Success "Microservice reloaded successfully! Old PID: $oldPid -> New PID: $newPid (Hot Reload Latency: $($sw.ElapsedMilliseconds) ms)"
             } else {
                 Write-Warn "Microservice PID did not refresh within timeout. Check container logs."
             }

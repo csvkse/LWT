@@ -20,7 +20,7 @@
     "pathPrefix": "/plugins/mcp-bridge"
   },
   "supervision": {
-    "autoRestart": false,
+    "autoRestart": true,
     "flappingThresholdSec": 10,
     "maxCrashRetries": 3
   },
