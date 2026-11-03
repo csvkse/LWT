@@ -72,8 +72,8 @@ export const PluginUrlResolver = {
     if (rawEntry && rawEntry !== 'web') {
       const cleanEntry = rawEntry.replace(/^\/+/, '').replace(/^ui\//, '');
       url = API.plugins.asset(plugin.id, cleanEntry);
-    } else if (plugin.manifest?.ui?.entry === 'web' || plugin.gatewayUrl || plugin.manifest?.network?.mode === 'path') {
-      url = plugin.gatewayUrl || API.plugins.gatewayUrl(plugin.id);
+    } else if (rawEntry === 'web' || plugin.gatewayUrl || plugin.manifest?.network?.mode === 'path' || plugin.manifest?.network?.supportHttp) {
+      url = this.getGatewayUrl(plugin);
     } else {
       url = API.plugins.asset(plugin.id, 'index.html');
     }
@@ -95,8 +95,11 @@ export const PluginUrlResolver = {
   getGatewayUrl(plugin, token = '') {
     if (!plugin || !plugin.id) return '';
 
-    // 优先读取下发的 gatewayUrl，若无则自动调用 API.plugins.gatewayUrl(id) 兜底
+    // 优先读取下发的 gatewayUrl，若无或为 localhost/127.0.0.1 则自动转换为宿主反代网关 API.plugins.gatewayUrl(id) 兜底
     let url = plugin.gatewayUrl || API.plugins.gatewayUrl(plugin.id);
+    if (url.startsWith('http://localhost') || url.startsWith('http://127.0.0.1') || url.startsWith('https://localhost') || url.startsWith('https://127.0.0.1')) {
+      url = API.plugins.gatewayUrl(plugin.id);
+    }
 
     if (url && token) {
       const sep = url.includes('?') ? '&' : '?';

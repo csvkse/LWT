@@ -10,6 +10,8 @@
   // 智能推断 API 前缀：如果在宿主反代路径 /plugins/socks5-forwarder/ 下
   if (window.location.pathname.includes('/plugins/socks5-forwarder')) {
     apiBase = window.location.pathname.replace(/\/ui\/.*|\/index\.html|\/?$/, '') + '/api';
+  } else if (window.location.pathname.includes('/api/Plugins/socks5-forwarder')) {
+    apiBase = '/plugins/socks5-forwarder/api';
   } else {
     apiBase = '/api';
   }
