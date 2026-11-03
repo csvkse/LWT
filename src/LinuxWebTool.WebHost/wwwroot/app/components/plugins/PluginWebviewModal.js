@@ -68,7 +68,8 @@ export default defineComponent({
             configuredPort: props.plugin.configuredPort || props.plugin.manifest?.network?.port,
             isPortAvoided: Boolean(props.plugin.isPortAvoided),
             portConflictReason: props.plugin.portConflictReason,
-            token: auth.token || ''
+            token: auth.token || '',
+            hostname: window.location.hostname || '127.0.0.1'
           }, '*');
         }
       } catch {

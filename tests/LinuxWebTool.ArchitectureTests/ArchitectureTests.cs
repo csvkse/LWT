@@ -2269,5 +2269,43 @@ public class ArchitectureTests
         Assert.Contains("出口代理连接超时", indexContent);
         Assert.Contains("未配置网络出口代理导致连接超时", indexContent);
     }
+
+    [Fact]
+    public void LinuxArch071_SOCKS5安全代理三维ACL策略默认值与Webview动态主机绑定门禁()
+    {
+        // 1. 验证 plugin.json 默认预设：入站客户端默认放行 LAN，出站目标默认全网开放无限制 (all)
+        var pluginJsonFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "plugin.json");
+        Assert.True(File.Exists(pluginJsonFile), "plugins/socks5-proxy/plugin.json 必须存在");
+        var pluginJsonContent = File.ReadAllText(pluginJsonFile);
+
+        Assert.Contains("\"--acl-preset\",", pluginJsonContent);
+        Assert.Contains("\"all\",", pluginJsonContent);
+        Assert.Contains("\"--allowed-subnets\",", pluginJsonContent);
+        Assert.Contains("\"*\",", pluginJsonContent);
+        Assert.Contains("\"--allowed-domains\",", pluginJsonContent);
+        Assert.Contains("\"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128\"", pluginJsonContent);
+
+        // 2. 验证 ui/index.html 客户端连接命令动态绑定主机名，严禁硬编码 127.0.0.1 误导外部连接
+        var uiFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "ui", "index.html");
+        Assert.True(File.Exists(uiFile), "plugins/socks5-proxy/ui/index.html 必须存在");
+        var uiContent = File.ReadAllText(uiFile);
+
+        Assert.Contains("getHostName()", uiContent);
+        Assert.Contains("currentHost", uiContent);
+        Assert.Contains("window.location.hostname", uiContent);
+        Assert.DoesNotContain("'socks5://' + authPrefix + '127.0.0.1:'", uiContent);
+
+        // 3. 验证 ui/index.html 默认快捷预设为全网开放出站 (all) 与局域网入站 (lan)
+        Assert.Contains("let activePreset = 'all';", uiContent);
+        Assert.Contains("applyPreset('all');", uiContent);
+        Assert.Contains("applyClientPreset('lan');", uiContent);
+        Assert.Contains("id=\"pill-all\" onclick=\"applyPreset('all')\"", uiContent);
+        Assert.Contains("id=\"client-pill-lan\" onclick=\"applyClientPreset('lan')\"", uiContent);
+
+        // 4. 验证 PluginWebviewModal.js 下发宿主主机名
+        var webviewModalFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "wwwroot", "app", "components", "plugins", "PluginWebviewModal.js");
+        var webviewContent = File.ReadAllText(webviewModalFile);
+        Assert.Contains("hostname: window.location.hostname", webviewContent);
+    }
 }
 

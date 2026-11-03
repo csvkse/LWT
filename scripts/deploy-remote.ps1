@@ -7,6 +7,7 @@ param(
     [string]$SyncMethod = "Auto",
 
     [switch]$FrontendOnly,
+    [string]$HotUpdatePlugin = "",
 
     [string]$EnvFile = "env/.envdev",
     [switch]$SkipDeps,
@@ -90,7 +91,7 @@ if (-not $deployHost) {
 }
 
 # Mode-specific adjustments (Adapter Pattern)
-if ($FrontendOnly) {
+if ($FrontendOnly -or $HotUpdatePlugin) {
     $Mode = "Dev"
 }
 
@@ -102,6 +103,8 @@ if ($Mode -eq "Dev") {
     $devWebUrl = "http://${deployHost}:${devPort}/"
     if ($FrontendOnly) {
         Write-Success "Adapter [LinuxFastDevAdapter - FrontendHotSync] selected: Target $deployUser@$deployHost`:$deployPort, container $containerName"
+    } elseif ($HotUpdatePlugin) {
+        Write-Success "Adapter [LinuxFastDevAdapter - PluginHotUpdate] selected: Target $deployUser@$deployHost`:$deployPort, container $containerName, plugin $HotUpdatePlugin"
     } else {
         Write-Success "Adapter [LinuxFastDevAdapter] selected: Target $deployUser@$deployHost`:$deployPort, container $containerName (Port $devPort), SyncMethod: $SyncMethod"
     }
@@ -116,7 +119,16 @@ try {
     [System.IO.File]::WriteAllText($tempKeyPath, ($cleanKey + "`n"), [System.Text.Encoding]::ASCII)
     & icacls.exe $tempKeyPath /inheritance:r /grant:r "$($env:USERNAME):(R)" | Out-Null
 
+    function Clean-SshOutput($val) {
+        if ($null -eq $val) { return "" }
+        $str = ($val -join "`n")
+        $str = [regex]::Replace($str, "\x1b\][^\x07\x1b]*[\x07\x1b\\]", "")
+        $str = [regex]::Replace($str, "\x1b\[[0-9;]*[a-zA-Z]", "")
+        return $str.Trim()
+    }
+
     function Invoke-RemoteSsh([string]$cmd) {
+        $cleanCmd = $cmd.Replace("`r`n", "`n")
         $sshArgs = @(
             "-i", $tempKeyPath,
             "-p", $deployPort,
@@ -124,13 +136,13 @@ try {
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "LogLevel=ERROR",
             "$deployUser@$deployHost",
-            $cmd
+            $cleanCmd
         )
         $output = & ssh @sshArgs
         if ($LASTEXITCODE -ne 0) {
             throw "SSH command failed with exit code $($LASTEXITCODE): $cmd"
         }
-        return $output
+        return (Clean-SshOutput $output)
     }
 
     if ($RemoteExec) {
@@ -207,6 +219,155 @@ try {
             if (Test-Path $feBundle) { Remove-Item $feBundle -Force -ErrorAction SilentlyContinue }
         }
     }
+
+    # =========================================================================
+    # Strategy A-2: Microservice Plugin In-Place Hot Update (Zero Container Restart)
+    # =========================================================================
+    if ($HotUpdatePlugin) {
+        if ($HotUpdatePlugin -eq "1" -or $HotUpdatePlugin -eq "true") {
+            $HotUpdatePlugin = "mcp-bridge"
+        }
+        $pluginRelDir = "plugins/$HotUpdatePlugin"
+        if (-not (Test-Path $pluginRelDir)) {
+            throw "Plugin directory '$pluginRelDir' not found."
+        }
+
+        Write-Step "[Dev - Plugin HotUpdate] Hot-updating microservice plugin '$HotUpdatePlugin' on $containerName..."
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+        # 1. 确保目标二进制存在且最新（若是 Go 编写的微服务插件）
+        $binFile = "$pluginRelDir/$HotUpdatePlugin"
+        $srcFile = "$pluginRelDir/cmd/$HotUpdatePlugin/main.go"
+        if (-not (Test-Path $srcFile)) {
+            $srcFile = "$pluginRelDir/main.go"
+        }
+        if (Test-Path $srcFile) {
+            $isElf = $false
+            if (Test-Path $binFile) {
+                try {
+                    $bytes = [System.IO.File]::ReadAllBytes($binFile)
+                    if ($bytes.Length -ge 4 -and $bytes[0] -eq 0x7F -and $bytes[1] -eq 0x45 -and $bytes[2] -eq 0x4C -and $bytes[3] -eq 0x46) {
+                        $isElf = $true
+                    }
+                } catch { }
+            }
+            $needCompile = (-not $isElf)
+            if (-not $needCompile -and (Test-Path $binFile)) {
+                $latestSource = (Get-ChildItem -Path $pluginRelDir -Recurse -File -Exclude "$HotUpdatePlugin","*.exe" | Measure-Object -Property LastWriteTime -Maximum).Maximum
+                if ($latestSource -and ((Get-Item $binFile).LastWriteTime -lt $latestSource)) {
+                    $needCompile = $true
+                }
+            }
+            if ($needCompile -and (Get-Command "go" -ErrorAction SilentlyContinue)) {
+                Write-Step "Pre-compiling $pluginRelDir for Linux x64 (CGO_ENABLED=0 GOOS=linux GOARCH=amd64)..."
+                cmd /c "set CGO_ENABLED=0& set GOOS=linux& set GOARCH=amd64& cd $pluginRelDir& go build -ldflags=`"-s -w`" -o $HotUpdatePlugin ./cmd/$HotUpdatePlugin"
+            }
+        }
+
+        $localHash = ""
+        if (Test-Path $binFile) {
+            $localHash = (Get-FileHash $binFile -Algorithm SHA256).Hash.ToLower()
+            Write-Host "Local Linux ELF Binary SHA256: $localHash" -ForegroundColor DarkCyan
+        }
+
+        # 2. 打包插件工作副本并流式传输到远程宿主机
+        $pluginBundle = "plugin-$HotUpdatePlugin-bundle.tar.gz"
+        try {
+            if (Test-Path $pluginBundle) { Remove-Item $pluginBundle -Force }
+            & tar.exe -czf $pluginBundle --exclude=.git --exclude=data --exclude=.runtime --exclude=*.tmp --exclude=*.tar.gz -C $pluginRelDir .
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $pluginBundle)) {
+                throw "Failed to create plugin bundle at $pluginBundle"
+            }
+
+            Invoke-RemoteSsh "mkdir -p $devWorkdir/plugins/$HotUpdatePlugin"
+            $pluginStreamArgs = @(
+                "-i", $tempKeyPath,
+                "-p", "$deployPort",
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "UserKnownHostsFile=/dev/null",
+                "-o", "LogLevel=ERROR",
+                "$deployUser@$deployHost",
+                "tar -xzf - -C $devWorkdir/plugins/$HotUpdatePlugin"
+            )
+            $pProc = Start-Process -FilePath "ssh" -ArgumentList $pluginStreamArgs -RedirectStandardInput $pluginBundle -NoNewWindow -Wait -PassThru
+            if ($pProc.ExitCode -ne 0) {
+                throw "Plugin host sync failed with exit code $($pProc.ExitCode)"
+            }
+            Invoke-RemoteSsh "chmod -R +x $devWorkdir/plugins/$HotUpdatePlugin 2>/dev/null || true"
+
+            # 3. 检查容器运行态并执行热更新原子切替
+            $containerRunning = (Invoke-RemoteSsh "docker ps -q --filter name=$containerName").Trim()
+            if (-not $containerRunning) {
+                Write-Warn "Container $containerName is not running. Host volume files updated."
+                return
+            }
+
+            Write-Step "Executing in-place atomic hot-swap inside container $containerName..."
+            $rawOldPid = (Invoke-RemoteSsh "docker exec $containerName sh -c 'cat /app/data/plugins/$HotUpdatePlugin/.runtime/process.pid 2>/dev/null || true'").Trim()
+            $oldPid = [regex]::Match($rawOldPid, '\d+').Value
+            Write-Host "Current microservice PID: $(if ($oldPid) { $oldPid } else { 'Not running' })" -ForegroundColor DarkYellow
+
+            # 原子 inode 替换 (避免 Text file busy)
+            $swapCmd = "sh -c 'mkdir -p /app/data/plugins/$HotUpdatePlugin && if [ -f /app/plugins/$HotUpdatePlugin/$HotUpdatePlugin ]; then cp -f /app/plugins/$HotUpdatePlugin/$HotUpdatePlugin /app/data/plugins/$HotUpdatePlugin/${HotUpdatePlugin}.hot && chmod +x /app/data/plugins/$HotUpdatePlugin/${HotUpdatePlugin}.hot && mv -f /app/data/plugins/$HotUpdatePlugin/${HotUpdatePlugin}.hot /app/data/plugins/$HotUpdatePlugin/$HotUpdatePlugin; fi && cp -rf /app/plugins/$HotUpdatePlugin/* /app/data/plugins/$HotUpdatePlugin/ 2>/dev/null || true && chmod -R +x /app/data/plugins/$HotUpdatePlugin 2>/dev/null || true'"
+            Invoke-RemoteSsh "docker exec $containerName $swapCmd"
+
+            # 优雅终止旧进程以触发插件框架/看门狗自动重拉
+            if ($oldPid) {
+                Write-Step "Signaling microservice (PID $oldPid) to reload with new binary..."
+                Invoke-RemoteSsh "docker exec $containerName kill -TERM $oldPid || true"
+            } else {
+                Write-Step "Signaling microservice via pattern to reload..."
+                Invoke-RemoteSsh "docker exec $containerName pkill -TERM -f '$HotUpdatePlugin serve' || true"
+            }
+
+            # 等待微服务拉起并探活
+            $newPid = ""
+            $retryCount = 0
+            $maxRetries = 15
+            while ($retryCount -lt $maxRetries) {
+                Start-Sleep -Milliseconds 600
+                $retryCount++
+                $rawCurPid = (Invoke-RemoteSsh "docker exec $containerName sh -c 'cat /app/data/plugins/$HotUpdatePlugin/.runtime/process.pid 2>/dev/null || true'").Trim()
+                $curPid = [regex]::Match($rawCurPid, '\d+').Value
+                if ($curPid -and $curPid -ne $oldPid) {
+                    $newPid = $curPid
+                    break
+                }
+            }
+
+            # 校验容器内运行的二进制 Hash
+            $rawRemoteHash = (Invoke-RemoteSsh "docker exec $containerName sha256sum /app/data/plugins/$HotUpdatePlugin/$HotUpdatePlugin").Trim()
+            $remoteHash = [regex]::Match($rawRemoteHash, '[0-9a-fA-F]{64}').Value.ToLower()
+            $sw.Stop()
+
+            if ($localHash -and $remoteHash -and ($localHash -eq $remoteHash)) {
+                Write-Success "Microservice binary hot-updated & verified! SHA256: $remoteHash"
+            } else {
+                Write-Warn "Binary hash comparison: local=$localHash, remote=$remoteHash"
+            }
+
+            if ($newPid) {
+                Write-Success "Microservice reloaded successfully! Old PID: $oldPid -> New PID: $newPid (Reload Latency: $($sw.ElapsedMilliseconds) ms)"
+            } else {
+                Write-Warn "Microservice PID did not refresh within timeout. Check container logs."
+            }
+
+            # 检查监听端口
+            $rawListenPort = (Invoke-RemoteSsh "docker exec $containerName sh -c 'netstat -tlnp 2>/dev/null | grep $HotUpdatePlugin || true'").Trim()
+            $listenPort = ($rawListenPort -split "`r?`n" | Where-Object { $_ -match "$HotUpdatePlugin" } | Select-Object -First 1)
+            if ($listenPort) {
+                Write-Success "Service port listener active: $listenPort"
+            }
+
+            Write-Host "Plugin Console URL: http://${deployHost}:${devPort}/plugins/${HotUpdatePlugin}/" -ForegroundColor Green
+            Write-Host "Zero-Downtime: Container $containerName was NOT restarted. Production container (${deployHost}:5270) unaffected." -ForegroundColor Cyan
+            return
+        }
+        finally {
+            if (Test-Path $pluginBundle) { Remove-Item $pluginBundle -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
 
     if ($Mode -eq "Dev") {
         # 1/4 Code Sync (Adaptive Strategy Pattern: Auto -> GitArchive (if clean) vs Direct (if dirty) vs GitPull)
@@ -341,27 +502,7 @@ git -C "$devWorkdir" log -1 --oneline
         Write-Success "Fast dev image built successfully!"
 
         Write-Step "3/4 [Dev] Launching development container ($containerName on port $devPort)..."
-        $devRunCmd = @"
-docker rm -f $containerName 2>/dev/null || true
-docker run -d \
-  --name $containerName \
-  --restart unless-stopped \
-  --privileged \
-  --pid=host \
-  --user root \
-  --device /dev/fuse \
-  --device=/dev/net/tun \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -p ${devPort}:5270 \
-  -p 18080-18090:18080-18090 \
-  -v ${containerName}-data:/app/data \
-  -v ${devWorkdir}/src/LinuxWebTool.WebHost/wwwroot:/app/wwwroot \
-  -v ${devWorkdir}/plugins:/app/plugins \
-  -v /lwt:/lwt:rshared \
-  -v /var/docker:/var/docker:rshared \
-  -v /usr/local/bin:/usr/local/bin:ro \
-  $devImage
-"@
+        $devRunCmd = "docker rm -f $containerName 2>/dev/null || true; docker run -d --name $containerName --restart unless-stopped --privileged --pid=host --user root --device /dev/fuse --device=/dev/net/tun -v /var/run/docker.sock:/var/run/docker.sock -p ${devPort}:5270 -p 18080-18090:18080-18090 -v ${containerName}-data:/app/data -v ${devWorkdir}/src/LinuxWebTool.WebHost/wwwroot:/app/wwwroot -v ${devWorkdir}/plugins:/app/plugins -v /lwt:/lwt:rshared -v /var/docker:/var/docker:rshared -v /usr/local/bin:/usr/local/bin:ro $devImage"
         Invoke-RemoteSsh $devRunCmd
         Write-Success "Dev container launched (Live volume mounts for wwwroot and plugins active)!"
 

@@ -197,7 +197,7 @@ func main() {
 	subnetsFlag := flag.String("allowed-subnets", "", "Allowed target subnets (e.g. '10.,127.,192.168.', '10.0.0.0/8')")
 	domainsFlag := flag.String("allowed-domains", "", "Allowed target domains (e.g. '*.internal,*.local,regex:...')")
 	clientsFlag := flag.String("allowed-clients", "", "Allowed client incoming IPs/subnets")
-	presetFlag := flag.String("acl-preset", "lan", "ACL preset ('lan', 'loopback', 'all')")
+	presetFlag := flag.String("acl-preset", "all", "ACL preset ('lan', 'loopback', 'all')")
 	flag.Parse()
 
 	stateDir := resolveStateDir(*stateDirFlag)
@@ -252,7 +252,16 @@ func main() {
 		preset = os.Getenv("SOCKS5_ACL_PRESET")
 	}
 	if preset == "" {
-		preset = "lan"
+		preset = "all"
+	}
+	if subnets == "" && preset == "all" {
+		subnets = "*"
+	}
+	if domains == "" && preset == "all" {
+		domains = "*"
+	}
+	if clients == "" {
+		clients = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128"
 	}
 
 	// 磁盘持久化配置状态覆盖 (State Machine Hydration)

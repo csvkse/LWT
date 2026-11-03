@@ -289,14 +289,15 @@ func compileAclRules(preset, rawSubnets, rawDomains, rawClients string) (*Compil
 	clientParts := splitRules(rawClients)
 	if len(clientParts) == 0 {
 		switch preset {
-		case PresetAll:
-			acl.AllowAllClient = true
 		case PresetLoopback:
 			for _, cp := range []string{"127.0.0.1/32", "::1/128"} {
 				rule, _ := parseSubnetRule(cp)
 				acl.ClientRules = append(acl.ClientRules, rule)
 			}
 		case PresetLan:
+			fallthrough
+		case PresetAll:
+			// 出站目标即使全网开放 (PresetAll)，入站客户端来源默认仍为局域网私网 (LAN) 保护，严防公网未授权探针
 			fallthrough
 		default:
 			for _, cp := range defaultLanSubnets {

@@ -21,13 +21,13 @@
     "--password",
     "",
     "--acl-preset",
-    "lan",
+    "all",
     "--allowed-subnets",
-    "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128",
+    "*",
     "--allowed-domains",
-    "*.local,*.internal,*.lan,localhost",
+    "*",
     "--allowed-clients",
-    ""
+    "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128"
   ],
   "configForm": [
     {
@@ -59,32 +59,32 @@
       "label": "访问控制预设模式 (ACL Preset)",
       "type": "select",
       "options": [
+        "all",
         "lan",
-        "loopback",
-        "all"
+        "loopback"
       ],
-      "defaultValue": "lan"
+      "defaultValue": "all"
     },
     {
       "field": "allowed_clients",
       "label": "入站客户端 IP 访问限制 (标准 CIDR，空则使用预设)",
       "type": "text",
-      "defaultValue": "",
-      "placeholder": "例如: 127.0.0.1/32, 10.126.0.0/16 或留空使用预设"
+      "defaultValue": "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128",
+      "placeholder": "例如: 10.0.0.0/8, 192.168.0.0/16 或留空使用局域网默认"
     },
     {
       "field": "allowed_subnets",
       "label": "允许目标网段 (标准 CIDR)",
       "type": "text",
-      "defaultValue": "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128",
-      "placeholder": "例如: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16"
+      "defaultValue": "*",
+      "placeholder": "例如: * (全网开放), 10.0.0.0/8, 192.168.0.0/16"
     },
     {
       "field": "allowed_domains",
       "label": "允许目标域名 (通配符或正则)",
       "type": "text",
-      "defaultValue": "*.local,*.internal,*.lan,localhost",
-      "placeholder": "例如: *.internal, *.corp.local, regex:^.*\\.corp$"
+      "defaultValue": "*",
+      "placeholder": "例如: * (全网开放), *.internal, *.corp.local"
     }
   ],
   "network": {

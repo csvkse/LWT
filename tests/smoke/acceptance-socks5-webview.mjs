@@ -125,10 +125,17 @@ async function runAcceptance() {
   const portCorrect = displayPort.includes('18080');
   const curlCorrect = curlPreview.includes('18080');
   const no18001 = !displayPort.includes('18001') && !curlPreview.includes('18001');
+  const expectedHost = new URL(baseUrl).hostname;
+  const hostDynamic = curlPreview.includes(expectedHost);
 
   console.log(`🎯 检验 1: Webview 端口显示 :18080 -> ${portCorrect ? '✅ 成功' : '❌ 失败'}`);
   console.log(`🎯 检验 2: cURL 指引动态绑定 :18080 -> ${curlCorrect ? '✅ 成功' : '❌ 失败'}`);
   console.log(`🎯 检验 3: 绝无 18001 历史错误硬编码残留 -> ${no18001 ? '✅ 成功' : '❌ 失败'}`);
+  console.log(`🎯 检验 4: cURL 动态绑定当前宿主主机 (${expectedHost}) -> ${hostDynamic ? '✅ 成功' : '❌ 失败'}`);
+
+  if (!hostDynamic) {
+    throw new Error(`cURL 指引未动态绑定当前宿主主机 ${expectedHost}: ${curlPreview}`);
+  }
 
   await saveScreenshot(page, '04-acceptance-success.png');
 

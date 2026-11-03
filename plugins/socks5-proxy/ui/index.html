@@ -275,7 +275,7 @@
       <span class="badge">🐹 Go 运行引擎</span>
       <span class="badge" id="active-auth-badge">🔑 无密码模式</span>
     </div>
-    <span class="badge badge-lan" id="active-preset-badge">🛡️ 局域网专用模式</span>
+    <span class="badge" id="active-preset-badge">🌐 全网开放模式</span>
   </div>
 
   <!-- 四层协议防呆提示 -->
@@ -363,8 +363,8 @@
 
     <div class="form-group">
       <label>允许接入客户端 IP 或网段 (标准 CIDR 格式，逗号或换行分隔):</label>
-      <input type="text" id="input-clients" value="" placeholder="留空使用预设，或输入如: 127.0.0.1/32, 10.126.0.0/16" />
-      <div class="tip">在 TCP 握手前短路阻断未授权客户端 IP 连接，零资源占用防护网络端口扫描探测。</div>
+      <input type="text" id="input-clients" value="10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1/128" placeholder="留空使用预设，或输入如: 10.0.0.0/8, 192.168.0.0/16" />
+      <div class="tip">在 TCP 握手前短路阻断未授权客户端 IP 连接，默认放行局域网私网来源。</div>
     </div>
   </div>
 
@@ -376,22 +376,22 @@
 
     <div class="presets">
       <span style="font-size: 0.8rem; color: var(--text-muted); align-self: center; margin-right: 4px;">出站快捷预设:</span>
-      <button class="preset-pill active" id="pill-lan" onclick="applyPreset('lan')">🟢 局域网专用 (推荐)</button>
+      <button class="preset-pill active" id="pill-all" onclick="applyPreset('all')">🌐 全网开放 (无限制，推荐)</button>
+      <button class="preset-pill" id="pill-lan" onclick="applyPreset('lan')">🟢 局域网专用</button>
       <button class="preset-pill" id="pill-loopback" onclick="applyPreset('loopback')">🔒 仅本机回环</button>
-      <button class="preset-pill" id="pill-all" onclick="applyPreset('all')">🌐 全网开放 (无限制)</button>
       <button class="preset-pill" id="pill-custom" onclick="applyPreset('custom')">⚙️ 自定义规则</button>
     </div>
 
     <div class="form-group">
       <label>允许访问目标网段 (标准 CIDR 格式，消除前缀歧义):</label>
-      <input type="text" id="input-subnets" value="10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1/128" placeholder="例如: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16" />
-      <div class="tip">严格采用标准 CIDR 掩码位校验。支持输入容错（如 10. 自动补齐为 10.0.0.0/8）。</div>
+      <input type="text" id="input-subnets" value="*" placeholder="例如: * (全网开放), 10.0.0.0/8, 192.168.0.0/16" />
+      <div class="tip">默认全网开放无限制（输入 *）。严格采用标准 CIDR 掩码位校验。</div>
     </div>
 
     <div class="form-group">
       <label>允许访问目标域名 (通配符 *.internal 或正则表达式 regex:^.*\.corp$):</label>
-      <input type="text" id="input-domains" value="*.local, *.internal, *.lan, localhost" placeholder="例如: *.internal, *.corp.local, regex:^.*\.corp$" />
-      <div class="tip">支持通配符与正则表达式。放行域名仍需进行 Anti-DNS-Rebinding 二次 IP 校验防重绑定穿透。</div>
+      <input type="text" id="input-domains" value="*" placeholder="例如: * (全网开放), *.internal, *.corp.local" />
+      <div class="tip">默认全网放行（输入 *）。支持通配符与正则表达式。</div>
     </div>
 
     <div class="btn-row">
@@ -420,8 +420,9 @@
 
   <script>
     let currentManifest = null;
-    let activePreset = 'lan';
+    let activePreset = 'all';
     let currentAuthMode = 'none';
+    let currentHost = '';
 
     function setStatus(msg, ok) {
       const el = document.getElementById('status-msg');
@@ -523,17 +524,30 @@
       return urlParams.get('token') || localStorage.getItem('lwt_token') || '';
     }
 
+    function getHostName() {
+      if (currentHost && currentHost !== '0.0.0.0') {
+        return currentHost;
+      }
+      const locHost = window.location.hostname;
+      if (locHost && locHost !== '0.0.0.0') {
+        return locHost;
+      }
+      return '127.0.0.1';
+    }
+
     function updateClientPreview() {
       let authPrefix = '';
       if (currentAuthMode === 'password') {
-        const user = document.getElementById('input-username').value.trim() || 'user';
-        const pass = document.getElementById('input-password').value || 'pass';
+        const user = document.getElementById('input-username').value.trim() || 'proxyuser';
+        const pass = document.getElementById('input-password').value || 'secretpassword123';
         authPrefix = encodeURIComponent(user) + ':' + encodeURIComponent(pass) + '@';
       }
       const port = document.getElementById('proxy-port').textContent.replace(':', '').trim() || '18080';
-      const proxyUrl = 'socks5://' + authPrefix + '127.0.0.1:' + port;
+      const host = getHostName();
+      const proxyUrl = 'socks5://' + authPrefix + host + ':' + port;
 
-      document.getElementById('curl-preview').textContent = 'curl -x ' + proxyUrl + ' http://127.0.0.1:5270/health';
+      const healthHost = (host === '127.0.0.1' || host === 'localhost') ? '127.0.0.1:5270' : `${host}:${window.location.port || '5271'}`;
+      document.getElementById('curl-preview').textContent = 'curl -x ' + proxyUrl + ' http://' + healthHost + '/health';
       document.getElementById('git-preview').textContent = 'git config --global http.proxy ' + proxyUrl;
       document.getElementById('env-preview').textContent = 'export ALL_PROXY=' + proxyUrl;
     }
@@ -544,7 +558,7 @@
     function resetDefaults() {
       setAuthMode('none');
       applyClientPreset('lan');
-      applyPreset('lan');
+      applyPreset('all');
       saveAcl();
     }
 
@@ -575,11 +589,14 @@
           }
         }
 
+        let hasPresetArg = false;
+        let hasClientsArg = false;
         if (currentManifest && Array.isArray(currentManifest.arguments)) {
           const args = currentManifest.arguments;
           for (let i = 0; i < args.length; i++) {
             if (args[i] === '--acl-preset' && args[i+1]) {
               applyPreset(args[i+1]);
+              hasPresetArg = true;
             }
             if (args[i] === '--allowed-subnets' && args[i+1]) {
               document.getElementById('input-subnets').value = args[i+1];
@@ -589,6 +606,7 @@
             }
             if (args[i] === '--allowed-clients' && args[i+1]) {
               document.getElementById('input-clients').value = args[i+1];
+              hasClientsArg = true;
             }
             if (args[i] === '--auth-mode' && args[i+1]) {
               setAuthMode(args[i+1]);
@@ -600,6 +618,12 @@
               document.getElementById('input-password').value = args[i+1];
             }
           }
+        }
+        if (!hasPresetArg) {
+          applyPreset('all');
+        }
+        if (!hasClientsArg && !document.getElementById('input-clients').value) {
+          applyClientPreset('lan');
         }
         updateClientPreview();
       } catch (err) {
@@ -618,13 +642,13 @@
           return;
         }
 
-        const subnets = document.getElementById('input-subnets').value.trim();
-        const domains = document.getElementById('input-domains').value.trim();
-        const clients = document.getElementById('input-clients').value.trim();
+        const subnets = document.getElementById('input-subnets').value.trim() || '*';
+        const domains = document.getElementById('input-domains').value.trim() || '*';
+        const clients = document.getElementById('input-clients').value.trim() || '10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1/128';
         const authMode = currentAuthMode;
         const username = document.getElementById('input-username').value.trim();
         const password = document.getElementById('input-password').value;
-        const preset = activePreset;
+        const preset = activePreset || 'all';
 
         if (authMode === 'password' && (!username || !password)) {
           setStatus('启用密码认证模式时，用户名与密码均不能为空', false);
@@ -702,7 +726,10 @@
     // 接收父窗口通过 postMessage 下发的基础环境信息
     window.addEventListener('message', (event) => {
       if (event.data && (event.data.type === 'LWT_PLUGIN_ENV' || event.data.allocatedPort)) {
-        const { allocatedPort, configuredPort, isPortAvoided, portConflictReason } = event.data;
+        const { allocatedPort, configuredPort, isPortAvoided, portConflictReason, hostname } = event.data;
+        if (hostname) {
+          currentHost = hostname;
+        }
         const port = allocatedPort || configuredPort;
         if (port) {
           const portEl = document.getElementById('proxy-port');
@@ -712,8 +739,8 @@
             avoidedBadge.style.display = isPortAvoided ? 'inline-block' : 'none';
             if (portConflictReason) avoidedBadge.title = portConflictReason;
           }
-          updateClientPreview();
         }
+        updateClientPreview();
       }
     });
 
