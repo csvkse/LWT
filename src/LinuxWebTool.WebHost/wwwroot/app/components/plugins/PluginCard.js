@@ -1,6 +1,8 @@
 import { computed, defineComponent } from 'vue';
 import { PluginStateMachine } from '../../utils/pluginStateMachine.js';
+import { PluginUrlResolver } from '../../utils/pluginUrlResolver.js';
 import { auth } from '../../store/auth.js';
+import { toast } from '../../store/toast.js';
 
 export default defineComponent({
   name: 'PluginCard',
@@ -45,8 +47,8 @@ export default defineComponent({
     const canStop = computed(() => PluginStateMachine.canStop(props.plugin));
     const canRestart = computed(() => PluginStateMachine.canRestart(props.plugin));
 
-    const hasWebview = computed(() => Boolean(props.plugin.manifest?.ui?.hasWebview || props.plugin.manifest?.ui?.entry));
-    const hasHttpService = computed(() => isResident.value && Boolean(props.plugin.manifest?.network?.supportHttp));
+    const hasWebview = computed(() => PluginUrlResolver.hasWebview(props.plugin));
+    const hasHttpService = computed(() => PluginUrlResolver.hasIndependentHttpGateway(props.plugin));
     const customActions = computed(() => props.plugin.manifest?.customActions || []);
 
     function handleStart() { emit('start', props.plugin); }
@@ -73,14 +75,7 @@ export default defineComponent({
     function handleSwitchPort() { emit('switch-port', props.plugin); }
 
     function openGateway() {
-      if (props.plugin.gatewayUrl) {
-        let url = props.plugin.gatewayUrl;
-        if (auth.token) {
-          const sep = url.includes('?') ? '&' : '?';
-          url = `${url}${sep}token=${encodeURIComponent(auth.token)}`;
-        }
-        window.open(url, '_blank');
-      }
+      PluginUrlResolver.openPluginGateway(props.plugin, auth.token, toast);
     }
 
     return {

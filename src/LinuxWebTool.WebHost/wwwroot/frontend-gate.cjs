@@ -26,6 +26,7 @@
  *  FE-PLUGIN-DATA-PURITY PluginsView 全局数据加载禁止传递响应式过滤参数，防止刷新冲垮宏观统计卡片与分类树事实源
  *  FE-PLUGIN-FILTER-FSM 插件中心策略模式多维过滤、有限状态机与暗黑搜索框契约行为门禁
  *  FE-PLUGIN-FILE-TREE 插件代码编辑文件树适配器与折叠状态机行为门禁（树状展开/折叠、Folders-First 排序与祖先自动聚焦）
+ *  FE-PLUGIN-GATEWAY-FALLBACK 插件网关与页面 URL 必须通过 PluginUrlResolver 解析，禁止组件裸读 gatewayUrl 造成坏死
  *
  * 基线：frontend-gate-baseline.json 冻结存量债务，只允许删除条目，不允许新增。
  */
@@ -607,6 +608,17 @@ if (fs.existsSync(mcpBridgeHtmlFile)) {
   }
 }
 
+// FE-PLUGIN-GATEWAY-FALLBACK：禁止在业务组件中直接读取未经兜底的 plugin.gatewayUrl，必须统一使用 PluginUrlResolver
+for (const file of files) {
+  if (!file.endsWith('.js')) continue;
+  const relPath = path.relative(appDir, file).replace(/\\/g, '/');
+  if (relPath === 'utils/pluginUrlResolver.js' || relPath === 'config.js') continue;
+  const content = fs.readFileSync(file, 'utf8');
+  if (/\.gatewayUrl\b/.test(content)) {
+    add('FE-PLUGIN-GATEWAY-FALLBACK', file, '禁止直接读取 .gatewayUrl，必须使用 PluginUrlResolver 解析与自动降级');
+  }
+}
+
 // 基线比对
 const baseline = readBaseline();
 const baselineSet = new Set();
@@ -709,4 +721,15 @@ if (fileTreeResult.error || fileTreeResult.status !== 0) {
   process.exit(1);
 }
 console.log('✅ FE-PLUGIN-FILE-TREE：插件文件树适配器与状态机行为门禁通过');
+
+const urlResolverTests = path.resolve(__dirname, '../../../tests/frontend/plugin-url-resolver.test.mjs');
+const urlResolverResult = spawnSync(process.execPath, ['--experimental-vm-modules', '--test', urlResolverTests], {
+  encoding: 'utf8', timeout: 30000, windowsHide: true,
+});
+if (urlResolverResult.error || urlResolverResult.status !== 0) {
+  console.error('[FE-PLUGIN-URL-RESOLVER] 插件多维 URL 解析器与策略仲裁门禁失败');
+  console.error(urlResolverResult.stdout || urlResolverResult.stderr || urlResolverResult.error?.message);
+  process.exit(1);
+}
+console.log('✅ FE-PLUGIN-URL-RESOLVER：插件多维 URL 解析器与策略仲裁门禁通过');
 console.log('✅ 前端架构门禁通过');

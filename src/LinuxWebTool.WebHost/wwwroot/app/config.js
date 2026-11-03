@@ -1,5 +1,5 @@
 // 端点常量与本地存储键 —— API 路径字符串仅允许出现在本文件（前端架构门禁 rule FE-API-OWNERSHIP）
-export const API_BASE = `${window.location.origin}/api`;
+export const API_BASE = `${typeof window !== 'undefined' ? window.location.origin : ''}/api`;
 
 export const LS_KEYS = {
   token: 'lwt_token',

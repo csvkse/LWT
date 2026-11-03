@@ -1333,7 +1333,9 @@ public class ArchitectureTests
         Assert.Contains("allow-modals", webviewContent);
 
         // 2. 宿主 WebviewModal 针对常驻微服务必须走反代网关 /plugins/{id}/，静态 UI 资产必须使用规范资产端点
-        Assert.Contains("API.plugins.gatewayUrl", webviewContent);
+        var resolverFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "wwwroot", "app", "utils", "pluginUrlResolver.js");
+        var combinedWebviewLogic = webviewContent + (File.Exists(resolverFile) ? File.ReadAllText(resolverFile) : "");
+        Assert.Contains("API.plugins.gatewayUrl", combinedWebviewLogic);
         Assert.Contains("/api/Plugins/${encodeURIComponent(id)}/Assets/", configContent);
 
         // 3. mcp-bridge 控制台 HTML 严禁使用阻断式原生弹窗 (window.prompt / window.confirm)

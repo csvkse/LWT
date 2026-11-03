@@ -1,5 +1,5 @@
 import { computed, defineComponent, ref } from 'vue';
-import { API } from '../../config.js';
+import { PluginUrlResolver } from '../../utils/pluginUrlResolver.js';
 import { auth } from '../../store/auth.js';
 
 export default defineComponent({
@@ -21,22 +21,8 @@ export default defineComponent({
 
     const assetUrl = computed(() => {
       if (!props.plugin) return '';
-      let url = '';
-      const rawEntry = props.plugin.manifest?.ui?.entry || props.plugin.manifest?.ui?.entryFile;
-      if (rawEntry && rawEntry !== 'web') {
-        const cleanEntry = rawEntry.replace(/^\/+/, '').replace(/^ui\//, '');
-        url = API.plugins.asset(props.plugin.id, cleanEntry);
-      } else if (props.plugin.manifest?.ui?.entry === 'web' || props.plugin.gatewayUrl || props.plugin.manifest?.network?.mode === 'path') {
-        url = props.plugin.gatewayUrl || API.plugins.gatewayUrl(props.plugin.id);
-      } else {
-        url = API.plugins.asset(props.plugin.id, 'index.html');
-      }
-
-      if (url && auth.token) {
-        const sep = url.includes('?') ? '&' : '?';
-        return `${url}${sep}token=${encodeURIComponent(auth.token)}`;
-      }
-      return url;
+      // Webview 路由通过 PluginUrlResolver 统一解析，涵盖常驻微服务网关 (API.plugins.gatewayUrl) 与静态资产端点
+      return PluginUrlResolver.getWebviewUrl(props.plugin, auth.token);
     });
 
     const displayUrl = computed(() => {
