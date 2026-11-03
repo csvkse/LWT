@@ -79,7 +79,7 @@ flowchart TD
   - **防误报设计**：引入 **`Mock Lexicon`（测试伪凭据词典）**，包含 `mock`, `test`, `dummy`, `sample`, `example`, `placeholder`, `super-safe`, `changeme` 等标识时自动降级或放行。
 - **合法的标准占位符**：
   - `tunnel_0123456789abcdef0123456789abcdef`、`your_secure_password_here`、`sk-proj-...`。
-  - **防误报设计**：建立**已批准的标准脱敏占位符白名单表**，严格放行符合《AGENT.md 第 7 节》规定的虚拟模式。
+  - **防误报设计**：建立**已批准的标准脱敏占位符白名单表**，严格放行符合《AGENTS.md 第 7 节》规定的虚拟模式。
 - **合法内网回环与通用网段**：
   - `127.0.0.1`、`0.0.0.0`、Docker 默认网桥 `172.17.0.0/16`、RFC 1918 预留测试地址。
   - **防误报设计**：IP 规则仅针对包含明确凭据上下文（如 `url = http://user:pass@ip` 或未排除的特殊内网堡垒 IP）进行告警，白名单放行常见回环与占位网段。
@@ -200,7 +200,7 @@ classDiagram
 | **TruffleHog** | Truffle Security | • 深度检测能力极强，支持 Git 历史深层全量挖掘<br>• 支持动态 API 验活（Active Verification）探测凭据真伪 | • 体量较大，扫描较重<br>• 动态探测需要外网网络权限，不适合作为高频离线 `pre-commit` | 适合定期的安全巡检与专项审计，不适合日常提交阻断。 |
 | **detect-secrets** | Yelp | • 核心思想为基线审计（Baseline 模式），支持记录存量债务<br>• 具有插件式启发式算法与熵值分析 | • 强依赖 Python 运行时环境，Windows 开发环境统一配置成本高 | 借鉴其基线增量（Baseline & Heuristics）的思想。 |
 | **Husky + lint-staged** | Typicode | • 前端业界事实标准，全自动管理 `.husky` 钩子映射 | • 本项目采用原生 ESM 零构建，无根目录 `package.json`，引入 npm 依赖体系会破坏现有零打包架构 | 不推荐引入 npm 庞大生态。 |
-| **项目原生自研轻量门禁** (`.githooks` + `frontend-gate` / `C# ArchGate`) | 本工程既有技术栈 | • **零新增外部依赖**：直接复用环境已有的 Node.js 或 .NET 运行时<br>• **100% 契合当前工程契约**（自动对齐 `AGENT.md` 规范与架构门禁体系）<br>• **性能极高**（< 80ms）且与 `frontend-gate.cjs` 无缝融合 | • 需维护项目特有的扫描脚本与规则库（但规则数量完全可控） | **🌟 最优主选方案**：与现有门禁体系浑然一体，维护成本最低。 |
+| **项目原生自研轻量门禁** (`.githooks` + `frontend-gate` / `C# ArchGate`) | 本工程既有技术栈 | • **零新增外部依赖**：直接复用环境已有的 Node.js 或 .NET 运行时<br>• **100% 契合当前工程契约**（自动对齐 `AGENTS.md` 规范与架构门禁体系）<br>• **性能极高**（< 80ms）且与 `frontend-gate.cjs` 无缝融合 | • 需维护项目特有的扫描脚本与规则库（但规则数量完全可控） | **🌟 最优主选方案**：与现有门禁体系浑然一体，维护成本最低。 |
 
 ---
 
@@ -279,7 +279,7 @@ EXIT_CODE=$?
 if [ $EXIT_CODE -ne 0 ]; then
     echo ""
     echo "❌ [Security Gate] 提交被拦截！检测到敏感凭据、真实地址或未脱敏配置。"
-    echo "👉 请参考 AGENT.md 第 7 节规范进行脱敏，或将真实凭据存入 /env/.envdev。"
+    echo "👉 请参考 AGENTS.md 第 7 节规范进行脱敏，或将真实凭据存入 /env/.envdev。"
     exit 1
 fi
 
@@ -361,4 +361,4 @@ flowchart LR
 3. **第三阶段：架构门禁与 CI 集成**
    - 在 `ArchitectureTests.cs` 中补充 `LinuxArch038` 规则，更新 `docs/dev/architecture-gates.md`，使安全合规正式升级为主工程一级架构指标。
 4. **第四阶段：团队与 Agent 协同自愈**
-   - 更新 `AGENT.md`，使 AI Agent 能够自动识别门禁告警信息，就地以标准占位符自愈修复，形成研发全生命周期的凭据安全闭环。
+   - 更新 `AGENTS.md`，使 AI Agent 能够自动识别门禁告警信息，就地以标准占位符自愈修复，形成研发全生命周期的凭据安全闭环。

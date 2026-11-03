@@ -1,4 +1,4 @@
-# LinuxWebTool (LWT) 智能体协作指南 (AGENT.md)
+# LinuxWebTool (LWT) 智能体协作指南 (AGENTS.md)
 
 > 本文档专为后续跨会话的 AI Coding Agent 及开发者编写，旨在提供统一、标准化、即开即用的环境指引、双轨制部署流程、解耦推送策略与内置浏览器验收规范。
 

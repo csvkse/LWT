@@ -37,7 +37,7 @@
   - 在 [`PluginPortManager.cs`](file:///e:/WorkProject/CSharp/PrivateProject/Web/WebToolForLinux/src/LinuxWebTool.Infrastructure/Features/Plugins/Supervisor/PluginPortManager.cs) 中，系统为插件分配 `18000-18999` 的 TCP 端口。
   - 在 sample 插件中（例如 `demo-py-api/main.py`、`ChatGPT 渠道网关 worker.py`、`socks5-proxy`），进程默认监听了 `0.0.0.0:{port}`（监听全网卡），Node.js 默认 `server.listen(port)` 同样默认监听所有网络接口。
 - **容器网络协同放大**：
-  - 根据 [`AGENT.md`](file:///e:/WorkProject/CSharp/PrivateProject/Web/WebToolForLinux/AGENT.md#L24) 规范，LWT 生产容器运行在 `--net=host`（主机网络模式）。
+  - 根据 [`AGENTS.md`](file:///e:/WorkProject/CSharp/PrivateProject/Web/WebToolForLinux/AGENTS.md#L24) 规范，LWT 生产容器运行在 `--net=host`（主机网络模式）。
   - **严重后果**：微服务绑定的 `0.0.0.0:18001` **直接暴露在宿主机的所有物理网卡与局域网 IP 上**！
   - 外部黑客只要用 Nmap / Masscan 扫描 `18000-18999` 端口，**根本不需要经过 LWT 的 5270 网关**，即可直连微服务进程，使得一切上层网关的鉴权策略沦为摆设！
 

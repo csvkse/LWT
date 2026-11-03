@@ -470,7 +470,7 @@ function runSecurityGate() {
 
   if (violationCount > 0) {
     console.error(`\n${colors.red}${colors.bold}🚫 安全门禁未通过！发现 ${violationCount} 处敏感凭据风险（耗时 ${elapsed}ms，扫描 ${scannedFiles} 个变更文件）。${colors.reset}`);
-    console.error(`${colors.yellow}👉 请参考 AGENT.md 第 7 节使用合规占位符，或将真实凭据存入 /env/.envdev。${colors.reset}\n`);
+    console.error(`${colors.yellow}👉 请参考 AGENTS.md 第 7 节使用合规占位符，或将真实凭据存入 /env/.envdev。${colors.reset}\n`);
     process.exit(1);
   }
 

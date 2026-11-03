@@ -13,7 +13,7 @@ EXIT_CODE=$?
 if [ $EXIT_CODE -ne 0 ]; then
     echo ""
     echo "❌ [Security Gate] 提交被拦截！检测到敏感凭据、真实地址或未脱敏配置。"
-    echo "👉 请参考 AGENT.md 第 7 节规范进行脱敏，或将真实凭据存入 /env/.envdev。"
+    echo "👉 请参考 AGENTS.md 第 7 节规范进行脱敏，或将真实凭据存入 /env/.envdev。"
     exit 1
 fi
 
