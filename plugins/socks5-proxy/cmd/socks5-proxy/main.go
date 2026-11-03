@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -425,6 +426,31 @@ func (b *BufferedConn) CloseWrite() error {
 	return nil
 }
 
+func (b *BufferedConn) Buffered() int {
+	if br, ok := b.r.(*bufio.Reader); ok {
+		return br.Buffered()
+	}
+	return 0
+}
+
+func (b *BufferedConn) RawConn() net.Conn {
+	return b.Conn
+}
+
+func extractTcpConn(conn net.Conn) *net.TCPConn {
+	for {
+		if bc, ok := conn.(*BufferedConn); ok {
+			conn = bc.RawConn()
+			continue
+		}
+		break
+	}
+	if tcp, ok := conn.(*net.TCPConn); ok {
+		return tcp
+	}
+	return nil
+}
+
 func optimizeTcpConn(conn net.Conn) {
 	if tcp, ok := conn.(*net.TCPConn); ok {
 		_ = tcp.SetNoDelay(true)
@@ -698,16 +724,38 @@ func (s *Server) relay(client, target net.Conn) error {
 	optimizeTcpConn(client)
 	optimizeTcpConn(target)
 
+	// 预先排空 client (BufferedConn) 中由于 Peek 首字节嗅探而残留的预读数据
+	if bc, ok := client.(*BufferedConn); ok {
+		if bufferedLen := bc.Buffered(); bufferedLen > 0 {
+			if n, err := io.CopyN(target, bc.r, int64(bufferedLen)); err == nil {
+				atomic.AddInt64(&s.metrics.BytesRx, n)
+			}
+		}
+		client = bc.RawConn()
+	}
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 
 	pipe := func(dst, src net.Conn, counter *int64) {
 		defer wg.Done()
-		bufPtr := bufPool.Get().(*[]byte)
-		buf := *bufPtr
-		defer bufPool.Put(bufPtr)
 
-		n, _ := io.CopyBuffer(dst, src, buf)
+		dstTcp := extractTcpConn(dst)
+		srcTcp := extractTcpConn(src)
+
+		var n int64
+		// Tier 1: Linux 原生内核 splice(2) 零拷贝快速通道 (Zero-Copy Splice Relay)
+		// 在 Linux 平台下，当双方均为原生 TCPConn 且传入 nil buffer 时，
+		// Go 运行时 net.(*TCPConn).ReadFrom 会自动触发 Linux 内核 splice 系统调用，
+		// 实现页缓存零拷贝转移，完全绕过用户态内存，大幅提升万兆链路吞吐并降低 CPU 占用
+		if runtime.GOOS == "linux" && dstTcp != nil && srcTcp != nil {
+			n, _ = io.Copy(dstTcp, srcTcp)
+		} else {
+			// Tier 2: 跨平台/非TCP环境 fallback 至 sync.Pool 缓冲池
+			bufPtr := bufPool.Get().(*[]byte)
+			n, _ = io.CopyBuffer(dst, src, *bufPtr)
+			bufPool.Put(bufPtr)
+		}
 		atomic.AddInt64(counter, n)
 
 		// 半关闭状态：通知对端本方向数据已发送完毕

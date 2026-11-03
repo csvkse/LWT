@@ -2416,6 +2416,14 @@ public class ArchitectureTests
         Assert.Contains("Stale-While-Revalidate", docContent);
         Assert.Contains("TCP_NODELAY", docContent);
         Assert.Contains("Navigation Timing", docContent);
+
+        // 4. 验证 main.go 落实了 Linux 原生内核 splice(2) 零拷贝快速通道与 BufferedConn 残留安全排空
+        var mainGoFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "main.go");
+        var mainGoContent = File.ReadAllText(mainGoFile);
+        Assert.Contains("extractTcpConn", mainGoContent);
+        Assert.Contains("runtime.GOOS == \"linux\"", mainGoContent);
+        Assert.Contains("io.Copy(dstTcp, srcTcp)", mainGoContent);
+        Assert.Contains("bc.Buffered()", mainGoContent);
     }
 }
 
