@@ -2424,6 +2424,14 @@ public class ArchitectureTests
         Assert.Contains("runtime.GOOS == \"linux\"", mainGoContent);
         Assert.Contains("io.Copy(dstTcp, srcTcp)", mainGoContent);
         Assert.Contains("bc.Buffered()", mainGoContent);
+
+        // 5. 验证无代理 vs 代理全维度对照测试套件 tests/benchmark/proxy-vs-direct-comparison.mjs 存在
+        var compBenchFile = Path.Combine(RepoRoot, "tests", "benchmark", "proxy-vs-direct-comparison.mjs");
+        Assert.True(File.Exists(compBenchFile), "tests/benchmark/proxy-vs-direct-comparison.mjs 必须存在");
+        var compBenchContent = File.ReadAllText(compBenchFile);
+        Assert.Contains("measureDirectTcp", compBenchContent);
+        Assert.Contains("measureDirectTtfb", compBenchContent);
+        Assert.Contains("measureBrowserPage", compBenchContent);
     }
 }
 
