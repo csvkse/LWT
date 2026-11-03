@@ -33,4 +33,5 @@ public interface IPluginManager
     ValueTask<PluginPortSwitchResult> SwitchPortAsync(string id, int newPort, bool restartIfRunning = true, CancellationToken ct = default);
     ValueTask<PluginActionResult> ExecuteActionAsync(PluginActionRequest request, CancellationToken ct = default);
     string? GetInternalSecret(string id);
+    event Action? OnPluginStateOrManifestChanged;
 }

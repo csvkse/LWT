@@ -29,7 +29,7 @@ public sealed class PluginIngressMiddleware(
 
     public async Task InvokeAsync(
         HttpContext context,
-        IPluginManager pluginManager,
+        IIngressRoutingTable routingTable,
         IDuplexStreamForwarder forwarder,
         IHttpClientFactory httpClientFactory)
     {
@@ -43,40 +43,27 @@ public sealed class PluginIngressMiddleware(
         }
 
         var ct = context.RequestAborted;
-        var plugins = await pluginManager.GetAllAsync(profileFilter: null, ct);
+        var activeRoutes = routingTable.GetActiveRoutes();
+        if (activeRoutes.Count == 0)
+        {
+            await next(context);
+            return;
+        }
 
         // 2. 收集所有匹配当前请求的有效候选路由并执行多维消歧仲裁评分
         var candidates = new List<IngressCandidate>();
 
-        foreach (var plugin in plugins)
+        foreach (var active in activeRoutes)
         {
-            if (plugin.State != PluginState.Running)
+            if (!IsPathMatch(active.EffectivePath, active.IsExact ? "Exact" : "Prefix", requestPath))
                 continue;
 
-            var ingress = plugin.Manifest.Ingress;
-            if (ingress == null || !ingress.Enabled || ingress.Routes.Count == 0)
+            if (!IsHeaderMatch(context, active.Route.Match.Headers))
                 continue;
 
-            var isStealth = string.Equals(ingress.Scope, "stealth", StringComparison.OrdinalIgnoreCase);
-
-            foreach (var route in ingress.Routes)
-            {
-                var effectivePaths = ResolveEffectivePaths(plugin.Id, route.Match, isStealth, logger);
-                if (effectivePaths.Count == 0) continue;
-
-                foreach (var (effectivePath, isExact) in effectivePaths)
-                {
-                    if (!IsPathMatch(effectivePath, isExact ? "Exact" : "Prefix", requestPath))
-                        continue;
-
-                    if (!IsHeaderMatch(context, route.Match.Headers))
-                        continue;
-
-                    // 计算多维消歧评分 (Precedence Score)
-                    int score = CalculatePrecedenceScore(context, route, effectivePath, isExact);
-                    candidates.Add(new IngressCandidate(plugin, route, effectivePath, score));
-                }
-            }
+            // 计算多维消歧评分 (Precedence Score)
+            int score = CalculatePrecedenceScore(context, active.Route, active.EffectivePath, active.IsExact);
+            candidates.Add(new IngressCandidate(active.Plugin, active.Route, active.EffectivePath, score));
         }
 
         if (candidates.Count == 0)
@@ -207,7 +194,7 @@ public sealed class PluginIngressMiddleware(
     /// 解析生效路径：区分标准隔离轨 (Standard) 与特权伪装轨 (Stealth)。
     /// 严禁任何模式侵犯宿主系统保留路径。
     /// </summary>
-    private static List<(string Path, bool IsExact)> ResolveEffectivePaths(
+    internal static List<(string Path, bool IsExact)> ResolveEffectivePaths(
         string pluginId,
         IngressMatchConfig match,
         bool isStealth,
