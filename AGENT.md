@@ -30,6 +30,17 @@
 | **数据目录** | 独立隔离卷 `linuxwebtool-dev-data` | 生产数据卷 `linuxwebtool-data` |
 | **凭据同步** | 首次拉起自动从 5270 生产容器热同步 `admin.json` | 读取宿主初始配置或自动生成 |
 
+### 敏捷开发部署决策矩阵 (Agile Decision Matrix)
+
+AI Agent 在日常开发与修复排障时，**必须依据修改范围精准选择最小粒度的更新策略**，严禁过度构建或盲目重启：
+
+| 变更范围 | 典型场景 | 推荐操作 | 耗时 | 容器停机时间 |
+| :--- | :--- | :--- | :--- | :--- |
+| **插件微服务逻辑/代码/配置** (`plugins/<id>/`) | MCP 智能安全网关、SOCKS5 代理、插件专属 webview 页面、`plugin.json`、Go/Node 业务代码修复 | **插件在线热更新** (`-HotUpdatePlugin <id>` 或 [`scripts/hot-update-mcp-bridge.ps1`](file:///e:/WorkProject/CSharp/PrivateProject/Web/WebToolForLinux/scripts/hot-update-mcp-bridge.ps1)) | **~5-8 秒** | **0 秒（零容器停机）** |
+| **主系统前端静态资源** (`src/.../wwwroot/`) | 页面样式、前端 Vue/ESM 组件、主系统视图布局 | **前端静态热更** (`-FrontendOnly`) | **~4-5 秒** | **0 秒（零容器停机）** |
+| **主系统后端与底层底座** (`src/.../Application`, `Infrastructure`, `WebHost`) | C# 控制器、中间件、PtyNative、EasyTier 核心调度、主数据库结构变更 | **开发镜像快速重建** (`-Mode Dev`) | **~40-50 秒** | 重启 `linuxwebtool-dev` |
+| **正式交付生产** | 功能全量回归、准备发布正式 Tag | **官方生产部署** (`-Mode Official`) | **~8-15 分钟** | 重启 `linuxwebtool` |
+
 ---
 
 ## 3. 两套方案具体使用方法
@@ -69,6 +80,32 @@ powershell -ExecutionPolicy Bypass -File scripts/deploy-remote.ps1 -Mode Dev -Sy
 powershell -ExecutionPolicy Bypass -File scripts/deploy-remote.ps1 -FrontendOnly
 ```
 > **效果**：约 4~5 秒完成双层热补丁（同时更新远程宿主机目录与容器内 `/app/wwwroot`）。完成后在浏览器直接按 `Ctrl + F5` 刷新页面即可查看改动！
+
+#### 4. 微服务插件在线热更新（Plugin HotUpdate - 零容器停机，统一强制规范）
+
+> [!IMPORTANT]
+> **插件更新铁律（AI Agent 强制遵从准则）**：
+> 凡涉及插件微服务本身的问题（例如 Go/Node 逻辑修复、OpenAI 隧道超时预算调整、SOCKS5 访问控制列表、manifest / [`plugin.json`](file:///e:/WorkProject/CSharp/PrivateProject/Web/WebToolForLinux/plugins/mcp-bridge/plugin.json) 配置微调、插件专属 webview 页面修改等），**只要不是插件底座平台（Plugin Platform 自身架构抽象、控制器管线）的问题，统一且必须使用【插件热更新方案】！严禁滥用 `-Mode Dev` 重启/重建开发容器！**
+
+- **为什么必须使用插件热更新**：
+  1. **零容器停机（Zero Downtime）**：`linuxwebtool-dev` 容器全程保持运行，网络命名空间、FRP 穿透会话、PTY 终端以及其他已加载的常驻微服务状态绝不丢失。
+  2. **极致秒级反馈**：耗时仅需 **5 ~ 8 秒**，相比全量镜像编译提速 80% 以上。
+  3. **消除系统级抖动**：频繁重建 Docker 容器容易引发端口重新分配冲突、TUN/FUSE 驱动句柄泄露及守护进程竞态。
+
+- **标准执行命令**：
+  ```powershell
+  # 方式 1: 专属一键热更脚本（针对高频更新的 MCP Bridge 智能安全网关）
+  powershell -ExecutionPolicy Bypass -File scripts/hot-update-mcp-bridge.ps1
+
+  # 方式 2: 统一脚本指定任意插件 ID（如 mcp-bridge, socks5-proxy 等）
+  powershell -ExecutionPolicy Bypass -File scripts/deploy-remote.ps1 -HotUpdatePlugin mcp-bridge
+  ```
+
+- **底层四重保障机制 (Quadruple-Guarantee)**：
+  1. **Linux 静态 ELF 预编译**：自动检测源文件 LastWriteTime，优先本地交叉编译 Linux 架构的 ELF 静态二进制（`CGO_ENABLED=0 GOOS=linux GOARCH=amd64`），彻底避免上传 Windows PE 造成远程无法执行。
+  2. **原子 Inode 替换（Atomic Inode Swap）**：在容器运行卷 `/app/data/plugins/<id>/` 内，通过 `cp -> chmod +x -> mv -f` 实现原子覆盖，避免覆盖正在运行的二进制进程而遭遇 Linux 内核的 `Text file busy` (ETXTBSY) 崩溃。
+  3. **中枢统一 REST API 协同重拉**：自动提取开发卷凭据，直接向插件平台发送 `POST /api/Plugins/<id>/Restart` 指令，状态机执行平滑退出、解绑旧 PID、重配监听并拉起新进程（耗时通常 < 800ms）。
+  4. **终端控制序列清洗 (OSC 133 防御)**：自动化管线内置终端 ANSI / OSC 转义序列清洗器，阻断远程 Shell Prompt 字符干扰，确保新旧 PID 与 SHA256 校验 100% 精准无误。
 
 ---
 
