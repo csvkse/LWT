@@ -278,10 +278,10 @@
     <span class="badge" id="active-preset-badge">🌐 全网开放模式</span>
   </div>
 
-  <!-- 四层协议防呆提示 -->
-  <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 6px; padding: 8px 12px; margin-bottom: 16px; font-size: 0.75rem; color: #fbbf24; display: flex; align-items: center; gap: 8px;">
-    <span>⚠️</span>
-    <span><b>四层代理协议须知</b>：SOCKS5 为四层 TCP 会话协议（RFC 1928），非 HTTP 七层网页服务，不可在浏览器地址栏直接打开。请通过终端命令或客户端网络代理接入。</span>
+  <!-- 双模自适应代理提示 -->
+  <div style="background: rgba(14, 165, 233, 0.1); border: 1px solid rgba(14, 165, 233, 0.3); border-radius: 6px; padding: 8px 12px; margin-bottom: 16px; font-size: 0.75rem; color: #38bdf8; display: flex; align-items: center; gap: 8px;">
+    <span>⚡</span>
+    <span><b>SOCKS5 / HTTP 双模自适应代理</b>：单端口智能嗅探 RFC 1928 (SOCKS5/socks5h) 与 RFC 9110 (HTTP/HTTPS CONNECT) 协议，同一个端口通吃所有命令行工具与浏览器！</span>
   </div>
 
   <div class="grid">
@@ -402,22 +402,25 @@
   </div>
 
   <div class="instructions">
-    <h3>快速连接与客户端配置指南</h3>
+    <h3>快速连接与客户端配置指南 (SOCKS5 / HTTP 双模支持)</h3>
     
-    <p class="tip" style="margin-bottom: 6px;">1. 通过 cURL 命令验证内网代理连通性 (本地 DNS 解析模式)：</p>
+    <p class="tip" style="margin-bottom: 6px;">1. 通过 cURL 验证 SOCKS5 代理连通性 (本地 DNS 解析模式)：</p>
     <div class="code-block" id="curl-preview">curl -x socks5://127.0.0.1:18080 http://127.0.0.1:5270/health</div>
 
     <p class="tip" style="margin-bottom: 6px;">2. 浏览器与远程域名代解推荐协议 (socks5h 模式，内置 LRU 高速缓存)：</p>
     <div class="code-block" id="curl-remote-dns-preview">curl -x socks5h://127.0.0.1:18080 http://127.0.0.1:5270/health</div>
 
-    <p class="tip" style="margin-bottom: 6px;">3. 为 Git 配置专用 SOCKS5 代理：</p>
+    <p class="tip" style="margin-bottom: 6px;">3. HTTP / HTTPS 正向代理模式 (RFC 9110 CONNECT 隧道)：</p>
+    <div class="code-block" id="curl-http-preview">curl -x http://127.0.0.1:18080 http://127.0.0.1:5270/health</div>
+
+    <p class="tip" style="margin-bottom: 6px;">4. 为 Git 配置专用代理 (支持 socks5:// 或 http://)：</p>
     <div class="code-block" id="git-preview">git config --global http.proxy socks5://127.0.0.1:18080</div>
 
-    <p class="tip" style="margin-bottom: 6px;">4. 环境变量导出配置（支持 Bash / Zsh 终端）：</p>
+    <p class="tip" style="margin-bottom: 6px;">5. 环境变量导出配置（支持 Bash / Zsh 终端）：</p>
     <div class="code-block" id="env-preview">export ALL_PROXY=socks5://127.0.0.1:18080</div>
 
     <div class="tip" style="margin-top: 14px;">
-      💡 提示：本微服务已内置 LRU DNS 高并发缓存池与 Singleflight 并发请求合并，完整支持 socks5h:// 远端域名代解，上游直连已解析目标 IP 杜绝二次 DNS 解析时延。
+      💡 提示：本微服务已升级为【SOCKS5 / HTTP 单端口双模自适应代理网关】，首字节毫秒级自适应嗅探（RFC 1928 / RFC 9110），内置 Stale-While-Revalidate 异步预刷新 LRU DNS 缓存池与 Singleflight 并发请求合并，TCP_NODELAY 极速直连并杜绝半关闭僵尸连接泄露。
     </div>
   </div>
 
@@ -555,6 +558,11 @@
       const remoteDnsEl = document.getElementById('curl-remote-dns-preview');
       if (remoteDnsEl) {
         remoteDnsEl.textContent = 'curl -x ' + remoteProxyUrl + ' http://' + healthHost + '/health';
+      }
+      const httpProxyUrl = 'http://' + authPrefix + host + ':' + port;
+      const httpEl = document.getElementById('curl-http-preview');
+      if (httpEl) {
+        httpEl.textContent = 'curl -x ' + httpProxyUrl + ' http://' + healthHost + '/health';
       }
       document.getElementById('git-preview').textContent = 'git config --global http.proxy ' + proxyUrl;
       document.getElementById('env-preview').textContent = 'export ALL_PROXY=' + proxyUrl;

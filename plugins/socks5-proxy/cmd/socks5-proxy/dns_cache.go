@@ -12,9 +12,9 @@ import (
 )
 
 var (
-	ErrNegativeCached   = errors.New("domain lookup failed (negative cached)")
-	ErrNoIPResolved     = errors.New("no ip addresses resolved for host")
-	ErrResolverTimeout  = errors.New("dns resolution timed out")
+	ErrNegativeCached  = errors.New("domain lookup failed (negative cached)")
+	ErrNoIPResolved    = errors.New("no ip addresses resolved for host")
+	ErrResolverTimeout = errors.New("dns resolution timed out")
 )
 
 // NormalizeDomain strips leading/trailing spaces, trailing FQDN dot, and converts to lowercase.
@@ -38,17 +38,22 @@ const (
 	DnsStateNegative
 )
 
-// DnsCacheEntry models a single DNS cache record.
+// DnsCacheEntry models a single DNS cache record with RFC 5861 dual TTL thresholds.
 type DnsCacheEntry struct {
-	Host      string
-	IPs       []net.IP
-	State     DnsEntryState
-	CreatedAt time.Time
-	ExpiresAt time.Time
+	Host          string
+	IPs           []net.IP
+	State         DnsEntryState
+	CreatedAt     time.Time
+	SoftExpiresAt time.Time // Stale-while-revalidate threshold (fresh until soft TTL)
+	HardExpiresAt time.Time // Complete eviction threshold
+}
+
+func (e *DnsCacheEntry) IsStale(now time.Time) bool {
+	return now.After(e.SoftExpiresAt) && !now.After(e.HardExpiresAt)
 }
 
 func (e *DnsCacheEntry) IsExpired(now time.Time) bool {
-	return now.After(e.ExpiresAt)
+	return now.After(e.HardExpiresAt)
 }
 
 type lruItem struct {
@@ -56,11 +61,12 @@ type lruItem struct {
 	entry *DnsCacheEntry
 }
 
-// DnsLruCache is a thread-safe LRU cache with capacity limits and TTL expiration.
+// DnsLruCache is a thread-safe LRU cache with dual TTL and capacity limits.
 type DnsLruCache struct {
 	mu          sync.RWMutex
 	capacity    int
-	positiveTtl time.Duration
+	softTtl     time.Duration
+	hardTtl     time.Duration
 	negativeTtl time.Duration
 	items       map[string]*list.Element
 	evictList   *list.List
@@ -68,36 +74,41 @@ type DnsLruCache struct {
 	// Metrics
 	hits      int64
 	misses    int64
+	staleHits int64
 	evictions int64
 }
 
-func NewDnsLruCache(capacity int, positiveTtl, negativeTtl time.Duration) *DnsLruCache {
+func NewDnsLruCache(capacity int, softTtl, hardTtl, negativeTtl time.Duration) *DnsLruCache {
 	if capacity <= 0 {
 		capacity = 2048
 	}
-	if positiveTtl <= 0 {
-		positiveTtl = 5 * time.Minute
+	if softTtl <= 0 {
+		softTtl = 3 * time.Minute
+	}
+	if hardTtl <= 0 || hardTtl < softTtl {
+		hardTtl = 10 * time.Minute
 	}
 	if negativeTtl <= 0 {
 		negativeTtl = 5 * time.Second
 	}
 	return &DnsLruCache{
 		capacity:    capacity,
-		positiveTtl: positiveTtl,
+		softTtl:     softTtl,
+		hardTtl:     hardTtl,
 		negativeTtl: negativeTtl,
 		items:       make(map[string]*list.Element),
 		evictList:   list.New(),
 	}
 }
 
-func (c *DnsLruCache) Get(host string) (*DnsCacheEntry, bool) {
+func (c *DnsLruCache) Get(host string) (entry *DnsCacheEntry, isStale bool, found bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	elem, found := c.items[host]
 	if !found {
 		atomic.AddInt64(&c.misses, 1)
-		return nil, false
+		return nil, false, false
 	}
 
 	item := elem.Value.(*lruItem)
@@ -105,12 +116,17 @@ func (c *DnsLruCache) Get(host string) (*DnsCacheEntry, bool) {
 	if item.entry.IsExpired(now) {
 		c.removeElement(elem)
 		atomic.AddInt64(&c.misses, 1)
-		return nil, false
+		return nil, false, false
 	}
 
 	c.evictList.MoveToFront(elem)
+	if item.entry.IsStale(now) {
+		atomic.AddInt64(&c.staleHits, 1)
+		return item.entry, true, true
+	}
+
 	atomic.AddInt64(&c.hits, 1)
-	return item.entry, true
+	return item.entry, false, true
 }
 
 func (c *DnsLruCache) Set(host string, ips []net.IP) {
@@ -119,11 +135,12 @@ func (c *DnsLruCache) Set(host string, ips []net.IP) {
 
 	now := time.Now()
 	entry := &DnsCacheEntry{
-		Host:      host,
-		IPs:       ips,
-		State:     DnsStateValid,
-		CreatedAt: now,
-		ExpiresAt: now.Add(c.positiveTtl),
+		Host:          host,
+		IPs:           ips,
+		State:         DnsStateValid,
+		CreatedAt:     now,
+		SoftExpiresAt: now.Add(c.softTtl),
+		HardExpiresAt: now.Add(c.hardTtl),
 	}
 
 	c.insertOrUpdate(host, entry)
@@ -135,11 +152,12 @@ func (c *DnsLruCache) SetNegative(host string) {
 
 	now := time.Now()
 	entry := &DnsCacheEntry{
-		Host:      host,
-		IPs:       nil,
-		State:     DnsStateNegative,
-		CreatedAt: now,
-		ExpiresAt: now.Add(c.negativeTtl),
+		Host:          host,
+		IPs:           nil,
+		State:         DnsStateNegative,
+		CreatedAt:     now,
+		SoftExpiresAt: now.Add(c.negativeTtl),
+		HardExpiresAt: now.Add(c.negativeTtl),
 	}
 
 	c.insertOrUpdate(host, entry)
@@ -180,10 +198,10 @@ func (c *DnsLruCache) Len() int {
 	return len(c.items)
 }
 
-func (c *DnsLruCache) Stats() (hits, misses, evictions int64, size int) {
+func (c *DnsLruCache) Stats() (hits, misses, staleHits, evictions int64, size int) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return atomic.LoadInt64(&c.hits), atomic.LoadInt64(&c.misses), atomic.LoadInt64(&c.evictions), len(c.items)
+	return atomic.LoadInt64(&c.hits), atomic.LoadInt64(&c.misses), atomic.LoadInt64(&c.staleHits), atomic.LoadInt64(&c.evictions), len(c.items)
 }
 
 // singleflightCall represents an active or completed in-flight DNS query.
@@ -268,20 +286,20 @@ func (r *Ipv4PreferResolver) Resolve(ctx context.Context, host string) ([]net.IP
 	return ips, nil
 }
 
-// CachedDnsResolver combines an LRU Cache, Singleflight, and underlying Resolution Strategy.
+// CachedDnsResolver combines an LRU Cache with Stale-While-Revalidate, Singleflight, and underlying Strategy.
 type CachedDnsResolver struct {
 	strategy IDnsResolverStrategy
 	cache    *DnsLruCache
 	sf       SingleflightGroup
 }
 
-func NewCachedDnsResolver(strategy IDnsResolverStrategy, capacity int, positiveTtl, negativeTtl time.Duration) *CachedDnsResolver {
+func NewCachedDnsResolver(strategy IDnsResolverStrategy, capacity int, softTtl, hardTtl, negativeTtl time.Duration) *CachedDnsResolver {
 	if strategy == nil {
 		strategy = NewIpv4PreferResolver(5 * time.Second)
 	}
 	return &CachedDnsResolver{
 		strategy: strategy,
-		cache:    NewDnsLruCache(capacity, positiveTtl, negativeTtl),
+		cache:    NewDnsLruCache(capacity, softTtl, hardTtl, negativeTtl),
 	}
 }
 
@@ -291,20 +309,33 @@ func (r *CachedDnsResolver) Resolve(ctx context.Context, host string) ([]net.IP,
 		return []net.IP{ip}, nil
 	}
 
-	// 1. Check LRU Cache
-	if entry, ok := r.cache.Get(norm); ok {
+	// 1. Check LRU Cache (including RFC 5861 Stale-While-Revalidate check)
+	if entry, isStale, ok := r.cache.Get(norm); ok {
 		if entry.State == DnsStateNegative {
 			return nil, ErrNegativeCached
 		}
 		if len(entry.IPs) > 0 {
+			if isStale {
+				// 异步派发后台刷新，当前连接直接返回旧 IP，实现 0ms 极限响应
+				go func(target string) {
+					_, _ = r.sf.Do("reval:"+target, func() ([]net.IP, error) {
+						bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer cancel()
+						resIPs, resErr := r.strategy.Resolve(bgCtx, target)
+						if resErr == nil && len(resIPs) > 0 {
+							r.cache.Set(target, resIPs)
+						}
+						return resIPs, resErr
+					})
+				}(norm)
+			}
 			return entry.IPs, nil
 		}
 	}
 
-	// 2. Use Singleflight to deduplicate concurrent queries for the same host
+	// 2. Cache miss: Singleflight synchronous resolve
 	ips, err := r.sf.Do(norm, func() ([]net.IP, error) {
-		// Double-check cache inside singleflight lock window
-		if entry, ok := r.cache.Get(norm); ok {
+		if entry, _, ok := r.cache.Get(norm); ok {
 			if entry.State == DnsStateNegative {
 				return nil, ErrNegativeCached
 			}
@@ -329,6 +360,6 @@ func (r *CachedDnsResolver) Resolve(ctx context.Context, host string) ([]net.IP,
 	return ips, err
 }
 
-func (r *CachedDnsResolver) CacheStats() (hits, misses, evictions int64, size int) {
+func (r *CachedDnsResolver) CacheStats() (hits, misses, staleHits, evictions int64, size int) {
 	return r.cache.Stats()
 }

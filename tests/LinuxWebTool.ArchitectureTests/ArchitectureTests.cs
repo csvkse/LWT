@@ -2344,5 +2344,45 @@ public class ArchitectureTests
         Assert.Contains("curl -x socks5h://", uiContent);
         Assert.Contains("curl-remote-dns-preview", uiContent);
     }
+
+    [Fact]
+    public void LinuxArch073_SOCKS5与HTTP单端口双模自适应代理与传输性能优化门禁()
+    {
+        // 1. 验证 http_proxy.go 存在，包含协议探测、Basic认证与 CONNECT 隧道/明文代理
+        var httpProxyFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "http_proxy.go");
+        Assert.True(File.Exists(httpProxyFile), "http_proxy.go 必须存在");
+        var httpProxyContent = File.ReadAllText(httpProxyFile);
+
+        Assert.Contains("func isHttpProxyMethod(b byte) bool", httpProxyContent);
+        Assert.Contains("func validateBasicAuth(authHeader, expectedUser, expectedPass string) bool", httpProxyContent);
+        Assert.Contains("func (s *Server) handleHttpProxy", httpProxyContent);
+        Assert.Contains("HTTP/1.1 200 Connection Established", httpProxyContent);
+        Assert.Contains("WriteProxy", httpProxyContent);
+
+        // 2. 验证 main.go 包含单端口自适应嗅探 Peek(1)、BufferedConn、TCP_NODELAY 与半关闭超时兜底
+        var mainGoFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "main.go");
+        var mainGoContent = File.ReadAllText(mainGoFile);
+
+        Assert.Contains("type BufferedConn struct", mainGoContent);
+        Assert.Contains("br.Peek(1)", mainGoContent);
+        Assert.Contains("s.handleHttpProxy(bConn, br)", mainGoContent);
+        Assert.Contains("optimizeTcpConn", mainGoContent);
+        Assert.Contains("SetNoDelay(true)", mainGoContent);
+        Assert.Contains("SetReadDeadline(time.Now().Add(10 * time.Second))", mainGoContent);
+
+        // 3. 验证 dns_cache.go 包含 Stale-While-Revalidate 双阈值软过期机制
+        var dnsCacheFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "dns_cache.go");
+        var dnsCacheContent = File.ReadAllText(dnsCacheFile);
+
+        Assert.Contains("SoftExpiresAt", dnsCacheContent);
+        Assert.Contains("HardExpiresAt", dnsCacheContent);
+        Assert.Contains("IsStale", dnsCacheContent);
+
+        // 4. 验证 ui/index.html 包含 HTTP 代理配置指引
+        var uiFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "ui", "index.html");
+        var uiContent = File.ReadAllText(uiFile);
+        Assert.Contains("curl -x http://", uiContent);
+        Assert.Contains("curl-http-preview", uiContent);
+    }
 }
 

@@ -46,7 +46,7 @@ func TestNormalizeDomain(t *testing.T) {
 
 func TestDnsLruCache_HitAndEviction(t *testing.T) {
 	capacity := 2
-	cache := NewDnsLruCache(capacity, 100*time.Millisecond, 50*time.Millisecond)
+	cache := NewDnsLruCache(capacity, 100*time.Millisecond, 200*time.Millisecond, 50*time.Millisecond)
 
 	ip1 := net.ParseIP("192.168.1.1")
 	ip2 := net.ParseIP("192.168.1.2")
@@ -56,58 +56,66 @@ func TestDnsLruCache_HitAndEviction(t *testing.T) {
 	cache.Set("host2.com", []net.IP{ip2})
 
 	// Hit host1.com (moves host1 to MRU, making host2 LRU)
-	entry, found := cache.Get("host1.com")
-	if !found || len(entry.IPs) == 0 || !entry.IPs[0].Equal(ip1) {
+	entry, isStale, found := cache.Get("host1.com")
+	if !found || isStale || len(entry.IPs) == 0 || !entry.IPs[0].Equal(ip1) {
 		t.Fatalf("expected host1.com to hit cache with ip %v", ip1)
 	}
 
 	// Insert host3.com, should evict host2.com (since host1 was accessed)
 	cache.Set("host3.com", []net.IP{ip3})
 
-	if _, found := cache.Get("host2.com"); found {
+	if _, _, found := cache.Get("host2.com"); found {
 		t.Errorf("expected host2.com to be evicted")
 	}
 
-	if _, found := cache.Get("host1.com"); !found {
+	if _, _, found := cache.Get("host1.com"); !found {
 		t.Errorf("expected host1.com to remain in cache")
 	}
 
-	if _, found := cache.Get("host3.com"); !found {
+	if _, _, found := cache.Get("host3.com"); !found {
 		t.Errorf("expected host3.com to be in cache")
 	}
 
-	hits, misses, evictions, size := cache.Stats()
-	if hits < 1 || misses < 1 || evictions != 1 || size != 2 {
-		t.Errorf("unexpected stats: hits=%d, misses=%d, evictions=%d, size=%d", hits, misses, evictions, size)
+	hits, misses, staleHits, evictions, size := cache.Stats()
+	if hits < 1 || misses < 1 || evictions != 1 || size != 2 || staleHits != 0 {
+		t.Errorf("unexpected stats: hits=%d, misses=%d, staleHits=%d, evictions=%d, size=%d", hits, misses, staleHits, evictions, size)
 	}
 }
 
 func TestDnsLruCache_TTL_Expiration(t *testing.T) {
-	ttl := 30 * time.Millisecond
-	cache := NewDnsLruCache(10, ttl, 10*time.Millisecond)
+	softTtl := 20 * time.Millisecond
+	hardTtl := 50 * time.Millisecond
+	cache := NewDnsLruCache(10, softTtl, hardTtl, 10*time.Millisecond)
 
 	cache.Set("expiring.com", []net.IP{net.ParseIP("10.0.0.1")})
 
-	// Immediately should hit
-	if _, found := cache.Get("expiring.com"); !found {
-		t.Fatal("expected immediate cache hit")
+	// 1. Immediate lookup -> Fresh hit
+	_, isStale, found := cache.Get("expiring.com")
+	if !found || isStale {
+		t.Fatal("expected fresh immediate cache hit")
 	}
 
-	// Wait for TTL to pass
-	time.Sleep(50 * time.Millisecond)
+	// 2. Wait 30ms -> past soft TTL, within hard TTL -> Stale hit (RFC 5861)
+	time.Sleep(30 * time.Millisecond)
+	_, isStale, found = cache.Get("expiring.com")
+	if !found || !isStale {
+		t.Fatal("expected stale hit between soft and hard TTL")
+	}
 
-	if _, found := cache.Get("expiring.com"); found {
-		t.Fatal("expected cache entry to be expired")
+	// 3. Wait past hard TTL -> Complete eviction
+	time.Sleep(30 * time.Millisecond)
+	if _, _, found := cache.Get("expiring.com"); found {
+		t.Fatal("expected cache entry to be expired after hard TTL")
 	}
 }
 
 func TestDnsLruCache_NegativeCaching(t *testing.T) {
 	negTtl := 30 * time.Millisecond
-	cache := NewDnsLruCache(10, 100*time.Millisecond, negTtl)
+	cache := NewDnsLruCache(10, 100*time.Millisecond, 200*time.Millisecond, negTtl)
 
 	cache.SetNegative("non-existent.test")
 
-	entry, found := cache.Get("non-existent.test")
+	entry, _, found := cache.Get("non-existent.test")
 	if !found {
 		t.Fatal("expected negative cache entry to be found")
 	}
@@ -116,7 +124,7 @@ func TestDnsLruCache_NegativeCaching(t *testing.T) {
 	}
 
 	time.Sleep(50 * time.Millisecond)
-	if _, found := cache.Get("non-existent.test"); found {
+	if _, _, found := cache.Get("non-existent.test"); found {
 		t.Fatal("expected negative cache entry to expire")
 	}
 }
@@ -127,7 +135,7 @@ func TestCachedDnsResolver_SingleflightDeduplication(t *testing.T) {
 		resultIPs: []net.IP{net.ParseIP("203.0.113.10")},
 	}
 
-	resolver := NewCachedDnsResolver(mock, 100, 1*time.Minute, 5*time.Second)
+	resolver := NewCachedDnsResolver(mock, 100, 1*time.Minute, 5*time.Minute, 5*time.Second)
 
 	concurrency := 20
 	var wg sync.WaitGroup
@@ -153,7 +161,7 @@ func TestCachedDnsResolver_SingleflightDeduplication(t *testing.T) {
 		t.Fatalf("expected exactly 1 underlying DNS query due to singleflight, got %d", calls)
 	}
 
-	hits, _, _, size := resolver.CacheStats()
+	hits, _, _, _, size := resolver.CacheStats()
 	if size != 1 {
 		t.Errorf("expected cache size 1, got %d", size)
 	}
@@ -164,7 +172,7 @@ func TestCachedDnsResolver_SingleflightDeduplication(t *testing.T) {
 
 func TestCachedDnsResolver_DirectIP(t *testing.T) {
 	mock := &mockResolver{}
-	resolver := NewCachedDnsResolver(mock, 10, time.Minute, time.Second)
+	resolver := NewCachedDnsResolver(mock, 10, time.Minute, 5*time.Minute, time.Second)
 
 	ips, err := resolver.Resolve(context.Background(), "127.0.0.1")
 	if err != nil || len(ips) == 0 || ips[0].String() != "127.0.0.1" {
@@ -180,7 +188,7 @@ func TestCachedDnsResolver_NegativeError(t *testing.T) {
 	mock := &mockResolver{
 		resultErr: errors.New("nxdomain error"),
 	}
-	resolver := NewCachedDnsResolver(mock, 10, time.Minute, 50*time.Millisecond)
+	resolver := NewCachedDnsResolver(mock, 10, time.Minute, 5*time.Minute, 50*time.Millisecond)
 
 	_, err := resolver.Resolve(context.Background(), "failed.domain.test")
 	if err == nil {

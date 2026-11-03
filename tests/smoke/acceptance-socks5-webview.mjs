@@ -113,6 +113,7 @@ async function runAcceptance() {
   const displayPort = await frame.locator('#proxy-port').innerText();
   const curlPreview = await frame.locator('#curl-preview').innerText();
   const curlRemoteDns = await frame.locator('#curl-remote-dns-preview').innerText();
+  const curlHttp = await frame.locator('#curl-http-preview').innerText();
   const gitPreview = await frame.locator('#git-preview').innerText();
   const envPreview = await frame.locator('#env-preview').innerText();
 
@@ -120,6 +121,7 @@ async function runAcceptance() {
   console.log(`📌 Webview 模态框展示端口: "${displayPort}"`);
   console.log(`📌 cURL 连接指引: "${curlPreview}"`);
   console.log(`📌 cURL Remote DNS (socks5h) 指引: "${curlRemoteDns}"`);
+  console.log(`📌 cURL HTTP 代理指引: "${curlHttp}"`);
   console.log(`📌 Git 代理配置指引: "${gitPreview}"`);
   console.log(`📌 环境变量指引: "${envPreview}"`);
   console.log('----------------------------------------------------');
@@ -130,18 +132,23 @@ async function runAcceptance() {
   const expectedHost = new URL(baseUrl).hostname;
   const hostDynamic = curlPreview.includes(expectedHost);
   const socks5hCorrect = curlRemoteDns.includes(`socks5h://`) && curlRemoteDns.includes(expectedHost) && curlRemoteDns.includes('18080');
+  const httpCorrect = curlHttp.includes(`http://`) && curlHttp.includes(expectedHost) && curlHttp.includes('18080');
 
   console.log(`🎯 检验 1: Webview 端口显示 :18080 -> ${portCorrect ? '✅ 成功' : '❌ 失败'}`);
   console.log(`🎯 检验 2: cURL 指引动态绑定 :18080 -> ${curlCorrect ? '✅ 成功' : '❌ 失败'}`);
   console.log(`🎯 检验 3: 绝无 18001 历史错误硬编码残留 -> ${no18001 ? '✅ 成功' : '❌ 失败'}`);
   console.log(`🎯 检验 4: cURL 动态绑定当前宿主主机 (${expectedHost}) -> ${hostDynamic ? '✅ 成功' : '❌ 失败'}`);
   console.log(`🎯 检验 5: cURL socks5h 远端域名代解指引包含 ${expectedHost}:18080 -> ${socks5hCorrect ? '✅ 成功' : '❌ 失败'}`);
+  console.log(`🎯 检验 6: cURL HTTP 正向代理双模指引包含 http://${expectedHost}:18080 -> ${httpCorrect ? '✅ 成功' : '❌ 失败'}`);
 
   if (!hostDynamic) {
     throw new Error(`cURL 指引未动态绑定当前宿主主机 ${expectedHost}: ${curlPreview}`);
   }
   if (!socks5hCorrect) {
     throw new Error(`cURL socks5h 远端解析指引异常: ${curlRemoteDns}`);
+  }
+  if (!httpCorrect) {
+    throw new Error(`cURL HTTP 代理指引异常: ${curlHttp}`);
   }
 
   await saveScreenshot(page, '04-acceptance-success.png');

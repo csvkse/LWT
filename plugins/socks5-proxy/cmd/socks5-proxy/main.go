@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/subtle"
 	"encoding/binary"
@@ -305,7 +306,7 @@ func main() {
 	}))
 
 	dnsStrategy := NewIpv4PreferResolver(time.Duration(*timeoutSec) * time.Second)
-	cachedResolver := NewCachedDnsResolver(dnsStrategy, 2048, 5*time.Minute, 5*time.Second)
+	cachedResolver := NewCachedDnsResolver(dnsStrategy, 2048, 3*time.Minute, 10*time.Minute, 5*time.Second)
 
 	srv := &Server{
 		cfg: Config{
@@ -407,9 +408,57 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
+// BufferedConn wraps net.Conn with a bufio.Reader to ensure any peeked or buffered bytes are drained first.
+type BufferedConn struct {
+	net.Conn
+	r io.Reader
+}
+
+func (b *BufferedConn) Read(p []byte) (int, error) {
+	return b.r.Read(p)
+}
+
+func (b *BufferedConn) CloseWrite() error {
+	if cw, ok := b.Conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return nil
+}
+
+func optimizeTcpConn(conn net.Conn) {
+	if tcp, ok := conn.(*net.TCPConn); ok {
+		_ = tcp.SetNoDelay(true)
+		_ = tcp.SetKeepAlive(true)
+		_ = tcp.SetKeepAlivePeriod(30 * time.Second)
+	}
+}
+
 func (s *Server) handleConn(conn net.Conn) error {
 	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	optimizeTcpConn(conn)
 
+	br := bufio.NewReader(conn)
+	prefix, err := br.Peek(1)
+	if err != nil {
+		return fmt.Errorf("peek protocol header failed: %w", err)
+	}
+
+	bConn := &BufferedConn{Conn: conn, r: br}
+
+	if prefix[0] == socks5Version {
+		// SOCKS5 Protocol (RFC 1928)
+		return s.handleSocks5(bConn)
+	}
+
+	if isHttpProxyMethod(prefix[0]) {
+		// HTTP / HTTPS Forward Proxy Protocol (RFC 9110)
+		return s.handleHttpProxy(bConn, br)
+	}
+
+	return fmt.Errorf("unsupported protocol signature: 0x%02X", prefix[0])
+}
+
+func (s *Server) handleSocks5(conn net.Conn) error {
 	// 1. Negotiation (Handshake)
 	header := make([]byte, 2)
 	if _, err := io.ReadFull(conn, header); err != nil {
@@ -513,7 +562,7 @@ func (s *Server) handleConn(conn net.Conn) error {
 	} else {
 		resolver := s.resolver
 		if resolver == nil {
-			resolver = NewCachedDnsResolver(NewIpv4PreferResolver(s.cfg.ConnectTimeout), 2048, 5*time.Minute, 5*time.Second)
+			resolver = NewCachedDnsResolver(NewIpv4PreferResolver(s.cfg.ConnectTimeout), 2048, 3*time.Minute, 10*time.Minute, 5*time.Second)
 		}
 		resolveCtx, cancel := context.WithTimeout(context.Background(), s.cfg.ConnectTimeout)
 		ips, err := resolver.Resolve(resolveCtx, targetHost)
@@ -646,6 +695,9 @@ func (s *Server) sendReply(conn net.Conn, rep byte, bindAddr *net.TCPAddr) error
 }
 
 func (s *Server) relay(client, target net.Conn) error {
+	optimizeTcpConn(client)
+	optimizeTcpConn(target)
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -657,9 +709,15 @@ func (s *Server) relay(client, target net.Conn) error {
 
 		n, _ := io.CopyBuffer(dst, src, buf)
 		atomic.AddInt64(counter, n)
-		if tcpConn, ok := dst.(*net.TCPConn); ok {
-			_ = tcpConn.CloseWrite()
+
+		// 半关闭状态：通知对端本方向数据已发送完毕
+		if cw, ok := dst.(interface{ CloseWrite() error }); ok {
+			_ = cw.CloseWrite()
 		}
+
+		// 僵尸连接防护：当本方向读写完毕后，为反方向连接注入 10 秒超时排空，杜绝死锁与 Goroutine/FD 泄露
+		_ = src.SetReadDeadline(time.Now().Add(10 * time.Second))
+		_ = dst.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	}
 
 	go pipe(target, client, &s.metrics.BytesRx)
@@ -701,10 +759,11 @@ func (s *Server) startMetricsHttp(boundAddr string) {
 		authMode, username, _ := s.GetAuthConfig()
 		var dnsStats map[string]any
 		if cr, ok := s.resolver.(*CachedDnsResolver); ok {
-			hits, misses, evictions, size := cr.CacheStats()
+			hits, misses, staleHits, evictions, size := cr.CacheStats()
 			dnsStats = map[string]any{
 				"hits":      hits,
 				"misses":    misses,
+				"staleHits": staleHits,
 				"evictions": evictions,
 				"cacheSize": size,
 			}
