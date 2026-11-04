@@ -246,22 +246,65 @@ func (l *InboundListener) handleSocks5Conn(ctx context.Context, clientConn net.C
 			l.dialProxyAndBridge(ctx, clientConn, r, targetAddr, target)
 			return
 		}
-		var hopDialers []IOutboundDialer
-		var hopNodes []UpstreamNode
-		for _, hopID := range chainCfg.Hops {
-			if node, ok := l.mgr.GetUpstreamNode(hopID); ok {
-				d, err := GlobalOutboundRegistry.CreateDialer(*node)
-				if err == nil {
-					hopDialers = append(hopDialers, d)
-					hopNodes = append(hopNodes, *node)
+
+		var chained IOutboundDialer
+		if chainCfg.Strategy == "auto" {
+			var fixedExit *UpstreamNode
+			if chainCfg.FixedExitNodeID != "" {
+				if n, ok := l.mgr.GetUpstreamNode(chainCfg.FixedExitNodeID); ok {
+					fixedExit = n
 				}
 			}
+
+			var candidateHops []UpstreamNode
+			for _, id := range chainCfg.CandidateHopNodeIDs {
+				if n, ok := l.mgr.GetUpstreamNode(id); ok {
+					candidateHops = append(candidateHops, *n)
+				}
+			}
+			// 若未显式配置 CandidateHopNodeIDs，则回退使用 Hops 中的前序节点
+			if len(candidateHops) == 0 && len(chainCfg.Hops) > 1 {
+				for i := 0; i < len(chainCfg.Hops)-1; i++ {
+					if n, ok := l.mgr.GetUpstreamNode(chainCfg.Hops[i]); ok {
+						candidateHops = append(candidateHops, *n)
+					}
+				}
+			}
+
+			var candidateExits []UpstreamNode
+			for _, id := range chainCfg.CandidateExitNodeIDs {
+				if n, ok := l.mgr.GetUpstreamNode(id); ok {
+					candidateExits = append(candidateExits, *n)
+				}
+			}
+			if fixedExit == nil && len(candidateExits) == 0 && len(chainCfg.Hops) > 0 {
+				lastID := chainCfg.Hops[len(chainCfg.Hops)-1]
+				if n, ok := l.mgr.GetUpstreamNode(lastID); ok {
+					candidateExits = append(candidateExits, *n)
+				}
+			}
+
+			chained = NewAdaptiveChainedOutbound(chainCfg.ID, chainCfg.Name, fixedExit, candidateHops, candidateExits)
+		} else {
+			// manual/static 模式
+			var hopDialers []IOutboundDialer
+			var hopNodes []UpstreamNode
+			for _, hopID := range chainCfg.Hops {
+				if node, ok := l.mgr.GetUpstreamNode(hopID); ok {
+					d, err := GlobalOutboundRegistry.CreateDialer(*node)
+					if err == nil {
+						hopDialers = append(hopDialers, d)
+						hopNodes = append(hopNodes, *node)
+					}
+				}
+			}
+			if len(hopDialers) == 0 {
+				_, _ = clientConn.Write([]byte{0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+				return
+			}
+			chained = NewChainedCompositeOutbound(chainCfg.ID, chainCfg.Name, hopDialers, hopNodes)
 		}
-		if len(hopDialers) == 0 {
-			_, _ = clientConn.Write([]byte{0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-			return
-		}
-		chained := NewChainedCompositeOutbound(chainCfg.ID, chainCfg.Name, hopDialers, hopNodes)
+
 		outConn, err := chained.DialContext(ctx, "tcp", targetAddr)
 		if err != nil {
 			_, _ = clientConn.Write([]byte{0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0})

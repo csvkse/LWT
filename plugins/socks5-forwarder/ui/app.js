@@ -46,6 +46,9 @@
       const data = await apiCall('profiles');
       state.upstreams = data.upstreams || [];
       state.inbounds = data.inbounds || [];
+      if (window.ForwarderFeatures) {
+        window.ForwarderFeatures.upstreams = state.upstreams;
+      }
       renderUpstreams();
       renderInbounds();
     } catch (err) {
@@ -431,8 +434,10 @@
   }
 
   function closeModals() {
-    document.getElementById('modalUpstream').classList.add('hidden');
-    document.getElementById('modalInbound').classList.add('hidden');
+    ['modalUpstream', 'modalInbound', 'modalImportLink', 'modalChains', 'modalTun'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('hidden');
+    });
   }
 
   // 4. 事件绑定
@@ -574,4 +579,8 @@
   // 初始加载与自动轮询
   loadData();
   setInterval(loadData, 5000);
+
+  if (window.ForwarderFeatures && window.ForwarderFeatures.init) {
+    window.ForwarderFeatures.init(apiCall, loadData, state.upstreams);
+  }
 })();

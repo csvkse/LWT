@@ -300,6 +300,63 @@ func (m *ProfileManager) GetChain(id string) (*ProxyChainConfig, bool) {
 	return nil, false
 }
 
+// GetChains 获取当前所有链式代理配置列表快照
+func (m *ProfileManager) GetChains() []ProxyChainConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	chains := make([]ProxyChainConfig, len(m.cfg.Chains))
+	copy(chains, m.cfg.Chains)
+	return chains
+}
+
+// UpsertChain 新增或修改链式代理配置
+func (m *ProfileManager) UpsertChain(chain ProxyChainConfig) (*ProxyChainConfig, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if chain.ID == "" {
+		chain.ID = fmt.Sprintf("chain-%d", time.Now().UnixNano()%100000)
+	}
+	if chain.Name == "" {
+		chain.Name = "链式代理 " + chain.ID
+	}
+	if chain.Strategy == "" {
+		chain.Strategy = "manual"
+	}
+
+	found := false
+	for i := range m.cfg.Chains {
+		if m.cfg.Chains[i].ID == chain.ID {
+			m.cfg.Chains[i] = chain
+			found = true
+			break
+		}
+	}
+	if !found {
+		m.cfg.Chains = append(m.cfg.Chains, chain)
+	}
+
+	if err := m.cfg.Save(); err != nil {
+		return nil, err
+	}
+	return &chain, nil
+}
+
+// DeleteChain 删除指定 ID 的链式代理配置
+func (m *ProfileManager) DeleteChain(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var updated []ProxyChainConfig
+	for _, c := range m.cfg.Chains {
+		if c.ID != id {
+			updated = append(updated, c)
+		}
+	}
+	m.cfg.Chains = updated
+	return m.cfg.Save()
+}
+
 // SelectUpstreamForProfile 为指定 Profile 挑选最优可用上游节点
 func (m *ProfileManager) SelectUpstreamForProfile(p InboundProfile, rrCounter *uint64) (*UpstreamNode, error) {
 	m.mu.RLock()

@@ -43,6 +43,7 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"upstreams": upstreams,
 			"inbounds":  inbounds,
+			"chains":    mgr.GetChains(),
 		})
 	})
 
@@ -141,6 +142,87 @@ func main() {
 			"status":    "healthy",
 			"latencyMs": latency,
 		})
+	})
+
+	// API: 解析标准协议链接 (vless, trojan, ss, socks5, http, vmess)
+	mux.HandleFunc("POST /api/upstreams/parse-link", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Link string `json:"link"`
+			Text string `json:"text"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "解析请求参数失败: "+err.Error())
+			return
+		}
+
+		if req.Text != "" {
+			nodes, errs := ParseUpstreamLinks(req.Text)
+			writeJSON(w, http.StatusOK, map[string]any{
+				"nodes":  nodes,
+				"errors": errs,
+			})
+			return
+		}
+
+		if req.Link == "" {
+			writeError(w, http.StatusBadRequest, "缺少 link 或 text 参数")
+			return
+		}
+
+		node, err := ParseUpstreamLink(req.Link)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "解析链接失败: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, node)
+	})
+
+	// API: 获取内置分流规则模板库
+	mux.HandleFunc("GET /api/routing-templates", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"templates": GetBuiltinRoutingTemplates(),
+		})
+	})
+
+	// API: 探查宿主容器 TUN 虚拟网卡与特权状态
+	mux.HandleFunc("GET /api/system/tun-status", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, CheckTunEnvironment())
+	})
+
+	// API: 获取所有链式代理配置
+	mux.HandleFunc("GET /api/chains", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"chains": mgr.GetChains(),
+		})
+	})
+
+	// API: 创建 / 修改链式代理配置
+	mux.HandleFunc("POST /api/chains", func(w http.ResponseWriter, r *http.Request) {
+		var c ProxyChainConfig
+		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+			writeError(w, http.StatusBadRequest, "解析链式代理配置失败: "+err.Error())
+			return
+		}
+		saved, err := mgr.UpsertChain(c)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, saved)
+	})
+
+	// API: 删除链式代理配置
+	mux.HandleFunc("DELETE /api/chains", func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("id")
+		if id == "" {
+			writeError(w, http.StatusBadRequest, "缺少必需的 id 参数")
+			return
+		}
+		if err := mgr.DeleteChain(id); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"message": "已成功删除链式代理配置"})
 	})
 
 	// 静态 Webview UI 文件服务

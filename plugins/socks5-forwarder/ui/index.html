@@ -52,6 +52,15 @@
         <button id="btnRefresh" class="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg flex items-center gap-1.5 transition">
           🔄 刷新数据
         </button>
+        <button id="btnImportLink" class="px-3 py-1.5 text-xs font-medium bg-emerald-600/30 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 rounded-lg flex items-center gap-1.5 transition">
+          📥 导入链接
+        </button>
+        <button id="btnManageChains" class="px-3 py-1.5 text-xs font-medium bg-purple-600/30 hover:bg-purple-600/40 text-purple-300 border border-purple-500/40 rounded-lg flex items-center gap-1.5 transition">
+          🔗 链式代理
+        </button>
+        <button id="btnTunStatus" class="px-3 py-1.5 text-xs font-medium bg-amber-600/30 hover:bg-amber-600/40 text-amber-300 border border-amber-500/40 rounded-lg flex items-center gap-1.5 transition">
+          🛡️ 透明网关
+        </button>
         <button id="btnAddUpstream" class="px-3 py-1.5 text-xs font-medium bg-blue-600/30 hover:bg-blue-600/40 text-blue-300 border border-blue-500/40 rounded-lg flex items-center gap-1.5 transition">
           + 添加上游服务节点
         </button>
@@ -257,6 +266,14 @@
             </label>
           </div>
 
+          <!-- 快速套用预设分流模板选单 -->
+          <div class="flex items-center justify-between text-xs pt-1 pb-1 border-t border-slate-800/80">
+            <span class="text-slate-400 flex items-center gap-1">📋 快速套用预设模板:</span>
+            <select id="selRoutingTemplate" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-cyan-300 text-[11px] focus:outline-none focus:border-cyan-500">
+              <option value="">-- 选择常用预设模板 --</option>
+            </select>
+          </div>
+
           <div class="grid grid-cols-3 gap-2">
             <div>
               <label class="block text-slate-400 mb-1">默认出站动作</label>
@@ -298,6 +315,192 @@ ip_cidr: 223.5.5.0/24 -> direct" class="w-full bg-slate-800 border border-slate-
     </div>
   </div>
 
+  <!-- 模态框: 一键导入标准协议链接 -->
+  <div id="modalImportLink" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-lg shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto custom-scroll">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+          <span>📥</span> 一键导入协议链接 (URI Parser)
+        </h3>
+        <button class="text-slate-400 hover:text-slate-200 text-lg modal-close">✕</button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <p class="text-slate-400 text-[11px]">支持粘贴单条或多行标准链接，自动解析协议、主机、端口、凭据与 SNI：</p>
+        <div class="flex flex-wrap gap-1 text-[10px]">
+          <span class="px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/40">vless://</span>
+          <span class="px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-400 border border-purple-800/40">trojan://</span>
+          <span class="px-1.5 py-0.5 rounded bg-indigo-950/60 text-indigo-400 border border-indigo-800/40">ss://</span>
+          <span class="px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-400 border border-amber-800/40">socks5://</span>
+          <span class="px-1.5 py-0.5 rounded bg-sky-950/60 text-sky-400 border border-sky-800/40">http(s)://</span>
+          <span class="px-1.5 py-0.5 rounded bg-rose-950/60 text-rose-400 border border-rose-800/40">vmess://</span>
+        </div>
+        <textarea id="importLinksText" rows="5" placeholder="粘贴链接至此，支持多行批量解析，如:
+vless://01234567-89ab-cdef-0123-456789abcdef@node.example.com:443?sni=node.example.com#香港01
+trojan://pwd123@node2.example.com:443#东京02" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-slate-100 font-mono text-[11px] focus:outline-none focus:border-cyan-500"></textarea>
+        
+        <div id="importPreviewArea" class="hidden p-3 rounded-lg bg-slate-950/80 border border-slate-800 space-y-2 max-h-44 overflow-y-auto">
+          <div class="text-[11px] font-semibold text-cyan-400 flex items-center justify-between">
+            <span>解析成功 (<span id="importParsedCount">0</span> 个节点)</span>
+          </div>
+          <div id="importParsedList" class="space-y-1.5 text-[10px] font-mono"></div>
+        </div>
+
+        <div id="importErrorsArea" class="hidden p-2 rounded-lg bg-rose-950/40 border border-rose-900/50 text-[10px] text-rose-400 font-mono space-y-1"></div>
+
+        <div class="flex justify-between items-center pt-2 border-t border-slate-800">
+          <button type="button" id="btnDoParsePreview" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-lg transition">🔍 预览解析</button>
+          <div class="flex gap-2">
+            <button type="button" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg modal-close">取消</button>
+            <button type="button" id="btnConfirmImport" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-lg shadow">一键导入保存</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 模态框: 链式代理拓扑与配置 (支持手动与自动自适应固定出口) -->
+  <div id="modalChains" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-xl shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto custom-scroll">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+          <span>🔗</span> 多跳链式代理拓扑编排 (Chained Proxy)
+        </h3>
+        <button class="text-slate-400 hover:text-slate-200 text-lg modal-close">✕</button>
+      </div>
+
+      <!-- 链式配置表单 -->
+      <form id="formChain" class="space-y-3 text-xs">
+        <input type="hidden" id="chainEditId">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1">链条名称</label>
+            <input type="text" id="chainName" required placeholder="如: 亚太中继 + 美西固定落地" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1">链路调度策略</label>
+            <select id="chainStrategy" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-semibold text-cyan-300">
+              <option value="auto">自适应动态寻优 (推荐: 支持固定出口与中继自愈)</option>
+              <option value="manual">手动严格静态穿透 (按指定顺序级联)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 自动模式下的配置项 -->
+        <div id="boxChainAuto" class="p-3 bg-slate-950/60 rounded-xl border border-slate-800 space-y-2.5">
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="text-slate-300 font-bold flex items-center gap-1.5">
+                <span>🎯</span> 可选固定落地出口节点 (Pinned Exit)
+              </label>
+              <span class="text-[10px] text-emerald-400 font-mono">锁定出口 IP 不漂移</span>
+            </div>
+            <select id="chainFixedExit" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
+              <option value="">🌐 (自动全网格优选，不固定出口)</option>
+            </select>
+            <p class="text-[10px] text-slate-500 mt-1">适合 IP 白名单、防风控、固定家宽出口业务；中间中继跳板将自动低时延加速访问该节点。</p>
+          </div>
+
+          <div>
+            <label class="block text-slate-400 mb-1">前置候选跳板池 (自适应寻优与故障无感秒切)</label>
+            <div id="chainHopCandidates" class="grid grid-cols-2 gap-2 bg-slate-800/60 p-2.5 rounded-lg border border-slate-800 max-h-28 overflow-y-auto">
+              <!-- 动态生成复选框 -->
+            </div>
+          </div>
+        </div>
+
+        <!-- 手动模式下的配置项 -->
+        <div id="boxChainManual" class="hidden p-3 bg-slate-950/60 rounded-xl border border-slate-800 space-y-2">
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-slate-400 mb-1">第一跳 (前置中继节点)</label>
+              <select id="chainManualHop1" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-cyan-500"></select>
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1">第二跳 (落地出口节点)</label>
+              <select id="chainManualHop2" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-cyan-500"></select>
+            </div>
+          </div>
+        </div>
+
+        <!-- 拓扑示意图预览 -->
+        <div class="p-3 bg-slate-950/90 rounded-lg border border-cyan-900/30 font-mono text-[11px] text-cyan-300 flex items-center justify-center gap-2 text-center" id="chainTopologyPreview">
+          <span>客户端</span> ➔ <span class="text-amber-400">[前置跳板自适应池]</span> ➔ <span class="text-emerald-400">[固定落地出口]</span> ➔ <span>目标网络</span>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+          <button type="button" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg modal-close">关闭</button>
+          <button type="submit" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-lg shadow">保存链式配置</button>
+        </div>
+      </form>
+
+      <!-- 已有链条列表展示 -->
+      <div class="pt-3 border-t border-slate-800 space-y-2">
+        <h4 class="text-xs font-bold text-slate-300">当前已激活的链式代理 (<span id="chainCount">0</span>)</h4>
+        <div id="chainList" class="space-y-2 max-h-36 overflow-y-auto"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 模态框: 透明代理网关面板 (TUN / TProxy) -->
+  <div id="modalTun" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-lg shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto custom-scroll">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+          <span>🛡️</span> 透明代理网关 (TUN / TProxy Gateway)
+        </h3>
+        <button class="text-slate-400 hover:text-slate-200 text-lg modal-close">✕</button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <!-- 特权与设备探针状态卡片 -->
+        <div id="tunProbeCard" class="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-200">系统内核与设备状态</span>
+            <span id="tunStatusBadge" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400">检测中...</span>
+          </div>
+          <p id="tunStatusMsg" class="text-[11px] text-slate-400 font-mono leading-relaxed">正在向宿主容器探测 /dev/net/tun 状态与网络特权...</p>
+        </div>
+
+        <div class="space-y-2.5">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-slate-400 mb-1">虚拟网卡名</label>
+              <input type="text" id="tunInterface" value="lwt-tun0" readonly class="w-full bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 text-slate-300 font-mono text-[11px]">
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1">用户态协议栈</label>
+              <input type="text" value="Google gVisor Netstack (零网络污染)" readonly class="w-full bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 text-cyan-300 font-mono text-[11px]">
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-slate-400 mb-1">TUN 虚拟网段 (Fake-IP)</label>
+            <input type="text" id="tunSubnet" value="198.18.0.1/16" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono text-[11px] focus:outline-none focus:border-cyan-500">
+          </div>
+
+          <div class="p-3 bg-slate-950/60 rounded-lg border border-slate-800 space-y-2">
+            <label class="flex items-center gap-2 cursor-pointer text-slate-200">
+              <input type="checkbox" id="tunDnsHijack" checked class="rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-0">
+              <span class="font-bold">53 端口 DNS 自动劫持</span>
+            </label>
+            <p class="text-[10px] text-slate-500">自动拦截系统级 DNS 查询，实现基于域名的精准透明分流与秒级响应。</p>
+          </div>
+
+          <div>
+            <label class="block text-slate-400 mb-1">透明代理旁路绕过网段 (Bypass CIDR)</label>
+            <input type="text" id="tunBypass" value="10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono text-[11px] focus:outline-none focus:border-cyan-500">
+          </div>
+        </div>
+
+        <div class="flex justify-between items-center pt-2 border-t border-slate-800">
+          <span class="text-[10px] text-slate-500">受容器 CAP_NET_ADMIN 严格守护</span>
+          <button type="button" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg modal-close">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="features.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

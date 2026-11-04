@@ -48,11 +48,14 @@ type RoutePolicyConfig struct {
 
 // ProxyChainConfig 多跳链式代理配置
 type ProxyChainConfig struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Strategy string   `json:"strategy"` // static, best_latency
-	Hops     []string `json:"hops"`     // 关联的 UpstreamNode ID 列表
-	Mux      bool     `json:"mux,omitempty"`
+	ID                   string   `json:"id"`
+	Name                 string   `json:"name"`
+	Strategy             string   `json:"strategy"`                       // manual (静态拓扑), auto (自适应寻优)
+	Hops                 []string `json:"hops"`                           // 关联的 UpstreamNode ID 列表（手动模式顺序）
+	FixedExitNodeID      string   `json:"fixedExitNodeId,omitempty"`      // 自动模式：可选固定落地出口（锁定出口 IP）
+	CandidateHopNodeIDs  []string `json:"candidateHopNodeIds,omitempty"`  // 自动模式：前置候选跳板池（自适应中继寻优）
+	CandidateExitNodeIDs []string `json:"candidateExitNodeIds,omitempty"` // 自动模式：落地候选池（当 FixedExitNodeID 为空时）
+	Mux                  bool     `json:"mux,omitempty"`
 }
 
 // InboundProfile 本地入站中继端口配置与策略
