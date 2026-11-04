@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -12,19 +14,46 @@ func CheckUpstreamHealth(ctx context.Context, node *UpstreamNode) (int64, error)
 	timeoutCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 
+	proto := strings.ToLower(node.Type)
+
+	// 1. 针对 LWT-WSS 隐匿隧道: 验证客户端到该端点的握手时延 (L1 物理链路 RTT)
+	// 避免向服务端不存在的 80 端口盲发 SOCKS5 CONNECT 导致 0x05 Connection Refused 假死误报
+	if proto == "lwt_wss" || (proto == "" && (strings.HasPrefix(node.URL, "ws://") || strings.HasPrefix(node.URL, "wss://"))) {
+		conn, err := DialWebSocket(timeoutCtx, node.URL, node.Token, "lwt-tunnel-protocol-v1", node.SkipTLSVerify, node.SNI)
+		if err != nil {
+			node.Status = "dead"
+			node.LastError = formatProbeError(err)
+			node.LastChecked = time.Now()
+			return 0, err
+		}
+		_ = conn.Close()
+
+		latency := time.Since(start).Milliseconds()
+		node.LatencyMs = latency
+		node.LastChecked = time.Now()
+		node.LastError = ""
+		if latency > 800 {
+			node.Status = "degraded"
+		} else {
+			node.Status = "healthy"
+		}
+		return latency, nil
+	}
+
+	// 2. 针对通用代理协议 (SOCKS5, HTTP, Trojan, VLESS, Shadowsocks):
 	dialer, err := GlobalOutboundRegistry.CreateDialer(*node)
 	if err != nil {
 		node.Status = "dead"
-		node.LastError = err.Error()
+		node.LastError = formatProbeError(err)
 		node.LastChecked = time.Now()
 		return 0, err
 	}
 
-	target := "127.0.0.1:80"
+	target := resolveSafeProbeTarget(node)
 	conn, err := dialer.DialContext(timeoutCtx, "tcp", target)
 	if err != nil {
 		node.Status = "dead"
-		node.LastError = err.Error()
+		node.LastError = formatProbeError(err)
 		node.LastChecked = time.Now()
 		return 0, err
 	}
@@ -42,6 +71,46 @@ func CheckUpstreamHealth(ctx context.Context, node *UpstreamNode) (int64, error)
 	}
 
 	return latency, nil
+}
+
+// resolveSafeProbeTarget 解析安全的健康检查探针目标，避免盲拨 127.0.0.1:80 引发连接拒绝
+func resolveSafeProbeTarget(node *UpstreamNode) string {
+	hostInternalPort := os.Getenv("LWT_HOST_INTERNAL_PORT")
+	if hostInternalPort == "" {
+		hostInternalPort = "5270"
+	}
+
+	// 若节点本身指向本地回环，探测当前系统内置的 Web 端口
+	if node.Server == "127.0.0.1" || node.Server == "localhost" {
+		return fmt.Sprintf("127.0.0.1:%s", hostInternalPort)
+	}
+
+	// 公网/境外节点：默认探测高可用探针目标 (Cloudflare 204)
+	return "cp.cloudflare.com:80"
+}
+
+// formatProbeError 将底层网络错误转译为人类友好的排障指引
+func formatProbeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	errStr := err.Error()
+	if strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "actively refused") {
+		return "服务未启动或端口未监听 (Connection refused)"
+	}
+	if strings.Contains(errStr, "i/o timeout") || strings.Contains(errStr, "context deadline exceeded") {
+		return "连接超时，目标主机无响应或防火墙阻断"
+	}
+	if strings.Contains(errStr, "0x05") {
+		return "上游代理可达，但目标端点拒绝访问 (0x05 Connection Refused)"
+	}
+	if strings.Contains(errStr, "0x02") {
+		return "被上游代理 ACL 白名单规则拦截 (0x02 Rule Violation)"
+	}
+	if strings.Contains(errStr, "401") || strings.Contains(errStr, "407") || strings.Contains(errStr, "凭据") {
+		return "鉴权失败：用户名、密码或 Token 不匹配"
+	}
+	return errStr
 }
 
 // SelectUpstream 根据策略从候选节点列表中挑选最适节点
