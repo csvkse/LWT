@@ -274,6 +274,32 @@ func (m *ProfileManager) TestUpstreamNode(id string) (int64, error) {
 	return latency, err
 }
 
+// GetUpstreamNode 根据 ID 查询上游节点快照
+func (m *ProfileManager) GetUpstreamNode(id string) (*UpstreamNode, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for i := range m.cfg.Upstreams {
+		if m.cfg.Upstreams[i].ID == id {
+			clone := m.cfg.Upstreams[i]
+			return &clone, true
+		}
+	}
+	return nil, false
+}
+
+// GetChain 根据 ID 查询多跳代理链快照
+func (m *ProfileManager) GetChain(id string) (*ProxyChainConfig, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for i := range m.cfg.Chains {
+		if m.cfg.Chains[i].ID == id {
+			clone := m.cfg.Chains[i]
+			return &clone, true
+		}
+	}
+	return nil, false
+}
+
 // SelectUpstreamForProfile 为指定 Profile 挑选最优可用上游节点
 func (m *ProfileManager) SelectUpstreamForProfile(p InboundProfile, rrCounter *uint64) (*UpstreamNode, error) {
 	m.mu.RLock()

@@ -9,36 +9,69 @@ import (
 	"time"
 )
 
-// UpstreamNode 远端上游服务节点（例如运行 socks5-proxy 的 LWT 宿主节点）
+// UpstreamNode 远端上游服务节点（例如运行 socks5-proxy 的 LWT 宿主节点或外部多协议节点）
 type UpstreamNode struct {
-	ID            string        `json:"id"`
-	Name          string        `json:"name"`
-	URL           string        `json:"url"` // ws:// 或 wss:// 地址
-	Token         string        `json:"token"`
-	SkipTLSVerify bool          `json:"skipTlsVerify"`
-	SNI           string        `json:"sni,omitempty"`
-	Status        string        `json:"status"`    // healthy, degraded, dead, unknown
-	LatencyMs     int64         `json:"latencyMs"` // 最近测速延迟 (毫秒)
-	LastChecked   time.Time     `json:"lastChecked"`
-	LastError     string        `json:"lastError,omitempty"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Type          string    `json:"type,omitempty"` // lwt_wss, socks5, http, shadowsocks, trojan, vless, direct
+	URL           string    `json:"url,omitempty"`  // ws:// 或 wss:// 地址
+	Server        string    `json:"server,omitempty"`
+	Port          int       `json:"port,omitempty"`
+	Username      string    `json:"username,omitempty"`
+	Password      string    `json:"password,omitempty"`
+	UUID          string    `json:"uuid,omitempty"`
+	Method        string    `json:"method,omitempty"`
+	Token         string    `json:"token,omitempty"`
+	SkipTLSVerify bool      `json:"skipTlsVerify,omitempty"`
+	SNI           string    `json:"sni,omitempty"`
+	Status        string    `json:"status"`    // healthy, degraded, dead, unknown
+	LatencyMs     int64     `json:"latencyMs"` // 最近测速延迟 (毫秒)
+	LastChecked   time.Time `json:"lastChecked"`
+	LastError     string    `json:"lastError,omitempty"`
+}
+
+// RuleConfig 单条分流路由规则
+type RuleConfig struct {
+	Type   string `json:"type"`   // domain_suffix, domain_keyword, ip_cidr
+	Value  string `json:"value"`  // 规则匹配值 (如 ".cn", "google", "192.168.1.0/24")
+	Action string `json:"action"` // direct, reject, proxy, chain
+	Target string `json:"target,omitempty"`
+}
+
+// RoutePolicyConfig 入站规则分流策略
+type RoutePolicyConfig struct {
+	DirectPrivateNetwork bool         `json:"directPrivateNetwork"`
+	Rules                []RuleConfig `json:"rules,omitempty"`
+	DefaultAction        string       `json:"defaultAction,omitempty"`   // proxy, direct, reject
+	DefaultUpstream      string       `json:"defaultUpstream,omitempty"` // 默认关联的 Upstream ID 或 Chain ID
+}
+
+// ProxyChainConfig 多跳链式代理配置
+type ProxyChainConfig struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Strategy string   `json:"strategy"` // static, best_latency
+	Hops     []string `json:"hops"`     // 关联的 UpstreamNode ID 列表
+	Mux      bool     `json:"mux,omitempty"`
 }
 
 // InboundProfile 本地入站中继端口配置与策略
 type InboundProfile struct {
-	ID               string   `json:"id"`
-	Name             string   `json:"name"`
-	Enabled          bool     `json:"enabled"`
-	ListenPort       int      `json:"listenPort"`
-	AdditionalPorts  []int    `json:"additionalPorts,omitempty"` // 附加监听端口列表（支持多端口入站映射同一策略）
-	Protocol         string   `json:"protocol"`                 // mixed (自适应), socks5, http
-	AllowedCIDR      []string `json:"allowedCidr"`
-	UpstreamStrategy string   `json:"upstreamStrategy"`         // single (固定单节点), best_latency (最低延迟), round_robin (轮询)
-	UpstreamNodes    []string `json:"upstreamNodes"`            // 关联的 UpstreamNode ID 列表
-	ActiveConns      int64    `json:"activeConns"`
-	TotalBytesTx     int64    `json:"totalBytesTx"`
-	TotalBytesRx     int64    `json:"totalBytesRx"`
-	Status           string   `json:"status"`                   // running, stopped, error
-	LastError        string   `json:"lastError,omitempty"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Enabled          bool              `json:"enabled"`
+	ListenPort       int               `json:"listenPort"`
+	AdditionalPorts  []int             `json:"additionalPorts,omitempty"` // 附加监听端口列表（支持多端口入站映射同一策略）
+	Protocol         string            `json:"protocol"`                 // mixed (自适应), socks5, http
+	AllowedCIDR      []string          `json:"allowedCidr"`
+	UpstreamStrategy string            `json:"upstreamStrategy"`         // single (固定单节点), best_latency (最低延迟), round_robin (轮询)
+	UpstreamNodes    []string          `json:"upstreamNodes"`            // 关联的 UpstreamNode ID 列表
+	RoutePolicy      RoutePolicyConfig `json:"routePolicy,omitempty"`    // 智能分流与局域网直连策略
+	ActiveConns      int64             `json:"activeConns"`
+	TotalBytesTx     int64             `json:"totalBytesTx"`
+	TotalBytesRx     int64             `json:"totalBytesRx"`
+	Status           string            `json:"status"` // running, stopped, error
+	LastError        string            `json:"lastError,omitempty"`
 }
 
 // GetEffectivePorts 返回当前规则生效的所有监听端口（主端口 + 附加端口，已去重过滤无效端口）
@@ -60,10 +93,11 @@ func (p *InboundProfile) GetEffectivePorts() []int {
 
 // Config 全局持久化配置
 type Config struct {
-	mu         sync.RWMutex
-	filePath   string
-	Upstreams  []UpstreamNode   `json:"upstreams"`
-	Inbounds   []InboundProfile `json:"inbounds"`
+	mu        sync.RWMutex
+	filePath  string
+	Upstreams []UpstreamNode     `json:"upstreams"`
+	Inbounds  []InboundProfile   `json:"inbounds"`
+	Chains    []ProxyChainConfig `json:"chains,omitempty"`
 }
 
 // LoadConfig 从指定路径加载配置，若文件不存在则初始化默认骨架
@@ -115,6 +149,7 @@ func LoadConfig(filePath string) (*Config, error) {
 		{
 			ID:            "default-lwt-node",
 			Name:          "远程 LWT 默认宿主节点",
+			Type:          "lwt_wss",
 			URL:           defaultUpstreamURL,
 			Token:         defaultToken,
 			SkipTLSVerify: true,
@@ -132,7 +167,16 @@ func LoadConfig(filePath string) (*Config, error) {
 			AllowedCIDR:      []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "::1/128"},
 			UpstreamStrategy: "single",
 			UpstreamNodes:    []string{"default-lwt-node"},
-			Status:           "stopped",
+			RoutePolicy: RoutePolicyConfig{
+				DirectPrivateNetwork: true,
+				Rules: []RuleConfig{
+					{Type: "domain_suffix", Value: ".cn", Action: "direct"},
+					{Type: "domain_suffix", Value: ".bilibili.com", Action: "direct"},
+				},
+				DefaultAction:   "proxy",
+				DefaultUpstream: "default-lwt-node",
+			},
+			Status: "stopped",
 		},
 	}
 

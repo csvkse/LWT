@@ -43,9 +43,9 @@
         <div>
           <div class="flex items-center gap-2">
             <h1 class="text-lg font-bold text-slate-100">SOCKS5 客户端边缘中继网关</h1>
-            <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">v1.0.0</span>
+            <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">v2.0.0 多协议分流版</span>
           </div>
-          <p class="text-xs text-slate-400 mt-0.5">多端口、多节点 SOCKS5 over WSS 伪装中继网关，为局域网设备提供免客户端加密出海与访问控制</p>
+          <p class="text-xs text-slate-400 mt-0.5">支持 SOCKS5 / HTTP / Trojan / VLESS / Shadowsocks / LWT-WSS 多协议聚合、智能分流与局域网私网直连</p>
         </div>
       </div>
       <div class="flex items-center gap-2 flex-wrap">
@@ -69,7 +69,7 @@
           <h2 class="text-sm font-semibold text-slate-200">远端上游服务节点 (Upstream Nodes)</h2>
           <span id="upstreamCount" class="text-xs px-2 py-0.2 rounded-full bg-slate-800 text-slate-400">0</span>
         </div>
-        <span class="text-xs text-slate-500">所有入站流量通过 WSS 伪装隧道加密穿透至以下节点</span>
+        <span class="text-xs text-slate-500">支持标准 SOCKS5, HTTP, Trojan, VLESS, Shadowsocks, LWT-WSS 等出站协议</span>
       </div>
 
       <div id="upstreamList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -85,7 +85,7 @@
           <h2 class="text-sm font-semibold text-slate-200">本地多入站中继规则 (Inbound Profiles)</h2>
           <span id="inboundCount" class="text-xs px-2 py-0.2 rounded-full bg-slate-800 text-slate-400">0</span>
         </div>
-        <span class="text-xs text-slate-500">为局域网不同设备分配独立端口、ACL 白名单与路由策略</span>
+        <span class="text-xs text-slate-500">为局域网设备分配独立端口、ACL 白名单、智能分流与局域网私网直连</span>
       </div>
 
       <div id="inboundList" class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -96,27 +96,85 @@
 
   <!-- 模态框: 新建/编辑上游节点 -->
   <div id="modalUpstream" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-lg shadow-2xl p-5 space-y-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-lg shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto custom-scroll">
       <div class="flex items-center justify-between border-b border-slate-800 pb-3">
         <h3 id="modalUpstreamTitle" class="text-sm font-bold text-slate-100">添加上游服务节点</h3>
         <button class="text-slate-400 hover:text-slate-200 text-lg modal-close">✕</button>
       </div>
       <form id="formUpstream" class="space-y-3 text-xs">
         <input type="hidden" id="upId">
-        <div>
-          <label class="block text-slate-400 mb-1">节点显示名称</label>
-          <input type="text" id="upName" required placeholder="如: 东京优化节点 (VPS-1)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
-        </div>
-        <div>
-          <label class="block text-slate-400 mb-1">上游 WSS 伪装隧道地址 (URL)</label>
-          <input type="text" id="upUrl" required placeholder="如: wss://jp.example.com:5271/telemetry/metrics" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]">
-          <p class="text-[10px] text-slate-500 mt-0.5">支持 ws:// (明文) 或 wss:// (TLS 伪装)，路径需与远端 Ingress 混淆别名一致</p>
-        </div>
-        <div>
-          <label class="block text-slate-400 mb-1">Ingress 访问令牌 (Token)</label>
-          <input type="password" id="upToken" placeholder="留空则无鉴权" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]">
-        </div>
+        
         <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1">节点名称</label>
+            <input type="text" id="upName" required placeholder="如: 日本优化节点 (VPS-1)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1">出站协议类型</label>
+            <select id="upType" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-semibold text-cyan-300">
+              <option value="lwt_wss">LWT Ingress 伪装隧道 (WSS)</option>
+              <option value="socks5">标准 SOCKS5 代理</option>
+              <option value="http">HTTP / HTTPS CONNECT</option>
+              <option value="trojan">Trojan (TLS + SHA224)</option>
+              <option value="vless">VLESS (TLS + UUID)</option>
+              <option value="shadowsocks">Shadowsocks (AEAD)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- WSS 专属输入区域 -->
+        <div id="boxWss" class="space-y-2">
+          <div>
+            <label class="block text-slate-400 mb-1">上游 WSS 伪装隧道地址 (URL)</label>
+            <input type="text" id="upUrl" placeholder="如: wss://jp.example.com:5271/telemetry/metrics" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]">
+            <p class="text-[10px] text-slate-500 mt-0.5">支持 ws:// 或 wss://，路径需与远端 Ingress 混淆别名一致</p>
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1">Ingress 访问令牌 (Token)</label>
+            <input type="password" id="upToken" placeholder="留空则无鉴权" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]">
+          </div>
+        </div>
+
+        <!-- 标准主机端口输入区域 -->
+        <div id="boxHostPort" class="hidden space-y-2">
+          <div class="grid grid-cols-3 gap-3">
+            <div class="col-span-2">
+              <label class="block text-slate-400 mb-1">服务器主机 / IP / 域名</label>
+              <input type="text" id="upServer" placeholder="127.0.0.1 或 proxy.example.com" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono">
+            </div>
+            <div>
+              <label class="block text-slate-400 mb-1">端口</label>
+              <input type="number" id="upPort" min="1" max="65535" placeholder="1080" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono">
+            </div>
+          </div>
+        </div>
+
+        <!-- 凭据区域: 账号密码 (SOCKS5 / HTTP) -->
+        <div id="boxUserPass" class="hidden grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-slate-400 mb-1">用户名 (可选)</label>
+            <input type="text" id="upUsername" placeholder="用户名" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
+          </div>
+          <div>
+            <label class="block text-slate-400 mb-1">密码 (可选)</label>
+            <input type="password" id="upPassword" placeholder="密码" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
+          </div>
+        </div>
+
+        <!-- 凭据区域: 密钥密码 (Trojan / Shadowsocks) -->
+        <div id="boxSecret" class="hidden">
+          <label id="lblSecret" class="block text-slate-400 mb-1">连接密码 / 预共享密钥</label>
+          <input type="password" id="upSecret" placeholder="密码或密钥" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]">
+        </div>
+
+        <!-- 凭据区域: UUID (VLESS) -->
+        <div id="boxUuid" class="hidden">
+          <label class="block text-slate-400 mb-1">用户 UUID</label>
+          <input type="text" id="upUuid" placeholder="如: 01234567-89ab-cdef-0123-456789abcdef" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]">
+        </div>
+
+        <!-- TLS 配置区域 (WSS, Trojan, VLESS) -->
+        <div id="boxTls" class="grid grid-cols-2 gap-3 pt-1 border-t border-slate-800">
           <div>
             <label class="block text-slate-400 mb-1">自定义 TLS SNI (可选)</label>
             <input type="text" id="upSni" placeholder="与证书域名一致" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
@@ -126,6 +184,7 @@
             <label for="upSkipTls" class="text-slate-300">跳过 TLS 证书校验</label>
           </div>
         </div>
+
         <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
           <button type="button" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg modal-close">取消</button>
           <button type="submit" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-lg shadow">保存节点</button>
@@ -136,7 +195,7 @@
 
   <!-- 模态框: 新建/编辑入站中继 Profile -->
   <div id="modalInbound" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-xl shadow-2xl p-5 space-y-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-xl shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto custom-scroll">
       <div class="flex items-center justify-between border-b border-slate-800 pb-3">
         <h3 id="modalInboundTitle" class="text-sm font-bold text-slate-100">新建入站中继规则</h3>
         <button class="text-slate-400 hover:text-slate-200 text-lg modal-close">✕</button>
@@ -183,6 +242,36 @@
           <label class="block text-slate-400 mb-1">关联上游服务器节点</label>
           <div id="inboundUpstreamCheckboxes" class="grid grid-cols-2 gap-2 bg-slate-800/60 p-2.5 rounded-lg border border-slate-800 max-h-32 overflow-y-auto">
             <!-- 动态生成复选框 -->
+          </div>
+        </div>
+
+        <!-- 智能分流与局域网直连模块 -->
+        <div class="p-3 bg-slate-950/60 rounded-xl border border-slate-800/80 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-200 flex items-center gap-1.5">
+              <span>🎯</span> 智能分流与局域网直连 (Routing Policy)
+            </span>
+            <label class="flex items-center gap-1.5 cursor-pointer text-cyan-400 text-xs">
+              <input type="checkbox" id="inDirectPrivate" checked class="rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-0">
+              <span>局域网私网直连短路 (RFC 1918)</span>
+            </label>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <label class="block text-slate-400 mb-1">默认出站动作</label>
+              <select id="inDefaultAction" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-cyan-500">
+                <option value="proxy">Proxy (走上游代理)</option>
+                <option value="direct">Direct (直连联网)</option>
+                <option value="reject">Reject (阻断拦截)</option>
+              </select>
+            </div>
+            <div class="col-span-2">
+              <label class="block text-slate-400 mb-1">分流规则列表 (每行一条: 类型: 规则 -> 动作)</label>
+              <textarea id="inRoutingRules" rows="3" placeholder="domain_suffix: .cn -> direct
+domain_keyword: adservice -> reject
+ip_cidr: 223.5.5.0/24 -> direct" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]"></textarea>
+            </div>
           </div>
         </div>
 

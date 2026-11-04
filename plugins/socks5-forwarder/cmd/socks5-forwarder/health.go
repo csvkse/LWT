@@ -12,7 +12,16 @@ func CheckUpstreamHealth(ctx context.Context, node *UpstreamNode) (int64, error)
 	timeoutCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 
-	conn, err := DialWebSocket(timeoutCtx, node.URL, node.Token, "lwt-token.", node.SkipTLSVerify, node.SNI)
+	dialer, err := GlobalOutboundRegistry.CreateDialer(*node)
+	if err != nil {
+		node.Status = "dead"
+		node.LastError = err.Error()
+		node.LastChecked = time.Now()
+		return 0, err
+	}
+
+	target := "127.0.0.1:80"
+	conn, err := dialer.DialContext(timeoutCtx, "tcp", target)
 	if err != nil {
 		node.Status = "dead"
 		node.LastError = err.Error()

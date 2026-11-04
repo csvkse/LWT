@@ -7,7 +7,6 @@
   const token = urlParams.get('token') || '';
   let apiBase = '';
 
-  // 智能推断 API 前缀：如果在宿主反代路径 /plugins/socks5-forwarder/ 下
   if (window.location.pathname.includes('/plugins/socks5-forwarder')) {
     apiBase = window.location.pathname.replace(/\/ui\/.*|\/index\.html|\/?$/, '') + '/api';
   } else if (window.location.pathname.includes('/api/Plugins/socks5-forwarder')) {
@@ -62,6 +61,31 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
+  function getProtocolBadge(type) {
+    const t = (type || 'lwt_wss').toLowerCase();
+    switch (t) {
+      case 'socks5':
+        return '<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">SOCKS5</span>';
+      case 'http':
+        return '<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-sky-500/20 text-sky-300 border border-sky-500/30">HTTP</span>';
+      case 'trojan':
+        return '<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">TROJAN</span>';
+      case 'vless':
+        return '<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">VLESS</span>';
+      case 'shadowsocks':
+        return '<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">SHADOWSOCKS</span>';
+      default:
+        return '<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">LWT-WSS</span>';
+    }
+  }
+
+  function getNodeTargetDisplay(node) {
+    if (node.server && node.port) {
+      return `${node.server}:${node.port}`;
+    }
+    return node.url || '127.0.0.1';
+  }
+
   // 渲染上游节点
   function renderUpstreams() {
     const list = document.getElementById('upstreamList');
@@ -95,11 +119,17 @@
           ⚠️ ${escapeHtml(node.lastError)}
         </div>` : '';
 
+      const targetText = getNodeTargetDisplay(node);
+      const protoBadge = getProtocolBadge(node.type);
+
       card.innerHTML = `
         <div class="flex items-start justify-between gap-2">
           <div class="truncate">
-            <h4 class="font-bold text-xs text-slate-200 truncate">${escapeHtml(node.name)}</h4>
-            <div class="text-[11px] font-mono text-cyan-400/80 truncate mt-0.5" title="${escapeHtml(node.url)}">${escapeHtml(node.url)}</div>
+            <div class="flex items-center gap-1.5">
+              ${protoBadge}
+              <h4 class="font-bold text-xs text-slate-200 truncate">${escapeHtml(node.name)}</h4>
+            </div>
+            <div class="text-[11px] font-mono text-cyan-400/80 truncate mt-1" title="${escapeHtml(targetText)}">${escapeHtml(targetText)}</div>
           </div>
           <div>${statusBadge}</div>
         </div>
@@ -107,7 +137,7 @@
         ${errSnippet}
 
         <div class="flex items-center justify-between pt-2 border-t border-slate-800/80 text-[11px]">
-          <span class="text-slate-500 text-[10px]">${node.skipTlsVerify ? '⚠️ 免证书校验' : '🔒 TLS 严密校验'}</span>
+          <span class="text-slate-500 text-[10px]">${node.skipTlsVerify ? '⚠️ 免证书校验' : '🔒 TLS 校验'}</span>
           <div class="flex items-center gap-1.5">
             <button class="btn-test-up px-2 py-0.8 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded transition" data-id="${node.id}">⚡ 测速</button>
             <button class="btn-edit-up px-2 py-0.8 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded transition" data-id="${node.id}">⚙</button>
@@ -187,6 +217,16 @@
       const portBadges = allPorts.map(pt => `<span class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-cyan-950/80 text-cyan-300 border border-cyan-800/40">:${pt}</span>`).join(' ');
       const lanAccessCodes = allPorts.map(pt => `<code class="font-mono text-slate-200 select-all">${hostIP}:${pt}</code>`).join('<span class="text-slate-600 mx-1">|</span>');
 
+      // 分流策略状态
+      const rp = p.routePolicy || {};
+      const directPrivatePill = rp.directPrivateNetwork !== false
+        ? '<span class="text-emerald-400 font-medium">✓ 私网直连</span>'
+        : '<span class="text-slate-500">✕ 私网走代理</span>';
+      const ruleCount = (rp.rules || []).length;
+      const rulePill = ruleCount > 0
+        ? `<span class="text-cyan-400 font-medium">分流: ${ruleCount} 条</span>`
+        : '<span class="text-slate-500">全量出站</span>';
+
       card.innerHTML = `
         <div>
           <div class="flex items-start justify-between gap-3">
@@ -195,7 +235,7 @@
                 <h3 class="font-bold text-sm text-slate-100">${escapeHtml(p.name)}</h3>
                 ${portBadges}
               </div>
-              <p class="text-[11px] text-slate-400 mt-0.5">协议模式: <span class="text-slate-300 font-medium">${p.protocol.toUpperCase()}</span> | 策略: <span class="text-slate-300">${p.upstreamStrategy}</span></p>
+              <p class="text-[11px] text-slate-400 mt-0.5">协议模式: <span class="text-slate-300 font-medium">${(p.protocol || 'mixed').toUpperCase()}</span> | 调度: <span class="text-slate-300">${p.upstreamStrategy || 'single'}</span></p>
             </div>
             <div>${statusPill}</div>
           </div>
@@ -206,8 +246,19 @@
               <span class="font-mono text-slate-300 truncate block mt-0.5" title="${(p.allowedCidr||[]).join(', ')}">${aclPreview || '全网放开'}</span>
             </div>
             <div>
-              <span class="text-slate-500 block text-[10px]">实时流量统计</span>
-              <span class="font-mono text-slate-300 block mt-0.5">↑ ${formatBytes(p.totalBytesTx)} | ↓ ${formatBytes(p.totalBytesRx)}</span>
+              <span class="text-slate-500 block text-[10px]">智能分流路由策略</span>
+              <div class="flex items-center gap-2 mt-0.5">${directPrivatePill} | ${rulePill}</div>
+            </div>
+          </div>
+
+          <div class="mt-2 grid grid-cols-2 gap-2 text-[11px] bg-slate-950/40 p-2 rounded border border-slate-800/60">
+            <div>
+              <span class="text-slate-500 text-[10px]">上行流量:</span>
+              <span class="font-mono text-slate-300 ml-1">↑ ${formatBytes(p.totalBytesTx)}</span>
+            </div>
+            <div>
+              <span class="text-slate-500 text-[10px]">下行流量:</span>
+              <span class="font-mono text-slate-300 ml-1">↓ ${formatBytes(p.totalBytesRx)}</span>
             </div>
           </div>
 
@@ -282,15 +333,64 @@
   }
 
   // 3. 模态框逻辑
+  function updateUpstreamFormVisibility(type) {
+    const t = (type || 'lwt_wss').toLowerCase();
+    const boxWss = document.getElementById('boxWss');
+    const boxHostPort = document.getElementById('boxHostPort');
+    const boxUserPass = document.getElementById('boxUserPass');
+    const boxSecret = document.getElementById('boxSecret');
+    const boxUuid = document.getElementById('boxUuid');
+    const boxTls = document.getElementById('boxTls');
+    const lblSecret = document.getElementById('lblSecret');
+
+    boxWss.classList.add('hidden');
+    boxHostPort.classList.add('hidden');
+    boxUserPass.classList.add('hidden');
+    boxSecret.classList.add('hidden');
+    boxUuid.classList.add('hidden');
+    boxTls.classList.add('hidden');
+
+    if (t === 'lwt_wss') {
+      boxWss.classList.remove('hidden');
+      boxTls.classList.remove('hidden');
+    } else {
+      boxHostPort.classList.remove('hidden');
+      if (t === 'socks5' || t === 'http') {
+        boxUserPass.classList.remove('hidden');
+      } else if (t === 'trojan') {
+        lblSecret.textContent = 'Trojan 密码 (Password)';
+        boxSecret.classList.remove('hidden');
+        boxTls.classList.remove('hidden');
+      } else if (t === 'vless') {
+        boxUuid.classList.remove('hidden');
+        boxTls.classList.remove('hidden');
+      } else if (t === 'shadowsocks') {
+        lblSecret.textContent = 'Shadowsocks 预共享密钥 (Secret Key)';
+        boxSecret.classList.remove('hidden');
+      }
+    }
+  }
+
   function openUpstreamModal(node = null) {
     const modal = document.getElementById('modalUpstream');
     document.getElementById('modalUpstreamTitle').textContent = node ? '编辑上游服务节点' : '添加上游服务节点';
     document.getElementById('upId').value = node ? node.id : '';
     document.getElementById('upName').value = node ? node.name : '';
-    document.getElementById('upUrl').value = node ? node.url : '';
-    document.getElementById('upToken').value = node ? node.token : '';
+    const nodeType = node ? (node.type || 'lwt_wss') : 'lwt_wss';
+    document.getElementById('upType').value = nodeType;
+
+    document.getElementById('upUrl').value = node ? (node.url || '') : '';
+    document.getElementById('upToken').value = node ? (node.token || '') : '';
+    document.getElementById('upServer').value = node ? (node.server || '') : '';
+    document.getElementById('upPort').value = node && node.port ? node.port : (nodeType === 'socks5' ? 1080 : (nodeType === 'http' ? 8080 : 443));
+    document.getElementById('upUsername').value = node ? (node.username || '') : '';
+    document.getElementById('upPassword').value = node ? (node.password || '') : '';
+    document.getElementById('upSecret').value = node ? (node.password || '') : '';
+    document.getElementById('upUuid').value = node ? (node.uuid || '') : '';
     document.getElementById('upSni').value = node ? (node.sni || '') : '';
     document.getElementById('upSkipTls').checked = node ? Boolean(node.skipTlsVerify) : true;
+
+    updateUpstreamFormVisibility(nodeType);
     modal.classList.remove('hidden');
   }
 
@@ -304,6 +404,14 @@
     document.getElementById('inProtocol').value = p ? p.protocol : 'mixed';
     document.getElementById('inStrategy').value = p ? p.upstreamStrategy : 'single';
     document.getElementById('inAcl').value = p ? (p.allowedCidr || []).join(', ') : '10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1/32';
+
+    // 智能分流策略字段填充
+    const rp = (p && p.routePolicy) ? p.routePolicy : {};
+    document.getElementById('inDirectPrivate').checked = rp.directPrivateNetwork !== false;
+    document.getElementById('inDefaultAction').value = rp.defaultAction || 'proxy';
+
+    const rulesFormatted = (rp.rules || []).map(r => `${r.type}: ${r.value} -> ${r.action}`).join('\n');
+    document.getElementById('inRoutingRules').value = rulesFormatted;
 
     // 动态生成候选上游复选框
     const container = document.getElementById('inboundUpstreamCheckboxes');
@@ -334,6 +442,10 @@
 
   document.querySelectorAll('.modal-close').forEach(btn => btn.addEventListener('click', closeModals));
 
+  document.getElementById('upType').addEventListener('change', (e) => {
+    updateUpstreamFormVisibility(e.target.value);
+  });
+
   // CIDR 快捷填充按钮
   document.getElementById('btnAclLan').addEventListener('click', () => {
     document.getElementById('inAcl').value = '10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1/8, ::1/128';
@@ -348,14 +460,31 @@
   // 表单提交: 上游节点
   document.getElementById('formUpstream').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const type = document.getElementById('upType').value;
     const node = {
       id: document.getElementById('upId').value || undefined,
       name: document.getElementById('upName').value.trim(),
-      url: document.getElementById('upUrl').value.trim(),
-      token: document.getElementById('upToken').value.trim(),
+      type: type,
       sni: document.getElementById('upSni').value.trim(),
       skipTlsVerify: document.getElementById('upSkipTls').checked
     };
+
+    if (type === 'lwt_wss') {
+      node.url = document.getElementById('upUrl').value.trim();
+      node.token = document.getElementById('upToken').value.trim();
+    } else {
+      node.server = document.getElementById('upServer').value.trim();
+      node.port = parseInt(document.getElementById('upPort').value, 10) || 1080;
+      if (type === 'socks5' || type === 'http') {
+        node.username = document.getElementById('upUsername').value.trim();
+        node.password = document.getElementById('upPassword').value.trim();
+      } else if (type === 'trojan' || type === 'shadowsocks') {
+        node.password = document.getElementById('upSecret').value.trim();
+      } else if (type === 'vless') {
+        node.uuid = document.getElementById('upUuid').value.trim();
+      }
+    }
+
     try {
       await apiCall('upstreams', { method: 'POST', body: node });
       closeModals();
@@ -382,6 +511,33 @@
       ? rawAdditional.split(/[\s,;]+/).map(s => parseInt(s.trim(), 10)).filter(pt => !isNaN(pt) && pt > 0 && pt <= 65535)
       : [];
 
+    // 解析分流规则列表
+    const rawRulesText = document.getElementById('inRoutingRules').value.trim();
+    const parsedRules = [];
+    if (rawRulesText) {
+      const lines = rawRulesText.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        // 匹配 "type: value -> action"
+        const parts = trimmed.split('->');
+        if (parts.length >= 2) {
+          const left = parts[0].trim();
+          const action = parts[1].trim();
+          const colonIdx = left.indexOf(':');
+          if (colonIdx > 0) {
+            const ruleType = left.substring(0, colonIdx).trim();
+            const ruleVal = left.substring(colonIdx + 1).trim();
+            parsedRules.push({
+              type: ruleType,
+              value: ruleVal,
+              action: action
+            });
+          }
+        }
+      }
+    }
+
     const profile = {
       id: document.getElementById('inId').value || undefined,
       name: document.getElementById('inName').value.trim(),
@@ -391,7 +547,12 @@
       protocol: document.getElementById('inProtocol').value,
       upstreamStrategy: document.getElementById('inStrategy').value,
       upstreamNodes: checkedNodes,
-      allowedCidr: allowedCidr
+      allowedCidr: allowedCidr,
+      routePolicy: {
+        directPrivateNetwork: document.getElementById('inDirectPrivate').checked,
+        defaultAction: document.getElementById('inDefaultAction').value,
+        rules: parsedRules
+      }
     };
 
     try {
