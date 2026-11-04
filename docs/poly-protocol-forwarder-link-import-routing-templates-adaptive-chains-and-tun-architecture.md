@@ -182,7 +182,7 @@ graph TD
   $$\text{Hop 1 (前置接入中转)} \longrightarrow \text{Hop 2 (境外落地节点)} \longrightarrow \text{目标服务器}$$
 - **行为特征**：严格确定性（Deterministic）。若中间任意一跳发生物理故障或连接超时，该次代理请求立即宣告失败并返回明确的跳数错误（如 `链式代理第 2 跳握手失败`），绝不私自跨跳。
 
-### 4.2 自动模式 (Adaptive Auto-Chaining with Self-Healing)
+### 4.2 自动模式：全网格动态自愈 (Adaptive Full-Mesh Chaining)
 针对需要“高可用（High Availability）与最低时延保障”的企业级场景，引入**自适应链路编排策略**：
 
 ```mermaid
@@ -208,10 +208,91 @@ sequenceDiagram
     Client->>Supervisor: 后续连接无感迁移，零业务中断！
 ```
 
+### 4.3 增强子模式：固定落地出口自适应模式 (Pinned Exit Node in Adaptive Chaining)
+
+> [!IMPORTANT]
+> **真实生产痛点 (The Fixed Egress IP Dilemma)**：
+> 在许多严肃生产场景中，**最终的落地出口 IP 绝对不能频繁漂移**：
+> 1. **IP 白名单访问**：企业内网安全网关、云服务安全组、特定 API 服务只放行固定的外部 IP 地址；
+> 2. **风控与防封禁**：流媒体、ChatGPT/Claude、银行与交易所账户对频繁变更出口 IP（IP 跳动/异地登录）极度敏感，容易触发二次风控或封号；
+> 3. **专属静态宽带资源**：用户特意购买了高成本的“原生静态住宅 IP”作为固定出口，但该出口直连国内线路质量极差、丢包率高，必须依赖优质中继加速。
+
+#### 1. 架构拓扑与动态调度机制：
+为了完美平衡“出口 IP 恒定”与“链路高质量自愈”，在自动模式中支持配置**可选固定出口节点 (`fixedExitNodeId`)**：
+
+```mermaid
+flowchart LR
+    subgraph InboundZone ["本地入站"]
+        Client["客户端应用<br/>(浏览器/应用)"]
+    end
+
+    subgraph MidRelayPool ["前置跳板候选池 (动态自适应优选)"]
+        Hop1["香港 CN2 中继<br/>RTT: 18ms"]
+        Hop2["日本 BGP 中继<br/>RTT: 35ms"]
+        Hop3["新加坡 中继<br/>RTT: 52ms"]
+    end
+
+    subgraph FixedExitZone ["固定落地出口 (Pinned Egress)"]
+        FixedExit["🇺🇸 美国静态住宅节点<br/>(固定落地 IP: 198.51.100.22)"]
+    end
+
+    subgraph Internet ["最终互联网端点"]
+        Target["OpenAI / 银行 / 企业专网<br/>(仅识别固定落地 IP)"]
+    end
+
+    Client -->|请求接管| MidRelayPool
+    Hop1 -.->|优选第一跳: 最佳链路| FixedExit
+    Hop2 -.->|备选第一跳: 故障秒级接管| FixedExit
+    Hop3 -.->|备选第一跳: 降级候选| FixedExit
+    FixedExit ==>|恒定静态出口 IP| Target
+
+    style FixedExit fill:#2e7d32,stroke:#1b5e20,stroke-width:2px,color:#fff
+```
+
+#### 2. 最优时延评估算法与数学模型：
+当用户指定了 `fixedExitNodeId` 时，调度器的优化目标函数退化为单变量求极值，计算复杂度大幅下降：
+$$\text{OptimalHop} = \arg\min_{h \in \text{HopCandidates}} \Big( RTT(\text{Client} \to h) + RTT(h \to \text{FixedExit}) \Big)$$
+
+- **前置跳板故障转移 (Hop Failover)**：若当前活跃的前置跳板（如香港 CN2）发生丢包或断线，调度器在 **500ms 内** 无感将后续连接切至备选前置跳板（如日本 BGP），而**对外暴露的出口落地 IP 始终为该固定节点，业务 Session 永不中断**！
+- **落地出口基准锚定 (Egress Health Anchor)**：状态机以固定出口节点的生命周期为锚点。若固定出口节点自身离线（如机器宕机），状态机直接触发 `CRITICAL_EGRESS_DOWN` 熔断告警，拒绝无意义的前置跳板盲目轮询，杜绝网络雪崩。
+
+#### 3. 配置模型与数据契约规范 (JSON Schema)：
+```json
+{
+  "chainConfig": {
+    "enabled": true,
+    "strategy": "auto",
+    "description": "美西固定住宅出口 + 亚太优质中继动态自适应加速",
+    "fixedExitNodeId": "node-us-residential-static-01",
+    "hopCandidates": [
+      "node-hk-cn2-01",
+      "node-jp-bgp-02",
+      "node-sg-direct-01"
+    ],
+    "exitCandidates": [],
+    "probeIntervalSeconds": 15,
+    "failoverThreshold": 2,
+    "rttWeight": 0.7,
+    "lossWeight": 0.3
+  }
+}
+```
+*注：当 `fixedExitNodeId` 留空（`null` 或 `""`）时，系统自动回退至全网格双候选池优选模式（`exitCandidates` 生效）。*
+
+#### 4. 前端 Webview 交互设计：
+在链式代理配置弹窗中，当用户切换至【自动自适应模式】时，界面呈现：
+- **固定落地出口节点（可选）**：下拉单选框。
+  - 选项首项：`🌐 自动全网格优选 (不固定出口)`；
+  - 其余选项：按上游节点列表列出已保存的出口节点（如 `🇺🇸 美国原生住宅 IP (198.51.100.22)`、`🇯🇵 东京企业专网出口` 等）；
+- **动态拓扑示意图**：实时根据下拉选择，动态更新拓扑预览：
+  - 若选择固定出口：呈现 `客户端 ➔ [亚太跳板池 (3个候选自适应)] ➔ [固定落地: 美国原生住宅] ➔ 目标`；
+  - 辅助提示：`💡 已锁定落地出口 IP，系统将仅在中间跳板中自动寻优与故障无感自愈，适合 IP 白名单与防封控业务。`
+
 #### 关键算法与设计模式：
 1. **策略模式 (`IProxyChainStrategy`)**：
    - `ManualStaticChainStrategy`：固定顺序穿透；
-   - `DynamicAdaptiveChainStrategy`：基于实时探针数据矩阵，动态选出最优两跳路径。
+   - `PinnedExitAdaptiveChainStrategy`：固定落地出口 + 前置跳板动态寻优自愈；
+   - `FullMeshAdaptiveChainStrategy`：全动态网格双向笛卡尔积寻优。
 2. **有限状态机 (`ChainStateFSM`)**：
    - 节点池状态迁移：`Optimal (最优)` $\rightarrow$ `Degraded (轻度抖动)` $\rightarrow$ `CircuitBreaker (熔断摘除)` $\rightarrow$ `Recovering (探活自愈)`。
 
