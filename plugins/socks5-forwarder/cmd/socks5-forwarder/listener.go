@@ -40,14 +40,28 @@ type InboundListener struct {
 	mu         sync.Mutex
 }
 
-// NewInboundListener 实例化入站监听器
+// NewInboundListener 实例化入站监听器 (三阶解耦模型：支持绑定独立分流线路)
 func NewInboundListener(p InboundProfile, mgr *ProfileManager) *InboundListener {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// 优先根据绑定的 PipelineID 提取路由流水线策略，未绑定时回退使用历史内嵌 RoutePolicy
+	routePolicy := p.RoutePolicy
+	if p.PipelineID != "" && mgr != nil {
+		if pipe, found := mgr.getPipelineLocked(p.PipelineID); found {
+			routePolicy = RoutePolicyConfig{
+				DirectPrivateNetwork: pipe.DirectPrivateNetwork,
+				DefaultAction:        pipe.DefaultAction,
+				DefaultUpstream:      pipe.DefaultOutbound,
+				Rules:                pipe.Rules,
+			}
+		}
+	}
+
 	return &InboundListener{
 		profile:    p,
 		listeners:  make([]net.Listener, 0),
 		acl:        NewACLManager(p.AllowedCIDR),
-		dispatcher: NewRuleRoutingDispatcher(p.RoutePolicy),
+		dispatcher: NewRuleRoutingDispatcher(routePolicy),
 		mgr:        mgr,
 		ctx:        ctx,
 		cancel:     cancel,

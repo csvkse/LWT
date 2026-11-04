@@ -357,6 +357,84 @@ func (m *ProfileManager) DeleteChain(id string) error {
 	return m.cfg.Save()
 }
 
+// GetPipeline 根据 ID 查询线路编排流水线快照
+func (m *ProfileManager) GetPipeline(id string) (*RoutingPipeline, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.getPipelineLocked(id)
+}
+
+func (m *ProfileManager) getPipelineLocked(id string) (*RoutingPipeline, bool) {
+	for i := range m.cfg.Pipelines {
+		if m.cfg.Pipelines[i].ID == id {
+			clone := m.cfg.Pipelines[i]
+			return &clone, true
+		}
+	}
+	return nil, false
+}
+
+// GetPipelines 获取当前所有线路编排流水线列表快照
+func (m *ProfileManager) GetPipelines() []RoutingPipeline {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	pipelines := make([]RoutingPipeline, len(m.cfg.Pipelines))
+	copy(pipelines, m.cfg.Pipelines)
+	return pipelines
+}
+
+// UpsertPipeline 新增或修改线路编排流水线
+func (m *ProfileManager) UpsertPipeline(pipe RoutingPipeline) (*RoutingPipeline, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if pipe.ID == "" {
+		pipe.ID = fmt.Sprintf("pipe-%d", time.Now().UnixNano()%100000)
+	}
+	if pipe.Name == "" {
+		pipe.Name = "线路 " + pipe.ID
+	}
+	if pipe.DefaultAction == "" {
+		pipe.DefaultAction = "proxy"
+	}
+
+	found := false
+	for i := range m.cfg.Pipelines {
+		if m.cfg.Pipelines[i].ID == pipe.ID {
+			m.cfg.Pipelines[i] = pipe
+			found = true
+			break
+		}
+	}
+	if !found {
+		m.cfg.Pipelines = append(m.cfg.Pipelines, pipe)
+	}
+
+	if err := m.cfg.Save(); err != nil {
+		return nil, err
+	}
+	return &pipe, nil
+}
+
+// DeletePipeline 删除指定 ID 的线路编排流水线
+func (m *ProfileManager) DeletePipeline(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if id == "pipe-default" {
+		return fmt.Errorf("禁止删除系统默认全局线路 [pipe-default]")
+	}
+
+	var updated []RoutingPipeline
+	for _, p := range m.cfg.Pipelines {
+		if p.ID != id {
+			updated = append(updated, p)
+		}
+	}
+	m.cfg.Pipelines = updated
+	return m.cfg.Save()
+}
+
 // SelectUpstreamForProfile 为指定 Profile 挑选最优可用上游节点
 func (m *ProfileManager) SelectUpstreamForProfile(p InboundProfile, rrCounter *uint64) (*UpstreamNode, error) {
 	m.mu.RLock()

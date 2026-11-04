@@ -38,7 +38,18 @@ type RuleConfig struct {
 	Target string `json:"target,omitempty"`
 }
 
-// RoutePolicyConfig 入站规则分流策略
+// RoutingPipeline 独立线路编排流水线 (解耦分流策略与物理接入)
+type RoutingPipeline struct {
+	ID                   string       `json:"id"`
+	Name                 string       `json:"name"`
+	Description          string       `json:"description,omitempty"`
+	DirectPrivateNetwork bool         `json:"directPrivateNetwork"`
+	DefaultAction        string       `json:"defaultAction"`            // proxy, direct, reject
+	DefaultOutbound      string       `json:"defaultOutbound,omitempty"` // 默认关联的 Upstream ID 或 Chain ID
+	Rules                []RuleConfig `json:"rules,omitempty"`
+}
+
+// RoutePolicyConfig 入站规则分流策略 (向后兼容历史配置)
 type RoutePolicyConfig struct {
 	DirectPrivateNetwork bool         `json:"directPrivateNetwork"`
 	Rules                []RuleConfig `json:"rules,omitempty"`
@@ -58,22 +69,28 @@ type ProxyChainConfig struct {
 	Mux                  bool     `json:"mux,omitempty"`
 }
 
-// InboundProfile 本地入站中继端口配置与策略
+// InboundProfile 本地入站接入配置 (三阶解耦模型：统一支持端口与 TUN 虚拟网卡)
 type InboundProfile struct {
 	ID               string            `json:"id"`
 	Name             string            `json:"name"`
+	Type             string            `json:"type,omitempty"`            // port (物理端口), tun (虚拟网卡透明代理)
 	Enabled          bool              `json:"enabled"`
 	ListenPort       int               `json:"listenPort"`
-	AdditionalPorts  []int             `json:"additionalPorts,omitempty"` // 附加监听端口列表（支持多端口入站映射同一策略）
+	AdditionalPorts  []int             `json:"additionalPorts,omitempty"` // 附加监听端口列表（支持多端口映射）
 	Protocol         string            `json:"protocol"`                 // mixed (自适应), socks5, http
 	AllowedCIDR      []string          `json:"allowedCidr"`
-	UpstreamStrategy string            `json:"upstreamStrategy"`         // single (固定单节点), best_latency (最低延迟), round_robin (轮询)
-	UpstreamNodes    []string          `json:"upstreamNodes"`            // 关联的 UpstreamNode ID 列表
-	RoutePolicy      RoutePolicyConfig `json:"routePolicy,omitempty"`    // 智能分流与局域网直连策略
+	PipelineID       string            `json:"pipelineId,omitempty"`      // 关联绑定的 RoutingPipeline ID
+	UpstreamStrategy string            `json:"upstreamStrategy,omitempty"`// 兼容字段
+	UpstreamNodes    []string          `json:"upstreamNodes,omitempty"`   // 兼容字段
+	RoutePolicy      RoutePolicyConfig `json:"routePolicy,omitempty"`    // 兼容历史字段
+	TunInterface     string            `json:"tunInterface,omitempty"`    // TUN 虚拟网卡名 (lwt-tun0)
+	TunCidr          string            `json:"tunCidr,omitempty"`         // TUN 虚拟网段 (198.18.0.1/16)
+	DnsHijack        bool              `json:"dnsHijack,omitempty"`       // 53 端口 DNS 自动劫持
+	BypassCidr       []string          `json:"bypassCidr,omitempty"`      // 透明代理旁路网段
 	ActiveConns      int64             `json:"activeConns"`
 	TotalBytesTx     int64             `json:"totalBytesTx"`
 	TotalBytesRx     int64             `json:"totalBytesRx"`
-	Status           string            `json:"status"` // running, stopped, error
+	Status           string            `json:"status"`                    // running, stopped, error
 	LastError        string            `json:"lastError,omitempty"`
 }
 
@@ -100,6 +117,7 @@ type Config struct {
 	filePath  string
 	Upstreams []UpstreamNode     `json:"upstreams"`
 	Inbounds  []InboundProfile   `json:"inbounds"`
+	Pipelines []RoutingPipeline  `json:"pipelines,omitempty"`
 	Chains    []ProxyChainConfig `json:"chains,omitempty"`
 }
 
@@ -109,6 +127,8 @@ func LoadConfig(filePath string) (*Config, error) {
 		filePath:  filePath,
 		Upstreams: make([]UpstreamNode, 0),
 		Inbounds:  make([]InboundProfile, 0),
+		Pipelines: make([]RoutingPipeline, 0),
+		Chains:    make([]ProxyChainConfig, 0),
 	}
 
 	hostInternalPort := os.Getenv("LWT_HOST_INTERNAL_PORT")
@@ -122,6 +142,39 @@ func LoadConfig(filePath string) (*Config, error) {
 	}
 	if defaultToken == "" {
 		defaultToken = "lwt_live_stream_token_8f3a9e"
+	}
+
+	defaultPipelines := []RoutingPipeline{
+		{
+			ID:                   "pipe-default",
+			Name:                 "全局标准分流线路 (默认流水线)",
+			Description:          "局域网与国内主流服务直连，拦截广告隐私追踪，境外服务走代理",
+			DirectPrivateNetwork: true,
+			DefaultAction:        "proxy",
+			DefaultOutbound:      "default-lwt-node",
+			Rules: []RuleConfig{
+				{Type: "domain_keyword", Value: "adservice", Action: "reject"},
+				{Type: "domain_keyword", Value: "telemetry", Action: "reject"},
+				{Type: "domain_suffix", Value: ".cn", Action: "direct"},
+				{Type: "domain_suffix", Value: "bilibili.com", Action: "direct"},
+				{Type: "ip_cidr", Value: "223.5.5.0/24", Action: "direct"},
+			},
+		},
+		{
+			ID:                   "pipe-ai-dedicated",
+			Name:                 "AI 研发专线流水线",
+			Description:          "OpenAI、Claude、Copilot 模型加速专线，大陆服务直连",
+			DirectPrivateNetwork: true,
+			DefaultAction:        "proxy",
+			DefaultOutbound:      "default-lwt-node",
+			Rules: []RuleConfig{
+				{Type: "domain_suffix", Value: "openai.com", Action: "proxy"},
+				{Type: "domain_suffix", Value: "chatgpt.com", Action: "proxy"},
+				{Type: "domain_suffix", Value: "anthropic.com", Action: "proxy"},
+				{Type: "domain_suffix", Value: "claude.ai", Action: "proxy"},
+				{Type: "domain_suffix", Value: ".cn", Action: "direct"},
+			},
+		},
 	}
 
 	if data, err := os.ReadFile(filePath); err == nil {
@@ -140,6 +193,25 @@ func LoadConfig(filePath string) (*Config, error) {
 					}
 				}
 			}
+
+			// 自动迁移并补全分流流水线
+			if len(cfg.Pipelines) == 0 {
+				cfg.Pipelines = defaultPipelines
+				healed = true
+			}
+
+			// 自动适配三阶分层字段 (PipelineID 与 Type)
+			for i := range cfg.Inbounds {
+				if cfg.Inbounds[i].Type == "" {
+					cfg.Inbounds[i].Type = "port"
+					healed = true
+				}
+				if cfg.Inbounds[i].PipelineID == "" {
+					cfg.Inbounds[i].PipelineID = "pipe-default"
+					healed = true
+				}
+			}
+
 			if healed {
 				_ = cfg.Save()
 			}
@@ -147,7 +219,8 @@ func LoadConfig(filePath string) (*Config, error) {
 		}
 	}
 
-	// 初始化默认演示配置 (自适应宿主容器内部直通端口与真实 Ingress Token)
+	// 初始化默认三阶解耦配置 (自适应宿主容器内部直通端口与真实 Ingress Token)
+	cfg.Pipelines = defaultPipelines
 	cfg.Upstreams = []UpstreamNode{
 		{
 			ID:            "default-lwt-node",
@@ -163,11 +236,13 @@ func LoadConfig(filePath string) (*Config, error) {
 		{
 			ID:               "inbound-lan-default",
 			Name:             "局域网默认混合中继",
+			Type:             "port",
 			Enabled:          true,
 			ListenPort:       10801,
 			AdditionalPorts:  []int{},
 			Protocol:         "mixed",
 			AllowedCIDR:      []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "::1/128"},
+			PipelineID:       "pipe-default",
 			UpstreamStrategy: "single",
 			UpstreamNodes:    []string{"default-lwt-node"},
 			RoutePolicy: RoutePolicyConfig{
@@ -191,6 +266,10 @@ func LoadConfig(filePath string) (*Config, error) {
 func (c *Config) Save() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.filePath == "" {
+		return nil
+	}
 
 	dir := filepath.Dir(c.filePath)
 	if err := os.MkdirAll(dir, 0755); err != nil {

@@ -37,12 +37,13 @@ func main() {
 	// 3. 构建 HTTP REST 控制面与 UI 静态托管路由
 	mux := http.NewServeMux()
 
-	// API: 获取完整快照
+	// API: 获取完整快照 (三阶解耦模型：含 pipelines)
 	mux.HandleFunc("GET /api/profiles", func(w http.ResponseWriter, r *http.Request) {
 		upstreams, inbounds := mgr.GetSnapshot()
 		writeJSON(w, http.StatusOK, map[string]any{
 			"upstreams": upstreams,
 			"inbounds":  inbounds,
+			"pipelines": mgr.GetPipelines(),
 			"chains":    mgr.GetChains(),
 		})
 	})
@@ -223,6 +224,42 @@ func main() {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"message": "已成功删除链式代理配置"})
+	})
+
+	// API: 获取所有分流线路
+	mux.HandleFunc("GET /api/pipelines", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"pipelines": mgr.GetPipelines(),
+		})
+	})
+
+	// API: 创建 / 修改分流线路
+	mux.HandleFunc("POST /api/pipelines", func(w http.ResponseWriter, r *http.Request) {
+		var p RoutingPipeline
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeError(w, http.StatusBadRequest, "解析分流线路配置失败: "+err.Error())
+			return
+		}
+		saved, err := mgr.UpsertPipeline(p)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, saved)
+	})
+
+	// API: 删除分流线路
+	mux.HandleFunc("DELETE /api/pipelines", func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("id")
+		if id == "" {
+			writeError(w, http.StatusBadRequest, "缺少必需的 id 参数")
+			return
+		}
+		if err := mgr.DeletePipeline(id); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"message": "已成功删除分流线路"})
 	})
 
 	// 静态 Webview UI 文件服务

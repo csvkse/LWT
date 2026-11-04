@@ -18,6 +18,8 @@
   let state = {
     upstreams: [],
     inbounds: [],
+    pipelines: [],
+    chains: [],
     loading: false
   };
 
@@ -40,15 +42,24 @@
     return res.json();
   }
 
-  // 2. 数据拉取与渲染
+  // 2. 数据拉取与渲染 (三阶解耦模型)
   async function loadData() {
     try {
       const data = await apiCall('profiles');
       state.upstreams = data.upstreams || [];
       state.inbounds = data.inbounds || [];
+      state.pipelines = data.pipelines || [];
+      state.chains = data.chains || [];
+
       if (window.ForwarderFeatures) {
         window.ForwarderFeatures.upstreams = state.upstreams;
+        window.ForwarderFeatures.pipelines = state.pipelines;
+        window.ForwarderFeatures.chains = state.chains;
       }
+      if (window.ForwarderPipelines && window.ForwarderPipelines.render) {
+        window.ForwarderPipelines.render(state.pipelines);
+      }
+
       renderUpstreams();
       renderInbounds();
     } catch (err) {
@@ -187,22 +198,71 @@
     });
   }
 
-  // 渲染本地入站中继规则
+  // 渲染本地入站接入网关 (三阶解耦模型：统一呈现 TUN 虚拟网卡与多端口中继)
   function renderInbounds() {
     const list = document.getElementById('inboundList');
     document.getElementById('inboundCount').textContent = state.inbounds.length;
     list.innerHTML = '';
 
+    const hostIP = window.location.hostname || '127.0.0.1';
+    const pipelineOptions = (state.pipelines || []).map(pipe =>
+      `<option value="${pipe.id}">${escapeHtml(pipe.name)}</option>`
+    ).join('');
+
+    // 1. 首先渲染 TUN 虚拟网卡用户态透明接入网关卡片
+    const tunCard = document.createElement('div');
+    tunCard.className = 'p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between gap-3 shadow-md relative overflow-hidden';
+    const tunStatus = (window.ForwarderFeatures && window.ForwarderFeatures.tunStatus) || {};
+    const tunReady = tunStatus.deviceAvailable && tunStatus.hasPrivilege;
+    const tunBadge = tunReady
+      ? '<span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> 🟢 设备就绪</span>'
+      : '<span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">⚠️ 设备受限</span>';
+
+    tunCard.innerHTML = `
+      <div>
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <h3 class="font-bold text-sm text-slate-100 flex items-center gap-1.5">
+                <span>🛡️</span> 全局 TUN 透明网关
+              </h3>
+              <span class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-amber-950/80 text-amber-300 border border-amber-800/40">lwt-tun0</span>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-0.5">模式: <span class="text-cyan-300 font-mono">Google gVisor</span> | 网段: <span class="font-mono text-slate-300">198.18.0.1/16</span></p>
+          </div>
+          <div>${tunBadge}</div>
+        </div>
+
+        <div class="mt-3 p-2.5 bg-slate-950/60 rounded-lg border border-slate-800 text-[11px] space-y-1.5">
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400 flex items-center gap-1 font-semibold">🔀 挂载分流线路:</span>
+            <select id="selTunPipeline" class="bg-slate-800 border border-slate-700 rounded px-2 py-0.5 text-cyan-300 font-semibold text-[11px] focus:outline-none focus:border-cyan-500">
+              ${pipelineOptions}
+            </select>
+          </div>
+          <p class="text-[10px] text-slate-500">用户态透明接管，53 端口 DNS 与出站流量自动由所选线路决策。</p>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between pt-2.5 border-t border-slate-800 text-xs">
+        <span class="text-[10px] text-slate-500">零宿主网络污染</span>
+        <div class="flex items-center gap-2">
+          <button id="btnCardTunModal" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs transition">⚙ 参数设置</button>
+        </div>
+      </div>
+    `;
+    list.appendChild(tunCard);
+
+    tunCard.querySelector('#btnCardTunModal').addEventListener('click', () => {
+      const btn = document.getElementById('btnTunStatus');
+      if (btn) btn.click();
+    });
+
     if (state.inbounds.length === 0) {
-      list.innerHTML = `
-        <div class="col-span-full p-6 rounded-xl border border-dashed border-slate-800 text-center text-slate-500 text-xs">
-          暂无入站中继规则，请点击右上角 "+ 新建入站中继" 开启本地端口中继
-        </div>`;
       return;
     }
 
-    const hostIP = window.location.hostname || '127.0.0.1';
-
+    // 2. 依次渲染各个端口中继卡片
     state.inbounds.forEach(p => {
       const card = document.createElement('div');
       card.className = 'p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between gap-3 shadow-md relative overflow-hidden';
@@ -215,20 +275,15 @@
           : '<span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-slate-800 text-slate-400">⏹ 已停止</span>');
 
       const aclPreview = (p.allowedCidr || []).slice(0, 3).join(', ') + ((p.allowedCidr || []).length > 3 ? '...' : '');
-
       const allPorts = [p.listenPort, ...(p.additionalPorts || [])].filter((v, i, a) => v && a.indexOf(v) === i);
       const portBadges = allPorts.map(pt => `<span class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-cyan-950/80 text-cyan-300 border border-cyan-800/40">:${pt}</span>`).join(' ');
       const lanAccessCodes = allPorts.map(pt => `<code class="font-mono text-slate-200 select-all">${hostIP}:${pt}</code>`).join('<span class="text-slate-600 mx-1">|</span>');
 
-      // 分流策略状态
-      const rp = p.routePolicy || {};
-      const directPrivatePill = rp.directPrivateNetwork !== false
-        ? '<span class="text-emerald-400 font-medium">✓ 私网直连</span>'
-        : '<span class="text-slate-500">✕ 私网走代理</span>';
-      const ruleCount = (rp.rules || []).length;
-      const rulePill = ruleCount > 0
-        ? `<span class="text-cyan-400 font-medium">分流: ${ruleCount} 条</span>`
-        : '<span class="text-slate-500">全量出站</span>';
+      // 线路绑定选择项
+      const currentPipeId = p.pipelineId || 'pipe-default';
+      const pipeSelectHtml = (state.pipelines || []).map(pipe =>
+        `<option value="${pipe.id}" ${pipe.id === currentPipeId ? 'selected' : ''}>${escapeHtml(pipe.name)}</option>`
+      ).join('');
 
       card.innerHTML = `
         <div>
@@ -238,44 +293,38 @@
                 <h3 class="font-bold text-sm text-slate-100">${escapeHtml(p.name)}</h3>
                 ${portBadges}
               </div>
-              <p class="text-[11px] text-slate-400 mt-0.5">协议模式: <span class="text-slate-300 font-medium">${(p.protocol || 'mixed').toUpperCase()}</span> | 调度: <span class="text-slate-300">${p.upstreamStrategy || 'single'}</span></p>
+              <p class="text-[11px] text-slate-400 mt-0.5">协议模式: <span class="text-slate-300 font-medium">${(p.protocol || 'mixed').toUpperCase()}</span></p>
             </div>
             <div>${statusPill}</div>
           </div>
 
-          <div class="mt-3 grid grid-cols-2 gap-2 text-[11px] bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80">
-            <div>
-              <span class="text-slate-500 block text-[10px]">客户端 IP 白名单 (CIDR)</span>
-              <span class="font-mono text-slate-300 truncate block mt-0.5" title="${(p.allowedCidr||[]).join(', ')}">${aclPreview || '全网放开'}</span>
-            </div>
-            <div>
-              <span class="text-slate-500 block text-[10px]">智能分流路由策略</span>
-              <div class="flex items-center gap-2 mt-0.5">${directPrivatePill} | ${rulePill}</div>
+          <!-- 线路绑定一键切换器 -->
+          <div class="mt-3 p-2 bg-slate-950/70 rounded-lg border border-slate-800 flex items-center justify-between text-[11px]">
+            <span class="text-slate-400 flex items-center gap-1 font-semibold">🔀 挂载线路:</span>
+            <select class="sel-inbound-pipeline bg-slate-800 border border-slate-700 rounded px-2 py-0.5 text-cyan-300 font-semibold text-[11px] focus:outline-none focus:border-cyan-500" data-id="${p.id}">
+              ${pipeSelectHtml}
+            </select>
+          </div>
+
+          <div class="mt-2 text-[11px] bg-slate-950/40 p-2 rounded border border-slate-800/60">
+            <span class="text-slate-500 block text-[10px]">白名单: <span class="font-mono text-slate-300">${aclPreview || '全网放开'}</span></span>
+            <div class="flex items-center justify-between mt-1 text-slate-400 text-[10px]">
+              <span>上行: <b class="font-mono text-slate-300">${formatBytes(p.totalBytesTx)}</b></span>
+              <span>下行: <b class="font-mono text-slate-300">${formatBytes(p.totalBytesRx)}</b></span>
             </div>
           </div>
 
-          <div class="mt-2 grid grid-cols-2 gap-2 text-[11px] bg-slate-950/40 p-2 rounded border border-slate-800/60">
-            <div>
-              <span class="text-slate-500 text-[10px]">上行流量:</span>
-              <span class="font-mono text-slate-300 ml-1">↑ ${formatBytes(p.totalBytesTx)}</span>
-            </div>
-            <div>
-              <span class="text-slate-500 text-[10px]">下行流量:</span>
-              <span class="font-mono text-slate-300 ml-1">↓ ${formatBytes(p.totalBytesRx)}</span>
-            </div>
-          </div>
-
-          <div class="mt-2.5 bg-slate-800/40 px-2.5 py-1.5 rounded border border-slate-800/60 flex items-center justify-between text-[11px]">
+          <div class="mt-2 bg-slate-800/40 px-2.5 py-1.5 rounded border border-slate-800/60 flex items-center justify-between text-[11px]">
             <div class="truncate text-slate-400 flex items-center gap-1.5 flex-wrap">
-              <span class="text-cyan-400 font-medium whitespace-nowrap">局域网接入:</span> 
+              <span class="text-cyan-400 font-medium whitespace-nowrap">局域网:</span> 
               <div class="flex items-center gap-1 flex-wrap">${lanAccessCodes}</div>
             </div>
-            <button class="btn-copy-proxy text-xs text-cyan-400 hover:text-cyan-300 ml-2 whitespace-nowrap" data-proxy="socks5://${hostIP}:${p.listenPort}">复制主端口</button>
+            <button class="btn-copy-proxy text-xs text-cyan-400 hover:text-cyan-300 ml-2 whitespace-nowrap" data-proxy="socks5://${hostIP}:${p.listenPort}">复制</button>
           </div>
         </div>
 
         <div class="flex items-center justify-between pt-2.5 border-t border-slate-800 text-xs">
-          <span class="text-[10px] text-slate-500">活跃连接: <b class="text-cyan-400">${p.activeConns || 0}</b></span>
+          <span class="text-[10px] text-slate-500">连接数: <b class="text-cyan-400">${p.activeConns || 0}</b></span>
           <div class="flex items-center gap-2">
             <button class="btn-toggle-in px-3 py-1 rounded font-medium transition ${isRunning ? 'bg-orange-600/20 text-orange-400 hover:bg-orange-600/30' : 'bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30'}" data-id="${p.id}">
               ${isRunning ? '⏹ 停止' : '▶ 启动'}
@@ -286,6 +335,23 @@
         </div>
       `;
       list.appendChild(card);
+    });
+
+    // 绑定线路快速切换事件
+    list.querySelectorAll('.sel-inbound-pipeline').forEach(sel => {
+      sel.addEventListener('change', async (e) => {
+        const pipeId = e.target.value;
+        const inId = sel.getAttribute('data-id');
+        const targetInbound = state.inbounds.find(x => x.id === inId);
+        if (!targetInbound) return;
+        targetInbound.pipelineId = pipeId;
+        try {
+          await apiCall('inbounds', { method: 'POST', body: targetInbound });
+          await loadData();
+        } catch (err) {
+          alert('更新入站绑定线路失败: ' + err.message);
+        }
+      });
     });
 
     // 绑定事件
@@ -434,7 +500,7 @@
   }
 
   function closeModals() {
-    ['modalUpstream', 'modalInbound', 'modalImportLink', 'modalChains', 'modalTun'].forEach(id => {
+    ['modalUpstream', 'modalInbound', 'modalImportLink', 'modalChains', 'modalTun', 'modalPipeline'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.classList.add('hidden');
     });
@@ -582,5 +648,8 @@
 
   if (window.ForwarderFeatures && window.ForwarderFeatures.init) {
     window.ForwarderFeatures.init(apiCall, loadData, state.upstreams);
+  }
+  if (window.ForwarderPipelines && window.ForwarderPipelines.init) {
+    window.ForwarderPipelines.init(apiCall, loadData);
   }
 })();
