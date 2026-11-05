@@ -118,7 +118,7 @@ RUN set -e; \
       *)             RID="linux-musl-x64" ;; \
     esac; \
     echo "Restoring dependencies for RID: ${RID}"; \
-    dotnet restore "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj" -r "${RID}"
+    dotnet restore "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj" -r "${RID}" -p:PublishAot=true
 
 COPY src ./src
 
