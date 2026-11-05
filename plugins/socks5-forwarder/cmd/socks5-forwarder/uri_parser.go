@@ -159,8 +159,21 @@ func (p *VlessLinkParser) Parse(rawLink string) (UpstreamNode, error) {
 	if sni == "" {
 		sni = q.Get("peer")
 	}
+	if sni == "" {
+		sni = q.Get("host")
+	}
 	security := strings.ToLower(q.Get("security"))
 	skipVerify := q.Get("allowInsecure") == "1" || q.Get("skipTlsVerify") == "true" || q.Get("insecure") == "1"
+
+	flow := strings.ToLower(q.Get("flow"))
+	fp := strings.ToLower(q.Get("fp"))
+	if fp == "" {
+		fp = strings.ToLower(q.Get("fingerprint"))
+	}
+	transport := strings.ToLower(q.Get("type"))
+	if transport == "" {
+		transport = "tcp"
+	}
 
 	name := u.Fragment
 	if name != "" {
@@ -178,6 +191,9 @@ func (p *VlessLinkParser) Parse(rawLink string) (UpstreamNode, error) {
 		Server:        host,
 		Port:          port,
 		UUID:          uuid,
+		Flow:          flow,
+		Fingerprint:   fp,
+		Transport:     transport,
 		SNI:           sni,
 		SkipTLSVerify: skipVerify || security == "none",
 	}, nil

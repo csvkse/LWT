@@ -2247,9 +2247,8 @@ public class ArchitectureTests
         Assert.True(File.Exists(controllerFile), "plugins/mcp-bridge/internal/tunnel/controller.go 必须存在");
         var controllerContent = File.ReadAllText(controllerFile);
 
-        // 2. 验证长轮询弹性超时预算：杜绝过早超时 (严禁 5 秒，强制 30 秒轮询与 15 秒死线护栏)
-        Assert.Contains("PollTimeout:           30 * time.Second", controllerContent);
-        Assert.Contains("PollDeadlineGuardrail: 15 * time.Second", controllerContent);
+        // 2. 验证长轮询弹性超时预算：杜绝过早超时 (严禁 5 秒，强制 20 秒/30 秒弹性轮询与死线护栏)
+        Assert.True(controllerContent.Contains("ResolvePollTimeout") || controllerContent.Contains("20 * time.Second") || controllerContent.Contains("30 * time.Second"), "长轮询必须配置合规的弹性超时");
         Assert.DoesNotContain("PollTimeout:           5 * time.Second", controllerContent);
 
         // 3. 验证出站代理规范：自动将 socks5:// 升级为 socks5h:// 免疫本地 DNS 污染
@@ -2356,7 +2355,7 @@ public class ArchitectureTests
     [Fact]
     public void LinuxArch073_SOCKS5与HTTP单端口双模自适应代理与传输性能优化门禁()
     {
-        // 1. 验证 http_proxy.go 存在，包含协议探测、Basic认证与 CONNECT 隧道/明文代理
+        // 1. 验证 http_proxy.go 存在，包含协议探测、Basic认证、CONNECT 隧道与逐请求 HTTP 转发
         var httpProxyFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "http_proxy.go");
         Assert.True(File.Exists(httpProxyFile), "http_proxy.go 必须存在");
         var httpProxyContent = File.ReadAllText(httpProxyFile);
@@ -2365,9 +2364,10 @@ public class ArchitectureTests
         Assert.Contains("func validateBasicAuth(authHeader, expectedUser, expectedPass string) bool", httpProxyContent);
         Assert.Contains("func (s *Server) handleHttpProxy", httpProxyContent);
         Assert.Contains("HTTP/1.1 200 Connection Established", httpProxyContent);
-        Assert.Contains("WriteProxy", httpProxyContent);
+        Assert.Contains("getHTTPForwardTransport", httpProxyContent);
+        Assert.Contains("transport.RoundTrip(req)", httpProxyContent);
 
-        // 2. 验证 main.go 包含单端口自适应嗅探 Peek(1)、BufferedConn、TCP_NODELAY 与半关闭超时兜底
+        // 2. 验证 main.go 包含单端口自适应嗅探、TCP_NODELAY、EOF 半关闭与硬错误双端清理
         var mainGoFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "main.go");
         var mainGoContent = File.ReadAllText(mainGoFile);
 
@@ -2376,7 +2376,11 @@ public class ArchitectureTests
         Assert.Contains("s.handleHttpProxy(bConn, br)", mainGoContent);
         Assert.Contains("optimizeTcpConn", mainGoContent);
         Assert.Contains("SetNoDelay(true)", mainGoContent);
-        Assert.Contains("SetReadDeadline(time.Now().Add(10 * time.Second))", mainGoContent);
+        Assert.Contains("CloseWrite()", mainGoContent);
+        Assert.Contains("copyErr != nil", mainGoContent);
+        Assert.Contains("client.Close()", mainGoContent);
+        Assert.Contains("target.Close()", mainGoContent);
+        Assert.DoesNotContain("SetReadDeadline(time.Now().Add(10 * time.Second))", mainGoContent);
 
         // 3. 验证 dns_cache.go 包含 Stale-While-Revalidate 双阈值软过期机制
         var dnsCacheFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "dns_cache.go");
@@ -2425,13 +2429,13 @@ public class ArchitectureTests
         Assert.Contains("TCP_NODELAY", docContent);
         Assert.Contains("Navigation Timing", docContent);
 
-        // 4. 验证 main.go 落实了 Linux 原生内核 splice(2) 零拷贝快速通道与 BufferedConn 残留安全排空
+        // 4. 验证 relay 使用复用缓冲区并保留 BufferedConn 残留安全排空；TCP-to-TCP splice 需单独实测后才能宣称
         var mainGoFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "main.go");
         var mainGoContent = File.ReadAllText(mainGoFile);
-        Assert.Contains("extractTcpConn", mainGoContent);
-        Assert.Contains("runtime.GOOS == \"linux\"", mainGoContent);
-        Assert.Contains("io.Copy(dstTcp, srcTcp)", mainGoContent);
+        Assert.Contains("io.CopyBuffer(dst, src, *bufPtr)", mainGoContent);
+        Assert.Contains("errCh := make(chan error, 2)", mainGoContent);
         Assert.Contains("bc.Buffered()", mainGoContent);
+        Assert.DoesNotContain("runtime.GOOS == \"linux\"", mainGoContent);
 
         // 5. 验证无代理 vs 代理全维度对照测试套件 tests/benchmark/proxy-vs-direct-comparison.mjs 存在
         var compBenchFile = Path.Combine(RepoRoot, "tests", "benchmark", "proxy-vs-direct-comparison.mjs");
@@ -2612,6 +2616,34 @@ public class ArchitectureTests
 
         var pureGatewayDoc = Path.Combine(RepoRoot, "docs", "ultimate-pure-gateway-architecture-and-multi-dimensional-routing-research.md");
         Assert.True(File.Exists(pureGatewayDoc), "docs/ultimate-pure-gateway-architecture-and-multi-dimensional-routing-research.md 必须存在");
+    }
+
+    [Fact]
+    public void LinuxArch079_OpenAiTunnel长轮询错误自愈与空闲超时弹性调谐门禁()
+    {
+        // 1. 验证 controller.go 存在并包含错误自愈复位机制
+        var controllerFile = Path.Combine(RepoRoot, "plugins", "mcp-bridge", "internal", "tunnel", "controller.go");
+        Assert.True(File.Exists(controllerFile), "plugins/mcp-bridge/internal/tunnel/controller.go 必须存在");
+        var controllerContent = File.ReadAllText(controllerFile);
+        Assert.Contains("c.status.LastPollError = \"\"", controllerContent);
+        Assert.Contains("ResolvePollTimeout()", controllerContent);
+        Assert.Contains("MCP_BRIDGE_POLL_TIMEOUT_SEC", controllerContent);
+
+        // 2. 验证自愈与超时调谐单元测试文件存在
+        var selfhealTestFile = Path.Combine(RepoRoot, "plugins", "mcp-bridge", "internal", "tunnel", "controller_selfheal_test.go");
+        Assert.True(File.Exists(selfhealTestFile), "controller_selfheal_test.go 单元测试必须存在");
+
+        // 3. 验证控制台前端 index.html 具备就绪态瞬态错误解耦呈现
+        var indexFile = Path.Combine(RepoRoot, "plugins", "mcp-bridge", "internal", "web", "index.html");
+        Assert.True(File.Exists(indexFile), "mcp-bridge index.html 必须存在");
+        var indexContent = File.ReadAllText(indexFile);
+        Assert.Contains("lastPollTitleVal", indexContent);
+        Assert.Contains("readyForChatgpt", indexContent);
+        Assert.Contains("Idle Timeout", indexContent);
+
+        // 4. 验证治理技术文档落盘
+        var docFile = Path.Combine(RepoRoot, "docs", "mcp-bridge-long-polling-timeout-idle-disconnect-and-resilience-governance.md");
+        Assert.True(File.Exists(docFile), "docs/mcp-bridge-long-polling-timeout-idle-disconnect-and-resilience-governance.md 必须存在");
     }
 }
 

@@ -12,11 +12,10 @@
         extend: {
           colors: {
             cyber: {
-              bg: '#0f172a',
-              card: '#1e293b',
-              line: '#334155',
-              accent: '#06b6d4',
-              hover: '#0891b2'
+              bg: '#0b1120',
+              card: '#0f172a',
+              line: '#1e293b',
+              accent: '#06b6d4'
             }
           }
         }
@@ -25,571 +24,109 @@
   </script>
   <style>
     body { background-color: #0b1120; color: #e2e8f0; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
-    .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
-    .custom-scroll::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+    .custom-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+    .custom-scroll::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.4); }
     .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
     .custom-scroll::-webkit-scrollbar-thumb:hover { background: #475569; }
   </style>
 </head>
-<body class="p-4 sm:p-6 custom-scroll min-h-screen">
+<body class="p-3 sm:p-5 custom-scroll min-h-screen text-slate-200">
 
-  <div id="app" class="max-w-6xl mx-auto space-y-6">
-    <!-- 头部横幅 -->
-    <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-900/80 border border-slate-800 shadow-xl backdrop-blur">
+  <div id="app" class="max-w-7xl mx-auto space-y-4">
+    <!-- 顶部常驻导航条: 标题 + TUN 状态胶囊 + 微型 Tab 切换 + 快捷动作 -->
+    <header class="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 shadow-xl backdrop-blur">
+      
+      <!-- 品牌与标题 -->
       <div class="flex items-center gap-3">
-        <div class="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-2xl shadow-inner shadow-cyan-500/20">
+        <div class="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-xl shadow-inner shadow-cyan-500/20">
           🌐
         </div>
         <div>
           <div class="flex items-center gap-2">
-            <h1 class="text-lg font-bold text-slate-100">SOCKS5 客户端边缘中继网关</h1>
-            <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">v2.0.0 多协议分流版</span>
+            <h1 class="text-sm sm:text-base font-bold text-slate-100">SOCKS5 客户端边缘中继网关</h1>
+            <span class="px-1.5 py-0.2 text-[10px] font-semibold rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">NextGen v3.0</span>
           </div>
-          <p class="text-xs text-slate-400 mt-0.5">支持 SOCKS5 / HTTP / Trojan / VLESS / Shadowsocks / LWT-WSS 多协议聚合、智能分流与局域网私网直连</p>
+          <div class="flex items-center gap-2 mt-0.5">
+            <!-- 全局 TUN 状态胶囊 -->
+            <button id="btnGlobalTunPill" class="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 flex items-center gap-1 transition">
+              <span>🛡️</span> 探测中...
+            </button>
+            <span id="globalSpinner" class="hidden text-[10px] text-cyan-400 font-mono animate-spin">⟳</span>
+          </div>
         </div>
       </div>
-      <div class="flex items-center gap-2 flex-wrap">
-        <button id="btnRefresh" class="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg flex items-center gap-1.5 transition">
-          🔄 刷新数据
+
+      <!-- 四大工作区 Tab 导航 -->
+      <nav class="flex items-center gap-1 bg-slate-950/80 p-1 rounded-xl border border-slate-800/80 self-start md:self-auto overflow-x-auto max-w-full">
+        <button class="nav-tab-btn" data-tab="topology">
+          <span>🧭</span> 拓扑管道
         </button>
-        <button id="btnAddInbound" class="px-3 py-1.5 text-xs font-medium bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg flex items-center gap-1.5 shadow-md shadow-cyan-600/20 transition">
-          + 新建端口接入
+        <button class="nav-tab-btn" data-tab="selectors">
+          <span>🎯</span> 策略组切网
         </button>
-        <button id="btnAddPipeline" class="px-3 py-1.5 text-xs font-medium bg-indigo-600/30 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/40 rounded-lg flex items-center gap-1.5 transition">
-          + 新增分流线路
+        <button class="nav-tab-btn" data-tab="nodes">
+          <span>📡</span> 节点工坊
         </button>
-        <button id="btnImportLink" class="px-3 py-1.5 text-xs font-medium bg-emerald-600/30 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 rounded-lg flex items-center gap-1.5 transition">
-          📥 导入链接
+        <button class="nav-tab-btn" data-tab="connections">
+          <span>📊</span> 实时连接
         </button>
-        <button id="btnManageChains" class="px-3 py-1.5 text-xs font-medium bg-purple-600/30 hover:bg-purple-600/40 text-purple-300 border border-purple-500/40 rounded-lg flex items-center gap-1.5 transition">
-          🔗 链式代理
+      </nav>
+
+      <!-- 右侧常用快捷按钮 -->
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <button id="btnGlobalPingAll" class="px-2.5 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 rounded-lg flex items-center gap-1 transition" title="并发测速所有节点">
+          ⚡ 测速
         </button>
-        <button id="btnAddUpstream" class="px-3 py-1.5 text-xs font-medium bg-blue-600/30 hover:bg-blue-600/40 text-blue-300 border border-blue-500/40 rounded-lg flex items-center gap-1.5 transition">
-          + 添加节点
+        <button id="btnQuickAddInbound" class="px-2.5 py-1.5 text-xs font-medium bg-cyan-600/30 hover:bg-cyan-600/40 text-cyan-300 border border-cyan-500/40 rounded-lg flex items-center gap-1 transition">
+          + 接入
+        </button>
+        <button id="btnQuickAddPipe" class="px-2.5 py-1.5 text-xs font-medium bg-indigo-600/30 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/40 rounded-lg flex items-center gap-1 transition">
+          + 线路
+        </button>
+        <button id="btnQuickAddChain" class="px-2.5 py-1.5 text-xs font-medium bg-purple-600/30 hover:bg-purple-600/40 text-purple-300 border border-purple-500/40 rounded-lg flex items-center gap-1 transition">
+          + 链式
+        </button>
+        <button id="btnQuickImport" class="px-2.5 py-1.5 text-xs font-medium bg-emerald-600/30 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 rounded-lg flex items-center gap-1 transition">
+          📥 导入
+        </button>
+        <button id="btnGlobalRefresh" class="px-2 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg transition" title="刷新数据">
+          🔄
         </button>
       </div>
+
     </header>
 
-    <!-- 第 1 栏: 流量接入网关 (Inbound Gateways - 端口接入 + 用户态 TUN 透明网关) -->
-    <section class="space-y-3">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <span class="text-cyan-400 text-sm">📥</span>
-          <h2 class="text-sm font-semibold text-slate-200">流量接入网关 (Inbound Gateways)</h2>
-          <span id="inboundCount" class="text-xs px-2 py-0.2 rounded-full bg-slate-800 text-slate-400">0</span>
-        </div>
-        <span class="text-xs text-slate-500">支持 TCP 多端口混合中继与用户态 TUN 虚拟网卡，可一键挂载任意分流线路</span>
-      </div>
-
-      <div id="inboundList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <!-- 动态渲染: TUN 网关卡片与多端口中继规则卡片 -->
-      </div>
-    </section>
-
-    <!-- 第 2 栏: 分流线路流水线 (Routing Pipelines - 策略与出站解耦) -->
-    <section class="space-y-3">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <span class="text-indigo-400 text-sm">🔀</span>
-          <h2 class="text-sm font-semibold text-slate-200">分流线路流水线 (Routing Pipelines)</h2>
-          <span id="pipelineCount" class="text-xs px-2 py-0.2 rounded-full bg-slate-800 text-slate-400">0</span>
-        </div>
-        <span class="text-xs text-slate-500">独立的路由决策管道，一次定义规则即可供多个端口与 TUN 透明网关共享复用</span>
-      </div>
-
-      <div id="pipelineList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        <!-- 动态渲染分流线路卡片 -->
-      </div>
-    </section>
-
-    <!-- 第 3 栏: 远端出口服务节点 (Outbound Nodes & Chains) -->
-    <section class="space-y-3">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <span class="text-blue-400 text-sm">📡</span>
-          <h2 class="text-sm font-semibold text-slate-200">远端出口服务节点 (Outbound Nodes)</h2>
-          <span id="upstreamCount" class="text-xs px-2 py-0.2 rounded-full bg-slate-800 text-slate-400">0</span>
-        </div>
-        <span class="text-xs text-slate-500">支持 SOCKS5 / HTTP / Trojan / VLESS / Shadowsocks / LWT-WSS 协议与自适应链式</span>
-      </div>
-
-      <div id="upstreamList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        <!-- 动态渲染上游节点卡片 -->
-      </div>
-    </section>
+    <!-- 工作区主体渲染视口 -->
+    <main id="mainWorkspaceContainer" class="min-h-[500px]">
+      <!-- 动态渲染四大工作区之一 -->
+    </main>
   </div>
 
-  <!-- 模态框: 新建/编辑上游节点 -->
-  <div id="modalUpstream" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-lg shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto custom-scroll">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <h3 id="modalUpstreamTitle" class="text-sm font-bold text-slate-100">添加上游服务节点</h3>
-        <button class="text-slate-400 hover:text-slate-200 text-lg modal-close">✕</button>
+  <!-- ======================== Slide-over 侧滑抽屉 (替代居中模态框) ======================== -->
+  <div id="slideoverBackdrop" class="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 hidden transition-opacity duration-300"></div>
+
+  <div id="slideoverDrawer" class="fixed top-0 right-0 bottom-0 w-full sm:w-[500px] md:w-[560px] bg-slate-900 border-l border-slate-700/80 shadow-2xl z-50 transform translate-x-full transition-transform duration-300 ease-out flex flex-col">
+    <!-- 抽屉头部 -->
+    <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+      <div class="flex items-center gap-2">
+        <span id="drawerIcon" class="text-lg">⚙</span>
+        <h3 id="drawerTitle" class="text-sm font-bold text-slate-100">配置抽屉</h3>
       </div>
-      <form id="formUpstream" class="space-y-3 text-xs">
-        <input type="hidden" id="upId">
-        
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-slate-400 mb-1">节点名称</label>
-            <input type="text" id="upName" required placeholder="如: 日本优化节点 (VPS-1)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
-          </div>
-          <div>
-            <label class="block text-slate-400 mb-1">出站协议类型</label>
-            <select id="upType" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-semibold text-cyan-300">
-              <option value="lwt_wss">LWT Ingress 伪装隧道 (WSS)</option>
-              <option value="socks5">标准 SOCKS5 代理</option>
-              <option value="http">HTTP / HTTPS CONNECT</option>
-              <option value="trojan">Trojan (TLS + SHA224)</option>
-              <option value="vless">VLESS (TLS + UUID)</option>
-              <option value="shadowsocks">Shadowsocks (AEAD)</option>
-            </select>
-          </div>
-        </div>
+      <button id="drawerCloseBtn" class="text-slate-400 hover:text-slate-200 text-lg p-1 rounded hover:bg-slate-800 transition" title="关闭 (Esc)">
+        ✕
+      </button>
+    </div>
 
-        <!-- WSS 专属输入区域 -->
-        <div id="boxWss" class="space-y-2">
-          <div>
-            <label class="block text-slate-400 mb-1">上游 WSS 伪装隧道地址 (URL)</label>
-            <input type="text" id="upUrl" placeholder="如: wss://jp.example.com:5271/telemetry/metrics" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]">
-            <p class="text-[10px] text-slate-500 mt-0.5">支持 ws:// 或 wss://，路径需与远端 Ingress 混淆别名一致</p>
-          </div>
-          <div>
-            <label class="block text-slate-400 mb-1">Ingress 访问令牌 (Token)</label>
-            <input type="password" id="upToken" placeholder="留空则无鉴权" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]">
-          </div>
-        </div>
-
-        <!-- 标准主机端口输入区域 -->
-        <div id="boxHostPort" class="hidden space-y-2">
-          <div class="grid grid-cols-3 gap-3">
-            <div class="col-span-2">
-              <label class="block text-slate-400 mb-1">服务器主机 / IP / 域名</label>
-              <input type="text" id="upServer" placeholder="127.0.0.1 或 proxy.example.com" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono">
-            </div>
-            <div>
-              <label class="block text-slate-400 mb-1">端口</label>
-              <input type="number" id="upPort" min="1" max="65535" placeholder="1080" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono">
-            </div>
-          </div>
-        </div>
-
-        <!-- 凭据区域: 账号密码 (SOCKS5 / HTTP) -->
-        <div id="boxUserPass" class="hidden grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-slate-400 mb-1">用户名 (可选)</label>
-            <input type="text" id="upUsername" placeholder="用户名" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
-          </div>
-          <div>
-            <label class="block text-slate-400 mb-1">密码 (可选)</label>
-            <input type="password" id="upPassword" placeholder="密码" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
-          </div>
-        </div>
-
-        <!-- 凭据区域: 密钥密码 (Trojan / Shadowsocks) -->
-        <div id="boxSecret" class="hidden">
-          <label id="lblSecret" class="block text-slate-400 mb-1">连接密码 / 预共享密钥</label>
-          <input type="password" id="upSecret" placeholder="密码或密钥" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]">
-        </div>
-
-        <!-- 凭据区域: UUID (VLESS) -->
-        <div id="boxUuid" class="hidden">
-          <label class="block text-slate-400 mb-1">用户 UUID</label>
-          <input type="text" id="upUuid" placeholder="如: 01234567-89ab-cdef-0123-456789abcdef" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]">
-        </div>
-
-        <!-- TLS 配置区域 (WSS, Trojan, VLESS) -->
-        <div id="boxTls" class="grid grid-cols-2 gap-3 pt-1 border-t border-slate-800">
-          <div>
-            <label class="block text-slate-400 mb-1">自定义 TLS SNI (可选)</label>
-            <input type="text" id="upSni" placeholder="与证书域名一致" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
-          </div>
-          <div class="flex items-center gap-2 pt-6">
-            <input type="checkbox" id="upSkipTls" class="rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-0">
-            <label for="upSkipTls" class="text-slate-300">跳过 TLS 证书校验</label>
-          </div>
-        </div>
-
-        <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
-          <button type="button" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg modal-close">取消</button>
-          <button type="submit" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-lg shadow">保存节点</button>
-        </div>
-      </form>
+    <!-- 抽屉内容区 (滚动) -->
+    <div id="drawerBody" class="flex-1 overflow-y-auto custom-scroll p-4 space-y-4">
+      <!-- 动态挂载表单 -->
     </div>
   </div>
 
-  <!-- 模态框: 新建/编辑入站中继 Profile -->
-  <div id="modalInbound" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-xl shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto custom-scroll">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <h3 id="modalInboundTitle" class="text-sm font-bold text-slate-100">新建入站中继规则</h3>
-        <button class="text-slate-400 hover:text-slate-200 text-lg modal-close">✕</button>
-      </div>
-      <form id="formInbound" class="space-y-3 text-xs">
-        <input type="hidden" id="inId">
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-slate-400 mb-1">规则名称</label>
-            <input type="text" id="inName" required placeholder="如: 办公电脑专用" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
-          </div>
-          <div>
-            <label class="block text-slate-400 mb-1">主监听端口 (Primary Port)</label>
-            <input type="number" id="inPort" required min="1024" max="65535" placeholder="10801" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono">
-          </div>
-        </div>
+  <!-- 轻量 Toast 浮动提示容器 -->
+  <div id="toastContainer" class="fixed bottom-4 right-4 z-50 space-y-2 pointer-events-none max-w-sm"></div>
 
-        <div>
-          <label class="block text-slate-400 mb-1">附加监听端口 (Additional Ports，多端口入站)</label>
-          <input type="text" id="inAdditionalPorts" placeholder="如: 10802, 10803 (多个端口用逗号分隔，共享此规则策略)" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]">
-          <p class="text-[10px] text-slate-500 mt-0.5">主端口与附加端口均会启动独立 TCP 监听，便于外部不同端口映射直接复用当前 ACL 白名单与上游分流策略</p>
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-slate-400 mb-1">协议识别类型</label>
-            <select id="inProtocol" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
-              <option value="mixed">Mixed (SOCKS5 / HTTP 智能自适应)</option>
-              <option value="socks5">纯 SOCKS5 代理</option>
-              <option value="http">纯 HTTP CONNECT 代理</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-slate-400 mb-1">上游调度策略</label>
-            <select id="inStrategy" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
-              <option value="single">固定单节点 (首选 + 故障转移)</option>
-              <option value="best_latency">最低延迟优先 (自动挑选最低 RTT)</option>
-              <option value="round_robin">轮询分流 (Round-Robin 均衡出网)</option>
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <label class="block text-slate-400 mb-1">关联上游服务器节点</label>
-          <div id="inboundUpstreamCheckboxes" class="grid grid-cols-2 gap-2 bg-slate-800/60 p-2.5 rounded-lg border border-slate-800 max-h-32 overflow-y-auto">
-            <!-- 动态生成复选框 -->
-          </div>
-        </div>
-
-        <!-- 智能分流与局域网直连模块 -->
-        <div class="p-3 bg-slate-950/60 rounded-xl border border-slate-800/80 space-y-2.5">
-          <div class="flex items-center justify-between">
-            <span class="font-bold text-slate-200 flex items-center gap-1.5">
-              <span>🎯</span> 智能分流与局域网直连 (Routing Policy)
-            </span>
-            <label class="flex items-center gap-1.5 cursor-pointer text-cyan-400 text-xs">
-              <input type="checkbox" id="inDirectPrivate" checked class="rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-0">
-              <span>局域网私网直连短路 (RFC 1918)</span>
-            </label>
-          </div>
-
-          <!-- 快速套用预设分流模板选单 -->
-          <div class="flex items-center justify-between text-xs pt-1 pb-1 border-t border-slate-800/80">
-            <span class="text-slate-400 flex items-center gap-1">📋 快速套用预设模板:</span>
-            <select id="selRoutingTemplate" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-cyan-300 text-[11px] focus:outline-none focus:border-cyan-500">
-              <option value="">-- 选择常用预设模板 --</option>
-            </select>
-          </div>
-
-          <div class="grid grid-cols-3 gap-2">
-            <div>
-              <label class="block text-slate-400 mb-1">默认出站动作</label>
-              <select id="inDefaultAction" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-cyan-500">
-                <option value="proxy">Proxy (走上游代理)</option>
-                <option value="direct">Direct (直连联网)</option>
-                <option value="reject">Reject (阻断拦截)</option>
-              </select>
-            </div>
-            <div class="col-span-2">
-              <label class="block text-slate-400 mb-1">分流规则列表 (每行一条: 类型: 规则 -> 动作)</label>
-              <textarea id="inRoutingRules" rows="3" placeholder="domain_suffix: .cn -> direct
-domain_keyword: adservice -> reject
-ip_cidr: 223.5.5.0/24 -> direct" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]"></textarea>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <div class="flex items-center justify-between mb-1">
-            <label class="text-slate-400">入站客户端 IP 访问限制 (CIDR 格式)</label>
-            <div class="flex items-center gap-1.5 text-[10px]">
-              <button type="button" id="btnAclLan" class="text-cyan-400 hover:underline">局域网私网</button>
-              <span class="text-slate-600">|</span>
-              <button type="button" id="btnAclLocal" class="text-slate-400 hover:underline">仅本机</button>
-              <span class="text-slate-600">|</span>
-              <button type="button" id="btnAclAll" class="text-amber-400 hover:underline">全网放开</button>
-            </div>
-          </div>
-          <textarea id="inAcl" rows="2" placeholder="10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1/32" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]"></textarea>
-          <p class="text-[10px] text-slate-500 mt-0.5">支持多个 CIDR，用逗号或换行分隔。未授权 IP 连接将在 TCP 握手前被 0 字节掐断</p>
-        </div>
-
-        <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
-          <button type="button" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg modal-close">取消</button>
-          <button type="submit" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-lg shadow">保存规则</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- 模态框: 一键导入标准协议链接 -->
-  <div id="modalImportLink" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-lg shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto custom-scroll">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
-          <span>📥</span> 一键导入协议链接 (URI Parser)
-        </h3>
-        <button class="text-slate-400 hover:text-slate-200 text-lg modal-close">✕</button>
-      </div>
-      <div class="space-y-3 text-xs">
-        <p class="text-slate-400 text-[11px]">支持粘贴单条或多行标准链接，自动解析协议、主机、端口、凭据与 SNI：</p>
-        <div class="flex flex-wrap gap-1 text-[10px]">
-          <span class="px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/40">vless://</span>
-          <span class="px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-400 border border-purple-800/40">trojan://</span>
-          <span class="px-1.5 py-0.5 rounded bg-indigo-950/60 text-indigo-400 border border-indigo-800/40">ss://</span>
-          <span class="px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-400 border border-amber-800/40">socks5://</span>
-          <span class="px-1.5 py-0.5 rounded bg-sky-950/60 text-sky-400 border border-sky-800/40">http(s)://</span>
-          <span class="px-1.5 py-0.5 rounded bg-rose-950/60 text-rose-400 border border-rose-800/40">vmess://</span>
-        </div>
-        <textarea id="importLinksText" rows="5" placeholder="粘贴链接至此，支持多行批量解析，如:
-vless://01234567-89ab-cdef-0123-456789abcdef@node.example.com:443?sni=node.example.com#香港01
-trojan://pwd123@node2.example.com:443#东京02" class="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-slate-100 font-mono text-[11px] focus:outline-none focus:border-cyan-500"></textarea>
-        
-        <div id="importPreviewArea" class="hidden p-3 rounded-lg bg-slate-950/80 border border-slate-800 space-y-2 max-h-44 overflow-y-auto">
-          <div class="text-[11px] font-semibold text-cyan-400 flex items-center justify-between">
-            <span>解析成功 (<span id="importParsedCount">0</span> 个节点)</span>
-          </div>
-          <div id="importParsedList" class="space-y-1.5 text-[10px] font-mono"></div>
-        </div>
-
-        <div id="importErrorsArea" class="hidden p-2 rounded-lg bg-rose-950/40 border border-rose-900/50 text-[10px] text-rose-400 font-mono space-y-1"></div>
-
-        <div class="flex justify-between items-center pt-2 border-t border-slate-800">
-          <button type="button" id="btnDoParsePreview" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-lg transition">🔍 预览解析</button>
-          <div class="flex gap-2">
-            <button type="button" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg modal-close">取消</button>
-            <button type="button" id="btnConfirmImport" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-lg shadow">一键导入保存</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 模态框: 链式代理拓扑与配置 (支持手动与自动自适应固定出口) -->
-  <div id="modalChains" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-xl shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto custom-scroll">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
-          <span>🔗</span> 多跳链式代理拓扑编排 (Chained Proxy)
-        </h3>
-        <button class="text-slate-400 hover:text-slate-200 text-lg modal-close">✕</button>
-      </div>
-
-      <!-- 链式配置表单 -->
-      <form id="formChain" class="space-y-3 text-xs">
-        <input type="hidden" id="chainEditId">
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-slate-400 mb-1">链条名称</label>
-            <input type="text" id="chainName" required placeholder="如: 亚太中继 + 美西固定落地" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
-          </div>
-          <div>
-            <label class="block text-slate-400 mb-1">链路调度策略</label>
-            <select id="chainStrategy" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500 font-semibold text-cyan-300">
-              <option value="auto">自适应动态寻优 (推荐: 支持固定出口与中继自愈)</option>
-              <option value="manual">手动严格静态穿透 (按指定顺序级联)</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- 自动模式下的配置项 -->
-        <div id="boxChainAuto" class="p-3 bg-slate-950/60 rounded-xl border border-slate-800 space-y-2.5">
-          <div>
-            <div class="flex items-center justify-between mb-1">
-              <label class="text-slate-300 font-bold flex items-center gap-1.5">
-                <span>🎯</span> 可选固定落地出口节点 (Pinned Exit)
-              </label>
-              <span class="text-[10px] text-emerald-400 font-mono">锁定出口 IP 不漂移</span>
-            </div>
-            <select id="chainFixedExit" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
-              <option value="">🌐 (自动全网格优选，不固定出口)</option>
-            </select>
-            <p class="text-[10px] text-slate-500 mt-1">适合 IP 白名单、防风控、固定家宽出口业务；中间中继跳板将自动低时延加速访问该节点。</p>
-          </div>
-
-          <div>
-            <label class="block text-slate-400 mb-1">前置候选跳板池 (自适应寻优与故障无感秒切)</label>
-            <div id="chainHopCandidates" class="grid grid-cols-2 gap-2 bg-slate-800/60 p-2.5 rounded-lg border border-slate-800 max-h-28 overflow-y-auto">
-              <!-- 动态生成复选框 -->
-            </div>
-          </div>
-        </div>
-
-        <!-- 手动模式下的配置项 -->
-        <div id="boxChainManual" class="hidden p-3 bg-slate-950/60 rounded-xl border border-slate-800 space-y-2">
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="block text-slate-400 mb-1">第一跳 (前置中继节点)</label>
-              <select id="chainManualHop1" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-cyan-500"></select>
-            </div>
-            <div>
-              <label class="block text-slate-400 mb-1">第二跳 (落地出口节点)</label>
-              <select id="chainManualHop2" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-cyan-500"></select>
-            </div>
-          </div>
-        </div>
-
-        <!-- 拓扑示意图预览 -->
-        <div class="p-3 bg-slate-950/90 rounded-lg border border-cyan-900/30 font-mono text-[11px] text-cyan-300 flex items-center justify-center gap-2 text-center" id="chainTopologyPreview">
-          <span>客户端</span> ➔ <span class="text-amber-400">[前置跳板自适应池]</span> ➔ <span class="text-emerald-400">[固定落地出口]</span> ➔ <span>目标网络</span>
-        </div>
-
-        <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
-          <button type="button" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg modal-close">关闭</button>
-          <button type="submit" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-lg shadow">保存链式配置</button>
-        </div>
-      </form>
-
-      <!-- 已有链条列表展示 -->
-      <div class="pt-3 border-t border-slate-800 space-y-2">
-        <h4 class="text-xs font-bold text-slate-300">当前已激活的链式代理 (<span id="chainCount">0</span>)</h4>
-        <div id="chainList" class="space-y-2 max-h-36 overflow-y-auto"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 模态框: 透明代理网关面板 (TUN / TProxy) -->
-  <div id="modalTun" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-lg shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto custom-scroll">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
-          <span>🛡️</span> 透明代理网关 (TUN / TProxy Gateway)
-        </h3>
-        <button class="text-slate-400 hover:text-slate-200 text-lg modal-close">✕</button>
-      </div>
-
-      <div class="space-y-3 text-xs">
-        <!-- 特权与设备探针状态卡片 -->
-        <div id="tunProbeCard" class="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-          <div class="flex items-center justify-between">
-            <span class="font-bold text-slate-200">系统内核与设备状态</span>
-            <span id="tunStatusBadge" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400">检测中...</span>
-          </div>
-          <p id="tunStatusMsg" class="text-[11px] text-slate-400 font-mono leading-relaxed">正在向宿主容器探测 /dev/net/tun 状态与网络特权...</p>
-        </div>
-
-        <div class="space-y-2.5">
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-slate-400 mb-1">虚拟网卡名</label>
-              <input type="text" id="tunInterface" value="lwt-tun0" readonly class="w-full bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 text-slate-300 font-mono text-[11px]">
-            </div>
-            <div>
-              <label class="block text-slate-400 mb-1">用户态协议栈</label>
-              <input type="text" value="Google gVisor Netstack (零网络污染)" readonly class="w-full bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 text-cyan-300 font-mono text-[11px]">
-            </div>
-          </div>
-
-          <div>
-            <label class="block text-slate-400 mb-1">TUN 虚拟网段 (Fake-IP)</label>
-            <input type="text" id="tunSubnet" value="198.18.0.1/16" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono text-[11px] focus:outline-none focus:border-cyan-500">
-          </div>
-
-          <div class="p-3 bg-slate-950/60 rounded-lg border border-slate-800 space-y-2">
-            <label class="flex items-center gap-2 cursor-pointer text-slate-200">
-              <input type="checkbox" id="tunDnsHijack" checked class="rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-0">
-              <span class="font-bold">53 端口 DNS 自动劫持</span>
-            </label>
-            <p class="text-[10px] text-slate-500">自动拦截系统级 DNS 查询，实现基于域名的精准透明分流与秒级响应。</p>
-          </div>
-
-          <div>
-            <label class="block text-slate-400 mb-1">透明代理旁路绕过网段 (Bypass CIDR)</label>
-            <input type="text" id="tunBypass" value="10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono text-[11px] focus:outline-none focus:border-cyan-500">
-          </div>
-        </div>
-
-        <div class="flex justify-between items-center pt-2 border-t border-slate-800">
-          <span class="text-[10px] text-slate-500">受容器 CAP_NET_ADMIN 严格守护</span>
-          <button type="button" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg modal-close">关闭</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 模态框: 新建/编辑分流线路流水线 (Routing Pipeline) -->
-  <div id="modalPipeline" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-lg shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto custom-scroll">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <h3 id="modalPipeTitle" class="text-sm font-bold text-slate-100 flex items-center gap-2">
-          <span>🔀</span> 新建分流线路流水线
-        </h3>
-        <button class="text-slate-400 hover:text-slate-200 text-lg modal-close">✕</button>
-      </div>
-
-      <form id="formPipeline" class="space-y-3 text-xs">
-        <input type="hidden" id="pipeId">
-        
-        <div>
-          <label class="block text-slate-400 mb-1">线路名称</label>
-          <input type="text" id="pipeName" required placeholder="如: AI 研发加速专线" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
-        </div>
-
-        <div>
-          <label class="block text-slate-400 mb-1">线路说明 (可选)</label>
-          <input type="text" id="pipeDesc" placeholder="简短描述该线路用途" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-cyan-500">
-        </div>
-
-        <!-- 快速套用预设模板 -->
-        <div class="p-2.5 bg-slate-950/60 rounded-lg border border-slate-800 space-y-1.5">
-          <label class="block text-slate-400 font-semibold">📋 快速套用预设分流模板 (一键填充)</label>
-          <select id="selPipePreset" class="w-full bg-slate-800 border border-slate-700 rounded px-2.5 py-1.5 text-cyan-300 focus:outline-none focus:border-cyan-500">
-            <option value="">-- 选择常用预设模板一键套用 --</option>
-          </select>
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-slate-400 mb-1">默认出站动作</label>
-            <select id="pipeDefaultAction" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-cyan-500">
-              <option value="proxy">Proxy (走代理)</option>
-              <option value="direct">Direct (直连联网)</option>
-              <option value="reject">Reject (阻断拦截)</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-slate-400 mb-1">默认出站目标 (节点/链式)</label>
-            <select id="pipeDefaultOutbound" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-cyan-300 font-mono text-[11px] focus:outline-none focus:border-cyan-500">
-              <option value="">(遵循默认调度)</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="flex items-center justify-between p-2 rounded bg-slate-950/40 border border-slate-800">
-          <span class="text-slate-300 font-bold">局域网私网直连短路 (RFC 1918)</span>
-          <label class="flex items-center gap-1.5 cursor-pointer text-cyan-400 text-xs">
-            <input type="checkbox" id="pipeDirectPrivate" checked class="rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-0">
-            <span>开启短路保护</span>
-          </label>
-        </div>
-
-        <div>
-          <label class="block text-slate-400 mb-1">分流规则列表 (每行一条: 类型: 规则 -> 动作)</label>
-          <textarea id="pipeRules" rows="4" placeholder="domain_suffix: openai.com -> proxy
-domain_suffix: .cn -> direct
-domain_keyword: adservice -> reject
-ip_cidr: 223.5.5.0/24 -> direct" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-[11px]"></textarea>
-        </div>
-
-        <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
-          <button type="button" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg modal-close">取消</button>
-          <button type="submit" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-lg shadow">保存线路</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <script src="features.js"></script>
-  <script src="pipelines.js"></script>
-  <script src="app.js"></script>
+  <!-- 引入模块化 ESM 主脚本 -->
+  <script type="module" src="./app.js"></script>
 </body>
 </html>

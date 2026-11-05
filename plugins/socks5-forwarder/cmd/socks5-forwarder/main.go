@@ -262,6 +262,46 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]string{"message": "已成功删除分流线路"})
 	})
 
+	// API: 极速切换线路默认出站 (Proxy Selector 毫秒级应用)
+	mux.HandleFunc("POST /api/selectors/switch", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			PipelineID string `json:"pipelineId"`
+			OutboundID string `json:"outboundId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "解析切网参数失败: "+err.Error())
+			return
+		}
+		if req.PipelineID == "" {
+			writeError(w, http.StatusBadRequest, "缺少 pipelineId 参数")
+			return
+		}
+		pipe, err := mgr.SelectPipelineOutbound(req.PipelineID, req.OutboundID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"message":  "出站已极速切换",
+			"pipeline": pipe,
+		})
+	})
+
+	// API: 全局并发测速所有节点
+	mux.HandleFunc("POST /api/upstreams/ping-all", func(w http.ResponseWriter, r *http.Request) {
+		results := mgr.PingAllUpstreams()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"results": results,
+		})
+	})
+
+	// API: 实时活跃连接快照
+	mux.HandleFunc("GET /api/connections", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"connections": mgr.GetActiveConnections(),
+		})
+	})
+
 	// 静态 Webview UI 文件服务
 	execPath, _ := os.Executable()
 	baseDir := filepath.Dir(execPath)

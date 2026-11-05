@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -58,6 +59,29 @@ func CheckUpstreamHealth(ctx context.Context, node *UpstreamNode) (int64, error)
 		return 0, err
 	}
 	defer conn.Close()
+
+	// 针对流式代理协议 (如 VLESS)，发送轻量 HTTP 探针载荷激活远端流代理并验证双向解帧
+	if proto == "vless" {
+		targetHost, _, _ := net.SplitHostPort(target)
+		if targetHost == "" {
+			targetHost = "cp.cloudflare.com"
+		}
+		probeReq := fmt.Sprintf("HEAD /generate_204 HTTP/1.1\r\nHost: %s\r\nUser-Agent: LWT-Forwarder/1.0\r\nConnection: close\r\n\r\n", targetHost)
+		if _, err := conn.Write([]byte(probeReq)); err != nil {
+			node.Status = "dead"
+			node.LastError = formatProbeError(err)
+			node.LastChecked = time.Now()
+			return 0, err
+		}
+		respBuf := make([]byte, 256)
+		_ = conn.SetReadDeadline(time.Now().Add(4 * time.Second))
+		if _, err := conn.Read(respBuf); err != nil {
+			node.Status = "dead"
+			node.LastError = formatProbeError(err)
+			node.LastChecked = time.Now()
+			return 0, err
+		}
+	}
 
 	latency := time.Since(start).Milliseconds()
 	node.LatencyMs = latency

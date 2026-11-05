@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -71,33 +72,52 @@ func NewController(vault *state.SecretsVault, server *mcp.Server, logger *slog.L
 	}
 
 	c.logBuf = NewChannelLogBuffer(200, func(entry ChannelLogEntry) {
-		go func(e ChannelLogEntry) {
-			c.mu.Lock()
-			defer c.mu.Unlock()
-
-			if e.Level == "WARN" || e.Level == "ERROR" {
-				if errMsg, ok := e.Attrs["error"].(string); ok && errMsg != "" {
-					c.status.LastPollError = errMsg
-				} else {
-					c.status.LastPollError = e.Message
-				}
-			}
-
-			if statusVal, ok := e.Attrs["status"]; ok {
-				if s, ok := statusVal.(int64); ok {
-					c.status.LastPollStatus = int(s)
-				} else if s, ok := statusVal.(int); ok {
-					c.status.LastPollStatus = s
-				}
-			}
-
-			if e.Level == "INFO" && strings.Contains(strings.ToLower(e.Message), "poll") {
-				c.status.LastActiveAt = e.Timestamp
-			}
-		}(entry)
+		go c.processLogEntry(entry)
 	})
 
 	return c
+}
+
+// processLogEntry handles log events from the tunnel runtime and self-heals transient errors.
+func (c *Controller) processLogEntry(e ChannelLogEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if e.Level == "WARN" || e.Level == "ERROR" {
+		if errMsg, ok := e.Attrs["error"].(string); ok && errMsg != "" {
+			c.status.LastPollError = errMsg
+		} else {
+			c.status.LastPollError = e.Message
+		}
+	}
+
+	if statusVal, ok := e.Attrs["status"]; ok {
+		if s, ok := statusVal.(int64); ok {
+			c.status.LastPollStatus = int(s)
+		} else if s, ok := statusVal.(int); ok {
+			c.status.LastPollStatus = s
+		}
+	}
+
+	if e.Level == "INFO" && strings.Contains(strings.ToLower(e.Message), "poll") {
+		c.status.LastActiveAt = e.Timestamp
+		// 成功轮询活动触发自愈复位：只要渠道处于就绪态且无活跃 HTTP 错误响应，清空历史瞬态错误
+		if c.status.ReadyForChatGPT && (c.status.LastPollStatus == 200 || c.status.LastPollStatus == 204 || c.status.LastPollStatus == 0) {
+			c.status.LastPollError = ""
+		}
+	}
+}
+
+// ProcessLogEntryForTest allows test suites to inject simulated log entries.
+func (c *Controller) ProcessLogEntryForTest(e ChannelLogEntry) {
+	c.processLogEntry(e)
+}
+
+// SetReadyForChatGPTForTest allows unit tests to set channel readiness for state flow tests.
+func (c *Controller) SetReadyForChatGPTForTest(ready bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.status.ReadyForChatGPT = ready
 }
 
 // SetStateChangeCallback registers a listener for state transitions (e.g. for Watchdog Supervisor).
@@ -219,6 +239,22 @@ func ApplyProxyEnvironment(proxyURL string) {
 	}
 }
 
+// ResolvePollTimeout calculates adaptive poll timeout and deadline guardrail.
+// Defaults to 20s poll wait (to safely precede common 30s proxy idle cuts) and 10s guardrail,
+// with override support via MCP_BRIDGE_POLL_TIMEOUT_SEC.
+func ResolvePollTimeout() (time.Duration, time.Duration) {
+	pollTimeout := 20 * time.Second
+	pollGuardrail := 10 * time.Second
+
+	if envTimeout := os.Getenv("MCP_BRIDGE_POLL_TIMEOUT_SEC"); envTimeout != "" {
+		if sec, err := strconv.Atoi(envTimeout); err == nil && sec >= 5 && sec <= 60 {
+			pollTimeout = time.Duration(sec) * time.Second
+			pollGuardrail = time.Duration(max(5, sec/2)) * time.Second
+		}
+	}
+	return pollTimeout, pollGuardrail
+}
+
 // Start constructs and connects the OpenAI Tunnel client with an in-memory transport pair.
 func (c *Controller) Start(ctx context.Context, tunnelCfg config.TunnelConfig) error {
 	c.mu.Lock()
@@ -276,13 +312,15 @@ func (c *Controller) Start(ctx context.Context, tunnelCfg config.TunnelConfig) e
 		_ = c.server.Run(serverCtx, serverTransport)
 	}()
 
+	pollTimeout, pollGuardrail := ResolvePollTimeout()
+
 	clientCfg := tunnelclient.Config{
 		TunnelID:              tunnelCfg.TunnelID,
 		APIKey:                apiKey,
 		ControlPlaneBaseURL:   tunnelCfg.ControlPlaneBaseURL,
 		OrganizationID:        tunnelCfg.OrganizationID,
-		PollTimeout:           30 * time.Second,
-		PollDeadlineGuardrail: 15 * time.Second,
+		PollTimeout:           pollTimeout,
+		PollDeadlineGuardrail: pollGuardrail,
 		LogLevel:              slog.LevelDebug,
 		LogWriter:             c.logBuf,
 	}
@@ -335,6 +373,7 @@ func (c *Controller) Start(ctx context.Context, tunnelCfg config.TunnelConfig) e
 				c.status.InitialPollMs = time.Since(startTime).Milliseconds()
 				c.status.LastActiveAt = time.Now()
 				c.status.ErrorMessage = ""
+				c.status.LastPollError = ""
 				st := c.status
 				cb := c.onStateChange
 				c.mu.Unlock()

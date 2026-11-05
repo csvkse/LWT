@@ -206,8 +206,8 @@ func (d *VlessOutbound) DialThrough(ctx context.Context, baseConn net.Conn, targ
 		}
 	}
 
-	// VLESS 请求头规范:
-	// 1 byte Version (0) + 16 bytes UUID + 1 byte AddonsLen (0) + 1 byte CMD (1=TCP) + 2 bytes Port + 1 byte AddrType + Addr
+	// 组装 VLESS 请求头规范 (支持标准模式与 XTLS-Vision 流控):
+	// 1 byte Version (0) + 16 bytes UUID + 1 byte AddonsLen + N bytes Addons + 1 byte CMD (1=TCP) + 2 bytes Port + 1 byte AddrType + Addr
 	targetHost, targetPortStr, err := net.SplitHostPort(targetAddr)
 	if err != nil {
 		_ = tlsConn.Close()
@@ -215,9 +215,23 @@ func (d *VlessOutbound) DialThrough(ctx context.Context, baseConn net.Conn, targ
 	}
 	targetPort, _ := strconv.Atoi(targetPortStr)
 
+	var addonProto []byte
+	isVision := false
+	if d.node.Flow != "" {
+		if strings.Contains(strings.ToLower(d.node.Flow), "vision") {
+			isVision = true
+		}
+		flowStr := d.node.Flow
+		addonProto = append(addonProto, 0x0a, byte(len(flowStr)))
+		addonProto = append(addonProto, []byte(flowStr)...)
+	}
+
 	header := []byte{0x00}
 	header = append(header, d.uuid[:]...)
-	header = append(header, 0x00) // Addons length = 0
+	header = append(header, byte(len(addonProto)))
+	if len(addonProto) > 0 {
+		header = append(header, addonProto...)
+	}
 	header = append(header, 0x01) // CMD: 1 (TCP)
 
 	portBytes := make([]byte, 2)
@@ -242,18 +256,116 @@ func (d *VlessOutbound) DialThrough(ctx context.Context, baseConn net.Conn, targ
 		return nil, fmt.Errorf("发送 VLESS 请求头失败: %w", err)
 	}
 
-	// 读取 VLESS 响应头: 1 byte version (0) + 1 byte addons len (0)
-	resp := make([]byte, 2)
-	if _, err := io.ReadFull(tlsConn, resp); err != nil {
-		_ = tlsConn.Close()
-		return nil, fmt.Errorf("读取 VLESS 响应头失败: %w", err)
+	// 全双工异步连接：不在 DialThrough 中半双工死等响应，通过 vlessConn 包装器在首个 Read() 懒解析并透明解帧
+	return newVlessConn(tlsConn, d.uuid, isVision), nil
+}
+
+// -----------------------------------------------------------------------------
+// VLESS 全双工流式包装连接 (支持首包懒加载响应头与 XTLS-Vision 自动解帧去填充)
+// -----------------------------------------------------------------------------
+
+type vlessConn struct {
+	net.Conn
+	uuid             [16]byte
+	isVision         bool
+	headerRead       bool
+	visionDirectCopy bool
+	remainingContent int
+	remainingPadding int
+}
+
+func newVlessConn(raw net.Conn, uuid [16]byte, isVision bool) *vlessConn {
+	return &vlessConn{
+		Conn:     raw,
+		uuid:     uuid,
+		isVision: isVision,
 	}
-	if resp[0] != 0x00 {
-		_ = tlsConn.Close()
-		return nil, fmt.Errorf("VLESS 协议版本不匹配: 0x%02x", resp[0])
+}
+
+func (c *vlessConn) Read(p []byte) (int, error) {
+	// 1. 首次读取时，按需懒解析 2 字节 VLESS 响应头 (Version 0x00 + AddonsLen)
+	if !c.headerRead {
+		vlessHdr := make([]byte, 2)
+		if _, err := io.ReadFull(c.Conn, vlessHdr); err != nil {
+			return 0, fmt.Errorf("读取 VLESS 响应头失败: %w", err)
+		}
+		if vlessHdr[0] != 0x00 {
+			return 0, fmt.Errorf("VLESS 协议版本不匹配: 0x%02x", vlessHdr[0])
+		}
+		if vlessHdr[1] > 0 {
+			discardAddons := make([]byte, vlessHdr[1])
+			if _, err := io.ReadFull(c.Conn, discardAddons); err != nil {
+				return 0, fmt.Errorf("读取 VLESS Addons 失败: %w", err)
+			}
+		}
+		c.headerRead = true
+
+		// 若启用了 XTLS-Vision 流控，首个下行数据流附带 16 字节 UUID 前缀
+		if c.isVision {
+			downUUID := make([]byte, 16)
+			if _, err := io.ReadFull(c.Conn, downUUID); err != nil {
+				return 0, fmt.Errorf("读取 Vision 下行 UUID 失败: %w", err)
+			}
+		}
 	}
 
-	return tlsConn, nil
+	// 2. 非 Vision 流控或已安全切换为直连直通模式 (待当前帧 Padding 全部排空后)
+	if !c.isVision || (c.visionDirectCopy && c.remainingContent == 0 && c.remainingPadding == 0) {
+		return c.Conn.Read(p)
+	}
+
+	// 3. XTLS-Vision 状态机解帧循环 (Command + ContentLen + PaddingLen)
+	for {
+		if c.remainingContent > 0 {
+			toRead := len(p)
+			if toRead > c.remainingContent {
+				toRead = c.remainingContent
+			}
+			n, err := c.Conn.Read(p[:toRead])
+			if n > 0 {
+				c.remainingContent -= n
+			}
+			return n, err
+		}
+
+		if c.remainingPadding > 0 {
+			toDiscard := c.remainingPadding
+			if toDiscard > 4096 {
+				toDiscard = 4096
+			}
+			discard := make([]byte, toDiscard)
+			n, err := c.Conn.Read(discard)
+			if n > 0 {
+				c.remainingPadding -= n
+			}
+			if err != nil {
+				return 0, err
+			}
+			continue
+		}
+
+		// 当前帧的 Content 与 Padding 均已安全排空，若收到了 Direct 指令则切入底层直通模式
+		if c.visionDirectCopy {
+			return c.Conn.Read(p)
+		}
+
+		// 读取下一个 5 字节 Vision 块头: cmd(1) + contentLen(2) + paddingLen(2)
+		blockHdr := make([]byte, 5)
+		if _, err := io.ReadFull(c.Conn, blockHdr); err != nil {
+			return 0, err
+		}
+
+		cmd := blockHdr[0]
+		contentLen := int(binary.BigEndian.Uint16(blockHdr[1:3]))
+		paddingLen := int(binary.BigEndian.Uint16(blockHdr[3:5]))
+
+		if cmd == 1 || cmd == 2 { // CommandPaddingEnd 或 CommandPaddingDirect
+			c.visionDirectCopy = true
+		}
+
+		c.remainingContent = contentLen
+		c.remainingPadding = paddingLen
+	}
 }
 
 // -----------------------------------------------------------------------------

@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
-	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -108,9 +110,8 @@ func TestHandleHttpProxy_AuthRequired(t *testing.T) {
 	}
 	br := bufio.NewReader(mem)
 
-	err := srv.handleHttpProxy(mem, br)
-	if err == nil {
-		t.Fatal("expected error when auth required but missing")
+	if err := srv.handleHttpProxy(mem, br); err != nil {
+		t.Fatalf("HTTP proxy server returned an error: %v", err)
 	}
 
 	respStr := mem.out.String()
@@ -143,9 +144,8 @@ func TestHandleHttpProxy_AclForbidden(t *testing.T) {
 	}
 	br := bufio.NewReader(mem)
 
-	err = srv.handleHttpProxy(mem, br)
-	if err == nil {
-		t.Fatal("expected error when target is forbidden by ACL")
+	if err := srv.handleHttpProxy(mem, br); err != nil {
+		t.Fatalf("HTTP proxy server returned an error: %v", err)
 	}
 
 	respStr := mem.out.String()
@@ -185,20 +185,280 @@ func TestHandleHttpProxy_ConnectSuccess(t *testing.T) {
 		},
 	}
 
-	reqRaw := "CONNECT 127.0.0.1:" + upstreamPortStr + " HTTP/1.1\r\nHost: 127.0.0.1:" + upstreamPortStr + "\r\n\r\n"
-	mem := &memoryConn{
-		in:  bytes.NewBufferString(reqRaw),
-		out: new(bytes.Buffer),
+	client, proxyConn := net.Pipe()
+	proxyDone := make(chan error, 1)
+	go func() { proxyDone <- srv.handleHttpProxy(proxyConn, bufio.NewReader(proxyConn)) }()
+	defer client.Close()
+	defer proxyConn.Close()
+	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err := fmt.Fprintf(client, "CONNECT 127.0.0.1:%s HTTP/1.1\r\nHost: 127.0.0.1:%s\r\n\r\n", upstreamPortStr, upstreamPortStr); err != nil {
+		t.Fatalf("write CONNECT request: %v", err)
 	}
-	br := bufio.NewReader(mem)
+	statusLine, err := bufio.NewReader(client).ReadString('\n')
+	if err != nil {
+		t.Fatalf("read CONNECT status: %v", err)
+	}
+	if !strings.Contains(statusLine, "200 Connection Established") {
+		t.Fatalf("expected 200 Connection Established, got: %s", statusLine)
+	}
+	_ = client.Close()
+	select {
+	case <-proxyDone:
+	case <-time.After(time.Second):
+		t.Fatal("CONNECT handler did not finish after client disconnect")
+	}
+}
 
-	err = srv.handleHttpProxy(mem, br)
-	if err != nil && !errors.Is(err, io.EOF) {
-		t.Logf("handleHttpProxy finished with: %v", err)
+func TestHandleHttpProxyRoutesEachKeepAliveRequestToItsOwnHost(t *testing.T) {
+	startUpstream := func(body string) string {
+		t.Helper()
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("listen for HTTP upstream: %v", err)
+		}
+		server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, body)
+		})}
+		go func() { _ = server.Serve(listener) }()
+		t.Cleanup(func() { _ = server.Close() })
+		return listener.Addr().String()
 	}
 
-	respStr := mem.out.String()
-	if !strings.Contains(respStr, "200 Connection Established") {
-		t.Fatalf("expected 200 Connection Established, got: %s", respStr)
+	firstUpstream := startUpstream("first upstream")
+	secondUpstream := startUpstream("second upstream")
+	acl, err := NewAclEngine("all", "", "", "")
+	if err != nil {
+		t.Fatalf("create ACL: %v", err)
+	}
+	srv := &Server{
+		cfg:    Config{AuthMode: "none", ConnectTimeout: 2 * time.Second},
+		acl:    acl,
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	proxyListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for proxy client: %v", err)
+	}
+	defer proxyListener.Close()
+	proxyDone := make(chan error, 1)
+	go func() {
+		proxyConn, acceptErr := proxyListener.Accept()
+		if acceptErr != nil {
+			proxyDone <- acceptErr
+			return
+		}
+		proxyDone <- srv.handleHttpProxy(proxyConn, bufio.NewReader(proxyConn))
+	}()
+
+	client, err := net.Dial("tcp", proxyListener.Addr().String())
+	if err != nil {
+		t.Fatalf("connect to proxy: %v", err)
+	}
+	clientReader := bufio.NewReader(client)
+	t.Cleanup(func() {
+		_ = client.Close()
+		select {
+		case <-proxyDone:
+		case <-time.After(2 * time.Second):
+			t.Error("proxy handler did not stop after client close")
+		}
+	})
+
+	requestAndRead := func(upstreamAddr, path string) string {
+		t.Helper()
+		url := "http://" + upstreamAddr + path
+		if _, writeErr := fmt.Fprintf(client, "GET %s HTTP/1.1\r\nHost: %s\r\n\r\n", url, upstreamAddr); writeErr != nil {
+			t.Fatalf("write proxy request: %v", writeErr)
+		}
+		request, requestErr := http.NewRequest(http.MethodGet, url, nil)
+		if requestErr != nil {
+			t.Fatalf("build response context: %v", requestErr)
+		}
+		response, responseErr := http.ReadResponse(clientReader, request)
+		if responseErr != nil {
+			t.Fatalf("read proxy response: %v", responseErr)
+		}
+		defer response.Body.Close()
+		body, bodyErr := io.ReadAll(response.Body)
+		if bodyErr != nil {
+			t.Fatalf("read response body: %v", bodyErr)
+		}
+		return string(body)
+	}
+
+	if got := requestAndRead(firstUpstream, "/first"); got != "first upstream" {
+		t.Fatalf("first response = %q, want first upstream", got)
+	}
+	if got := requestAndRead(secondUpstream, "/second"); got != "second upstream" {
+		t.Fatalf("second response = %q, want second upstream", got)
+	}
+}
+
+func TestHandleHttpProxyClearsHandshakeDeadlineBeforeSlowForwardResponse(t *testing.T) {
+	upstreamListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for HTTP upstream: %v", err)
+	}
+	upstreamServer := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(250 * time.Millisecond)
+		_, _ = io.WriteString(w, "slow upstream")
+	})}
+	go func() { _ = upstreamServer.Serve(upstreamListener) }()
+	t.Cleanup(func() { _ = upstreamServer.Close() })
+
+	acl, err := NewAclEngine("all", "", "", "")
+	if err != nil {
+		t.Fatalf("create ACL: %v", err)
+	}
+	srv := &Server{
+		cfg:    Config{AuthMode: "none", ConnectTimeout: 2 * time.Second},
+		acl:    acl,
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	proxyListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for proxy client: %v", err)
+	}
+	defer proxyListener.Close()
+	proxyDone := make(chan error, 1)
+	go func() {
+		proxyConn, acceptErr := proxyListener.Accept()
+		if acceptErr != nil {
+			proxyDone <- acceptErr
+			return
+		}
+		_ = proxyConn.SetDeadline(time.Now().Add(100 * time.Millisecond))
+		proxyDone <- srv.handleHttpProxy(proxyConn, bufio.NewReader(proxyConn))
+	}()
+
+	client, err := net.Dial("tcp", proxyListener.Addr().String())
+	if err != nil {
+		t.Fatalf("connect to proxy: %v", err)
+	}
+	defer client.Close()
+	_ = client.SetDeadline(time.Now().Add(2 * time.Second))
+	url := "http://" + upstreamListener.Addr().String() + "/slow"
+	if _, err := fmt.Fprintf(client, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", url, upstreamListener.Addr().String()); err != nil {
+		t.Fatalf("write proxy request: %v", err)
+	}
+	request, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("build response context: %v", err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(client), request)
+	if err != nil {
+		t.Fatalf("read response after handshake deadline elapsed: %v", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read delayed response body: %v", err)
+	}
+	if string(body) != "slow upstream" {
+		t.Fatalf("response body = %q, want slow upstream", body)
+	}
+
+	select {
+	case err := <-proxyDone:
+		if err != nil {
+			t.Fatalf("proxy handler failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("proxy handler did not stop after Connection: close")
+	}
+}
+
+func TestHandleHttpProxyReauthenticatesEachForwardRequestAndStripsCredentials(t *testing.T) {
+	var upstreamRequests atomic.Int32
+	upstreamListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for HTTP upstream: %v", err)
+	}
+	upstreamServer := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamRequests.Add(1)
+		if r.Header.Get("Proxy-Authorization") != "" {
+			_, _ = io.WriteString(w, "credential leaked")
+			return
+		}
+		_, _ = io.WriteString(w, "ok")
+	})}
+	go func() { _ = upstreamServer.Serve(upstreamListener) }()
+	t.Cleanup(func() { _ = upstreamServer.Close() })
+
+	acl, err := NewAclEngine("all", "", "", "")
+	if err != nil {
+		t.Fatalf("create ACL: %v", err)
+	}
+	srv := &Server{
+		cfg:    Config{AuthMode: "password", Username: "proxy-user", Password: "proxy-pass", ConnectTimeout: 2 * time.Second},
+		acl:    acl,
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	proxyListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for proxy client: %v", err)
+	}
+	defer proxyListener.Close()
+	proxyDone := make(chan error, 1)
+	go func() {
+		proxyConn, acceptErr := proxyListener.Accept()
+		if acceptErr != nil {
+			proxyDone <- acceptErr
+			return
+		}
+		proxyDone <- srv.handleHttpProxy(proxyConn, bufio.NewReader(proxyConn))
+	}()
+
+	client, err := net.Dial("tcp", proxyListener.Addr().String())
+	if err != nil {
+		t.Fatalf("connect to proxy: %v", err)
+	}
+	defer client.Close()
+	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
+	clientReader := bufio.NewReader(client)
+	url := "http://" + upstreamListener.Addr().String() + "/auth"
+	authHeader := "Basic " + base64.StdEncoding.EncodeToString([]byte("proxy-user:proxy-pass"))
+
+	_, _ = fmt.Fprintf(client, "GET %s HTTP/1.1\r\nHost: %s\r\nProxy-Authorization: %s\r\n\r\n", url, upstreamListener.Addr().String(), authHeader)
+	firstRequest, _ := http.NewRequest(http.MethodGet, url, nil)
+	firstResponse, err := http.ReadResponse(clientReader, firstRequest)
+	if err != nil {
+		t.Fatalf("read authenticated response: %v", err)
+	}
+	firstBody, err := io.ReadAll(firstResponse.Body)
+	_ = firstResponse.Body.Close()
+	if err != nil {
+		t.Fatalf("read authenticated response body: %v", err)
+	}
+	if string(firstBody) != "ok" {
+		t.Fatalf("upstream response = %q, want credentials stripped", firstBody)
+	}
+
+	_, _ = fmt.Fprintf(client, "GET %s HTTP/1.1\r\nHost: %s\r\n\r\n", url, upstreamListener.Addr().String())
+	secondRequest, _ := http.NewRequest(http.MethodGet, url, nil)
+	secondResponse, err := http.ReadResponse(clientReader, secondRequest)
+	if err != nil {
+		t.Fatalf("read authentication challenge: %v", err)
+	}
+	secondBody, err := io.ReadAll(secondResponse.Body)
+	_ = secondResponse.Body.Close()
+	if err != nil {
+		t.Fatalf("read authentication challenge body: %v", err)
+	}
+	if secondResponse.StatusCode != http.StatusProxyAuthRequired || string(secondBody) != "Proxy authentication required.\n" {
+		t.Fatalf("unauthorized second response = %d %q, want 407 challenge", secondResponse.StatusCode, secondBody)
+	}
+	if got := secondResponse.Header.Get("Proxy-Authenticate"); !strings.HasPrefix(got, "Basic ") {
+		t.Fatalf("Proxy-Authenticate = %q, want Basic challenge", got)
+	}
+	if got := upstreamRequests.Load(); got != 1 {
+		t.Fatalf("upstream request count = %d, want 1", got)
+	}
+
+	select {
+	case <-proxyDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("proxy handler did not stop after rejecting the unauthenticated request")
 	}
 }

@@ -493,3 +493,101 @@ func (m *ProfileManager) backgroundHealthLoop() {
 		}
 	}
 }
+
+// SelectPipelineOutbound 快速切换指定线路的默认出站目标（节点或代理链）并原子保存
+func (m *ProfileManager) SelectPipelineOutbound(pipeID, outboundID string) (*RoutingPipeline, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var targetPipe *RoutingPipeline
+	for i := range m.cfg.Pipelines {
+		if m.cfg.Pipelines[i].ID == pipeID {
+			if outboundID == "direct" {
+				m.cfg.Pipelines[i].DefaultAction = "direct"
+				m.cfg.Pipelines[i].DefaultOutbound = ""
+			} else if outboundID == "reject" {
+				m.cfg.Pipelines[i].DefaultAction = "reject"
+				m.cfg.Pipelines[i].DefaultOutbound = ""
+			} else {
+				m.cfg.Pipelines[i].DefaultAction = "proxy"
+				m.cfg.Pipelines[i].DefaultOutbound = outboundID
+			}
+			targetPipe = &m.cfg.Pipelines[i]
+			break
+		}
+	}
+
+	if targetPipe == nil {
+		return nil, fmt.Errorf("未找到分流线路流水线 '%s'", pipeID)
+	}
+
+	if err := m.cfg.Save(); err != nil {
+		return nil, fmt.Errorf("保存线路默认出站失败: %w", err)
+	}
+
+	clone := *targetPipe
+	return &clone, nil
+}
+
+// PingAllUpstreams 并发批量测速所有上游节点，返回最新延迟矩阵
+func (m *ProfileManager) PingAllUpstreams() []map[string]any {
+	m.mu.Lock()
+	nodes := make([]*UpstreamNode, len(m.cfg.Upstreams))
+	for i := range m.cfg.Upstreams {
+		nodes[i] = &m.cfg.Upstreams[i]
+	}
+	m.mu.Unlock()
+
+	var wg sync.WaitGroup
+	results := make([]map[string]any, len(nodes))
+
+	for i, n := range nodes {
+		wg.Add(1)
+		go func(idx int, target *UpstreamNode) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(m.ctx, 8*time.Second)
+			defer cancel()
+			latency, err := CheckUpstreamHealth(ctx, target)
+			res := map[string]any{
+				"id":        target.ID,
+				"name":      target.Name,
+				"type":      target.Type,
+				"status":    target.Status,
+				"latencyMs": latency,
+			}
+			if err != nil {
+				res["error"] = err.Error()
+			}
+			results[idx] = res
+		}(i, n)
+	}
+
+	wg.Wait()
+	_ = m.cfg.Save()
+	return results
+}
+
+// GetActiveConnections 获取当前所有入站网关的活跃连接汇总快照
+func (m *ProfileManager) GetActiveConnections() []map[string]any {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	conns := make([]map[string]any, 0)
+	for id, l := range m.listeners {
+		active := atomic.LoadInt64(&l.profile.ActiveConns)
+		tx := atomic.LoadInt64(&l.profile.TotalBytesTx)
+		rx := atomic.LoadInt64(&l.profile.TotalBytesRx)
+		conns = append(conns, map[string]any{
+			"inboundId":   id,
+			"inboundName": l.profile.Name,
+			"protocol":    l.profile.Protocol,
+			"ports":       l.profile.GetEffectivePorts(),
+			"pipelineId":  l.profile.PipelineID,
+			"activeConns": active,
+			"totalTx":     tx,
+			"totalRx":     rx,
+			"status":      l.profile.Status,
+		})
+	}
+	return conns
+}

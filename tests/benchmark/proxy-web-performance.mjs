@@ -30,6 +30,27 @@ loadEnvDev();
 const PROXY_SERVER = process.env.PROXY_URL || 'http://10.126.1.70:18080';
 const SOCKS5_PROXY_SERVER = process.env.SOCKS5_PROXY_URL || 'socks5://10.126.1.70:18080';
 const TEST_TARGET_URL = process.env.WEB_BENCH_URL || 'http://10.126.1.70:5271/#/login';
+const PAGE_SAMPLES = Math.max(1, Number.parseInt(process.env.BENCH_BROWSER_SAMPLES || '5', 10));
+const PROXY_USERNAME = process.env.SOCKS5_USERNAME || '';
+const PROXY_PASSWORD = process.env.SOCKS5_PASSWORD || '';
+if (Boolean(PROXY_USERNAME) !== Boolean(PROXY_PASSWORD)) {
+  throw new Error('Set both SOCKS5_USERNAME and SOCKS5_PASSWORD, or neither.');
+}
+
+function percentile(values, p) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(p * sorted.length) - 1)];
+}
+
+function shuffled(items) {
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
 
 async function measurePagePerformance(modeName, proxyConfig) {
   const launchOptions = {
@@ -39,7 +60,10 @@ async function measurePagePerformance(modeName, proxyConfig) {
   };
 
   if (proxyConfig) {
-    launchOptions.proxy = { server: proxyConfig };
+    launchOptions.proxy = {
+      server: proxyConfig,
+      ...(PROXY_USERNAME ? { username: PROXY_USERNAME, password: PROXY_PASSWORD } : {}),
+    };
   }
 
   const browser = await chromium.launch(launchOptions);
@@ -47,18 +71,21 @@ async function measurePagePerformance(modeName, proxyConfig) {
   const page = await context.newPage();
 
   // 监听并记录网络请求耗时
-  const requestTimings = [];
-  page.on('requestfinished', async (request) => {
-    const timing = request.timing();
-    const url = request.url();
-    if (timing) {
-      requestTimings.push({ url, timing });
-    }
+  let requestCount = 0;
+  let failedRequestCount = 0;
+  const responseStatuses = {};
+  page.on('requestfinished', () => { requestCount++; });
+  page.on('requestfailed', () => { failedRequestCount++; });
+  page.on('response', (response) => {
+    const status = String(response.status());
+    responseStatuses[status] = (responseStatuses[status] || 0) + 1;
   });
 
+  try {
   const tStart = Date.now();
   await page.goto(TEST_TARGET_URL, { waitUntil: 'networkidle', timeout: 30000 });
   const totalNavMs = Date.now() - tStart;
+  const browserVersion = browser.version();
 
   // 提取 W3C Performance Navigation Timing
   const perfData = await page.evaluate(() => {
@@ -86,14 +113,50 @@ async function measurePagePerformance(modeName, proxyConfig) {
     };
   });
 
-  await browser.close();
-
   return {
     modeName,
     proxyConfig: proxyConfig || '(None - Direct)',
     totalNavMs,
-    requestCount: requestTimings.length,
+    requestCount,
+    failedRequestCount,
+    responseStatuses,
+    browserVersion,
     perfData,
+  };
+  } finally {
+    await browser.close();
+  }
+}
+
+async function measureRepeatedPagePerformance(modeName, proxyConfig, collectedSamples = null) {
+  const samples = collectedSamples ?? [];
+  if (!collectedSamples) {
+    for (let i = 0; i < PAGE_SAMPLES; i++) {
+      try { samples.push(await measurePagePerformance(modeName, proxyConfig)); }
+      catch { console.warn(`  ${modeName} sample ${i + 1}/${PAGE_SAMPLES} failed`); }
+    }
+  }
+  const metricNames = ['dnsTime', 'tcpConnectTime', 'sslHandshakeTime', 'ttfb', 'downloadTime', 'domReadyTime', 'loadEventTime', 'fcp', 'transferSize'];
+  const validSamples = samples.filter((s) => s.perfData);
+  const perfData = {};
+  for (const metric of metricNames) perfData[metric] = percentile(validSamples.map((s) => s.perfData[metric]), 0.5);
+  const aggregatedStatuses = {};
+  for (const sample of samples) {
+    for (const [status, count] of Object.entries(sample.responseStatuses || {})) {
+      aggregatedStatuses[status] = (aggregatedStatuses[status] || 0) + count;
+    }
+  }
+  return {
+    modeName,
+    proxyConfig: proxyConfig || '(None - Direct)',
+    perfData: validSamples.length ? perfData : null,
+    totalNavMs: percentile(samples.map((s) => s.totalNavMs), 0.5),
+    requestCount: samples.length ? percentile(samples.map((s) => s.requestCount), 0.5) : 0,
+    failedRequestCount: samples.length ? percentile(samples.map((s) => s.failedRequestCount), 0.5) : 0,
+    responseStatuses: aggregatedStatuses,
+    browserVersion: samples[0]?.browserVersion || 'unavailable',
+    successes: validSamples.length,
+    attempts: PAGE_SAMPLES,
   };
 }
 
@@ -103,21 +166,32 @@ async function runWebPerformanceBenchmark() {
   console.log(`📌 目标网页 URL: ${TEST_TARGET_URL}`);
   console.log(`📌 HTTP 代理节点: ${PROXY_SERVER}`);
   console.log(`📌 SOCKS5 代理节点: ${SOCKS5_PROXY_SERVER}`);
+  console.log(`📌 每模式浏览器采样: ${PAGE_SAMPLES} (冷启动新浏览器；结果汇总 p50)`);
+  console.log(`📌 Runtime: Node ${process.version} (${process.platform}/${process.arch}); browser versions are reported per mode`);
   console.log('================================================================\n');
 
-  console.log('⏳ 场景 1/3: 测量 Direct (直连无代理) 网页加载全链路耗时...');
-  const directResult = await measurePagePerformance('Direct 直连', null);
+  const pageScenarios = [
+    ['Direct 直连', null],
+    ['HTTP Proxy 代理', PROXY_SERVER],
+    ['SOCKS5 Proxy 代理', SOCKS5_PROXY_SERVER],
+  ];
+  const pageSamples = new Map(pageScenarios.map(([mode]) => [mode, []]));
+  for (let round = 0; round < PAGE_SAMPLES; round++) {
+    console.log(`⏳ 浏览器采样 ${round + 1}/${PAGE_SAMPLES}: 按随机顺序测量 Direct/HTTP/SOCKS5`);
+    for (const [mode, proxy] of shuffled(pageScenarios)) {
+      try { pageSamples.get(mode).push(await measurePagePerformance(mode, proxy)); }
+      catch { console.warn(`  ${mode} sample ${round + 1}/${PAGE_SAMPLES} failed`); }
+    }
+  }
 
-  console.log('⏳ 场景 2/3: 测量 HTTP 代理模式下网页加载全链路耗时...');
-  const httpProxyResult = await measurePagePerformance('HTTP Proxy 代理', PROXY_SERVER);
-
-  console.log('⏳ 场景 3/3: 测量 SOCKS5 代理模式下网页加载全链路耗时...');
-  const socks5ProxyResult = await measurePagePerformance('SOCKS5 Proxy 代理', SOCKS5_PROXY_SERVER);
+  const directResult = await measureRepeatedPagePerformance('Direct 直连', null, pageSamples.get('Direct 直连'));
+  const httpProxyResult = await measureRepeatedPagePerformance('HTTP Proxy 代理', PROXY_SERVER, pageSamples.get('HTTP Proxy 代理'));
+  const socks5ProxyResult = await measureRepeatedPagePerformance('SOCKS5 Proxy 代理', SOCKS5_PROXY_SERVER, pageSamples.get('SOCKS5 Proxy 代理'));
 
   const results = [directResult, httpProxyResult, socks5ProxyResult];
 
   console.log('\n--------------------------------------------------------------------------------------------------------------');
-  console.log('| 评测模式        | DNS (ms) | TCP (ms) | TTFB (ms)| Download | DOMReady | PageLoad | FCP (ms) | 总请求数 |');
+  console.log('| 评测模式        | 成功/计划 | DNS | TCP | TLS | TTFB | Content Download | DOMReady | PageLoad | FCP | 请求(p50) | 失败(p50) | HTTP 状态合计 | Browser |');
   console.log('--------------------------------------------------------------------------------------------------------------');
 
   for (const r of results) {
@@ -128,14 +202,19 @@ async function runWebPerformanceBenchmark() {
     }
     console.log(
       `| ${r.modeName.padEnd(14)} ` +
+      `| ${String(r.successes).padStart(2)}/${r.attempts} ` +
       `| ${p.dnsTime.toFixed(1).padStart(8)} ` +
       `| ${p.tcpConnectTime.toFixed(1).padStart(8)} ` +
+      `| ${p.sslHandshakeTime.toFixed(1).padStart(8)} ` +
       `| ${p.ttfb.toFixed(1).padStart(8)} ` +
       `| ${p.downloadTime.toFixed(1).padStart(8)} ` +
       `| ${p.domReadyTime.toFixed(1).padStart(8)} ` +
       `| ${p.loadEventTime.toFixed(1).padStart(8)} ` +
       `| ${p.fcp.toFixed(1).padStart(8)} ` +
-      `| ${String(r.requestCount).padStart(8)} |`
+      `| ${String(r.requestCount).padStart(8)} ` +
+      `| ${String(r.failedRequestCount).padStart(8)} ` +
+      `| ${JSON.stringify(r.responseStatuses)} ` +
+      `| ${r.browserVersion} |`
     );
   }
   console.log('--------------------------------------------------------------------------------------------------------------');
@@ -151,18 +230,13 @@ async function runWebPerformanceBenchmark() {
     console.log(`  • 直连完整页面加载耗时: ${directLoad.toFixed(1)} ms`);
     console.log(`  • HTTP 代理完整页面加载耗时: ${proxyLoad.toFixed(1)} ms`);
     console.log(`  • 代理模式额外时延差值: ${diffMs >= 0 ? '+' : ''}${diffMs.toFixed(1)} ms (${diffPercent}%)`);
-    console.log(`  • 网页资源请求数量: ${httpProxyResult.requestCount} 个资源全部通过代理加载成功`);
+    console.log(`  • HTTP 代理完成请求数中位数: ${httpProxyResult.requestCount}; 失败请求中位数: ${httpProxyResult.failedRequestCount}`);
 
-    // 门禁断言: 代理加载页面时间额外增加不得超过 200ms (针对本地/内网部署页面)
-    const passThreshold = diffMs < 200;
-    console.log(`\n🎯 网页代理性能质量门禁 (< 200ms 额外时延): ${passThreshold ? '✅ 通过' : '⚠️ 超过阈值'}`);
-
-    if (!passThreshold) {
-      console.warn('⚠️ 注意: 代理模式网页加载耗时略微超出阈值，可进一步结合 Splice 零拷贝及连接池继续优化。');
-    }
+    console.log('\n📌 此差值是每模式冷启动浏览器导航 p50 对照，不作为固定 SLA；加载时间受目标服务和网络路径影响。');
   }
 
   console.log('\n🎉 真实网页访问性能评测完成！');
+  if (results.some((r) => r.successes < r.attempts)) process.exitCode = 1;
 }
 
 runWebPerformanceBenchmark().catch((err) => {

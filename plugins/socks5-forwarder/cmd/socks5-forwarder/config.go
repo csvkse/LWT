@@ -20,6 +20,9 @@ type UpstreamNode struct {
 	Username      string    `json:"username,omitempty"`
 	Password      string    `json:"password,omitempty"`
 	UUID          string    `json:"uuid,omitempty"`
+	Flow          string    `json:"flow,omitempty"`        // xtls-rprx-vision 等流控
+	Fingerprint   string    `json:"fingerprint,omitempty"` // chrome, firefox 等指纹
+	Transport     string    `json:"transport,omitempty"`   // tcp, ws, etc.
 	Method        string    `json:"method,omitempty"`
 	Token         string    `json:"token,omitempty"`
 	SkipTLSVerify bool      `json:"skipTlsVerify,omitempty"`

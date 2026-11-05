@@ -33,6 +33,30 @@ func TestUriParser_Vless(t *testing.T) {
 	}
 }
 
+func TestUriParser_Vless_Vision(t *testing.T) {
+	link := "vless://00000000-0000-0000-0000-000000000000@node.example.com:11443?encryption=none&flow=xtls-rprx-vision&security=tls&sni=node.example.com&fp=chrome&type=tcp&headerType=none&host=node.example.com#Vision-Node"
+	node, err := ParseUpstreamLink(link)
+	if err != nil {
+		t.Fatalf("ParseUpstreamLink failed: %v", err)
+	}
+
+	if node.Flow != "xtls-rprx-vision" {
+		t.Errorf("expected flow xtls-rprx-vision, got %s", node.Flow)
+	}
+	if node.Fingerprint != "chrome" {
+		t.Errorf("expected fp chrome, got %s", node.Fingerprint)
+	}
+	if node.Transport != "tcp" {
+		t.Errorf("expected transport tcp, got %s", node.Transport)
+	}
+	if node.Server != "node.example.com" {
+		t.Errorf("expected server node.example.com, got %s", node.Server)
+	}
+	if node.SNI != "node.example.com" {
+		t.Errorf("expected sni node.example.com, got %s", node.SNI)
+	}
+}
+
 func TestUriParser_Trojan(t *testing.T) {
 	link := "trojan://test-trojan-pwd-123@trojan.example.com:443?sni=trojan.example.com&allowInsecure=1#HK-Trojan"
 	node, err := ParseUpstreamLink(link)

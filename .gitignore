@@ -29,4 +29,5 @@ docs_secret/
 /plugins/socks5-forwarder/socks5-forwarder.exe
 dist/
 *.zip
+__pycache__/
 

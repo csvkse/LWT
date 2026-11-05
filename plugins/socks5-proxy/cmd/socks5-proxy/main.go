@@ -16,7 +16,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -62,23 +61,66 @@ var bufPool = sync.Pool{
 }
 
 type Metrics struct {
-	ActiveConns int64 `json:"activeConnections"`
-	TotalConns  int64 `json:"totalConnections"`
-	BytesRx     int64 `json:"bytesReceived"`
-	BytesTx     int64 `json:"bytesTransmitted"`
+	ActiveConns     int64       `json:"activeConnections"`
+	TotalConns      int64       `json:"totalConnections"`
+	RejectedConns   int64       `json:"rejectedConnections"`
+	PeakActiveConns int64       `json:"peakActiveConnections"`
+	BytesRx         int64       `json:"bytesReceived"`
+	BytesTx         int64       `json:"bytesTransmitted"`
+	DNSResolve      PhaseMetric `json:"-"`
+	UpstreamDial    PhaseMetric `json:"-"`
+}
+
+type PhaseMetric struct {
+	count   int64
+	totalNs int64
+	maxNs   int64
+}
+
+type PhaseMetricSnapshot struct {
+	Count   int64 `json:"count"`
+	TotalNs int64 `json:"totalNs"`
+	MaxNs   int64 `json:"maxNs"`
+}
+
+func (m *PhaseMetric) Observe(duration time.Duration) {
+	ns := duration.Nanoseconds()
+	if ns < 0 {
+		ns = 0
+	}
+	atomic.AddInt64(&m.count, 1)
+	atomic.AddInt64(&m.totalNs, ns)
+	for current := atomic.LoadInt64(&m.maxNs); ns > current; current = atomic.LoadInt64(&m.maxNs) {
+		if atomic.CompareAndSwapInt64(&m.maxNs, current, ns) {
+			break
+		}
+	}
+}
+
+func (m *PhaseMetric) Snapshot() PhaseMetricSnapshot {
+	return PhaseMetricSnapshot{
+		Count:   atomic.LoadInt64(&m.count),
+		TotalNs: atomic.LoadInt64(&m.totalNs),
+		MaxNs:   atomic.LoadInt64(&m.maxNs),
+	}
 }
 
 type Config struct {
-	ListenAddr     string
-	AuthMode       string // "none" or "password"
-	Username       string
-	Password       string
-	ConnectTimeout time.Duration
-	StatusPort     int
-	AllowedSubnets string
-	AllowedDomains string
-	AllowedClients string
-	AclPreset      string
+	ListenAddr                string
+	AuthMode                  string // "none" or "password"
+	Username                  string
+	Password                  string
+	ConnectTimeout            time.Duration
+	MaxActiveSessions         int
+	MaxHTTPConnsPerHost       int
+	MaxHTTPPendingPerHost     int
+	HTTPQueueTimeout          time.Duration
+	HTTPResponseHeaderTimeout time.Duration
+	StatusPort                int
+	AllowedSubnets            string
+	AllowedDomains            string
+	AllowedClients            string
+	AclPreset                 string
 }
 
 type PersistedConfig struct {
@@ -92,14 +134,18 @@ type PersistedConfig struct {
 }
 
 type Server struct {
-	authMu     sync.RWMutex
-	cfg        Config
-	logger     *slog.Logger
-	metrics    Metrics
-	acl        *AclEngine
-	stateDir   string
-	configPath string
-	resolver   IDnsResolverStrategy
+	authMu               sync.RWMutex
+	resolverMu           sync.Mutex
+	httpForwardMu        sync.Mutex
+	cfg                  Config
+	logger               *slog.Logger
+	metrics              Metrics
+	acl                  *AclEngine
+	stateDir             string
+	configPath           string
+	resolver             IDnsResolverStrategy
+	httpForwardTransport *http.Transport
+	httpForwardLimiter   *HTTPHostRequestLimiter
 }
 
 func (s *Server) persistConfigAtomic() error {
@@ -178,6 +224,19 @@ func (s *Server) GetAuthConfig() (mode, username, password string) {
 	return s.cfg.AuthMode, s.cfg.Username, s.cfg.Password
 }
 
+func (s *Server) getDnsResolver() IDnsResolverStrategy {
+	s.resolverMu.Lock()
+	defer s.resolverMu.Unlock()
+	if s.resolver == nil {
+		timeout := s.cfg.ConnectTimeout
+		if timeout <= 0 {
+			timeout = 10 * time.Second
+		}
+		s.resolver = NewCachedDnsResolver(NewIpv4PreferResolver(timeout), 2048, 3*time.Minute, 10*time.Minute, 5*time.Second)
+	}
+	return s.resolver
+}
+
 func (s *Server) SetAuthConfig(mode, username, password string) {
 	s.authMu.Lock()
 	defer s.authMu.Unlock()
@@ -197,6 +256,11 @@ func main() {
 	usernameFlag := flag.String("username", "", "SOCKS5 authentication username")
 	passwordFlag := flag.String("password", "", "SOCKS5 authentication password")
 	timeoutSec := flag.Int("connect-timeout", 10, "Upstream connection timeout in seconds")
+	maxSessionsFlag := flag.Int("max-active-sessions", positiveIntFromEnv("SOCKS5_MAX_ACTIVE_SESSIONS", defaultMaxActiveSessions), "Maximum active client sessions")
+	maxHTTPConnsPerHostFlag := flag.Int("max-http-conns-per-host", positiveIntFromEnv("SOCKS5_HTTP_MAX_CONNS_PER_HOST", 128), "Maximum active/dialing/idle HTTP upstream connections per host")
+	maxHTTPPendingPerHostFlag := flag.Int("http-max-pending-per-host", positiveIntFromEnv("SOCKS5_HTTP_MAX_PENDING_PER_HOST", defaultMaxHTTPPendingPerHost), "Maximum queued HTTP upstream requests per host")
+	httpQueueTimeoutFlag := flag.Duration("http-queue-timeout", positiveDurationFromEnv("SOCKS5_HTTP_QUEUE_TIMEOUT", defaultHTTPQueueTimeout), "Maximum wait for an HTTP upstream request slot")
+	responseHeaderTimeoutFlag := flag.Duration("http-response-header-timeout", positiveDurationFromEnv("SOCKS5_HTTP_RESPONSE_HEADER_TIMEOUT", 30*time.Second), "Maximum wait for upstream HTTP response headers")
 	subnetsFlag := flag.String("allowed-subnets", "", "Allowed target subnets (e.g. '10.,127.,192.168.', '10.0.0.0/8')")
 	domainsFlag := flag.String("allowed-domains", "", "Allowed target domains (e.g. '*.internal,*.local,regex:...')")
 	clientsFlag := flag.String("allowed-clients", "", "Allowed client incoming IPs/subnets")
@@ -307,19 +371,24 @@ func main() {
 	}))
 
 	dnsStrategy := NewIpv4PreferResolver(time.Duration(*timeoutSec) * time.Second)
-	cachedResolver := NewCachedDnsResolver(dnsStrategy, 2048, 3*time.Minute, 10*time.Minute, 5*time.Second)
+	cachedResolver := NewCachedDnsResolverWithTimeout(dnsStrategy, 2048, 3*time.Minute, 10*time.Minute, 5*time.Second, time.Duration(*timeoutSec)*time.Second)
 
 	srv := &Server{
 		cfg: Config{
-			ListenAddr:     addr,
-			AuthMode:       authMode,
-			Username:       username,
-			Password:       password,
-			ConnectTimeout: time.Duration(*timeoutSec) * time.Second,
-			AllowedSubnets: subnets,
-			AllowedDomains: domains,
-			AllowedClients: clients,
-			AclPreset:      preset,
+			ListenAddr:                addr,
+			AuthMode:                  authMode,
+			Username:                  username,
+			Password:                  password,
+			ConnectTimeout:            time.Duration(*timeoutSec) * time.Second,
+			MaxActiveSessions:         *maxSessionsFlag,
+			MaxHTTPConnsPerHost:       *maxHTTPConnsPerHostFlag,
+			MaxHTTPPendingPerHost:     *maxHTTPPendingPerHostFlag,
+			HTTPQueueTimeout:          *httpQueueTimeoutFlag,
+			HTTPResponseHeaderTimeout: *responseHeaderTimeoutFlag,
+			AllowedSubnets:            subnets,
+			AllowedDomains:            domains,
+			AllowedClients:            clients,
+			AclPreset:                 preset,
 		},
 		logger:     logger,
 		acl:        aclEngine,
@@ -356,6 +425,7 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to bind SOCKS5 listener on %s: %w", s.cfg.ListenAddr, err)
 	}
 	defer listener.Close()
+	defer s.closeHTTPForwardIdleConnections()
 
 	boundAddr := listener.Addr().String()
 	fmt.Printf("SOCKS5_LISTEN=%s\n", boundAddr)
@@ -363,6 +433,11 @@ func (s *Server) Run(ctx context.Context) error {
 		"listen", boundAddr,
 		"authMode", s.cfg.AuthMode,
 		"connectTimeout", s.cfg.ConnectTimeout.String(),
+		"maxActiveSessions", s.effectiveMaxActiveSessions(),
+		"maxHTTPConnsPerHost", s.effectiveMaxHTTPConnsPerHost(),
+		"maxHTTPPendingPerHost", s.effectiveMaxHTTPPendingPerHost(),
+		"httpQueueTimeout", s.effectiveHTTPQueueTimeout().String(),
+		"httpResponseHeaderTimeout", s.effectiveHTTPResponseHeaderTimeout().String(),
 	)
 
 	// Optionally start a background metrics HTTP server on Loopback (port + 1000) for UI health check
@@ -373,6 +448,7 @@ func (s *Server) Run(ctx context.Context) error {
 		s.logger.Info("shutting down SOCKS5 listener...")
 		_ = listener.Close()
 	}()
+	admission := NewConnectionAdmission(s.effectiveMaxActiveSessions())
 
 	for {
 		conn, err := listener.Accept()
@@ -393,20 +469,73 @@ func (s *Server) Run(ctx context.Context) error {
 			continue
 		}
 
-		atomic.AddInt64(&s.metrics.ActiveConns, 1)
-		atomic.AddInt64(&s.metrics.TotalConns, 1)
+		s.startAcceptedSession(conn, admission)
+	}
+}
 
-		go func(c net.Conn) {
-			defer func() {
-				_ = c.Close()
-				atomic.AddInt64(&s.metrics.ActiveConns, -1)
-			}()
+func (s *Server) startAcceptedSession(conn net.Conn, admission *ConnectionAdmission) bool {
+	permit, ok := admission.TryAcquire()
+	if !ok {
+		atomic.AddInt64(&s.metrics.RejectedConns, 1)
+		_ = conn.Close()
+		return false
+	}
 
-			if err := s.handleConn(c); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+	active := atomic.AddInt64(&s.metrics.ActiveConns, 1)
+	updateMaxInt64(&s.metrics.PeakActiveConns, active)
+	atomic.AddInt64(&s.metrics.TotalConns, 1)
+	go func(c net.Conn) {
+		defer func() {
+			_ = c.Close()
+			atomic.AddInt64(&s.metrics.ActiveConns, -1)
+			permit.Release()
+		}()
+		if err := s.handleConn(c); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+			if s.logger != nil {
 				s.logger.Debug("session ended with error", "client", c.RemoteAddr().String(), "error", err)
 			}
-		}(conn)
+		}
+	}(conn)
+	return true
+}
+
+func updateMaxInt64(target *int64, value int64) {
+	for current := atomic.LoadInt64(target); value > current; current = atomic.LoadInt64(target) {
+		if atomic.CompareAndSwapInt64(target, current, value) {
+			return
+		}
 	}
+}
+
+func (s *Server) effectiveMaxActiveSessions() int {
+	if s.cfg.MaxActiveSessions > 0 {
+		return s.cfg.MaxActiveSessions
+	}
+	return defaultMaxActiveSessions
+}
+
+func positiveIntFromEnv(name string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func positiveDurationFromEnv(name string, fallback time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }
 
 // BufferedConn wraps net.Conn with a bufio.Reader to ensure any peeked or buffered bytes are drained first.
@@ -435,20 +564,6 @@ func (b *BufferedConn) Buffered() int {
 
 func (b *BufferedConn) RawConn() net.Conn {
 	return b.Conn
-}
-
-func extractTcpConn(conn net.Conn) *net.TCPConn {
-	for {
-		if bc, ok := conn.(*BufferedConn); ok {
-			conn = bc.RawConn()
-			continue
-		}
-		break
-	}
-	if tcp, ok := conn.(*net.TCPConn); ok {
-		return tcp
-	}
-	return nil
 }
 
 func optimizeTcpConn(conn net.Conn) {
@@ -586,12 +701,11 @@ func (s *Server) handleSocks5(conn net.Conn) error {
 	if ip := net.ParseIP(targetHost); ip != nil {
 		candidateIPs = []net.IP{ip}
 	} else {
-		resolver := s.resolver
-		if resolver == nil {
-			resolver = NewCachedDnsResolver(NewIpv4PreferResolver(s.cfg.ConnectTimeout), 2048, 3*time.Minute, 10*time.Minute, 5*time.Second)
-		}
+		resolver := s.getDnsResolver()
 		resolveCtx, cancel := context.WithTimeout(context.Background(), s.cfg.ConnectTimeout)
+		resolveStarted := time.Now()
 		ips, err := resolver.Resolve(resolveCtx, targetHost)
+		s.metrics.DNSResolve.Observe(time.Since(resolveStarted))
 		cancel()
 		if err != nil || len(ips) == 0 {
 			_ = s.sendReply(conn, repHostUnreach, nil)
@@ -617,7 +731,9 @@ func (s *Server) handleSocks5(conn net.Conn) error {
 	}
 
 	// 5. Connect to upstream target via Happy Eyeballs Race (RFC 8305)
+	dialStarted := time.Now()
 	upstream, winningIP, err := dialUpstreamWithRace(context.Background(), candidateIPs, int(targetPort), s.cfg.ConnectTimeout, s.acl)
+	s.metrics.UpstreamDial.Observe(time.Since(dialStarted))
 	if err != nil {
 		if errors.Is(err, ErrAclForbidden) {
 			_ = s.sendReply(conn, repRuleViolation, nil)
@@ -719,8 +835,12 @@ func (s *Server) relay(client, target net.Conn) error {
 	// 预先排空 client (BufferedConn) 中由于 Peek 首字节嗅探而残留的预读数据
 	if bc, ok := client.(*BufferedConn); ok {
 		if bufferedLen := bc.Buffered(); bufferedLen > 0 {
-			if n, err := io.CopyN(target, bc.r, int64(bufferedLen)); err == nil {
-				atomic.AddInt64(&s.metrics.BytesRx, n)
+			n, err := io.CopyN(target, bc.r, int64(bufferedLen))
+			atomic.AddInt64(&s.metrics.BytesRx, n)
+			if err != nil {
+				_ = client.Close()
+				_ = target.Close()
+				return fmt.Errorf("forward buffered client data: %w", err)
 			}
 		}
 		client = bc.RawConn()
@@ -728,43 +848,46 @@ func (s *Server) relay(client, target net.Conn) error {
 
 	var wg sync.WaitGroup
 	wg.Add(2)
+	errCh := make(chan error, 2)
 
 	pipe := func(dst, src net.Conn, counter *int64) {
 		defer wg.Done()
 
-		dstTcp := extractTcpConn(dst)
-		srcTcp := extractTcpConn(src)
-
-		var n int64
-		// Tier 1: Linux 原生内核 splice(2) 零拷贝快速通道 (Zero-Copy Splice Relay)
-		// 在 Linux 平台下，当双方均为原生 TCPConn 且传入 nil buffer 时，
-		// Go 运行时 net.(*TCPConn).ReadFrom 会自动触发 Linux 内核 splice 系统调用，
-		// 实现页缓存零拷贝转移，完全绕过用户态内存，大幅提升万兆链路吞吐并降低 CPU 占用
-		if runtime.GOOS == "linux" && dstTcp != nil && srcTcp != nil {
-			n, _ = io.Copy(dstTcp, srcTcp)
-		} else {
-			// Tier 2: 跨平台/非TCP环境 fallback 至 sync.Pool 缓冲池
-			bufPtr := bufPool.Get().(*[]byte)
-			n, _ = io.CopyBuffer(dst, src, *bufPtr)
-			bufPool.Put(bufPtr)
-		}
+		bufPtr := bufPool.Get().(*[]byte)
+		n, copyErr := io.CopyBuffer(dst, src, *bufPtr)
+		bufPool.Put(bufPtr)
 		atomic.AddInt64(counter, n)
+		if copyErr != nil {
+			// A hard copy error invalidates the full tunnel. Closing both sides
+			// releases the opposite direction if it is still blocked in Read.
+			_ = client.Close()
+			_ = target.Close()
+			errCh <- copyErr
+			return
+		}
 
 		// 半关闭状态：通知对端本方向数据已发送完毕
 		if cw, ok := dst.(interface{ CloseWrite() error }); ok {
-			_ = cw.CloseWrite()
+			if err := cw.CloseWrite(); err != nil {
+				_ = client.Close()
+				_ = target.Close()
+				errCh <- err
+				return
+			}
 		}
-
-		// 僵尸连接防护：当本方向读写完毕后，为反方向连接注入 10 秒超时排空，杜绝死锁与 Goroutine/FD 泄露
-		_ = src.SetReadDeadline(time.Now().Add(10 * time.Second))
-		_ = dst.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		errCh <- nil
 	}
 
 	go pipe(target, client, &s.metrics.BytesRx)
 	go pipe(client, target, &s.metrics.BytesTx)
 
 	wg.Wait()
-	return nil
+	firstErr := <-errCh
+	secondErr := <-errCh
+	if firstErr != nil {
+		return firstErr
+	}
+	return secondErr
 }
 
 func (s *Server) startMetricsHttp(boundAddr string) {
@@ -808,17 +931,34 @@ func (s *Server) startMetricsHttp(boundAddr string) {
 				"cacheSize": size,
 			}
 		}
+		httpAdmission := s.getHTTPForwardRequestLimiter().Snapshot()
 		resp := map[string]any{
-			"status":      "ok",
-			"listen":      boundAddr,
-			"authMode":    authMode,
-			"username":    username,
-			"activeConns": atomic.LoadInt64(&s.metrics.ActiveConns),
-			"totalConns":  atomic.LoadInt64(&s.metrics.TotalConns),
-			"bytesRx":     atomic.LoadInt64(&s.metrics.BytesRx),
-			"bytesTx":     atomic.LoadInt64(&s.metrics.BytesTx),
-			"acl":         s.acl.GetStats(),
-			"dns":         dnsStats,
+			"status":                      "ok",
+			"listen":                      boundAddr,
+			"authMode":                    authMode,
+			"username":                    username,
+			"activeConns":                 atomic.LoadInt64(&s.metrics.ActiveConns),
+			"totalConns":                  atomic.LoadInt64(&s.metrics.TotalConns),
+			"rejectedConns":               atomic.LoadInt64(&s.metrics.RejectedConns),
+			"peakActiveConns":             atomic.LoadInt64(&s.metrics.PeakActiveConns),
+			"maxActiveSessions":           s.effectiveMaxActiveSessions(),
+			"maxHTTPConnsPerHost":         s.effectiveMaxHTTPConnsPerHost(),
+			"maxHTTPPendingPerHost":       s.effectiveMaxHTTPPendingPerHost(),
+			"httpQueueTimeoutMs":          s.effectiveHTTPQueueTimeout().Milliseconds(),
+			"httpResponseHeaderTimeoutMs": s.effectiveHTTPResponseHeaderTimeout().Milliseconds(),
+			"httpActiveRequests":          httpAdmission.Active,
+			"httpPendingRequests":         httpAdmission.Pending,
+			"httpRejectedRequests":        httpAdmission.Rejected,
+			"httpQueueTimeouts":           httpAdmission.TimedOut,
+			"bytesRx":                     atomic.LoadInt64(&s.metrics.BytesRx),
+			"bytesTx":                     atomic.LoadInt64(&s.metrics.BytesTx),
+			"runtime":                     currentRuntimeSnapshot(),
+			"acl":                         s.acl.GetStats(),
+			"dns":                         dnsStats,
+			"phases": map[string]PhaseMetricSnapshot{
+				"dnsResolve":   s.metrics.DNSResolve.Snapshot(),
+				"upstreamDial": s.metrics.UpstreamDial.Snapshot(),
+			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	})
@@ -845,6 +985,7 @@ func (s *Server) startMetricsHttp(boundAddr string) {
 				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 				return
 			}
+			s.closeHTTPForwardIdleConnections()
 			s.authMu.Lock()
 			if body.Preset != "" {
 				s.cfg.AclPreset = body.Preset
