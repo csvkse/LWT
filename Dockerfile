@@ -129,6 +129,7 @@ RUN set -e; \
         sleep 3; \
       }; \
     done
+ENV GOTOOLCHAIN=auto
 COPY plugins ./plugins
 # 编译 MCP Bridge 原生 Go 独立二进制微服务（优先复用有效 Linux ELF 预编译产物，否则从源码静态编译）
 RUN if [ -f plugins/mcp-bridge/mcp-bridge ] && [ "$(head -c 4 plugins/mcp-bridge/mcp-bridge 2>/dev/null)" = "$(printf '\177ELF')" ]; then \

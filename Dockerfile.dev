@@ -33,6 +33,7 @@ WORKDIR /src
 # 配置中科大源并安装编译 PTY、Go 编译器与高性能内存分配器 mimalloc
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
     apk update && apk add --no-cache build-base go mimalloc
+ENV GOTOOLCHAIN=auto
 
 # 注入 mimalloc 替代 musl libc 的单全局锁堆分配器，释放多核 Roslyn 编译吞吐
 ENV LD_PRELOAD=/usr/lib/libmimalloc.so
