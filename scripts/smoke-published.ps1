@@ -22,6 +22,16 @@ function Get-SmokeResourceSample($phase) {
         return @{ phase = $phase; timestamp = [DateTimeOffset]::UtcNow.ToString('o'); cpuSeconds = $process.TotalProcessorTime.TotalSeconds; residentBytes = $process.WorkingSet64; privateBytes = $process.PrivateMemorySize64; threads = $process.Threads.Count }
     } catch { return @{ phase = $phase; unavailable = $true } }
 }
+function Read-SmokeLog($logPath, $secret) {
+    for ($attempt = 0; $attempt -lt 40; $attempt++) {
+        try {
+            return [IO.File]::ReadAllText($logPath).Replace($secret, '[REDACTED]')
+        } catch [IO.IOException] {
+            if ($attempt -eq 39) { throw }
+            Start-Sleep -Milliseconds 250
+        }
+    }
+}
 try {
     $env:ASPNETCORE_URLS = "http://127.0.0.1:$Port"
     $env:Urls = $env:ASPNETCORE_URLS
@@ -58,11 +68,15 @@ try {
         }
     }
     $resources | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath "$evidence/resources.json" -Encoding utf8NoBOM
-    if ($process -and !$process.HasExited) { Stop-Process -Id $process.Id; $process.WaitForExit(5000) | Out-Null }
+    if ($process -and !$process.HasExited) {
+        Stop-Process -Id $process.Id
+        if (!$process.WaitForExit(15000)) { throw "Published artifact process $($process.Id) did not exit before log collection" }
+    }
+    if ($process -and !$process.WaitForExit(15000)) { throw "Published artifact process $($process.Id) did not release its output before log collection" }
     # Only upload logs; the isolated data directory contains credentials and stays local.
     foreach ($log in @("$evidence/stdout.log", "$evidence/stderr.log")) {
         if (Test-Path -LiteralPath $log) {
-            $text = [IO.File]::ReadAllText($log).Replace($password, '[REDACTED]')
+            $text = Read-SmokeLog $log $password
             [IO.File]::WriteAllText($log, $text, [Text.UTF8Encoding]::new($false))
         }
     }

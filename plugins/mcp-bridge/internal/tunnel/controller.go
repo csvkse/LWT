@@ -358,7 +358,8 @@ func (c *Controller) Start(ctx context.Context, tunnelCfg config.TunnelConfig) e
 	c.client = client
 	c.status.LastActiveAt = time.Now()
 
-	c.stopCh = make(chan struct{})
+	stopCh := make(chan struct{})
+	c.stopCh = stopCh
 	startTime := time.Now()
 
 	// Asynchronously monitor client readiness (first successful control-plane poll handshake)
@@ -388,7 +389,7 @@ func (c *Controller) Start(ctx context.Context, tunnelCfg config.TunnelConfig) e
 			} else {
 				c.mu.Unlock()
 			}
-		case <-c.stopCh:
+		case <-stopCh:
 			return
 		case <-client.Done():
 			return
@@ -396,9 +397,9 @@ func (c *Controller) Start(ctx context.Context, tunnelCfg config.TunnelConfig) e
 	}()
 
 	// Background watcher for unexpected termination
-	go func() {
+	go func(client *tunnelclient.Client, stopCh <-chan struct{}) {
 		select {
-		case <-c.client.Done():
+		case <-client.Done():
 			c.mu.Lock()
 			c.status.ReadyForChatGPT = false
 			if c.status.State == StateConnected || c.status.State == StateConnecting {
@@ -416,10 +417,10 @@ func (c *Controller) Start(ctx context.Context, tunnelCfg config.TunnelConfig) e
 			if cb != nil {
 				cb(st)
 			}
-		case <-c.stopCh:
+		case <-stopCh:
 			serverCancel()
 		}
-	}()
+	}(client, stopCh)
 
 	return nil
 }

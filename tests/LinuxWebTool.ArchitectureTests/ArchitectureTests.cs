@@ -2365,7 +2365,11 @@ public class ArchitectureTests
         Assert.Contains("func (s *Server) handleHttpProxy", httpProxyContent);
         Assert.Contains("HTTP/1.1 200 Connection Established", httpProxyContent);
         Assert.Contains("getHTTPForwardTransport", httpProxyContent);
-        Assert.Contains("transport.RoundTrip(req)", httpProxyContent);
+        var httpServerFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "http_server.go");
+        Assert.True(File.Exists(httpServerFile), "http_server.go 必须存在");
+        var httpServerContent = File.ReadAllText(httpServerFile);
+        Assert.Contains("newHTTPForwardReverseProxy", httpServerContent);
+        Assert.Contains("forwardProxy.ServeHTTP(w, req.WithContext(ctx))", httpServerContent);
 
         // 2. 验证 main.go 包含单端口自适应嗅探、TCP_NODELAY、EOF 半关闭与硬错误双端清理
         var mainGoFile = Path.Combine(RepoRoot, "plugins", "socks5-proxy", "cmd", "socks5-proxy", "main.go");
