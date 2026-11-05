@@ -371,7 +371,12 @@ func main() {
 	}))
 
 	dnsStrategy := NewIpv4PreferResolver(time.Duration(*timeoutSec) * time.Second)
-	cachedResolver := NewCachedDnsResolverWithTimeout(dnsStrategy, 2048, 3*time.Minute, 10*time.Minute, 5*time.Second, time.Duration(*timeoutSec)*time.Second)
+	defaultResolver := NewCachedDnsResolverWithTimeout(dnsStrategy, 2048, 3*time.Minute, 10*time.Minute, 5*time.Second, time.Duration(*timeoutSec)*time.Second)
+	configuredResolver, err := buildDNSResolver(defaultResolver, os.Getenv("SOCKS5_DNS_RULES"), time.Duration(*timeoutSec)*time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid SOCKS5_DNS_RULES: %v\n", err)
+		os.Exit(1)
+	}
 
 	srv := &Server{
 		cfg: Config{
@@ -394,7 +399,7 @@ func main() {
 		acl:        aclEngine,
 		stateDir:   stateDir,
 		configPath: configPath,
-		resolver:   cachedResolver,
+		resolver:   configuredResolver,
 	}
 
 	// 首次启动时若尚未落盘，立即初始化持久化文件
@@ -921,7 +926,13 @@ func (s *Server) startMetricsHttp(boundAddr string) {
 		w.Header().Set("Content-Type", "application/json")
 		authMode, username, _ := s.GetAuthConfig()
 		var dnsStats map[string]any
-		if cr, ok := s.resolver.(*CachedDnsResolver); ok {
+		dnsRuleCount := 0
+		if routed, ok := s.resolver.(*dnsRoutingResolver); ok {
+			dnsRuleCount = len(routed.routes)
+		}
+		if cr, ok := s.resolver.(interface {
+			CacheStats() (int64, int64, int64, int64, int)
+		}); ok {
 			hits, misses, staleHits, evictions, size := cr.CacheStats()
 			dnsStats = map[string]any{
 				"hits":      hits,
@@ -955,6 +966,7 @@ func (s *Server) startMetricsHttp(boundAddr string) {
 			"runtime":                     currentRuntimeSnapshot(),
 			"acl":                         s.acl.GetStats(),
 			"dns":                         dnsStats,
+			"dnsRuleCount":                dnsRuleCount,
 			"phases": map[string]PhaseMetricSnapshot{
 				"dnsResolve":   s.metrics.DNSResolve.Snapshot(),
 				"upstreamDial": s.metrics.UpstreamDial.Snapshot(),

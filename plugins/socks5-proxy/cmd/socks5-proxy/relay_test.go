@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"net"
@@ -16,6 +18,47 @@ var errBufferedRelayWrite = errors.New("buffered relay write failed")
 type blockedRelayTarget struct {
 	closed chan struct{}
 	once   sync.Once
+}
+
+func TestRelayLargeResponseIntegrity(t *testing.T) {
+	client, clientPeer := newTCPConnPair(t)
+	upstream, upstreamPeer := newTCPConnPair(t)
+	_ = clientPeer.SetDeadline(time.Now().Add(10 * time.Second))
+	_ = upstreamPeer.SetDeadline(time.Now().Add(10 * time.Second))
+	payload := bytes.Repeat([]byte("large-resource-payload-0123456789"), 131072)
+	want := sha256.Sum256(payload)
+	relayDone := make(chan error, 1)
+	go func() { relayDone <- (&Server{}).relay(client, upstream) }()
+	if err := clientPeer.CloseWrite(); err != nil {
+		t.Fatalf("close client write side: %v", err)
+	}
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := upstreamPeer.Write(payload)
+		if err == nil {
+			err = upstreamPeer.CloseWrite()
+		}
+		writeDone <- err
+	}()
+	hash := sha256.New()
+	n, err := io.Copy(hash, clientPeer)
+	if err != nil {
+		t.Fatalf("read relayed response: %v", err)
+	}
+	if n != int64(len(payload)) || !bytes.Equal(hash.Sum(nil), want[:]) {
+		t.Fatalf("response integrity mismatch: received %d bytes, want %d", n, len(payload))
+	}
+	if err := <-writeDone; err != nil {
+		t.Fatalf("write upstream response: %v", err)
+	}
+	select {
+	case err := <-relayDone:
+		if err != nil {
+			t.Fatalf("relay: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("relay did not finish after both write sides closed")
+	}
 }
 
 func newBlockedRelayTarget() *blockedRelayTarget {

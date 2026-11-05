@@ -17,7 +17,8 @@ def read_proxy_status(port: int) -> dict:
         "activeConns", "totalConns", "peakActiveConns", "rejectedConns", "maxActiveSessions",
         "httpActiveRequests", "httpPendingRequests", "httpRejectedRequests", "httpQueueTimeouts",
     )
-    return {"status": {key: status.get(key) for key in keys}, "runtime": status.get("runtime") or {}}
+    return {"status": {key: status.get(key) for key in keys}, "runtime": status.get("runtime") or {},
+            "dns": status.get("dns"), "phases": status.get("phases")}
 
 
 def find_proxy_pid(status: dict, proxy_port: int) -> int | None:
