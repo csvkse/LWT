@@ -156,6 +156,7 @@ RUN set -e; \
       -r "${RID}"
 
 RUN cp /tmp/liblinuxwebtool_pty.so /app/publish/liblinuxwebtool_pty.so
+RUN test -x /app/publish/LinuxWebTool.WebHost
 
 # 清理调试符号，减小镜像体积
 RUN find /app/publish -type f -name "*.pdb" -delete
@@ -165,6 +166,7 @@ FROM base AS final
 WORKDIR /app
 COPY --from=build --chown=appuser:appgroup /app/publish .
 COPY --chown=appuser:appgroup plugins ./plugins
+RUN test -x /app/LinuxWebTool.WebHost
 
 RUN cp /app/mcp-bridge /usr/local/bin/mcp-bridge 2>/dev/null || true && \
     chmod +x /usr/local/bin/mcp-bridge 2>/dev/null || true && \

@@ -26,8 +26,8 @@ function Read-SmokeLog($logPath, $secret) {
     for ($attempt = 0; $attempt -lt 40; $attempt++) {
         try {
             return [IO.File]::ReadAllText($logPath).Replace($secret, '[REDACTED]')
-        } catch [IO.IOException] {
-            if ($attempt -eq 39) { throw }
+        } catch {
+            if ($_.Exception.InnerException -isnot [IO.IOException] -or $attempt -eq 39) { throw }
             Start-Sleep -Milliseconds 250
         }
     }
