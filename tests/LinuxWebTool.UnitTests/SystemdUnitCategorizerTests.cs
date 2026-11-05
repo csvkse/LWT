@@ -77,7 +77,7 @@ public sealed class SystemdUnitCategorizerTests
     }
 
     [Fact]
-    public void Categorize_PerformanceBenchmark_1000Matches_ShouldCompleteUnder10Milliseconds()
+    public void Categorize_PerformanceBenchmark_1000Matches_ShouldUseUnder50MillisecondsOfCpuTime()
     {
         var samples = new (string Unit, string Desc)[]
         {
@@ -97,7 +97,8 @@ public sealed class SystemdUnitCategorizerTests
             _categorizer.Categorize(samples[i % samples.Length].Unit, samples[i % samples.Length].Desc);
         }
 
-        var sw = Stopwatch.StartNew();
+        var process = Process.GetCurrentProcess();
+        var cpuStart = process.TotalProcessorTime;
         for (var i = 0; i < 1000; i++)
         {
             var item = samples[i % samples.Length];
@@ -105,10 +106,10 @@ public sealed class SystemdUnitCategorizerTests
             Assert.NotNull(cat);
             Assert.NotNull(scp);
         }
-        sw.Stop();
+        var cpuElapsed = process.TotalProcessorTime - cpuStart;
 
-        // 1000 次分类必须远小于 15ms（通常 < 2ms）
-        Assert.True(sw.ElapsedMilliseconds < 50, $"1000 次分类耗时过高: {sw.ElapsedMilliseconds}ms");
+        // Measure CPU consumed by the operation, not time spent waiting for a shared CI runner.
+        Assert.True(cpuElapsed < TimeSpan.FromMilliseconds(50), $"1000 次分类 CPU 时间过高: {cpuElapsed.TotalMilliseconds:F2}ms");
     }
 
     [Fact]
