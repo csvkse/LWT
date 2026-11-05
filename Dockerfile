@@ -152,7 +152,7 @@ RUN set -e; \
       -c $BUILD_CONFIGURATION \
       -o /app/publish \
       --no-restore \
-      /p:PublishAot=true \
+      -p:PublishAot=true \
       -r "${RID}"
 
 RUN cp /tmp/liblinuxwebtool_pty.so /app/publish/liblinuxwebtool_pty.so
