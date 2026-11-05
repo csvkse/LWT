@@ -156,7 +156,7 @@ RUN set -e; \
       -r "${RID}"
 
 RUN cp /tmp/liblinuxwebtool_pty.so /app/publish/liblinuxwebtool_pty.so
-RUN test -x /app/publish/LinuxWebTool.WebHost
+RUN find /app/publish -maxdepth 2 -type f -exec ls -l {} \; && test -x /app/publish/LinuxWebTool.WebHost
 
 # 清理调试符号，减小镜像体积
 RUN find /app/publish -type f -name "*.pdb" -delete
