@@ -7,6 +7,12 @@ using Xunit;
 
 namespace LinuxWebTool.UnitTests;
 
+[CollectionDefinition("Systemd categorizer benchmark", DisableParallelization = true)]
+public sealed class SystemdCategorizerBenchmarkCollection
+{
+}
+
+[Collection("Systemd categorizer benchmark")]
 public sealed class SystemdUnitCategorizerTests
 {
     private readonly SystemdUnitCategorizer _categorizer = new();
