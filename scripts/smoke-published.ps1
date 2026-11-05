@@ -22,16 +22,6 @@ function Get-SmokeResourceSample($phase) {
         return @{ phase = $phase; timestamp = [DateTimeOffset]::UtcNow.ToString('o'); cpuSeconds = $process.TotalProcessorTime.TotalSeconds; residentBytes = $process.WorkingSet64; privateBytes = $process.PrivateMemorySize64; threads = $process.Threads.Count }
     } catch { return @{ phase = $phase; unavailable = $true } }
 }
-function Read-SmokeLog($logPath, $secret) {
-    for ($attempt = 0; $attempt -lt 40; $attempt++) {
-        try {
-            return [IO.File]::ReadAllText($logPath).Replace($secret, '[REDACTED]')
-        } catch {
-            if ($attempt -eq 39) { throw }
-            Start-Sleep -Milliseconds 250
-        }
-    }
-}
 try {
     $env:ASPNETCORE_URLS = "http://127.0.0.1:$Port"
     $env:Urls = $env:ASPNETCORE_URLS
@@ -46,11 +36,20 @@ try {
     $env:SMOKE_TARGET = 'published-' + [Runtime.InteropServices.RuntimeInformation]::RuntimeIdentifier
     $env:SMOKE_TARGET_MODE = if (Test-Path -LiteralPath (Join-Path $publish 'LinuxWebTool.WebHost.dll')) { 'managed' } else { 'native-aot' }
     $executable = Join-Path $publish $(if ($IsWindows) { 'LinuxWebTool.WebHost.exe' } else { 'LinuxWebTool.WebHost' })
-    $start = @{ FilePath = $executable; WorkingDirectory = $publish; PassThru = $true; RedirectStandardOutput = "$evidence/stdout.log"; RedirectStandardError = "$evidence/stderr.log" }
-    if ($IsWindows) { $start.WindowStyle = 'Hidden' }
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $executable
+    $start.WorkingDirectory = $publish
+    $start.UseShellExecute = $false
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.CreateNoWindow = $true
     $env:SMOKE_LAUNCH_EPOCH_MS = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString()
     $resourceClock = [Diagnostics.Stopwatch]::StartNew()
-    $process = Start-Process @start
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    if (!$process.Start()) { throw 'Published artifact process did not start' }
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
     $resources.samples += Get-SmokeResourceSample 'before'
     node "$PSScriptRoot/smoke-http.mjs"
     if ($LASTEXITCODE -ne 0) { throw 'Published artifact HTTP smoke failed' }
@@ -72,13 +71,12 @@ try {
         Stop-Process -Id $process.Id
         if (!$process.WaitForExit(15000)) { throw "Published artifact process $($process.Id) did not exit before log collection" }
     }
-    if ($process -and !$process.WaitForExit(15000)) { throw "Published artifact process $($process.Id) did not release its output before log collection" }
-    # Only upload logs; the isolated data directory contains credentials and stays local.
-    foreach ($log in @("$evidence/stdout.log", "$evidence/stderr.log")) {
-        if (Test-Path -LiteralPath $log) {
-            $text = Read-SmokeLog $log $password
-            [IO.File]::WriteAllText($log, $text, [Text.UTF8Encoding]::new($false))
-        }
+    if ($process) {
+        if (!$process.WaitForExit(15000)) { throw "Published artifact process $($process.Id) did not release its output before log collection" }
+        $stdout = $stdoutTask.GetAwaiter().GetResult().Replace($password, '[REDACTED]')
+        $stderr = $stderrTask.GetAwaiter().GetResult().Replace($password, '[REDACTED]')
+        [IO.File]::WriteAllText("$evidence/stdout.log", $stdout, [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText("$evidence/stderr.log", $stderr, [Text.UTF8Encoding]::new($false))
     }
     foreach ($key in $saved.Keys) { [Environment]::SetEnvironmentVariable($key, $saved[$key]) }
 }
