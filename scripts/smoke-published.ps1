@@ -15,6 +15,9 @@ foreach ($key in @('ASPNETCORE_URLS', 'Urls', 'Admin__UserName', 'Admin__Passwor
     $saved[$key] = [Environment]::GetEnvironmentVariable($key)
 }
 $process = $null
+$processStarted = $false
+$stdoutTask = $null
+$stderrTask = $null
 $resources = @{ schemaVersion = 1; source = 'process'; sampling = 'before/after smoke; not peak'; samples = @() }
 function Get-SmokeResourceSample($phase) {
     try {
@@ -48,6 +51,7 @@ try {
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $start
     if (!$process.Start()) { throw 'Published artifact process did not start' }
+    $processStarted = $true
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
     $resources.samples += Get-SmokeResourceSample 'before'
@@ -59,7 +63,7 @@ try {
         finally { Pop-Location }
     }
 } finally {
-    if ($process) {
+    if ($process -and $processStarted) {
         $resources.samples += Get-SmokeResourceSample 'after'
         $resources.elapsedMs = $resourceClock.Elapsed.TotalMilliseconds
         if (!$resources.samples[0].unavailable -and !$resources.samples[1].unavailable -and $resources.elapsedMs -gt 0) {
@@ -67,12 +71,12 @@ try {
         }
     }
     $resources | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath "$evidence/resources.json" -Encoding utf8NoBOM
-    if ($process -and !$process.HasExited) {
-        Stop-Process -Id $process.Id
+    if ($process -and $processStarted -and !$process.HasExited) {
+        $process.Kill($true)
         if (!$process.WaitForExit(15000)) { throw "Published artifact process $($process.Id) did not exit before log collection" }
     }
-    if ($process) {
-        if (!$process.WaitForExit(15000)) { throw "Published artifact process $($process.Id) did not release its output before log collection" }
+    if ($process -and $processStarted) {
+        if (!$stdoutTask.Wait(5000) -or !$stderrTask.Wait(5000)) { throw "Published artifact process $($process.Id) did not close its output streams after exit" }
         $stdout = $stdoutTask.GetAwaiter().GetResult().Replace($password, '[REDACTED]')
         $stderr = $stderrTask.GetAwaiter().GetResult().Replace($password, '[REDACTED]')
         [IO.File]::WriteAllText("$evidence/stdout.log", $stdout, [Text.UTF8Encoding]::new($false))

@@ -626,8 +626,9 @@ git -C "$devWorkdir" log -1 --oneline
             Write-Success "All 5 runtime environments installed and ready ($installedCount/5)"
         } else {
             Write-Warn "Some runtimes missing ($installedCount/5). Configuring USTC mirror and installing..."
-            $setupScript = "sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && apk update && apk add --no-cache caddy nodejs python3 py3-pip dotnet8-sdk powershell"
-            Invoke-RemoteSsh "docker exec $containerName sh -c `"$setupScript`""
+            $setupScript = 'sed -i "s@dl-cdn.alpinelinux.org@mirrors.ustc.edu.cn@g" /etc/apk/repositories && apk update && apk add --no-cache caddy nodejs python3 py3-pip dotnet8-sdk powershell'
+            $encodedSetupScript = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($setupScript))
+            Invoke-RemoteSsh "docker exec $containerName sh -c 'echo $encodedSetupScript | base64 -d | sh'"
             Write-Success "Runtimes installed successfully!"
         }
 
