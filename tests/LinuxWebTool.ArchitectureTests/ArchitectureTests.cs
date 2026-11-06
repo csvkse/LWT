@@ -1975,12 +1975,12 @@ public class ArchitectureTests
         var authContent = File.ReadAllText(authCtrlFile);
         Assert.Contains("Response.Cookies.Append(\"lwt_token\"", authContent);
 
-        // 2. PluginAuthGatewayEvaluator 必须支持从 Query 参数与 Cookie 提取 Token
-        var evalFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "Plugins", "Auth", "PluginAuthGatewayEvaluator.cs");
+        // 2. JWT 处理器从 Query 参数与 Cookie 提取 Token，并统一执行认证验证。
+        var evalFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Composition", "ServiceCollectionExtensions.cs");
         Assert.True(File.Exists(evalFile), "PluginAuthGatewayEvaluator.cs 必须存在");
         var evalContent = File.ReadAllText(evalFile);
-        Assert.Contains("context.Request.Cookies.TryGetValue(\"lwt_token\"", evalContent);
-        Assert.Contains("context.Request.Query.TryGetValue(\"token\"", evalContent);
+        Assert.Contains("context.Request.Cookies[\"lwt_token\"]", evalContent);
+        Assert.Contains("context.Request.Query[\"token\"]", evalContent);
 
         // 3. 插件状态机 pluginStateMachine.js canStop 必须允许降级、崩溃、退避状态手动停止
         var fsmFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "wwwroot", "app", "utils", "pluginStateMachine.js");

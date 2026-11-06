@@ -30,4 +30,5 @@ docs_secret/
 dist/
 *.zip
 __pycache__/
+.playwright-mcp/
 

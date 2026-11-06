@@ -38,6 +38,8 @@ public static class TestServerFixture
         builder.AddApplicationServices();
         var app = builder.Build();
         app.UseApplicationPipeline();
+        app.MapGet("/plugins/auth-test/identity", (Microsoft.AspNetCore.Http.HttpContext context) =>
+            Microsoft.AspNetCore.Http.Results.Json(new { authenticated = context.User.Identity?.IsAuthenticated == true }));
         await app.StartAsync();
         return app;
     }

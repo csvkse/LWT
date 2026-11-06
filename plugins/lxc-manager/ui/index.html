@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LXC 容器管理</title>
+<style>
+  body{font:15px system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:24px} main{max-width:1100px;margin:auto} h1{font-size:1.4rem} h2{font-size:1rem} .note{color:#94a3b8} button{background:#0369a1;color:white;border:0;border-radius:6px;padding:8px 16px;cursor:pointer} button:disabled{opacity:.5} .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:16px} section{background:#1e293b;border:1px solid #334155;border-radius:8px;padding:16px;min-width:0} ul{padding-left:20px;overflow-wrap:anywhere} #error{color:#fca5a5;white-space:pre-wrap} #status{color:#67e8f9}
+</style>
+</head>
+<body><main>
+<h1>LXC 容器管理</h1>
+<p class="note">创建前会检查宿主容量和存储配额能力。</p>
+<button id="refresh" type="button">刷新状态</button>
+<p id="status" role="status">等待加载</p><p id="error" role="alert"></p>
+<section>
+ <h2>创建预检</h2>
+ <p class="note">预检通过后可提交创建；执行结果需核对。</p>
+ <form id="preflight">
+  <p><label>名称 <input name="name" required maxlength="63" pattern="[a-zA-Z0-9][a-zA-Z0-9-]{0,62}"></label></p>
+  <p><label>镜像 <select name="imageFingerprint" required></select></label></p>
+  <p><label>CPU 核数 <input name="cpu" type="number" min="1" max="1024" value="1" required></label>
+   <label>内存 MiB <input name="memoryMiB" type="number" min="64" max="16777216" value="512" required></label>
+   <label>磁盘 GiB <input name="diskGiB" type="number" min="1" max="1048576" value="8" required></label></p>
+  <p><label>存储池 <select name="storagePool" required></select></label>
+   <label>受管网桥 <select name="network" required></select></label></p>
+  <button id="sample" type="button" disabled>读取宿主资源</button>
+  <p id="sample-result" role="status"></p>
+  <button id="check" type="submit" disabled>检查配置</button>
+  <button id="create" type="button" disabled>创建容器</button>
+  <button id="reconcile" type="button" disabled>核对任务</button>
+  <p id="task-result" role="status"></p>
+ </form>
+ <p id="preflight-result" role="status"></p><ul id="preflight-reasons"></ul>
+</section>
+<section><h2>服务端待核对任务</h2><p class="note">本地记录丢失时，可恢复完整任务；信息不完整的任务需要人工核对。</p><ul id="server-tasks"></ul><p id="server-tasks-error" role="alert"></p></section>
+<section><h2>已托管实例</h2><p class="note">仅已完成创建并通过归属核对的实例可操作。</p><ul id="managed"></ul><p id="managed-error" role="alert"></p></section>
+<div class="grid">
+ <section><h2>系统容器</h2><ul id="instances"></ul></section>
+ <section><h2>本地容器镜像</h2><ul id="images"></ul></section>
+ <section><h2>存储池</h2><ul id="pools"></ul></section>
+ <section><h2>受管网桥</h2><ul id="networks"></ul></section>
+</div>
+</main>
+<script type="module" src="./app.js"></script>
+</body></html>

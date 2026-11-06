@@ -139,6 +139,10 @@ RUN if [ -f plugins/mcp-bridge/mcp-bridge ] && [ "$(head -c 4 plugins/mcp-bridge
         echo "Building mcp-bridge from source for Linux" && \
         cd plugins/mcp-bridge && CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w" -o /app/publish/mcp-bridge ./cmd/mcp-bridge; \
     fi
+# 构建与目标架构一致的 LXC 管理插件，避免依赖生产镜像中的 Go 编译器。
+RUN set -e; ARCH="${TARGETARCH:-$(go env GOARCH)}"; \
+    case "$ARCH" in amd64|arm64) ;; *) echo "unsupported lxc-manager architecture: $ARCH" >&2; exit 1 ;; esac; \
+    mkdir -p /app/publish; cd plugins/lxc-manager; CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -ldflags "-s -w" -o /app/publish/lxc-manager ./cmd/lxc-manager
 RUN cc -shared -fPIC -O2 -Wall -Wextra -Werror src/LinuxWebTool.Infrastructure/Features/Terminal/Platform/native/linuxwebtool_pty.c -o /tmp/liblinuxwebtool_pty.so -lutil
 RUN set -e; \
     ARCH="${TARGETARCH:-$(uname -m)}"; \
@@ -166,6 +170,7 @@ FROM base AS final
 WORKDIR /app
 COPY --from=build --chown=appuser:appgroup /app/publish .
 COPY --chown=appuser:appgroup plugins ./plugins
+COPY --from=build --chown=appuser:appgroup /app/publish/lxc-manager /app/plugins/lxc-manager/lxc-manager
 RUN test -x /app/LinuxWebTool.WebHost
 
 RUN cp /app/mcp-bridge /usr/local/bin/mcp-bridge 2>/dev/null || true && \

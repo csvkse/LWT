@@ -213,6 +213,14 @@ public static class ServiceCollectionExtensions
                             {
                                 token = context.Request.Query["access_token"].ToString();
                             }
+                            if (string.IsNullOrEmpty(token) && context.Request.Path.StartsWithSegments("/plugins"))
+                            {
+                                token = context.Request.Query["lwt_token"].ToString();
+                                if (string.IsNullOrEmpty(token) && !context.Request.Headers.ContainsKey("Authorization"))
+                                {
+                                    token = context.Request.Cookies["lwt_token"] ?? "";
+                                }
+                            }
                             if (!string.IsNullOrEmpty(token))
                             {
                                 context.Token = token;

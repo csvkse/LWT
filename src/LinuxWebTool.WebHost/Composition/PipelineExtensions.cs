@@ -183,6 +183,9 @@ public static class PipelineExtensions
             {
                 if (h.Key.Equals("Host", StringComparison.OrdinalIgnoreCase)) continue;
                 if (h.Key.StartsWith("X-LWT-Internal-", StringComparison.OrdinalIgnoreCase)) continue; // 剥离外部伪造的内部头
+                if (h.Key.Equals("X-LWT-Plugin-Id", StringComparison.OrdinalIgnoreCase) ||
+                    h.Key.Equals("X-LWT-Auth-User", StringComparison.OrdinalIgnoreCase) ||
+                    h.Key.Equals("X-LWT-Auth-Type", StringComparison.OrdinalIgnoreCase)) continue;
                 reqMsg.Headers.TryAddWithoutValidation(h.Key, h.Value.ToArray());
             }
 

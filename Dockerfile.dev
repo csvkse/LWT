@@ -80,6 +80,8 @@ RUN if [ -f plugins/mcp-bridge/mcp-bridge ] && [ "$(head -c 4 plugins/mcp-bridge
         cd plugins/mcp-bridge && CGO_ENABLED=0 go build -ldflags "-s -w" -o /app/publish/mcp-bridge ./cmd/mcp-bridge; \
     fi
 
+RUN mkdir -p /app/publish && cd plugins/lxc-manager && CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w" -o /app/publish/lxc-manager ./cmd/lxc-manager
+
 # 标准 JIT 快速发布（禁用 PublishAot，带 --no-restore 与 -m 并发，上游工程已就绪）
 RUN dotnet publish "src/LinuxWebTool.WebHost/LinuxWebTool.WebHost.csproj" \
     -c Release \
@@ -101,6 +103,7 @@ ENV PATH="/usr/share/dotnet:$PATH" \
 
 COPY --from=build /app/publish .
 COPY plugins ./plugins
+COPY --from=build /app/publish/lxc-manager /app/plugins/lxc-manager/lxc-manager
 
 # 注入已编译的原生 MCP Bridge 并软链接至系统 PATH 与内置插件目录
 RUN cp /app/mcp-bridge /usr/local/bin/mcp-bridge 2>/dev/null || true && \

@@ -29,25 +29,7 @@ public sealed class PluginAuthGatewayEvaluator(
 
         string? adminName = isAdmin ? context.User?.Identity?.Name ?? "admin" : null;
 
-        // 1.1 若 context.User 尚未被认领，探查浏览器 Web 会话 Cookie (lwt_token) 或 URL Query (token/lwt_token)
-        if (!isAdmin)
-        {
-            if (context.Request.Cookies.TryGetValue("lwt_token", out var cookieToken) &&
-                !string.IsNullOrWhiteSpace(cookieToken))
-            {
-                // 会话 Cookie 存在，认定具备 Web 会话
-                isAdmin = true;
-                adminName = "web-admin";
-            }
-            else if ((context.Request.Query.TryGetValue("token", out var qToken) ||
-                      context.Request.Query.TryGetValue("lwt_token", out qToken)) &&
-                     !string.IsNullOrWhiteSpace(qToken))
-            {
-                // Webview 或新标签页通过 URL Query 传递有效 Token 凭据
-                isAdmin = true;
-                adminName = "web-admin";
-            }
-        }
+        // Cookie 和 query token 由 JWT 认证处理器验证；原始字符串不能证明身份。
 
         // 2. 检查 API Key 认证态（优先读取中间件注入的 CurrentApiKey）
         ApiKeyEntity? apiKey = null;

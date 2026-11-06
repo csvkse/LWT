@@ -1,0 +1,16 @@
+{
+  "manifestVersion": 1,
+  "id": "lxc-manager",
+  "name": "LXC 容器管理",
+  "category": "System",
+  "version": "0.1.0",
+  "description": "Incus 系统容器管理插件（开发中，当前提供只读能力与资源发现）",
+  "icon": "📦",
+  "profile": "resident",
+  "runtime": "native",
+  "source": "package",
+  "entrypoint": "lxc-manager",
+  "network": { "mode": "path", "portEnv": "PORT", "pathPrefix": "/plugins/lxc-manager", "authMode": "inherit" },
+  "supervision": { "autoRestart": true },
+  "ui": { "entry": "ui/index.html", "title": "LXC 容器管理", "icon": "📦" }
+}
