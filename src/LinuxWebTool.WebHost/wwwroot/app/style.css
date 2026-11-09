@@ -1,5 +1,14 @@
 /* LinuxWebTool 前端公共样式（cyber 暗黑主题） */
 
+/* W3C 滚动条防抖与宽度锁定规范：
+ * 1. scrollbar-gutter: stable 提前在右侧保留滚动条轨道槽位，彻底消除内容增减时突发占位引起的整体布局横跳（CLS = 0）；
+ * 2. overflow-y: scroll 针对不支持 scrollbar-gutter 的老旧浏览器进行保底兼容。
+ */
+html {
+  scrollbar-gutter: stable;
+  overflow-y: scroll;
+}
+
 body {
   background-image:
     radial-gradient(ellipse 80% 50% at 20% -10%, rgba(34, 211, 238, 0.08), transparent),
@@ -198,10 +207,11 @@ button.badge:hover, .badge[role="button"]:hover, .badge.cursor-pointer:hover {
   overflow-y: auto !important;
 }
 
-/* 标准长列表高度限制视口类（配合 GPU 隔离与禁用滚动锚定跳动） */
+/* 标准长列表高度限制视口类（配合 GPU 隔离与禁用滚动锚定跳动、防滚动条挤占抖动） */
 .list-viewport {
   max-height: 70vh;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   position: relative;
   contain: paint layout;
   overflow-anchor: none;
@@ -213,6 +223,7 @@ button.badge:hover, .badge[role="button"]:hover, .badge.cursor-pointer:hover {
   min-height: 0;
   max-height: 65vh;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   contain: paint layout;
   overflow-anchor: none;
 }
@@ -221,6 +232,7 @@ button.badge:hover, .badge[role="button"]:hover, .badge.cursor-pointer:hover {
 .card-list-viewport {
   max-height: 24rem;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   contain: paint layout;
   overflow-anchor: none;
 }

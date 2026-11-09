@@ -68,6 +68,7 @@ public sealed class ServiceEnvironmentDetector : IServiceEnvironmentDetector
         var isPrivilegedContainer = false;
         var systemdPierced = false;
         var hasSystemd = false;
+        string? hostDistroKey = null;
 
         if (isLinux)
         {
@@ -99,6 +100,14 @@ public sealed class ServiceEnvironmentDetector : IServiceEnvironmentDetector
             else
             {
                 // 本地原生 Linux
+                try
+                {
+                    hostDistroKey = LinuxDistroKeyResolver.Resolve(File.ReadAllText("/etc/os-release"));
+                }
+                catch
+                {
+                    hostDistroKey = null;
+                }
                 var sysTest = await _shellExecutor.ExecuteAsync(new ShellRequest
                 {
                     CommandText = "systemctl is-system-running 2>/dev/null",
@@ -106,6 +115,19 @@ public sealed class ServiceEnvironmentDetector : IServiceEnvironmentDetector
                 }, cancellationToken);
 
                 hasSystemd = sysTest.ExitCode == 0 || sysTest.StandardOutput.Contains("running") || sysTest.StandardOutput.Contains("degraded");
+            }
+
+            if (isDockerContainer && isPrivilegedContainer)
+            {
+                var hostOs = await _shellExecutor.ExecuteAsync(new ShellRequest
+                {
+                    CommandText = "nsenter -t 1 -m -u -i -- cat /etc/os-release",
+                    TimeoutSeconds = 3
+                }, cancellationToken);
+                if (hostOs.ExitCode == 0)
+                {
+                    hostDistroKey = LinuxDistroKeyResolver.Resolve(hostOs.StandardOutput);
+                }
             }
         }
         else if (isWindows)
@@ -228,6 +250,7 @@ public sealed class ServiceEnvironmentDetector : IServiceEnvironmentDetector
             KernelVersion = Environment.OSVersion.VersionString,
             IsDockerContainer = isDockerContainer,
             IsPrivilegedContainer = isPrivilegedContainer,
+            HostDistroKey = hostDistroKey,
             HasSystemd = hasSystemd,
             SystemdPierced = systemdPierced,
             HasDockerSocket = hasDockerSocket,
@@ -275,5 +298,24 @@ public sealed class ServiceEnvironmentDetector : IServiceEnvironmentDetector
         {
             return false;
         }
+    }
+}
+
+public static class LinuxDistroKeyResolver
+{
+    public static string? Resolve(string? osRelease)
+    {
+        if (string.IsNullOrWhiteSpace(osRelease)) return null;
+        var idLine = osRelease.Split('\n').FirstOrDefault(line => line.StartsWith("ID=", StringComparison.Ordinal));
+        if (idLine == null) return null;
+        var id = idLine[3..].Trim().Trim('"', '\'').ToLowerInvariant();
+        return id switch
+        {
+            "alpine" => "alpine",
+            "debian" or "ubuntu" => "debian",
+            "rhel" or "centos" or "fedora" or "rocky" or "almalinux" => "rhel",
+            "arch" => "arch",
+            _ => null
+        };
     }
 }

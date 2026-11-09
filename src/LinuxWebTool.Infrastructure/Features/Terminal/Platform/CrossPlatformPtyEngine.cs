@@ -102,6 +102,37 @@ public sealed class CrossPlatformPtyEngine : IPtyEngine
             }
         }
 
+        if (target != null && target.StartsWith("docker:", StringComparison.OrdinalIgnoreCase) && OperatingSystem.IsLinux())
+        {
+            var parts = target.Split(':');
+            int containerPid = 0;
+            if (parts.Length >= 3 && int.TryParse(parts[2], out var parsedPid))
+            {
+                containerPid = parsedPid;
+            }
+
+            var nsenter = File.Exists("/usr/bin/nsenter") ? "/usr/bin/nsenter" : (File.Exists("/bin/nsenter") ? "/bin/nsenter" : null);
+            if (nsenter != null && containerPid > 0 && Directory.Exists($"/proc/{containerPid}/ns"))
+            {
+                var targetDir = !string.IsNullOrWhiteSpace(workingDirectory) ? workingDirectory : "/";
+                var root = $"/proc/{containerPid}/root";
+                var targetShell = File.Exists($"{root}/bin/bash") ? "/bin/bash" :
+                                  (File.Exists($"{root}/bin/sh") ? "/bin/sh" :
+                                  (File.Exists($"{root}/bin/ash") ? "/bin/ash" :
+                                  (File.Exists($"{root}/usr/bin/bash") ? "/usr/bin/bash" : "sh")));
+
+                var envExe = File.Exists("/usr/bin/env") ? "/usr/bin/env" : "/bin/env";
+                return (nsenter, [
+                    "-t", containerPid.ToString(), "-m", "-u", "-i", "-n", "-p", "--",
+                    envExe, "-u", "LC_ALL", "LANG=C.UTF-8",
+                    targetShell, "-c", "cd \"$1\" 2>/dev/null || cd /; exec \"$2\" --login 2>/dev/null || exec \"$2\"",
+                    "sh",
+                    targetDir,
+                    targetShell
+                ]);
+            }
+        }
+
         if (OperatingSystem.IsWindows())
         {
             // Two-line prompt for modern terminal UX with UTF-8 encoding support:

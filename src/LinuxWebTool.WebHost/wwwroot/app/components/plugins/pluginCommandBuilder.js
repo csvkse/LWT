@@ -57,8 +57,28 @@ export const DISTRO_TABS = [
   { key: 'alpine', label: '🐧 Alpine Linux (Docker 推荐)' },
   { key: 'debian', label: '🍥 Debian / Ubuntu' },
   { key: 'rhel', label: '🎩 RHEL / CentOS' },
+  { key: 'arch', label: '🏹 Arch Linux' },
   { key: 'windows', label: '🪟 Windows' },
 ];
+
+export function resolveInstallDistro(scope, env = {}) {
+  const key = scope === 'host' ? env.hostDistroKey : env.containerDistroKey;
+  return ['alpine', 'debian', 'rhel', 'arch', 'windows'].includes(key)
+    ? key
+    : (scope === 'host' ? '' : 'alpine');
+}
+
+export function getDependencyScope(dep) {
+  const scope = String(dep?.scope || 'container').trim().toLowerCase();
+  return ['container', 'host', 'external'].includes(scope) ? scope : 'unknown';
+}
+
+export function preferredInstallTarget(dependencies) {
+  const requiredScopes = new Set(
+    dependencies.filter((dep) => dep.required).map(getDependencyScope)
+  );
+  return requiredScopes.size === 1 && requiredScopes.has('host') ? 'host' : 'container';
+}
 
 export function resolveCoreRuntimeCmd(p, distro) {
   if (!p) return '';
@@ -73,14 +93,16 @@ export function resolveCoreRuntimeCmd(p, distro) {
   return defaults[distro] || '';
 }
 
-export function buildAggregatedCommand(p, dependencyList, distro, selectedIds, includeCore) {
+export function buildAggregatedCommand(p, dependencyList, distro, selectedIds, includeCore, targetScope = 'container') {
   const rawCommands = [];
-  if (includeCore) {
+  const normalizedTarget = ['container', 'host'].includes(targetScope) ? targetScope : 'unknown';
+  const coreScope = getDependencyScope({ scope: p?.manifest?.target || p?.target || 'container' });
+  if (includeCore && coreScope === normalizedTarget) {
     const coreCmd = resolveCoreRuntimeCmd(p, distro);
     if (coreCmd) rawCommands.push(coreCmd);
   }
   for (const dep of dependencyList) {
-    if (selectedIds.has(dep.id)) {
+    if (selectedIds.has(dep.id) && getDependencyScope(dep) === normalizedTarget) {
       const guide = dep.installGuide?.[distro];
       if (guide) rawCommands.push(guide);
     }

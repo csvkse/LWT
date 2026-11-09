@@ -205,6 +205,11 @@ public class WorkflowsController(
         {
             return (false, "工作流编排定义不能为空");
         }
+        var (dagValid, dagError) = LinuxWebTool.Infrastructure.Features.Workflows.WorkflowDagValidator.ValidateDefinition(request.DefinitionJson);
+        if (!dagValid)
+        {
+            return (false, dagError ?? "工作流依赖图非法");
+        }
         if (await workflowStore.ExistsNameAsync(request.Name.Trim(), excludeId))
         {
             return (false, "工作流名称已存在");

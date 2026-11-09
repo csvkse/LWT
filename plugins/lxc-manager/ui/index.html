@@ -1,45 +1,471 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LXC 容器管理</title>
-<style>
-  body{font:15px system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:24px} main{max-width:1100px;margin:auto} h1{font-size:1.4rem} h2{font-size:1rem} .note{color:#94a3b8} button{background:#0369a1;color:white;border:0;border-radius:6px;padding:8px 16px;cursor:pointer} button:disabled{opacity:.5} .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:16px} section{background:#1e293b;border:1px solid #334155;border-radius:8px;padding:16px;min-width:0} ul{padding-left:20px;overflow-wrap:anywhere} #error{color:#fca5a5;white-space:pre-wrap} #status{color:#67e8f9}
-</style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LXC 容器管理中枢</title>
+<link rel="stylesheet" href="./style.css">
 </head>
-<body><main>
-<h1>LXC 容器管理</h1>
-<p class="note">创建前会检查宿主容量和存储配额能力。</p>
-<button id="refresh" type="button">刷新状态</button>
-<p id="status" role="status">等待加载</p><p id="error" role="alert"></p>
-<section>
- <h2>创建预检</h2>
- <p class="note">预检通过后可提交创建；执行结果需核对。</p>
- <form id="preflight">
-  <p><label>名称 <input name="name" required maxlength="63" pattern="[a-zA-Z0-9][a-zA-Z0-9-]{0,62}"></label></p>
-  <p><label>镜像 <select name="imageFingerprint" required></select></label></p>
-  <p><label>CPU 核数 <input name="cpu" type="number" min="1" max="1024" value="1" required></label>
-   <label>内存 MiB <input name="memoryMiB" type="number" min="64" max="16777216" value="512" required></label>
-   <label>磁盘 GiB <input name="diskGiB" type="number" min="1" max="1048576" value="8" required></label></p>
-  <p><label>存储池 <select name="storagePool" required></select></label>
-   <label>受管网桥 <select name="network" required></select></label></p>
-  <button id="sample" type="button" disabled>读取宿主资源</button>
-  <p id="sample-result" role="status"></p>
-  <button id="check" type="submit" disabled>检查配置</button>
-  <button id="create" type="button" disabled>创建容器</button>
-  <button id="reconcile" type="button" disabled>核对任务</button>
-  <p id="task-result" role="status"></p>
- </form>
- <p id="preflight-result" role="status"></p><ul id="preflight-reasons"></ul>
-</section>
-<section><h2>服务端待核对任务</h2><p class="note">本地记录丢失时，可恢复完整任务；信息不完整的任务需要人工核对。</p><ul id="server-tasks"></ul><p id="server-tasks-error" role="alert"></p></section>
-<section><h2>已托管实例</h2><p class="note">仅已完成创建并通过归属核对的实例可操作。</p><ul id="managed"></ul><p id="managed-error" role="alert"></p></section>
-<div class="grid">
- <section><h2>系统容器</h2><ul id="instances"></ul></section>
- <section><h2>本地容器镜像</h2><ul id="images"></ul></section>
- <section><h2>存储池</h2><ul id="pools"></ul></section>
- <section><h2>受管网桥</h2><ul id="networks"></ul></section>
+<body>
+<div class="lwt-shell">
+  <!-- 顶部状态栏与指标卡片 -->
+  <header class="cyber-header">
+    <div class="header-branding">
+      <div class="logo-box">📦</div>
+      <div>
+        <h1 class="header-title">LXC 系统容器管理中枢</h1>
+        <div class="header-subtitle">
+          <span id="engine-badge" class="badge badge-ready">驱动就绪</span>
+          <span id="status" class="status-indicator">正在连接守护进程...</span>
+        </div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="btn-open-create" type="button" class="btn btn-primary">
+        <span class="icon">＋</span> 新建容器
+      </button>
+      <button id="btn-open-import" type="button" class="btn btn-secondary">
+        <span class="icon">📥</span> 导入容器
+      </button>
+      <button id="refresh" type="button" class="btn btn-secondary">
+        <span class="icon">⟳</span> 刷新状态
+      </button>
+    </div>
+  </header>
+
+  <!-- 顶部资源水位指标 -->
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <div class="metric-header"><span>CPU 可用核心</span><span class="metric-icon">⚡</span></div>
+      <div class="metric-value" id="metric-cpu">- / -</div>
+      <div class="metric-bar"><div class="metric-progress" id="bar-cpu" style="width: 25%"></div></div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-header"><span>可用内存余量</span><span class="metric-icon">💾</span></div>
+      <div class="metric-value" id="metric-mem">- / -</div>
+      <div class="metric-bar"><div class="metric-progress" id="bar-mem" style="width: 35%"></div></div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-header"><span>存储池余量</span><span class="metric-icon">💽</span></div>
+      <div class="metric-value" id="metric-disk">- / -</div>
+      <div class="metric-bar"><div class="metric-progress" id="bar-disk" style="width: 15%"></div></div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-header"><span>系统实例总数</span><span class="metric-icon">🌐</span></div>
+      <div class="metric-value" id="metric-instances">0</div>
+      <div class="metric-note" id="metric-instances-sub">0 运行中 · 0 已停止</div>
+    </div>
+  </div>
+
+  <div id="error" class="alert-box alert-error" role="alert" style="display:none"></div>
+
+  <!-- 精选模板快速启动区 -->
+  <section class="section-card">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">🚀 常用 Linux 发行版模板库</h2>
+        <div class="section-desc">一键选择经过深度验证的官方优化模板，秒级拉取并启动隔离系统容器</div>
+      </div>
+    </div>
+    <div id="template-catalog" class="template-grid">
+      <!-- 动态渲染精选模板卡片 -->
+    </div>
+  </section>
+
+  <!-- 容器实例管理区 -->
+  <section class="section-card">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">📦 系统容器实例列表</h2>
+        <div class="section-desc">支持完整的非特权隔离系统容器启停、Web 终端直连、端口转发映射与状态协调</div>
+      </div>
+    </div>
+    <div id="container-grid" class="container-grid">
+      <!-- 动态渲染现代化容器卡片 -->
+    </div>
+  </section>
+
+  <!-- 状态协调与底层资源折叠区 -->
+  <section class="section-card">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">🛡️ 任务协调与底层拓扑</h2>
+        <div class="section-desc">存储池、受管网桥、镜像指纹以及待核对状态机管理</div>
+      </div>
+      <button id="toggle-advanced" type="button" class="btn btn-outline btn-sm">展开底层详情 ▾</button>
+    </div>
+    <div id="advanced-panel" style="display:none">
+      <div class="infra-grid">
+        <div class="infra-col">
+          <h3>💽 存储池</h3>
+          <ul id="pools" class="tag-list"></ul>
+        </div>
+        <div class="infra-col">
+          <h3>🌐 受管网桥</h3>
+          <ul id="networks" class="tag-list"></ul>
+        </div>
+        <div class="infra-col">
+          <h3>🖼️ 镜像指纹</h3>
+          <ul id="images" class="tag-list"></ul>
+        </div>
+      </div>
+
+      <div class="tasks-box">
+        <h3>⏳ 待核对操作任务</h3>
+        <ul id="server-tasks" class="task-list"></ul>
+        <p id="server-tasks-error" class="text-danger"></p>
+        <div id="managed-box">
+          <ul id="managed" class="task-list"></ul>
+          <p id="managed-error" class="text-danger"></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 隐藏但保持兼容的原有 DOM 占位 -->
+  <div style="display:none">
+    <ul id="instances"></ul>
+    <p id="sample-result"></p>
+    <p id="task-result"></p>
+    <button id="reconcile" type="button"></button>
+    <button id="sample" type="button"></button>
+  </div>
 </div>
-</main>
+
+<!-- ================= 侧滑抽屉：新建/编辑容器 ================= -->
+<div id="drawer-create" class="slide-drawer-overlay">
+  <div class="slide-drawer">
+    <div class="drawer-header">
+      <h2 class="drawer-title">新建 LXC 系统容器</h2>
+      <button id="btn-close-create" type="button" class="btn-close">✕</button>
+    </div>
+    <div class="drawer-body">
+      <form id="preflight">
+        <div class="form-group">
+          <label>容器名称 (主机名)</label>
+          <input name="name" class="form-control" required maxlength="63" pattern="[a-zA-Z0-9][a-zA-Z0-9_\-]{0,62}" placeholder="如：my-debian-web">
+          <div class="form-help">字母数字及中划线组合，长度 1-63 位。</div>
+        </div>
+
+        <div class="form-group">
+          <label>操作系统模板 / 镜像指纹</label>
+          <select name="imageFingerprint" class="form-control" required></select>
+          <div class="form-help">选择内置发行版或已缓存的本地镜像指纹。</div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col-4">
+            <label>CPU 核数</label>
+            <input name="cpu" type="number" class="form-control" min="1" max="1024" value="1" required>
+          </div>
+          <div class="form-group col-4">
+            <label>内存 (MiB)</label>
+            <input name="memoryMiB" type="number" class="form-control" min="64" max="16777216" value="512" required>
+          </div>
+          <div class="form-group col-4">
+            <label>磁盘 (GiB)</label>
+            <input name="diskGiB" type="number" class="form-control" min="1" max="1048576" value="8" required>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col-6">
+            <label>存储池</label>
+            <select name="storagePool" class="form-control" required></select>
+          </div>
+          <div class="form-group col-6">
+            <label>网络接口 (NAT 网桥 / 物理网卡直连)</label>
+            <select name="network" class="form-control" required></select>
+          </div>
+        </div>
+
+        <!-- 实时预检结果卡片 -->
+        <div class="preflight-status-card" id="preflight-status-box">
+          <div class="preflight-header">
+            <span>🛡️ 宿主资源准入与硬配额预检</span>
+            <span id="preflight-badge" class="badge badge-pending">等待检查</span>
+          </div>
+          <p id="preflight-result" class="preflight-msg">修改配置后点击下方按钮执行准入检测。</p>
+          <ul id="preflight-reasons" class="preflight-reasons"></ul>
+        </div>
+
+        <div class="drawer-actions">
+          <button id="check" type="submit" class="btn btn-secondary">
+            <span class="icon">🔍</span> 检查配置准入
+          </button>
+          <button id="create" type="button" class="btn btn-primary" disabled>
+            <span class="icon">🚀</span> 确认创建容器
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 侧滑抽屉：Web 控制台终端 ================= -->
+<div id="drawer-terminal" class="slide-drawer-overlay">
+  <div class="slide-drawer drawer-wide">
+    <div class="drawer-header">
+      <div>
+        <h2 class="drawer-title" id="terminal-title">容器控制台: -</h2>
+        <div class="drawer-subtitle">通过隔离 PTY 会话直连容器内部 Shell</div>
+      </div>
+      <button id="btn-close-terminal" type="button" class="btn-close">✕</button>
+    </div>
+    <div class="drawer-body console-body">
+      <div class="terminal-toolbar">
+        <span class="quick-cmd-label">快捷指令:</span>
+        <button type="button" class="quick-cmd-btn" data-cmd="uname -a">uname -a</button>
+        <button type="button" class="quick-cmd-btn" data-cmd="whoami">whoami</button>
+        <button type="button" class="quick-cmd-btn" data-cmd="ip a">ip a</button>
+        <button type="button" class="quick-cmd-btn" data-cmd="df -h">df -h</button>
+        <button type="button" class="quick-cmd-btn" data-cmd="free">free</button>
+        <button type="button" class="quick-cmd-btn" data-cmd="ps aux">ps aux</button>
+        <button type="button" class="quick-cmd-btn" data-cmd="cat /etc/os-release">os-release</button>
+      </div>
+      <div id="terminal-screen" class="terminal-screen">
+        <div id="terminal-output" class="terminal-output"></div>
+      </div>
+      <div class="terminal-input-bar">
+        <span class="terminal-prompt">root@container:~#</span>
+        <input id="terminal-input" type="text" class="terminal-input" placeholder="输入命令并回车..." autocomplete="off">
+        <button id="terminal-send" type="button" class="btn btn-primary btn-sm">发送</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 侧滑抽屉：端口转发映射 ================= -->
+<div id="drawer-portmap" class="slide-drawer-overlay">
+  <div class="slide-drawer">
+    <div class="drawer-header">
+      <div>
+        <h2 class="drawer-title" id="portmap-title">端口转发映射: -</h2>
+        <div class="drawer-subtitle">将宿主机外部端口直接 NAT 映射至该容器内部服务</div>
+      </div>
+      <button id="btn-close-portmap" type="button" class="btn-close">✕</button>
+    </div>
+    <div class="drawer-body">
+      <div class="portmap-add-box">
+        <h3>新增端口转发规则</h3>
+        <form id="form-portmap">
+          <div class="form-row">
+            <div class="form-group col-4">
+              <label>协议</label>
+              <select id="pm-protocol" class="form-control">
+                <option value="tcp">TCP</option>
+                <option value="udp">UDP</option>
+              </select>
+            </div>
+            <div class="form-group col-4">
+              <label>宿主端口</label>
+              <input id="pm-host-port" type="number" class="form-control" min="1" max="65535" placeholder="如: 2222" required>
+            </div>
+            <div class="form-group col-4">
+              <label>容器端口</label>
+              <input id="pm-target-port" type="number" class="form-control" min="1" max="65535" placeholder="如: 22" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>规则描述</label>
+            <input id="pm-desc" type="text" class="form-control" placeholder="如: SSH 管理通道">
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">添加转发规则</button>
+        </form>
+      </div>
+
+      <div class="portmap-list-box">
+        <h3>已有映射规则</h3>
+        <ul id="portmap-list" class="portmap-list"></ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 侧滑抽屉：实例容器导入向导 ================= -->
+<div id="drawer-import" class="slide-drawer-overlay">
+  <div class="slide-drawer">
+    <div class="drawer-header">
+      <div>
+        <h2 class="drawer-title">导入 LXC 容器实例</h2>
+        <div class="drawer-subtitle">从本地备份归档（.tar.gz / .tar.zst）一键恢复或克隆为全新隔离容器</div>
+      </div>
+      <button id="btn-close-import" type="button" class="btn-close">✕</button>
+    </div>
+    <div class="drawer-body">
+      <form id="form-import">
+        <div class="form-group">
+          <label>选择或拖拽归档文件 (.tar.gz / .tar.zst)</label>
+          <div class="upload-dropzone" id="import-dropzone">
+            <div class="dropzone-icon">📁</div>
+            <div class="dropzone-text" id="dropzone-hint">点击选择文件 或 将容器归档拖拽至此处</div>
+            <input type="file" id="import-file" name="file" accept=".tar.gz,.tar.zst,.tar" style="display:none" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>新容器名称 (留空则沿用原归档名)</label>
+          <input id="import-name" name="name" class="form-control" maxlength="63" pattern="[a-zA-Z0-9][a-zA-Z0-9_\-]{0,62}" placeholder="如：alpine-restored-01">
+          <div class="form-help">字母数字及中划线组合。若与现有容器同名将导致导入冲突。</div>
+        </div>
+
+        <div class="form-group">
+          <label>恢复至目标存储池</label>
+          <select id="import-pool" name="storagePool" class="form-control" required></select>
+        </div>
+
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="import-reset-mac" name="resetMac" checked>
+            <span>自动重置虚拟网卡 MAC（推荐：防止物理网络或局域网 ARP/IP 冲突）</span>
+          </label>
+        </div>
+
+        <div class="import-progress-box" id="import-progress-box" style="display:none">
+          <div class="progress-label" id="import-progress-label">正在流式上传解包...</div>
+          <div class="metric-bar"><div class="metric-progress" id="import-progress-bar" style="width: 100%"></div></div>
+        </div>
+
+        <button type="submit" id="btn-submit-import" class="btn btn-primary btn-block">
+          <span class="icon">🚀</span> 确认恢复并导入实例
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 侧滑抽屉：细粒度硬件与网络调优 ================= -->
+<div id="drawer-edit" class="slide-drawer-overlay">
+  <div class="slide-drawer drawer-wide">
+    <div class="drawer-header">
+      <div>
+        <h2 class="drawer-title" id="edit-drawer-title">硬件规格与配额热调优: -</h2>
+        <div class="drawer-subtitle">无损热生效：调优 CPU 核心占用、磁盘 IOPS/吞吐量、防 Fork 炸弹与网络 QoS</div>
+      </div>
+      <button id="btn-close-edit" type="button" class="btn-close">✕</button>
+    </div>
+    <div class="drawer-body">
+      <!-- 调优分类 Tabs -->
+      <div class="cyber-tabs">
+        <button type="button" class="cyber-tab active" data-tab="tab-cpu">⚡ 算力占用 (CPU)</button>
+        <button type="button" class="cyber-tab" data-tab="tab-disk">💽 存储与 IOPS</button>
+        <button type="button" class="cyber-tab" data-tab="tab-safety">🛡️ 进程与安全</button>
+        <button type="button" class="cyber-tab" data-tab="tab-network">🌐 网络与 QoS</button>
+      </div>
+
+      <form id="form-edit-spec">
+        <input type="hidden" id="edit-inst-name">
+
+        <!-- Tab 1: CPU 算力 -->
+        <div id="tab-cpu" class="tab-pane active">
+          <div class="form-group">
+            <label>CPU 核心绑定数 (Cores)</label>
+            <div class="radio-chip-group">
+              <label class="chip-item"><input type="radio" name="editCpuCores" value="1"> 1 核</label>
+              <label class="chip-item"><input type="radio" name="editCpuCores" value="2"> 2 核</label>
+              <label class="chip-item"><input type="radio" name="editCpuCores" value="4"> 4 核</label>
+              <label class="chip-item"><input type="radio" name="editCpuCores" value="8"> 8 核</label>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <div class="slider-header">
+              <label>CFS 核心占用比硬上限 (Allowance Quota)</label>
+              <span class="slider-badge" id="val-cpu-allowance">100%</span>
+            </div>
+            <input type="range" id="edit-cpu-allowance" class="slider-control" min="10" max="100" step="5" value="100">
+            <div class="form-help">限制在每个调度周期内可用的最大 CPU 时间百分比，硬性防范恶意挖矿或死循环。</div>
+          </div>
+
+          <div class="form-group">
+            <div class="slider-header">
+              <label>资源争抢权重优先级 (CPU Weight / Priority: 1~10)</label>
+              <span class="slider-badge" id="val-cpu-priority">5</span>
+            </div>
+            <input type="range" id="edit-cpu-priority" class="slider-control" min="1" max="10" step="1" value="5">
+            <div class="form-help">平时空闲时可跑满，多容器资源争抢时按权重分配时间片。</div>
+          </div>
+        </div>
+
+        <!-- Tab 2: 存储与磁盘 IOPS -->
+        <div id="tab-disk" class="tab-pane" style="display:none">
+          <div class="form-group">
+            <label>磁盘空间容量扩容 (GiB)</label>
+            <input id="edit-disk-size" type="number" class="form-control" min="1" max="1048576" placeholder="如: 10">
+            <div class="form-help">基于底层存储驱动原地扩容，仅允许增量输入更大容量。</div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>读取吞吐量限速 (MB/s)</label>
+              <input id="edit-disk-read-mb" type="number" class="form-control" min="0" placeholder="0 为不限速">
+            </div>
+            <div class="form-group col-6">
+              <label>写入吞吐量限速 (MB/s)</label>
+              <input id="edit-disk-write-mb" type="number" class="form-control" min="0" placeholder="0 为不限速">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>读取 IOPS 频率限制 (次/秒)</label>
+              <input id="edit-disk-read-iops" type="number" class="form-control" min="0" placeholder="0 为不限速 (如: 1000)">
+            </div>
+            <div class="form-group col-6">
+              <label>写入 IOPS 频率限制 (次/秒)</label>
+              <input id="edit-disk-write-iops" type="number" class="form-control" min="0" placeholder="0 为不限速 (如: 500)">
+            </div>
+          </div>
+          <div class="form-help">底层通过 Linux 内核 cgroups v2 io.max 精细化限速，毫秒级在线生效。</div>
+        </div>
+
+        <!-- Tab 3: 进程与安全 -->
+        <div id="tab-safety" class="tab-pane" style="display:none">
+          <div class="form-group">
+            <label>最大进程数上限 (PIDs Limit，防 Fork 炸弹)</label>
+            <input id="edit-max-processes" type="number" class="form-control" min="128" max="100000" value="500">
+            <div class="form-help">强制安全下限 >= 128，杜绝容器内恶意进程耗尽宿主 PID 表。</div>
+          </div>
+
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="edit-allow-swap">
+              <span>允许使用宿主机 Swap 分区 (取消勾选可保护物理固态硬盘 SSD 寿命)</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Tab 4: 网络模式与 QoS -->
+        <div id="tab-network" class="tab-pane" style="display:none">
+          <div class="form-group">
+            <label>网络接口模式 (NAT 受管网桥 / 物理网卡直连)</label>
+            <select id="edit-network" class="form-control"></select>
+            <div class="form-help">支持在受管 NAT 网桥 (虚拟隔离子网) 与物理网卡直连 (Macvlan 模式 · 直接获取物理局域网 IP) 之间无损热切换。</div>
+          </div>
+
+          <div class="form-group">
+            <div class="slider-header">
+              <label>网络最大全双工带宽限制 (Linux TC QoS)</label>
+              <span class="slider-badge" id="val-net-bandwidth">不限速</span>
+            </div>
+            <input type="range" id="edit-net-bandwidth" class="slider-control" min="0" max="1000" step="50" value="0">
+            <div class="form-help">0 为不限速；支持 50Mbit ~ 1000Mbit 动态无级令牌桶限速，即刻热生效。</div>
+          </div>
+        </div>
+
+        <div class="drawer-actions">
+          <button type="submit" class="btn btn-primary btn-block">
+            <span class="icon">💾</span> 保存并应用热调优配额
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Toast 通知总线 -->
+<div id="toast-container" class="toast-container"></div>
+
 <script type="module" src="./app.js"></script>
-</body></html>
+</body>
+</html>

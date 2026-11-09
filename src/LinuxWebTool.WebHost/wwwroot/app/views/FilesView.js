@@ -1,10 +1,17 @@
-import { computed, defineComponent, onMounted, ref } from 'vue';
+import { computed, defineComponent, nextTick, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { http, httpUpload, httpDownload } from '../api/client.js';
 import { API } from '../config.js';
 import { openConfirm } from '../store/modal.js';
 import { toast } from '../store/toast.js';
 import { buildFileBreadcrumbs } from '../utils/filePaths.js';
+
+// 会话级内存记忆状态（保持 SPA 路由切换时双栈记忆，且遵守 FE-STORAGE 架构门禁）
+const targetMemory = {
+  container: '/',
+  host: '/'
+};
+let lastActiveTarget = 'container';
 
 export default defineComponent({
   name: 'FilesView',
@@ -20,6 +27,22 @@ export default defineComponent({
     const loadError = ref('');
     const directoryReady = ref(false);
     const virtualRoot = ref(false);
+
+    // 目标环境源调度状态机
+    const isPrivilegedContainer = ref(false);
+    const activeTarget = ref(lastActiveTarget || 'container'); // 'container' | 'host'
+    const focusedItem = ref(typeof route.query.focus === 'string' ? route.query.focus : '');
+
+    function applyFocus(name) {
+      if (!name) return;
+      focusedItem.value = name;
+      nextTick(() => {
+        const row = document.querySelector(`[data-entry-name="${CSS.escape(name)}"]`);
+        if (row) {
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      });
+    }
 
     // 下载状态
     const downloadingPath = ref('');
@@ -48,6 +71,10 @@ export default defineComponent({
 
     // 当前目录信息
     const dirName = computed(() => breadcrumbs.value.at(-1)?.name || '/');
+    const containerDisplayName = computed(() => {
+      if (!activeTarget.value?.startsWith('docker:')) return '';
+      return (route.query.name || activeTarget.value.slice(7, 19));
+    });
 
     async function load(path) {
       const target = path ?? (loadError.value ? attemptedPath.value : currentPath.value);
@@ -55,7 +82,28 @@ export default defineComponent({
       loading.value = true;
       loadError.value = '';
       try {
-        const result = await http(API.files.list, { method: 'GET', params: { path: target } });
+        let result = await http(API.files.list, {
+          method: 'GET',
+          params: { path: target, target: activeTarget.value }
+        });
+
+        // 核心防御：若传入的是文件路径（后端 404 目录不存在），且路径非根目录，自动回退到父目录并将该文件设为 focus 目标
+        if (!result.ok && result.status === 404 && target && target !== '/' && target.includes('/')) {
+          const lastSlash = target.lastIndexOf('/');
+          const parentDir = lastSlash <= 0 ? '/' : target.slice(0, lastSlash);
+          const fileName = target.slice(lastSlash + 1);
+          if (fileName) {
+            const fallbackResult = await http(API.files.list, {
+              method: 'GET',
+              params: { path: parentDir, target: activeTarget.value }
+            });
+            if (fallbackResult.ok && fallbackResult.data) {
+              result = fallbackResult;
+              applyFocus(fileName);
+            }
+          }
+        }
+
         if (result.ok && result.data && Array.isArray(result.data.entries)) {
           currentPath.value = result.data.path;
           entries.value = result.data.entries;
@@ -64,6 +112,10 @@ export default defineComponent({
           virtualRoot.value = result.data.isVirtualRoot === true;
           if (virtualRoot.value) breadcrumbs.value[0].name = '磁盘';
           directoryReady.value = true;
+          targetMemory[activeTarget.value] = currentPath.value;
+          if (route.query.focus || focusedItem.value) {
+            applyFocus(String(route.query.focus || focusedItem.value));
+          }
           return true;
         }
         loadError.value = result.message || '目录加载失败';
@@ -79,12 +131,38 @@ export default defineComponent({
     }
 
     async function goPath(path) {
-      if (await load(path)) router.replace({ path: '/files', query: { path: currentPath.value } });
+      if (await load(path)) {
+        router.replace({ path: '/files', query: { path: currentPath.value, target: activeTarget.value } });
+      }
+    }
+
+    async function switchTarget(newTarget) {
+      if (activeTarget.value === newTarget) return;
+      if (newTarget === 'host' && !isPrivilegedContainer.value) return;
+
+      // 记忆离开前的路径
+      targetMemory[activeTarget.value] = currentPath.value;
+      activeTarget.value = newTarget;
+      lastActiveTarget = newTarget;
+
+      // 恢复进入新源的目标路径
+      const restoredPath = targetMemory[newTarget] || '/';
+      await goPath(restoredPath);
     }
 
     function openTerminal(path = currentPath.value) {
       if (!directoryReady.value || virtualRoot.value && path === currentPath.value || loading.value || loadError.value) return;
-      router.push({ path: '/terminal', query: { cwd: path, open: Date.now().toString(36) + Math.random().toString(36).slice(2, 8) } });
+      const query = {
+        cwd: path,
+        open: Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+      };
+      if (activeTarget.value === 'host') {
+        query.target = 'host';
+      } else if (activeTarget.value?.startsWith('docker:')) {
+        query.target = activeTarget.value;
+        if (route.query.name) query.name = route.query.name;
+      }
+      router.push({ path: '/terminal', query });
     }
 
     function goUp() {
@@ -111,7 +189,7 @@ export default defineComponent({
       if (entry.isDirectory) return '📁';
       const ext = (entry.extension || '').toLowerCase();
       if (['.txt', '.md', '.log', '.json', '.yaml', '.yml', '.cs', '.js', '.ts', '.py', '.sh', '.rs', '.go', '.xml', '.html', '.css', '.ini', '.conf'].includes(ext)) return '📄';
-      if (['.mp4', '.mkv', '.mov', '.avi', '.mp3', '.flac', '.wav', '.jpg', '.png', '.gif', '.webp'].includes(ext)) return '🎞';
+      if (['.mp4', '.mkv', '.mov', '.avi', '.mp3', '.flac', '.wav', '.jpg', '.png', '.gif', '.webp'].includes(ext)) return '🎬';
       return '📄';
     }
 
@@ -126,58 +204,26 @@ export default defineComponent({
       }
     }
 
-    async function downloadEntry(entry) {
-      if (!entry?.path || downloadingPath.value) return;
-      downloadingPath.value = entry.path;
-      try {
-        await httpDownload(API.files.download, { params: { path: entry.path } });
-      } finally {
-        downloadingPath.value = '';
-      }
-    }
-
-    async function downloadCurrent() {
-      if (!directoryReady.value || virtualRoot.value || isRoot.value || downloadingPath.value) return;
-      downloadingPath.value = currentPath.value;
-      try {
-        await httpDownload(API.files.download, { params: { path: currentPath.value } });
-      } finally {
-        downloadingPath.value = '';
-      }
-    }
-
-    async function downloadCurrentEditor() {
-      if (!editorPath.value || downloadingPath.value) return;
-      downloadingPath.value = editorPath.value;
-      try {
-        await httpDownload(API.files.download, { params: { path: editorPath.value } });
-      } finally {
-        downloadingPath.value = '';
-      }
-    }
-
+    // 文本查看与编辑
     async function openEditor(path) {
-      showEditor.value = true;
       editorPath.value = path;
-      editorName.value = path.split('/').pop();
+      editorName.value = path.split('/').filter(Boolean).pop() || path;
       editorContent.value = '';
       editorLoading.value = true;
+      showEditor.value = true;
       try {
-        const result = await http(API.files.content, { method: 'GET', params: { path } });
+        const result = await http(API.files.content, {
+          method: 'GET',
+          params: { path, target: activeTarget.value }
+        });
         if (result.ok && result.data) {
           editorContent.value = result.data.content ?? '';
-        } else if (result.ok && result.data.tooLarge) {
-          toast.error('文件过大，无法在线编辑');
-          showEditor.value = false;
-        } else if (result.ok && result.data.binary) {
-          toast.error('二进制文件，无法在线编辑');
-          showEditor.value = false;
         } else {
-          toast.error(result.message || '读取失败');
+          toast.error(result.message || '读取文件失败');
           showEditor.value = false;
         }
       } catch (e) {
-        toast.error(e?.message || '读取失败');
+        toast.error(e?.message || '读取文件失败');
         showEditor.value = false;
       } finally {
         editorLoading.value = false;
@@ -189,16 +235,51 @@ export default defineComponent({
       try {
         const result = await http(API.files.content, {
           method: 'POST',
-          body: { path: editorPath.value, content: editorContent.value },
+          body: {
+            path: editorPath.value,
+            content: editorContent.value,
+            target: activeTarget.value
+          },
         });
         if (result.ok) {
           toast.success('已保存');
           showEditor.value = false;
           await load();
+        } else {
+          toast.error(result.message || '保存失败');
         }
+      } catch (e) {
+        toast.error(e?.message || '保存失败');
       } finally {
         editorSaving.value = false;
       }
+    }
+
+    // 下载单文件 / 目录打包
+    async function downloadEntry(entry) {
+      const p = entry.path;
+      downloadingPath.value = p;
+      try {
+        await httpDownload(API.files.download, {
+          params: { path: p, target: activeTarget.value }
+        });
+      } catch (e) {
+        toast.error(e?.message || '下载失败');
+      } finally {
+        downloadingPath.value = '';
+      }
+    }
+
+    // 打包下载当前目录
+    async function downloadCurrent() {
+      if (isRoot.value || !directoryReady.value) return;
+      downloadEntry({ path: currentPath.value, isDirectory: true });
+    }
+
+    // 在文本查看弹窗中下载当前查看的文件
+    async function downloadCurrentEditor() {
+      if (!editorPath.value) return;
+      downloadEntry({ path: editorPath.value, isDirectory: false });
     }
 
     // 新建文件夹
@@ -209,38 +290,40 @@ export default defineComponent({
 
     async function createMkdir() {
       const name = mkdirName.value.trim();
-      if (!name) return toast.error('请输入文件夹名称');
-      mkdirName.value = name;
-      const newPath = `${currentPath.value.replace(/\/$/, '')}/${name}`;
+      if (!name) return;
+      const base = currentPath.value === '/' ? '' : currentPath.value;
+      const newPath = `${base}/${name}`;
       try {
-        const result = await http(API.files.mkdir, { method: 'POST', body: { path: newPath } });
+        const result = await http(API.files.mkdir, {
+          method: 'POST',
+          body: { path: newPath, target: activeTarget.value },
+        });
         if (result.ok) {
-          toast.success('文件夹已创建');
+          toast.success('已创建');
           showMkdir.value = false;
           await load();
         }
       } finally {
-        mkdirName.value = '';
+        showMkdir.value = false;
       }
     }
 
     // 重命名
     function renameEntry(entry) {
-      renameName.value = entry.name;
       renamePath.value = entry.path;
+      renameName.value = entry.name;
       showRename.value = true;
     }
 
     async function saveRename() {
       const newName = renameName.value.trim();
-      if (!newName) return toast.error('请输入新名称');
-      if (newName === renamePath.value.split('/').pop()) { showRename.value = false; return; }
+      if (!newName) return;
       const parent = renamePath.value.slice(0, renamePath.value.lastIndexOf('/')) || '';
       const newPath = parent === '' ? `/${newName}` : `${parent}/${newName}`;
       try {
         const result = await http(API.files.rename, {
           method: 'POST',
-          body: { from: renamePath.value, to: newPath },
+          body: { from: renamePath.value, to: newPath, target: activeTarget.value },
         });
         if (result.ok) {
           toast.success('已重命名');
@@ -255,26 +338,32 @@ export default defineComponent({
     // 删除（文件直接删；目录非空需递归确认）
     function removeEntry(entry) {
       const isDir = entry.isDirectory;
+      const targetLabel = activeTarget.value === 'host' ? ' [宿主文件]' : '';
       openConfirm({
-        title: `删除${isDir ? '文件夹' : '文件'}`,
-        message: `确定删除「${entry.name}」？此操作不可撤销。`,
+        title: `删除${isDir ? '文件夹' : '文件'}${targetLabel}`,
+        message: `确定删除「${entry.name}」？${activeTarget.value === 'host' ? '该操作直接作用于物理宿主机，' : ''}此操作不可撤销。`,
         confirmText: '删除',
         danger: true,
         onConfirm: async () => {
           const parentPath = currentPath.value;
-          const result = await http(API.files.remove(), { method: 'DELETE', params: { path: entry.path } });
+          const result = await http(API.files.remove(), {
+            method: 'DELETE',
+            params: { path: entry.path, target: activeTarget.value }
+          });
           if (result.ok) {
             toast.success('已删除');
             await load(parentPath);
           } else if (result && result.data && result.data.needRecursive) {
-            // 目录非空，需递归删除
             openConfirm({
-              title: '递归删除文件夹',
+              title: `递归删除文件夹${targetLabel}`,
               message: `「${entry.name}」非空，继续将删除其中所有内容。继续？`,
               confirmText: '强制删除',
               danger: true,
               onConfirm: async () => {
-                const r2 = await http(API.files.remove(), { method: 'DELETE', params: { path: entry.path, recursive: true } });
+                const r2 = await http(API.files.remove(), {
+                  method: 'DELETE',
+                  params: { path: entry.path, recursive: true, target: activeTarget.value }
+                });
                 if (r2.ok) {
                   toast.success('已删除');
                   await load(parentPath);
@@ -297,7 +386,10 @@ export default defineComponent({
       e.target.value = '';
       if (!file) return;
       try {
-        const result = await httpUpload(API.files.upload(), { params: { path: uploadPath.value }, file });
+        const result = await httpUpload(API.files.upload(), {
+          params: { path: uploadPath.value, target: activeTarget.value },
+          file
+        });
         if (result.ok) {
           toast.success('上传成功');
           await load();
@@ -311,14 +403,63 @@ export default defineComponent({
       goPath('/');
     }
 
-    onMounted(() => {
-      const q = route.query.path;
-      const start = typeof q === 'string' && q ? q : '/';
-      load(start);
+    async function syncFromRoute() {
+      const qTarget = route.query.target;
+      const candidateTarget = (typeof qTarget === 'string' && qTarget) ? qTarget : (lastActiveTarget || 'container');
+      if (candidateTarget.startsWith('docker:')) {
+        activeTarget.value = candidateTarget;
+      } else if (candidateTarget === 'host' && isPrivilegedContainer.value) {
+        activeTarget.value = 'host';
+      } else {
+        activeTarget.value = 'container';
+      }
+      lastActiveTarget = activeTarget.value;
+
+      const qFocus = route.query.focus;
+      if (typeof qFocus === 'string') {
+        focusedItem.value = qFocus;
+      }
+
+      const qPath = route.query.path;
+      const start = (typeof qPath === 'string' && qPath)
+        ? qPath
+        : (activeTarget.value === 'host' ? targetMemory.host : targetMemory.container);
+
+      await load(start || '/');
+    }
+
+    onMounted(async () => {
+      // 1. 探测环境是否具备宿主特权穿透能力
+      try {
+        const envRes = await http(API.services.environment, { method: 'GET' }).catch(() => null);
+        if (envRes && envRes.ok && envRes.data) {
+          isPrivilegedContainer.value = envRes.data.isPrivilegedContainer === true;
+        }
+      } catch {}
+
+      await syncFromRoute();
     });
 
+    watch(
+      () => [route.query.path, route.query.target, route.query.focus],
+      async ([newPath, newTarget, newFocus]) => {
+        if (!directoryReady.value) return;
+        if (typeof newFocus === 'string') {
+          focusedItem.value = newFocus;
+        }
+        if (newTarget && newTarget !== activeTarget.value) {
+          await syncFromRoute();
+        } else if (newPath && newPath !== currentPath.value) {
+          await load(newPath);
+        } else if (focusedItem.value) {
+          applyFocus(focusedItem.value);
+        }
+      }
+    );
+
     return {
-      currentPath, entries, breadcrumbs, isRoot, loading, loadError, dirName, directoryReady, virtualRoot, openTerminal,
+      currentPath, entries, breadcrumbs, isRoot, loading, loadError, dirName, containerDisplayName, directoryReady, virtualRoot, openTerminal,
+      isPrivilegedContainer, activeTarget, switchTarget, focusedItem,
       showEditor, editorPath, editorName, editorContent, editorLoading, editorSaving,
       showMkdir, mkdirName, showRename, renameName, renamePath, uploadInput,
       downloadingPath, isDownloadingCurrent,
@@ -331,6 +472,31 @@ export default defineComponent({
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-2">
         <h2 class="text-sm text-slate-400">文件管理器</h2>
+
+        <!-- 仅在特权容器环境中显示目标切换开关 -->
+        <div v-if="isPrivilegedContainer" class="flex items-center bg-slate-900/80 border border-slate-700/60 rounded p-0.5 shrink-0 text-xs ml-2">
+          <button 
+            type="button"
+            class="px-2 py-1 rounded transition-colors flex items-center gap-1 font-medium"
+            :class="activeTarget === 'container' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'"
+            @click="switchTarget('container')"
+            title="浏览当前容器内部文件"
+          >
+            <span>📦</span>
+            <span>当前容器</span>
+          </button>
+          <button 
+            type="button"
+            class="px-2 py-1 rounded transition-colors flex items-center gap-1 font-medium"
+            :class="activeTarget === 'host' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm shadow-amber-500/10' : 'text-slate-400 hover:text-slate-200'"
+            @click="switchTarget('host')"
+            title="穿透至物理宿主机根文件系统 (nsenter)"
+          >
+            <span>🖥️</span>
+            <span>宿主主机 (nsenter穿透)</span>
+          </button>
+        </div>
+
         <div class="ml-auto flex gap-1">
           <button class="btn btn-xs" :disabled="!directoryReady || virtualRoot || loading || !!loadError" @click="openTerminal()">在此打开终端</button>
           <button class="btn btn-xs" :disabled="!directoryReady || virtualRoot || isRoot || loading || !!loadError || isDownloadingCurrent" @click="downloadCurrent()">{{ isDownloadingCurrent ? '打包中…' : '📦 打包当前目录' }}</button>
@@ -339,8 +505,27 @@ export default defineComponent({
         </div>
       </div>
 
+      <!-- 宿主模式高危琥珀色安全告警横幅 -->
+      <div v-if="activeTarget === 'host'" class="panel !border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs px-3.5 py-1.5 flex items-center gap-2">
+        <span class="animate-pulse">⚠️</span>
+        <span class="font-medium">🖥️ 宿主主机穿透视图 (nsenter)</span>
+        <span class="text-amber-300/70 text-[11px]">— 所有写/删操作直接作用于物理宿主机，系统核心关键目录受策略保护。</span>
+      </div>
+
+      <!-- 独立 Docker 容器专属文件系统横幅 -->
+      <div v-if="activeTarget.startsWith('docker:')" class="panel !border-cyan-500/40 bg-cyan-500/10 text-cyan-300 text-xs px-3.5 py-1.5 flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2">
+          <span class="animate-pulse">🐳</span>
+          <span class="font-medium">Docker 容器文件系统视图：{{ containerDisplayName }}</span>
+          <span class="text-cyan-300/70 text-[11px]">— 实时隔离访问容器根文件系统 (VFS /proc/root)</span>
+        </div>
+        <button type="button" class="btn btn-xs hover:border-cyan-400" @click="switchTarget('container')">返回主容器</button>
+      </div>
+
       <div class="panel p-3 flex items-center gap-2">
-        <button class="btn btn-xs shrink-0" @click="goHome()">🏠</button>
+        <button class="btn btn-xs shrink-0" @click="goHome()" :title="activeTarget === 'host' ? '宿主根目录' : '容器根目录'">
+          {{ activeTarget === 'host' ? '🖥️' : '🏠' }}
+        </button>
         <button class="btn btn-xs shrink-0" @click="goUp()" :disabled="isRoot">⬆ 上一级</button>
         <div class="text-xs text-cyan-300/80 font-mono flex items-center gap-1.5 flex-1 min-w-0 overflow-x-auto no-scrollbar py-0.5">
           <template v-for="(crumb, i) in breadcrumbs" :key="crumb.path">
@@ -368,11 +553,16 @@ export default defineComponent({
           </thead>
           <tbody>
             <tr v-if="!entries.length && !loading && !loadError"><td colspan="4" class="text-slate-600 py-8 text-center">{{ dirName === '/' ? '根目录为空' : '此目录为空' }}</td></tr>
-            <tr v-for="entry in entries" :key="entry.path" class="hover:bg-cyan-500/5 transition cursor-pointer" @click="openEntry(entry)">
+            <tr v-for="entry in entries" :key="entry.path"
+                :data-entry-name="entry.name"
+                class="transition cursor-pointer"
+                :class="focusedItem === entry.name ? 'bg-cyan-500/15 ring-1 ring-cyan-400 shadow-sm shadow-cyan-500/20' : 'hover:bg-cyan-500/5'"
+                @click="openEntry(entry)">
               <td>
                 <div class="flex items-center gap-1.5 min-w-0">
                   <span class="shrink-0">{{ iconFor(entry) }}</span>
                   <span class="font-mono text-xs truncate" :class="entry.isDirectory ? 'text-cyan-300/80' : 'text-slate-300'">{{ entry.name }}</span>
+                  <span v-if="entry.isSymlink" class="badge !border-slate-600/40 text-slate-400 !text-[0.6rem] !py-0 !px-1 shrink-0" title="符号链接">🔗 链接</span>
                 </div>
               </td>
               <td class="text-xs text-slate-500 whitespace-nowrap">{{ entry.isDirectory ? '—' : formatBytes(entry.size) }}</td>
@@ -395,6 +585,7 @@ export default defineComponent({
         <div class="panel w-full max-w-2xl p-5 max-h-[88vh] flex flex-col" style="background: rgba(13, 21, 38, 0.97)">
           <div class="flex items-center gap-2 mb-3">
             <h3 class="font-display text-base text-neon-soft shrink-0">编辑文本 · {{ editorName }}</h3>
+            <span v-if="activeTarget === 'host'" class="badge border-amber-500/50 text-amber-300 !text-[0.65rem]">🖥️ 宿主文件</span>
             <span class="text-xs text-slate-500 truncate min-w-0 flex-1 ml-auto text-right" :title="editorPath">{{ editorPath }}</span>
             <button class="btn btn-xs shrink-0" :disabled="downloadingPath === editorPath" @click="downloadCurrentEditor()">⬇ 下载</button>
             <button class="btn btn-xs shrink-0" @click="showEditor = false">✕</button>
@@ -414,7 +605,10 @@ export default defineComponent({
       <!-- 新建文件夹弹窗 -->
       <div v-if="showMkdir" class="fixed inset-0 z-[85] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="panel w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto" style="background: rgba(13, 21, 38, 0.97)">
-          <h3 class="font-display text-base text-neon-soft mb-4">新建文件夹</h3>
+          <div class="flex items-center gap-2 mb-4">
+            <h3 class="font-display text-base text-neon-soft">新建文件夹</h3>
+            <span v-if="activeTarget === 'host'" class="badge border-amber-500/50 text-amber-300 !text-[0.65rem] ml-auto">🖥️ 宿主</span>
+          </div>
           <input class="input font-mono" v-model="mkdirName" placeholder="文件夹名称" @keyup.enter="createMkdir()" />
           <div class="flex justify-end gap-2 mt-5">
             <button class="btn" @click="showMkdir = false">取消</button>
@@ -426,7 +620,10 @@ export default defineComponent({
       <!-- 重命名弹窗 -->
       <div v-if="showRename" class="fixed inset-0 z-[85] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
         <div class="panel w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto" style="background: rgba(13, 21, 38, 0.97)">
-          <h3 class="font-display text-base text-neon-soft mb-4">重命名</h3>
+          <div class="flex items-center gap-2 mb-4">
+            <h3 class="font-display text-base text-neon-soft">重命名</h3>
+            <span v-if="activeTarget === 'host'" class="badge border-amber-500/50 text-amber-300 !text-[0.65rem] ml-auto">🖥️ 宿主</span>
+          </div>
           <input class="input font-mono" v-model="renameName" placeholder="新名称" @keyup.enter="saveRename()" />
           <div class="flex justify-end gap-2 mt-5">
             <button class="btn" @click="showRename = false">取消</button>

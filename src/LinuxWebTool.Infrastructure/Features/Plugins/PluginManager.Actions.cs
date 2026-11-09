@@ -20,12 +20,15 @@ public sealed partial class PluginManager
             return new PluginActionResult { Status = "failed", Message = $"未找到插件: {request.PluginId}" };
         }
 
+        var effectiveDir = Supervisor.PluginRevisionManager.ResolveEffectiveDirectory(dir);
+
         if (File.Exists(Path.Combine(dir, ".disabled")))
         {
             return new PluginActionResult { Status = "failed", Message = $"插件 '{request.PluginId}' 已被显式禁用，禁止执行任何操作。" };
         }
 
-        var manifestPath = Path.Combine(dir, "plugin.json");
+        var manifestPath = Path.Combine(effectiveDir, "plugin.json");
+        if (!File.Exists(manifestPath)) manifestPath = Path.Combine(dir, "plugin.json");
         if (!File.Exists(manifestPath))
         {
             return new PluginActionResult { Status = "failed", Message = $"未找到插件清单 plugin.json" };
@@ -51,7 +54,32 @@ public sealed partial class PluginManager
 
         var effectiveRequest = request with { Action = effectiveAction };
         var strategy = GetStrategy(manifest.Profile);
-        return await strategy.ExecuteActionAsync(manifest, dir, effectiveRequest, _adapters, ct);
+        var pipeline = Supervisor.PluginResiliencePipeline.GetOrCreate(manifest.Id);
+
+        try
+        {
+            return await pipeline.ExecuteAsync(
+                async token => await strategy.ExecuteActionAsync(manifest, effectiveDir, effectiveRequest, _adapters, token),
+                ct).ConfigureAwait(false);
+        }
+        catch (Polly.CircuitBreaker.BrokenCircuitException)
+        {
+            return new PluginActionResult
+            {
+                Status = "failed",
+                ErrorCode = "CIRCUIT_BROKEN",
+                Message = $"插件 '{manifest.Id}' 当前处于熔断保护状态（连续故障率过高，暂时拒绝执行以保护系统）。"
+            };
+        }
+        catch (Polly.Timeout.TimeoutRejectedException)
+        {
+            return new PluginActionResult
+            {
+                Status = "timedOut",
+                ErrorCode = "TIMEOUT",
+                Message = $"插件动作 '{effectiveAction}' 执行超时。"
+            };
+        }
     }
 
     public ValueTask<IReadOnlyList<string>> GetLogsAsync(string id, int limit = 200, CancellationToken ct = default)

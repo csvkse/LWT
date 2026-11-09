@@ -1,0 +1,131 @@
+{
+  "manifestVersion": 3,
+  "id": "chatgpt-channel",
+  "name": "ChatGPT 渠道网关微服务",
+  "category": "AI",
+  "version": "1.0.0",
+  "description": "聚合多渠道大模型网关微服务，支持动态负载均衡与流式代理",
+  "icon": "🤖",
+  "profile": "Resident",
+  "runtime": "Python",
+  "entrypoint": "worker.py",
+  "network": {
+    "mode": "path",
+    "port": 18010,
+    "portEnv": "PORT",
+    "pathPrefix": "/plugins/chatgpt-channel"
+  },
+  "dependencies": [
+    {
+      "id": "python",
+      "name": "Python 3 运行时",
+      "scope": "container",
+      "kind": "runner",
+      "required": true,
+      "recommended": true,
+      "description": "运行 ChatGPT 渠道网关所需环境",
+      "probe": {
+        "command": "python3",
+        "args": [
+          "--version"
+        ]
+      },
+      "installGuide": {
+        "alpine": "apk add --no-cache python3",
+        "debian": "apt update && apt install -y python3",
+        "windows": "winget install Python.Python.3.12"
+      }
+    }
+  ],
+  "storage": {
+    "enableSqlite": true,
+    "enableKv": true
+  },
+  "supervision": {
+    "autoRestart": true
+  },
+  "ui": {
+    "entry": "ui/index.html",
+    "title": "渠道网关控制台",
+    "icon": "🤖"
+  },
+  "customActions": [
+    {
+      "action": "health",
+      "label": "渠道健康自检",
+      "icon": "🩺"
+    },
+    {
+      "action": "sync_models",
+      "label": "拉取可用模型",
+      "icon": "🔄"
+    }
+  ],
+  "configForm": [
+    {
+      "field": "api_key",
+      "label": "OpenAI API 密钥",
+      "type": "password",
+      "required": true
+    }
+  ],
+  "archetype": {
+    "profile": "Resident",
+    "lifecycle": "Interpreted",
+    "protocol": "Http",
+    "language": "python"
+  },
+  "layout": {
+    "sourceEntry": "worker.py",
+    "targetArtifact": "worker.py",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "interface": {
+    "protocol": "Http",
+    "endpoint": "http://127.0.0.1:{port}",
+    "healthEndpoint": "/health",
+    "services": {
+      "chatgpt-worker": {
+        "description": "ChatGPT 消息中继网关",
+        "operations": [
+          "status",
+          "chat"
+        ]
+      }
+    }
+  },
+  "resources": {
+    "limits": {
+      "cpu": "500m",
+      "memory": "256Mi",
+      "pids": 30
+    },
+    "requests": {
+      "cpu": "100m",
+      "memory": "64Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    }
+  },
+  "events": {
+    "publishes": [
+      "chatgpt.message.routed"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "network:listen",
+    "network:egress"
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "manifestVersion": 3,
+  "id": "demo-ps-daemon",
+  "name": "PowerShell 系统资源监控守护",
+  "category": "Ops",
+  "version": "1.0.0",
+  "description": "PowerShell 编写的主机资源采集与磁盘告警长时守护进程",
+  "icon": "💙",
+  "profile": "Resident",
+  "runtime": "PowerShell",
+  "entrypoint": "daemon.ps1",
+  "network": {
+    "mode": "none"
+  },
+  "dependencies": [
+    {
+      "id": "powershell",
+      "name": "PowerShell (pwsh)",
+      "scope": "container",
+      "kind": "runner",
+      "required": true,
+      "recommended": true,
+      "description": "运行 PowerShell 资源监控守护进程所需环境",
+      "probe": {
+        "command": "pwsh",
+        "args": [
+          "-Version"
+        ]
+      },
+      "installGuide": {
+        "alpine": "apk add --no-cache powershell",
+        "debian": "apt update && apt install -y powershell",
+        "windows": "winget install Microsoft.PowerShell"
+      }
+    }
+  ],
+  "supervision": {
+    "autoRestart": true
+  },
+  "archetype": {
+    "profile": "Resident",
+    "lifecycle": "Interpreted",
+    "protocol": "Http",
+    "language": "powershell"
+  },
+  "layout": {
+    "sourceEntry": "daemon.ps1",
+    "targetArtifact": "daemon.ps1",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "interface": {
+    "protocol": "Http",
+    "endpoint": "http://127.0.0.1:{port}",
+    "healthEndpoint": "/health",
+    "services": {
+      "ps-daemon": {
+        "description": "PowerShell 跨平台守护进程",
+        "operations": [
+          "status",
+          "metrics"
+        ]
+      }
+    }
+  },
+  "resources": {
+    "limits": {
+      "cpu": "300m",
+      "memory": "128Mi",
+      "pids": 20
+    },
+    "requests": {
+      "cpu": "50m",
+      "memory": "32Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    }
+  },
+  "events": {
+    "publishes": [
+      "ps.daemon.tick"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "system:metrics_read"
+  ]
+}

@@ -32,6 +32,20 @@ public class ArchitectureTests
         }
     }
 
+    private static string ResolveDocPath(string relativeOrFileName)
+    {
+        var direct = Path.Combine(RepoRoot, "docs", relativeOrFileName);
+        if (File.Exists(direct)) return direct;
+        var fileName = Path.GetFileName(relativeOrFileName);
+        var docsDir = Path.Combine(RepoRoot, "docs");
+        if (Directory.Exists(docsDir))
+        {
+            var match = Directory.GetFiles(docsDir, fileName, SearchOption.AllDirectories).FirstOrDefault();
+            if (match != null) return match;
+        }
+        return direct;
+    }
+
     [Fact]
     public void LinuxArch001_Contracts_禁止引用任何项目与第三方包()
     {
@@ -2425,7 +2439,7 @@ public class ArchitectureTests
         Assert.Contains("loadEventEnd", webBenchContent);
 
         // 3. 验证调研文档存在，系统分析了性能评测维度与 Linux Splice 零拷贝等深度优化空间
-        var docFile = Path.Combine(RepoRoot, "docs", "network-proxy-performance-testing-and-optimization-research.md");
+        var docFile = ResolveDocPath("network-proxy-performance-testing-and-optimization-research.md");
         Assert.True(File.Exists(docFile), "docs/network-proxy-performance-testing-and-optimization-research.md 必须存在");
         var docContent = File.ReadAllText(docFile);
         Assert.Contains("splice(2)", docContent);
@@ -2479,7 +2493,7 @@ public class ArchitectureTests
         Assert.Contains("measureHttpConnect", cdnBenchContent);
 
         // 4. 验证 B站评论区懒加载深度调研文档存在
-        var docFile = Path.Combine(RepoRoot, "docs", "bilibili-comment-lazy-load-slowdown-proxy-research.md");
+        var docFile = ResolveDocPath("bilibili-comment-lazy-load-slowdown-proxy-research.md");
         Assert.True(File.Exists(docFile), "docs/bilibili-comment-lazy-load-slowdown-proxy-research.md 必须存在");
         var docContent = File.ReadAllText(docFile);
         Assert.Contains("Happy Eyeballs", docContent);
@@ -2542,7 +2556,7 @@ public class ArchitectureTests
         Assert.Contains("\"passthrough_to_default_spa\"", socksJsonContent);
 
         // 5. 验证通用化架构设计文档已落盘
-        var archDoc = Path.Combine(RepoRoot, "docs", "platform-level-generic-ingress-and-fallback-architecture.md");
+        var archDoc = ResolveDocPath("platform-level-generic-ingress-and-fallback-architecture.md");
         Assert.True(File.Exists(archDoc), "docs/platform-level-generic-ingress-and-fallback-architecture.md 必须存在");
     }
 
@@ -2576,7 +2590,7 @@ public class ArchitectureTests
         Assert.Contains("\"tokenSubprotocolPrefix\"", socksJsonContent);
 
         // 4. 验证防主动探测与路径别名深度调研规范已落盘
-        var researchDoc = Path.Combine(RepoRoot, "docs", "ingress-path-aliases-and-anti-probing-camouflaged-duplex-stream-research.md");
+        var researchDoc = ResolveDocPath("ingress-path-aliases-and-anti-probing-camouflaged-duplex-stream-research.md");
         Assert.True(File.Exists(researchDoc), "docs/ingress-path-aliases-and-anti-probing-camouflaged-duplex-stream-research.md 必须存在");
         var researchContent = File.ReadAllText(researchDoc);
         Assert.Contains("05 01 00", researchContent);
@@ -2615,10 +2629,10 @@ public class ArchitectureTests
         Assert.Contains("candidates.OrderByDescending", middlewareContent);
 
         // 4. 验证双轨制治理与纯粹无兼容终极架构调研方案落盘
-        var dualTrackDoc = Path.Combine(RepoRoot, "docs", "ingress-path-scope-conflict-arbitration-and-dual-track-namespacing-plan.md");
+        var dualTrackDoc = ResolveDocPath("ingress-path-scope-conflict-arbitration-and-dual-track-namespacing-plan.md");
         Assert.True(File.Exists(dualTrackDoc), "docs/ingress-path-scope-conflict-arbitration-and-dual-track-namespacing-plan.md 必须存在");
 
-        var pureGatewayDoc = Path.Combine(RepoRoot, "docs", "ultimate-pure-gateway-architecture-and-multi-dimensional-routing-research.md");
+        var pureGatewayDoc = ResolveDocPath("ultimate-pure-gateway-architecture-and-multi-dimensional-routing-research.md");
         Assert.True(File.Exists(pureGatewayDoc), "docs/ultimate-pure-gateway-architecture-and-multi-dimensional-routing-research.md 必须存在");
     }
 
@@ -2646,8 +2660,65 @@ public class ArchitectureTests
         Assert.Contains("Idle Timeout", indexContent);
 
         // 4. 验证治理技术文档落盘
-        var docFile = Path.Combine(RepoRoot, "docs", "mcp-bridge-long-polling-timeout-idle-disconnect-and-resilience-governance.md");
+        var docFile = ResolveDocPath("mcp-bridge-long-polling-timeout-idle-disconnect-and-resilience-governance.md");
         Assert.True(File.Exists(docFile), "docs/mcp-bridge-long-polling-timeout-idle-disconnect-and-resilience-governance.md 必须存在");
+    }
+
+    [Fact]
+    public void LinuxArch080_PluginProbeContractIntegrity_ForProxyAndSecurityServices()
+    {
+        // 1. 扫描 plugins 目录下所有 plugin.json，若属于代理或多路转发类微服务，其探针禁止误配为 HttpCheck，必须声明为 SocketCheck
+        var pluginsDir = Path.Combine(RepoRoot, "plugins");
+        foreach (var dir in Directory.GetDirectories(pluginsDir))
+        {
+            var pJson = Path.Combine(dir, "plugin.json");
+            if (!File.Exists(pJson)) continue;
+            var content = File.ReadAllText(pJson);
+            var id = Path.GetFileName(dir);
+            if (id.Contains("proxy") || id.Contains("forwarder"))
+            {
+                Assert.DoesNotContain("\"type\": \"HttpCheck\"", content, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("SocketCheck", content, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        // 2. 验证自适应就绪探针治理文档落地
+        var docFile = ResolveDocPath("plugin-probing-stuck-root-cause-and-adaptive-prober-plan.md");
+        Assert.True(File.Exists(docFile), "docs/plugin-probing-stuck-root-cause-and-adaptive-prober-plan.md 必须存在");
+    }
+
+    [Fact]
+    public void LinuxArch081_ScrollbarStabilityAndAntiJitterGovernance()
+    {
+        // 1. 验证全局样式声明了 W3C scrollbar-gutter: stable 与 overflow-y: scroll 锁定视口槽位
+        var styleFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "wwwroot", "app", "style.css");
+        Assert.True(File.Exists(styleFile), "style.css 必须存在");
+        var styleContent = File.ReadAllText(styleFile);
+        Assert.Contains("scrollbar-gutter: stable", styleContent);
+        Assert.Contains("overflow-y: scroll", styleContent);
+
+        // 验证受控长列表容器 .list-viewport 同样配置了 scrollbar-gutter: stable
+        Assert.Matches(@"\.list-viewport\s*\{[^}]*scrollbar-gutter:\s*stable", styleContent);
+
+        // 2. 验证 PluginsView 加载中面板配置了视口高度保底占位 min-h-[45vh]，杜绝高度塌缩与视觉跳变
+        var pluginsViewFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "wwwroot", "app", "views", "PluginsView.js");
+        Assert.True(File.Exists(pluginsViewFile), "PluginsView.js 必须存在");
+        var pluginsViewContent = File.ReadAllText(pluginsViewFile);
+        Assert.Contains("min-h-[45vh]", pluginsViewContent);
+
+        // 3. 验证前端门禁脚本注入了 FE-SCROLLBAR-STABILITY 规则
+        var gateFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "wwwroot", "frontend-gate.cjs");
+        Assert.True(File.Exists(gateFile), "frontend-gate.cjs 必须存在");
+        var gateContent = File.ReadAllText(gateFile);
+        Assert.Contains("FE-SCROLLBAR-STABILITY", gateContent);
+
+        // 4. 验证抖动治理与滚动条闪烁深度调研方案文档落地
+        var solutionDoc = ResolveDocPath("page-jitter-scrollbar-flicker-root-cause-and-solution.md");
+        Assert.True(File.Exists(solutionDoc), "docs/page-jitter-scrollbar-flicker-root-cause-and-solution.md 必须存在");
+        var docContent = File.ReadAllText(solutionDoc);
+        Assert.Contains("scrollbar-gutter", docContent);
+        Assert.Contains("CLS", docContent);
+        Assert.Contains("100vw", docContent);
     }
 }
 

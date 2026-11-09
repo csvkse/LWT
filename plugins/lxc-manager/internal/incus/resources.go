@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -25,7 +24,7 @@ func (c Client) getResource(ctx context.Context, path string, out any) error {
 	if c.HTTP == nil {
 		return errors.New("missing HTTP client")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.Endpoint, "/")+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiURL(path, nil), nil)
 	if err != nil {
 		return err
 	}

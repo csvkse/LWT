@@ -1,0 +1,108 @@
+{
+  "manifestVersion": 3,
+  "id": "demo-js-webhook",
+  "name": "Node.js 自动化 Webhook 微服务",
+  "category": "Integration",
+  "version": "1.0.0",
+  "description": "基于轻量 http 模块的事件接收与告警转发常驻微服务",
+  "icon": "⚡",
+  "profile": "Resident",
+  "runtime": "Node",
+  "entrypoint": "index.js",
+  "network": {
+    "mode": "path",
+    "port": 18001,
+    "portEnv": "PORT",
+    "pathPrefix": "/plugins/demo-js-webhook"
+  },
+  "dependencies": [
+    {
+      "id": "node",
+      "name": "Node.js 运行时",
+      "scope": "container",
+      "kind": "runner",
+      "required": true,
+      "recommended": true,
+      "description": "运行 JavaScript Webhook 所需的 Node.js 运行时",
+      "probe": {
+        "command": "node",
+        "args": [
+          "--version"
+        ]
+      },
+      "installGuide": {
+        "alpine": "apk add --no-cache nodejs",
+        "debian": "apt update && apt install -y nodejs",
+        "rhel": "dnf install -y nodejs",
+        "windows": "winget install OpenJS.NodeJS.LTS"
+      }
+    }
+  ],
+  "storage": {
+    "enableSqlite": true,
+    "enableKv": true
+  },
+  "supervision": {
+    "autoRestart": true
+  },
+  "archetype": {
+    "profile": "Resident",
+    "lifecycle": "Interpreted",
+    "protocol": "Http",
+    "language": "javascript"
+  },
+  "layout": {
+    "sourceEntry": "index.js",
+    "targetArtifact": "index.js",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "interface": {
+    "protocol": "Http",
+    "endpoint": "http://127.0.0.1:{port}",
+    "healthEndpoint": "/health",
+    "services": {
+      "js-webhook": {
+        "description": "Node.js Webhook 事件接收微服务",
+        "operations": [
+          "status",
+          "hook",
+          "ping"
+        ]
+      }
+    }
+  },
+  "resources": {
+    "limits": {
+      "cpu": "300m",
+      "memory": "128Mi",
+      "pids": 30
+    },
+    "requests": {
+      "cpu": "100m",
+      "memory": "32Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    }
+  },
+  "events": {
+    "publishes": [
+      "webhook.received"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "network:listen",
+    "storage:readwrite"
+  ]
+}

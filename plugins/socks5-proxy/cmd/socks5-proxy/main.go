@@ -121,16 +121,24 @@ type Config struct {
 	AllowedDomains            string
 	AllowedClients            string
 	AclPreset                 string
+	DNSUpstreams              []string
+	DNSRules                  []dnsRouteConfig
+	EnableWinningIPPromote    bool
+	EnableParallelRacing      bool
 }
 
 type PersistedConfig struct {
-	AuthMode       string `json:"authMode"`
-	Username       string `json:"username"`
-	Password       string `json:"password"`
-	AclPreset      string `json:"aclPreset"`
-	AllowedSubnets string `json:"allowedSubnets"`
-	AllowedDomains string `json:"allowedDomains"`
-	AllowedClients string `json:"allowedClients"`
+	AuthMode               string           `json:"authMode"`
+	Username               string           `json:"username"`
+	Password               string           `json:"password"`
+	AclPreset              string           `json:"aclPreset"`
+	AllowedSubnets         string           `json:"allowedSubnets"`
+	AllowedDomains         string           `json:"allowedDomains"`
+	AllowedClients         string           `json:"allowedClients"`
+	DNSUpstreams           []string         `json:"dnsUpstreams,omitempty"`
+	DNSRules               []dnsRouteConfig `json:"dnsRules,omitempty"`
+	EnableWinningIPPromote *bool            `json:"enableWinningIpPromote,omitempty"`
+	EnableParallelRacing   *bool            `json:"enableParallelRacing,omitempty"`
 }
 
 type Server struct {
@@ -153,14 +161,26 @@ func (s *Server) persistConfigAtomic() error {
 		return nil
 	}
 	s.authMu.RLock()
+	var rules []dnsRouteConfig
+	if routed, ok := s.resolver.(*dnsRoutingResolver); ok {
+		rules = routed.GetConfigs()
+	} else {
+		rules = s.cfg.DNSRules
+	}
+	enableWinning := s.cfg.EnableWinningIPPromote
+	enableRacing := s.cfg.EnableParallelRacing
 	p := PersistedConfig{
-		AuthMode:       s.cfg.AuthMode,
-		Username:       s.cfg.Username,
-		Password:       s.cfg.Password,
-		AclPreset:      s.cfg.AclPreset,
-		AllowedSubnets: s.cfg.AllowedSubnets,
-		AllowedDomains: s.cfg.AllowedDomains,
-		AllowedClients: s.cfg.AllowedClients,
+		AuthMode:               s.cfg.AuthMode,
+		Username:               s.cfg.Username,
+		Password:               s.cfg.Password,
+		AclPreset:              s.cfg.AclPreset,
+		AllowedSubnets:         s.cfg.AllowedSubnets,
+		AllowedDomains:         s.cfg.AllowedDomains,
+		AllowedClients:         s.cfg.AllowedClients,
+		DNSUpstreams:           s.cfg.DNSUpstreams,
+		DNSRules:               rules,
+		EnableWinningIPPromote: &enableWinning,
+		EnableParallelRacing:   &enableRacing,
 	}
 	s.authMu.RUnlock()
 
@@ -183,7 +203,9 @@ func (s *Server) persistConfigAtomic() error {
 		return fmt.Errorf("atomic rename config failed: %w", err)
 	}
 
-	s.logger.Info("persisted socks5 configuration atomically", "path", s.configPath)
+	if s.logger != nil {
+		s.logger.Info("persisted socks5 configuration atomically", "path", s.configPath)
+	}
 	return nil
 }
 
@@ -216,6 +238,25 @@ func resolveStateDir(raw string) string {
 	}
 	cwd, _ := os.Getwd()
 	return filepath.Clean(filepath.Join(cwd, "data"))
+}
+
+func (s *Server) promoteWinningIP(host string, ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	s.authMu.RLock()
+	enabled := s.cfg.EnableWinningIPPromote
+	s.authMu.RUnlock()
+	if !enabled {
+		return false
+	}
+	resolver := s.getDnsResolver()
+	if promoter, ok := resolver.(interface {
+		PromoteWinningIP(string, net.IP) bool
+	}); ok {
+		return promoter.PromoteWinningIP(host, ip)
+	}
+	return false
 }
 
 func (s *Server) GetAuthConfig() (mode, username, password string) {
@@ -265,6 +306,10 @@ func main() {
 	domainsFlag := flag.String("allowed-domains", "", "Allowed target domains (e.g. '*.internal,*.local,regex:...')")
 	clientsFlag := flag.String("allowed-clients", "", "Allowed client incoming IPs/subnets")
 	presetFlag := flag.String("acl-preset", "all", "ACL preset ('lan', 'loopback', 'all')")
+	dnsUpstreamsFlag := flag.String("dns-upstreams", "", "Comma-separated upstream DNS servers (e.g. '223.5.5.5:53,119.29.29.29:53')")
+	dnsRulesFlag := flag.String("dns-rules", "", "JSON array of DNS routing rules")
+	winningIpPromoteFlag := flag.Bool("enable-winning-ip-promote", true, "Enable Happy Eyeballs winning IP cache promotion")
+	parallelRacingFlag := flag.Bool("enable-parallel-racing", true, "Enable multi-upstream DNS parallel racing")
 	flag.Parse()
 
 	stateDir := resolveStateDir(*stateDirFlag)
@@ -370,11 +415,61 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 
-	dnsStrategy := NewIpv4PreferResolver(time.Duration(*timeoutSec) * time.Second)
-	defaultResolver := NewCachedDnsResolverWithTimeout(dnsStrategy, 2048, 3*time.Minute, 10*time.Minute, 5*time.Second, time.Duration(*timeoutSec)*time.Second)
-	configuredResolver, err := buildDNSResolver(defaultResolver, os.Getenv("SOCKS5_DNS_RULES"), time.Duration(*timeoutSec)*time.Second)
+	var dnsUpstreams []string
+	if *dnsUpstreamsFlag != "" {
+		for _, s := range strings.Split(*dnsUpstreamsFlag, ",") {
+			if trimmed := strings.TrimSpace(s); trimmed != "" {
+				dnsUpstreams = append(dnsUpstreams, trimmed)
+			}
+		}
+	} else if envUpstreams := os.Getenv("SOCKS5_DNS_UPSTREAMS"); envUpstreams != "" {
+		for _, s := range strings.Split(envUpstreams, ",") {
+			if trimmed := strings.TrimSpace(s); trimmed != "" {
+				dnsUpstreams = append(dnsUpstreams, trimmed)
+			}
+		}
+	}
+
+	var dnsRules []dnsRouteConfig
+	if *dnsRulesFlag != "" {
+		if parsed, err := parseDNSRouteConfigs(*dnsRulesFlag); err == nil {
+			dnsRules = parsed
+		} else {
+			fmt.Fprintf(os.Stderr, "invalid --dns-rules: %v\n", err)
+			os.Exit(1)
+		}
+	} else if envRules := os.Getenv("SOCKS5_DNS_RULES"); envRules != "" {
+		if parsed, err := parseDNSRouteConfigs(envRules); err == nil {
+			dnsRules = parsed
+		} else {
+			fmt.Fprintf(os.Stderr, "invalid SOCKS5_DNS_RULES: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	winningPromote := *winningIpPromoteFlag
+	parallelRacing := *parallelRacingFlag
+
+	if hasPersisted {
+		if len(persisted.DNSUpstreams) > 0 && len(dnsUpstreams) == 0 {
+			dnsUpstreams = persisted.DNSUpstreams
+		}
+		if len(persisted.DNSRules) > 0 && len(dnsRules) == 0 {
+			dnsRules = persisted.DNSRules
+		}
+		if persisted.EnableWinningIPPromote != nil {
+			winningPromote = *persisted.EnableWinningIPPromote
+		}
+		if persisted.EnableParallelRacing != nil {
+			parallelRacing = *persisted.EnableParallelRacing
+		}
+	}
+
+	timeoutDur := time.Duration(*timeoutSec) * time.Second
+	baseResolver := buildBaseResolver(dnsUpstreams, timeoutDur)
+	configuredResolver, err := buildDNSResolverWithConfigs(baseResolver, dnsRules, timeoutDur)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid SOCKS5_DNS_RULES: %v\n", err)
+		fmt.Fprintf(os.Stderr, "failed to build DNS resolver: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -384,7 +479,7 @@ func main() {
 			AuthMode:                  authMode,
 			Username:                  username,
 			Password:                  password,
-			ConnectTimeout:            time.Duration(*timeoutSec) * time.Second,
+			ConnectTimeout:            timeoutDur,
 			MaxActiveSessions:         *maxSessionsFlag,
 			MaxHTTPConnsPerHost:       *maxHTTPConnsPerHostFlag,
 			MaxHTTPPendingPerHost:     *maxHTTPPendingPerHostFlag,
@@ -394,6 +489,10 @@ func main() {
 			AllowedDomains:            domains,
 			AllowedClients:            clients,
 			AclPreset:                 preset,
+			DNSUpstreams:              dnsUpstreams,
+			DNSRules:                  dnsRules,
+			EnableWinningIPPromote:    winningPromote,
+			EnableParallelRacing:      parallelRacing,
 		},
 		logger:     logger,
 		acl:        aclEngine,
@@ -755,7 +854,9 @@ func (s *Server) handleSocks5(conn net.Conn) error {
 	if s.acl != nil {
 		s.acl.RecordTargetResult(true)
 	}
-	_ = winningIP
+	if winningIP != nil {
+		s.promoteWinningIP(targetHost, winningIP)
+	}
 
 	localBind := upstream.LocalAddr().(*net.TCPAddr)
 	if err := s.sendReply(conn, repSuccess, localBind); err != nil {
@@ -928,18 +1029,19 @@ func (s *Server) startMetricsHttp(boundAddr string) {
 		var dnsStats map[string]any
 		dnsRuleCount := 0
 		if routed, ok := s.resolver.(*dnsRoutingResolver); ok {
-			dnsRuleCount = len(routed.routes)
+			dnsRuleCount = routed.RouteCount()
 		}
 		if cr, ok := s.resolver.(interface {
-			CacheStats() (int64, int64, int64, int64, int)
+			CacheStats() (int64, int64, int64, int64, int64, int)
 		}); ok {
-			hits, misses, staleHits, evictions, size := cr.CacheStats()
+			hits, misses, staleHits, evictions, promotions, size := cr.CacheStats()
 			dnsStats = map[string]any{
-				"hits":      hits,
-				"misses":    misses,
-				"staleHits": staleHits,
-				"evictions": evictions,
-				"cacheSize": size,
+				"hits":       hits,
+				"misses":     misses,
+				"staleHits":  staleHits,
+				"evictions":  evictions,
+				"promotions": promotions,
+				"cacheSize":  size,
 			}
 		}
 		httpAdmission := s.getHTTPForwardRequestLimiter().Snapshot()
@@ -973,6 +1075,128 @@ func (s *Server) startMetricsHttp(boundAddr string) {
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	mux.HandleFunc("/api/dns/config", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			s.authMu.RLock()
+			upstreams := s.cfg.DNSUpstreams
+			winningPromote := s.cfg.EnableWinningIPPromote
+			parallelRacing := s.cfg.EnableParallelRacing
+			s.authMu.RUnlock()
+
+			var routes []dnsRouteConfig
+			if routed, ok := s.resolver.(*dnsRoutingResolver); ok {
+				routes = routed.GetConfigs()
+			} else {
+				routes = s.cfg.DNSRules
+			}
+
+			var stats map[string]any
+			if cr, ok := s.resolver.(interface {
+				CacheStats() (int64, int64, int64, int64, int64, int)
+			}); ok {
+				hits, misses, staleHits, evictions, promotions, size := cr.CacheStats()
+				stats = map[string]any{
+					"hits":       hits,
+					"misses":     misses,
+					"staleHits":  staleHits,
+					"evictions":  evictions,
+					"promotions": promotions,
+					"cacheSize":  size,
+				}
+			}
+
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":                 "ok",
+				"upstreams":              upstreams,
+				"routes":                 routes,
+				"enableWinningIpPromote": winningPromote,
+				"enableParallelRacing":   parallelRacing,
+				"stats":                  stats,
+			})
+			return
+		}
+
+		if r.Method == http.MethodPost {
+			var body struct {
+				Upstreams              []string         `json:"upstreams"`
+				Routes                 []dnsRouteConfig `json:"routes"`
+				EnableWinningIPPromote *bool            `json:"enableWinningIpPromote"`
+				EnableParallelRacing   *bool            `json:"enableParallelRacing"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid json payload"})
+				return
+			}
+
+			// Validate upstreams
+			cleanUpstreams := make([]string, 0, len(body.Upstreams))
+			for _, u := range body.Upstreams {
+				valid, err := validateDNSServer(u)
+				if err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("invalid upstream DNS %q: %v", u, err)})
+					return
+				}
+				cleanUpstreams = append(cleanUpstreams, valid)
+			}
+
+			timeout := s.cfg.ConnectTimeout
+			if timeout <= 0 {
+				timeout = 10 * time.Second
+			}
+
+			newBase := buildBaseResolver(cleanUpstreams, timeout)
+			newRoutes, err := buildDNSRoutes(body.Routes, timeout)
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+
+			if routed, ok := s.resolver.(*dnsRoutingResolver); ok {
+				routed.Update(newBase, newRoutes, body.Routes)
+			}
+
+			s.authMu.Lock()
+			s.cfg.DNSUpstreams = cleanUpstreams
+			s.cfg.DNSRules = body.Routes
+			if body.EnableWinningIPPromote != nil {
+				s.cfg.EnableWinningIPPromote = *body.EnableWinningIPPromote
+			}
+			if body.EnableParallelRacing != nil {
+				s.cfg.EnableParallelRacing = *body.EnableParallelRacing
+			}
+			s.authMu.Unlock()
+
+			if err := s.persistConfigAtomic(); err != nil {
+				s.logger.Error("failed to persist socks5 configuration", "error", err)
+			}
+
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":     "ok",
+				"message":    "DNS routing rules updated and persisted",
+				"routeCount": len(newRoutes),
+				"upstreams":  cleanUpstreams,
+			})
+			return
+		}
+
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	})
+
+	mux.HandleFunc("/api/dns/flush", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if flusher, ok := s.resolver.(interface{ Flush() }); ok {
+			flusher.Flush()
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":  "ok",
+			"message": "DNS cache flushed",
+		})
 	})
 
 	mux.HandleFunc("/api/acl", func(w http.ResponseWriter, r *http.Request) {

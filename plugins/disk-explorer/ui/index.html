@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>磁盘空间透视镜 - LinuxWebTool</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="lwt-shell">
+    <!-- 顶部 Cyber 风格页头 -->
+    <header class="cyber-header">
+      <div class="header-branding">
+        <div class="logo-box">💾</div>
+        <div>
+          <h1 class="header-title">磁盘空间透视镜</h1>
+          <div class="header-subtitle">
+            <span class="status-indicator">高并发系统与宿主文件夹占用极速分析</span>
+            <span id="env-badge" class="badge badge-info">检测环境中...</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btn-refresh-env" class="btn btn-secondary" title="重新检测环境能力">
+          🔄 重新检测
+        </button>
+      </div>
+    </header>
+
+    <!-- 扫描配置与目标决策面板 -->
+    <section class="card config-card">
+      <div class="card-header">
+        <span class="card-title">🎯 目标命名空间与分析路径</span>
+        <span id="target-summary" class="text-muted text-sm">自适应检测环境权限</span>
+      </div>
+
+      <!-- 目标选择器 (宿主选项仅在特权穿透检测成功时呈现) -->
+      <div class="target-switcher-wrapper">
+        <label class="section-label">分析目标命名空间：</label>
+        <div id="target-switcher" class="segmented-control">
+          <!-- 由 app.js 依据 /api/capabilities 动态渲染 -->
+          <div class="target-item active" data-target="container">
+            <span class="icon">📦</span>
+            <div class="info">
+              <span class="name">当前系统 (容器环境)</span>
+              <span class="desc">分析当前沙箱内文件系统</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 快捷路径与输入框 -->
+      <div class="path-input-group">
+        <div class="input-row">
+          <label for="input-path" class="section-label">扫描起始绝对路径：</label>
+          <div class="input-with-actions">
+            <input type="text" id="input-path" class="form-control" value="/app" placeholder="例如: /app, /var/log, /" />
+            <button id="btn-start-scan" class="btn btn-primary">
+              ⚡ 启动极速分析
+            </button>
+            <button id="btn-abort-scan" class="btn btn-danger hidden">
+              🛑 终止分析
+            </button>
+          </div>
+        </div>
+
+        <div class="quick-paths-wrapper">
+          <span class="quick-paths-label">推荐热点：</span>
+          <div id="quick-paths-list" class="quick-pills">
+            <!-- 动态填充快捷按钮 -->
+          </div>
+        </div>
+      </div>
+
+      <!-- 高级过滤配置折叠面板 -->
+      <div class="advanced-options-toggle">
+        <button id="btn-toggle-options" class="btn-text">
+          ⚙️ 扫描性能与边界选项 <span id="toggle-arrow">▼</span>
+        </button>
+      </div>
+
+      <div id="advanced-options-panel" class="advanced-panel hidden">
+        <div class="options-grid">
+          <div class="option-item">
+            <label class="checkbox-label">
+              <input type="checkbox" id="chk-one-fs" checked />
+              <span>锁定单一物理文件系统 (One File System / -x)</span>
+            </label>
+            <span class="help-text">防止递归穿越至 CIFS/SMB/NFS 网络挂载卷或外部存储盘，避免 I/O 挂起。</span>
+          </div>
+
+          <div class="option-item">
+            <label for="select-depth" class="section-label">层级展示深度：</label>
+            <select id="select-depth" class="form-control form-select">
+              <option value="1">1 级 (极速概览，最轻量)</option>
+              <option value="2">2 级 (推荐，兼顾速度与层级)</option>
+              <option value="3" selected>3 级 (深度分析)</option>
+              <option value="4">4 级 (精细下钻)</option>
+            </select>
+          </div>
+
+          <div class="option-item">
+            <label for="select-engine" class="section-label">扫描计算内核：</label>
+            <select id="select-engine" class="form-control form-select">
+              <option value="auto" selected>Auto 智能自适应 (推荐)</option>
+              <option value="fastwalk">FastWalk (Go 原生高并发协程池)</option>
+              <option value="gdu">GDU (若安装则优先加速)</option>
+              <option value="posixdu">POSIX du (标准系统调用降级保底)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 实时扫描进度卡片 (扫描时动态激活) -->
+    <section id="progress-card" class="card progress-card hidden">
+      <div class="progress-header">
+        <div class="progress-title-group">
+          <div class="spinner-pulse"></div>
+          <span id="progress-status-text" class="progress-status">正在遍历文件系统...</span>
+        </div>
+        <div class="progress-metrics">
+          <span class="metric-pill">已扫描条目: <strong id="metric-items">0</strong></span>
+          <span class="metric-pill">已耗时: <strong id="metric-elapsed">0 ms</strong></span>
+          <span class="metric-pill">估算大小: <strong id="metric-size">0 B</strong></span>
+        </div>
+      </div>
+
+      <div class="progress-bar-container">
+        <div id="progress-bar-fill" class="progress-bar-fill"></div>
+      </div>
+
+      <div class="progress-current-path">
+        <span class="current-label">正在探测：</span>
+        <code id="progress-current-path-text" class="current-path">...</code>
+      </div>
+    </section>
+
+    <!-- 错误与告警提示条 -->
+    <div id="alert-box" class="alert alert-danger hidden">
+      <span class="alert-icon">⚠️</span>
+      <span id="alert-message" class="alert-text"></span>
+      <button id="btn-close-alert" class="btn-icon">✕</button>
+    </div>
+
+    <!-- 空间分析结果展示区 -->
+    <section id="result-card" class="card result-card hidden">
+      <div class="result-header">
+        <div class="breadcrumb-container">
+          <span class="breadcrumb-icon">📂</span>
+          <nav id="breadcrumbs" class="breadcrumbs-list">
+            <!-- 动态面包屑 -->
+          </nav>
+        </div>
+        <div class="view-controls">
+          <span id="result-total-badge" class="badge badge-success text-md">总量: 0 B</span>
+          <button id="btn-view-tree" class="btn btn-sm btn-secondary active">📊 树状排行</button>
+          <button id="btn-view-treemap" class="btn btn-sm btn-secondary">🗺️ 矩形树图</button>
+        </div>
+      </div>
+
+      <!-- 视图 1：树状排行榜 -->
+      <div id="view-tree-container" class="view-panel">
+        <div class="tree-table-header">
+          <span class="col-name">目录 / 文件名称</span>
+          <span class="col-bar">空间占用占比</span>
+          <span class="col-size">大小</span>
+          <span class="col-actions">操作</span>
+        </div>
+        <div id="tree-list-body" class="tree-list-scrollable">
+          <!-- 动态渲染树状列表节点 -->
+        </div>
+      </div>
+
+      <!-- 视图 2：Canvas/SVG 矩形树图 -->
+      <div id="view-treemap-container" class="view-panel hidden">
+        <div class="treemap-wrapper">
+          <canvas id="treemap-canvas" class="treemap-canvas" width="1150" height="420"></canvas>
+          <div id="treemap-tooltip" class="treemap-tooltip hidden"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 抽屉：其余微小项明细展开 (Unranked Drawer) -->
+    <div id="unranked-drawer-backdrop" class="drawer-backdrop hidden"></div>
+    <aside id="unranked-drawer" class="unranked-drawer hidden">
+      <div class="drawer-header">
+        <div class="drawer-title-group">
+          <span class="drawer-icon">📦</span>
+          <div>
+            <h3 class="drawer-title">微小内容明细清单</h3>
+            <span id="drawer-subtitle" class="drawer-subtitle">...</span>
+          </div>
+        </div>
+        <button id="btn-close-drawer" class="btn-icon">✕</button>
+      </div>
+
+      <div class="drawer-search-bar">
+        <input type="text" id="input-unranked-search" class="form-control" placeholder="按文件/目录名称过滤..." />
+        <span id="drawer-stats" class="drawer-stats">共 0 项</span>
+      </div>
+
+      <div class="drawer-list-header">
+        <span class="col-name">名称</span>
+        <span class="col-size">大小</span>
+        <span class="col-actions">操作</span>
+      </div>
+
+      <div id="drawer-list-body" class="drawer-list-scrollable">
+        <!-- 动态渲染项 -->
+      </div>
+
+      <div id="drawer-footer" class="drawer-footer hidden">
+        <button id="btn-unranked-more" class="btn btn-secondary w-full">加载更多...</button>
+      </div>
+    </aside>
+  </div>
+
+  <script type="module" src="app.js?v=20261109"></script>
+</body>
+</html>

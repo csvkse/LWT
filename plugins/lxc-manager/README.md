@@ -2,7 +2,13 @@
 
 目前提供 Incus 服务认证、版本及容器、镜像、存储池、受管网桥的只读发现和面板。`Ready` 只代表 Incus 已认证，不表示存储硬配额、网络或创建条件已满足。创建和核对接口已连接任务流程，但当前没有可信容量与硬配额证据源，预检会拒绝所有创建请求。管理员可对本插件已完成创建且归属验证通过的实例提交启动、停止、重启任务；此功能尚未在真实 Incus 环境验收。资源查询失败会显示错误，不能视为空列表。
 
-平台通过 `LWT_INTERNAL_SECRET` 和管理员身份将请求代理到本机监听端口。服务拒绝直接访问及 API Key 身份；不要将此端口暴露到网络。插件只连接本地 Unix socket，默认为 `/var/lib/incus/unix.socket`；`INCUS_SOCKET` 可由受信任的部署管理员配置。访问此 socket 的权限可能等同管理宿主，须先确认权限边界。当前 Docker 运行环境不会自动拥有该 socket。
+插件 manifest 将 Incus 标为 `scope: host`。普通依赖继续在当前容器探测；宿主依赖显示为“尚未验证”，不会误用容器内 `command --version` 结果，也不会阻止插件启动。安装引导会优先使用环境服务确认的宿主发行版；检测不到时不生成默认宿主命令。宿主包安装需管理员审查后在终端执行，当前尚无自动宿主代理。安装 daemon 不会自动向 LWT 容器开放 Incus socket/TLS API，连接授权和存储/网络初始化需单独配置。
+
+平台通过 `LWT_INTERNAL_SECRET` 和管理员身份将请求代理到本机监听端口。服务拒绝直接访问及 API Key 身份；不要将此端口暴露到网络。默认连接本地 Unix socket `/var/lib/incus/unix.socket`，受信任的部署管理员可用 `INCUS_SOCKET` 覆盖。访问宿主 socket 可能等同管理宿主；当前 Docker 运行环境不会自动拥有该 socket，也不应为了方便直接挂载 `incus-admin` socket。
+
+也可由部署管理员配置受限 TLS API 连接：设置 `INCUS_ENDPOINT`（仅 HTTPS）、`INCUS_PROJECT`、`INCUS_TLS_SERVER_CA_FILE`、`INCUS_TLS_SERVER_CERT_SHA256`、`INCUS_TLS_CLIENT_CERT_FILE` 和 `INCUS_TLS_CLIENT_KEY_FILE`。证书内容不得放进环境变量或插件清单；证书文件应由部署层以只读方式提供，并限制读取权限。远程模式要求 TLS 1.3、CA/主机名校验及服务端证书 SHA-256 指纹匹配，关闭 HTTP 代理且不会跟随重定向；不提供跳过证书校验选项。TLS 模式与 Unix socket 模式互斥。服务端证书轮换时须审查并同步更新 CA/指纹配置。
+
+`INCUS_PROJECT` 只用于把 API 请求明确路由到目标项目，不能作为权限边界。Incus 服务端必须把该客户端证书登记为仅允许专用项目的 restricted certificate，并确认 `authorization.client.tls-restricted=tls`；还需预先配置该项目可用的镜像、存储和网络。当前插件没有证书发放/轮换界面，也没有在真实 Incus 服务上验收 TLS 授权。没有可信的容量预留和磁盘硬配额证据时，创建预检仍会拒绝请求。
 
 创建界面在浏览器本地保存无凭据的待核对任务，并使用 Web Locks 避免标签页相互覆盖；浏览器需支持该 API，通常需要 HTTPS 或 localhost 安全上下文。清除浏览器站点数据后，可从服务端待核对列表恢复完整任务；若任务记录缺少参数，必须人工核对。未能读取任务列表或存在待核对任务时，界面暂停新操作。
 

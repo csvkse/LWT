@@ -14,7 +14,7 @@ namespace LinuxWebTool.Infrastructure.Features.Services.Adapters.Docker;
 /// - Socket 通道不可用时自动降级使用 docker CLI；
 /// - 完全 Native AOT 兼容，零外部重量级依赖。
 /// </summary>
-public sealed class DockerEngineAdapter : IDockerEngineAdapter
+public sealed partial class DockerEngineAdapter : IDockerEngineAdapter
 {
     private readonly IShellExecutor _shellExecutor;
     private readonly IServiceEnvironmentDetector _envDetector;
@@ -390,33 +390,26 @@ public sealed class DockerEngineAdapter : IDockerEngineAdapter
 
             while (ms.Position < ms.Length)
             {
-                // 如果剩余不足 8 字节，可能是非 multiplexed 裸流
                 if (ms.Length - ms.Position < 8)
                 {
                     sb.Append(reader.ReadToEnd());
                     break;
                 }
-
                 var header = new byte[8];
                 var read = ms.Read(header, 0, 8);
                 if (read < 8) break;
 
-                // header[0] stream type: 1=stdout, 2=stderr
-                // 大端字节序读取 payload 长度
                 var size = (header[4] << 24) | (header[5] << 16) | (header[6] << 8) | header[7];
                 if (size <= 0 || size > ms.Length - ms.Position)
                 {
-                    // 若长度异常，直接把剩余部分按普通文本读取
                     ms.Seek(-8, SeekOrigin.Current);
                     sb.Append(reader.ReadToEnd());
                     break;
                 }
-
                 var payload = new byte[size];
                 ms.Read(payload, 0, size);
                 sb.Append(System.Text.Encoding.UTF8.GetString(payload));
             }
-
             return sb.ToString();
         }
         catch

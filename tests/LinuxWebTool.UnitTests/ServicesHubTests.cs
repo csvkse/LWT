@@ -70,6 +70,15 @@ public sealed class ServicesHubTests
     }
 
     [Fact]
+    public void LinuxDistroKeyResolver_MapsOsReleaseAndRejectsUnknownValues()
+    {
+        Assert.Equal("debian", LinuxDistroKeyResolver.Resolve("ID=debian\nVERSION_ID=\"12\""));
+        Assert.Equal("debian", LinuxDistroKeyResolver.Resolve("ID=ubuntu\nVERSION_ID=\"24.04\""));
+        Assert.Equal("alpine", LinuxDistroKeyResolver.Resolve("ID=alpine"));
+        Assert.Null(LinuxDistroKeyResolver.Resolve("NAME=Unknown Linux"));
+    }
+
+    [Fact]
     public async Task SystemServiceConfigAdapter_GetSshConfig_ReturnsSafeDefaults()
     {
         var executor = new MockShellExecutor();
@@ -113,6 +122,7 @@ public sealed class ServicesHubTests
             KernelVersion = "6.6.0-generic",
             IsDockerContainer = true,
             IsPrivilegedContainer = true,
+            HostDistroKey = "debian",
             HasSystemd = true,
             SystemdPierced = true,
             HasDockerSocket = true,
@@ -125,6 +135,7 @@ public sealed class ServicesHubTests
         Assert.NotNull(restored);
         Assert.Equal("Linux", restored.OperatingSystem);
         Assert.True(restored.IsPrivilegedContainer);
+        Assert.Equal("debian", restored.HostDistroKey);
 
         var unit = new SystemdUnitItem
         {

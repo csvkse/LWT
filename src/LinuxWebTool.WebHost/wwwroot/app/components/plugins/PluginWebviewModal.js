@@ -1,4 +1,5 @@
-import { computed, defineComponent, ref } from 'vue';
+import { computed, defineComponent, ref, onMounted, onBeforeUnmount } from 'vue';
+import { useRouter } from 'vue-router';
 import { PluginUrlResolver } from '../../utils/pluginUrlResolver.js';
 import { auth } from '../../store/auth.js';
 
@@ -16,6 +17,7 @@ export default defineComponent({
   },
   emits: ['close'],
   setup(props, { emit }) {
+    const router = useRouter();
     const iframeRef = ref(null);
     const iframeKey = ref(0);
 
@@ -33,6 +35,23 @@ export default defineComponent({
     function handleClose() {
       emit('close');
     }
+
+    function handleMessage(event) {
+      if (event.data?.type === 'LWT_NAVIGATE') {
+        handleClose();
+        if (event.data.path) {
+          router.push({ path: event.data.path, query: event.data.query || {} });
+        }
+      }
+    }
+
+    onMounted(() => {
+      window.addEventListener('message', handleMessage);
+    });
+
+    onBeforeUnmount(() => {
+      window.removeEventListener('message', handleMessage);
+    });
 
     function handleReload() {
       iframeKey.value++;

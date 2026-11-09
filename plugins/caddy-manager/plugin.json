@@ -1,0 +1,106 @@
+{
+  "manifestVersion": 3,
+  "id": "caddy-manager",
+  "name": "Caddy 反向代理网关",
+  "category": "Network",
+  "version": "1.0.0",
+  "description": "Caddy Web Server 原生网关管理，支持配置文件语法校验与零停机平滑重载",
+  "icon": "🌐",
+  "profile": "OneShot",
+  "runtime": "Native",
+  "entrypoint": "caddy",
+  "source": "system",
+  "dependencies": [
+    {
+      "id": "caddy",
+      "name": "Caddy Web 服务器",
+      "scope": "container",
+      "kind": "binary",
+      "required": true,
+      "recommended": true,
+      "description": "核心 Web 服务器与反向代理程序",
+      "probe": {
+        "command": "caddy",
+        "args": [
+          "version"
+        ]
+      },
+      "installGuide": {
+        "alpine": "apk add --no-cache caddy",
+        "debian": "apt update && apt install -y caddy",
+        "rhel": "dnf install -y caddy",
+        "windows": "winget install CaddyServer.Caddy"
+      }
+    }
+  ],
+  "network": {
+    "mode": "port",
+    "port": 2019
+  },
+  "customActions": [
+    {
+      "action": "validate",
+      "label": "校验配置语法",
+      "icon": "✅"
+    },
+    {
+      "action": "reload",
+      "label": "平滑热重载",
+      "icon": "🔄"
+    }
+  ],
+  "archetype": {
+    "profile": "OneShot",
+    "lifecycle": "PrebuiltBinary",
+    "protocol": "CliArgs",
+    "language": "native"
+  },
+  "interface": {
+    "protocol": "CliArgs",
+    "services": {
+      "caddy-cli": {
+        "description": "Caddy 原生反向代理管理工具",
+        "operations": [
+          "validate",
+          "reload"
+        ]
+      }
+    }
+  },
+  "layout": {
+    "sourceEntry": "caddy",
+    "targetArtifact": "caddy",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "resources": {
+    "limits": {
+      "cpu": "500m",
+      "memory": "128Mi",
+      "pids": 20
+    },
+    "requests": {
+      "cpu": "100m",
+      "memory": "32Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "ExecCheck",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "ExecCheck",
+      "timeoutSeconds": 3
+    }
+  },
+  "events": {
+    "publishes": [
+      "caddy.config.validated"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "process:execute"
+  ]
+}

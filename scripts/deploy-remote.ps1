@@ -8,6 +8,7 @@ param(
 
     [switch]$FrontendOnly,
     [string]$HotUpdatePlugin = "",
+    [switch]$SetupIncusHost,
 
     [string]$EnvFile = "env/.envdev",
     [switch]$SkipDeps,
@@ -143,6 +144,56 @@ try {
             throw "SSH command failed with exit code $($LASTEXITCODE): $cmd"
         }
         return (Clean-SshOutput $output)
+    }
+
+    function Invoke-IncusHostProvision {
+        Write-Step "[Host Provision] Checking and provisioning Incus host dependencies..."
+        $incusProvisionScript = @'
+set -eu
+mkdir -p /var/lib/incus
+
+# 1. 检查并安装轻量级 incus-base 守护进程与客户端
+if ! command -v incus >/dev/null 2>&1; then
+    echo "[PROVISION] Updating apt and installing incus-base, incus-client, dnsmasq-base from bookworm-backports..."
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y --no-install-recommends -t bookworm-backports \
+        -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
+        incus-base incus-client dnsmasq-base
+    systemctl enable --now incus.socket incus.service
+else
+    echo "[PROVISION] incus daemon package is already installed."
+    systemctl enable --now incus.socket incus.service 2>/dev/null || true
+fi
+
+# 2. 幂等初始化存储池与网桥
+if ! incus network list --format json 2>/dev/null | grep -q '"name":"incusbr0"'; then
+    echo "[PROVISION] Initializing minimal Incus storage and incusbr0 network..."
+    incus admin init --minimal
+else
+    echo "[PROVISION] incusbr0 network is already active."
+fi
+
+# 3. 注入 Docker 防火墙共存放行规则
+echo "[PROVISION] Ensuring iptables FORWARD rules for incusbr0..."
+iptables -C FORWARD -i incusbr0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i incusbr0 -j ACCEPT
+iptables -C FORWARD -o incusbr0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o incusbr0 -j ACCEPT
+
+# 4. 验证 socket 与版本
+echo "[PROVISION] Incus daemon ready. Verification:"
+ls -la /var/lib/incus/unix.socket
+incus version
+'@
+        $provisionOut = Invoke-RemoteSsh $incusProvisionScript
+        Write-Host $provisionOut -ForegroundColor DarkCyan
+        Write-Success "Incus host provisioning completed successfully!"
+    }
+
+    if ($SetupIncusHost) {
+        Invoke-IncusHostProvision
+        if ($CheckOnly) {
+            return
+        }
     }
 
     if ($RemoteExec) {
@@ -514,7 +565,8 @@ git -C "$devWorkdir" log -1 --oneline
         Write-Success "Fast dev image built successfully!"
 
         Write-Step "3/4 [Dev] Launching development container ($containerName on port $devPort)..."
-        $devRunCmd = "docker rm -f $containerName 2>/dev/null || true; docker run -d --name $containerName --restart unless-stopped --privileged --pid=host --user root --device /dev/fuse --device=/dev/net/tun -v /var/run/docker.sock:/var/run/docker.sock -p ${devPort}:5270 -p 18080-18090:18080-18090 -p 10801-10815:10801-10815 -e LWT_HOST_EXTERNAL_PORT=${devPort} -e LWT_HOST_INTERNAL_PORT=5270 -e LWT_HOST_PUBLIC_IP=${deployHost} -v ${containerName}-data:/app/data -v ${devWorkdir}/src/LinuxWebTool.WebHost/wwwroot:/app/wwwroot -v ${devWorkdir}/plugins:/app/plugins -v /lwt:/lwt:rshared -v /var/docker:/var/docker:rshared -v /usr/local/bin:/usr/local/bin:ro $devImage"
+        Invoke-RemoteSsh "mkdir -p /var/lib/incus"
+        $devRunCmd = "docker rm -f $containerName 2>/dev/null || true; docker run -d --name $containerName --restart unless-stopped --privileged --pid=host --user root --device /dev/fuse --device=/dev/net/tun -v /var/run/docker.sock:/var/run/docker.sock -p ${devPort}:5270 -p 18080-18090:18080-18090 -p 10801-10815:10801-10815 -e LWT_HOST_EXTERNAL_PORT=${devPort} -e LWT_HOST_INTERNAL_PORT=5270 -e LWT_HOST_PUBLIC_IP=${deployHost} -v ${containerName}-data:/app/data -v ${devWorkdir}/src/LinuxWebTool.WebHost/wwwroot:/app/wwwroot -v ${devWorkdir}/plugins:/app/plugins -v /lwt:/lwt:rshared -v /var/docker:/var/docker:rshared -v /var/lib/incus:/var/lib/incus:rshared -v /usr/local/bin:/usr/local/bin:ro $devImage"
         Invoke-RemoteSsh $devRunCmd
         Write-Success "Dev container launched (Live volume mounts for wwwroot and plugins active)!"
 
@@ -572,6 +624,14 @@ git -C "$devWorkdir" log -1 --oneline
             }
         } catch {}
 
+        # Test Incus socket access from within container if socket exists
+        try {
+            $incusCheck = (Invoke-RemoteSsh "docker exec $containerName sh -c 'if [ -S /var/lib/incus/unix.socket ]; then echo socket_found; fi' 2>/dev/null").Trim()
+            if ($incusCheck -eq "socket_found") {
+                Write-Success "Incus Socket check: /var/lib/incus/unix.socket detected and accessible inside $containerName!"
+            }
+        } catch {}
+
         $ps = Invoke-RemoteSsh "docker ps --filter name=$containerName"
         Write-Host $ps -ForegroundColor Green
 
@@ -589,7 +649,7 @@ git -C "$devWorkdir" log -1 --oneline
     Write-Success "Docker pull finished!"
 
     Write-Step "2/4 Recreating production container with privileged and host network mode..."
-    $dockerRunCmd = "docker rm -f $containerName 2>/dev/null || true; docker run -d --name $containerName --restart unless-stopped --privileged --pid=host --user root --device /dev/fuse --device=/dev/net/tun -v /var/run/docker.sock:/var/run/docker.sock -p ${webPort}:${webPort} --net=host -e LWT_HOST_EXTERNAL_PORT=${webPort} -e LWT_HOST_INTERNAL_PORT=${webPort} -e LWT_HOST_PUBLIC_IP=${deployHost} -v linuxwebtool-data:/app/data -v /lwt:/lwt:rshared -v /var/docker:/var/docker:rshared -v /usr/local/bin:/usr/local/bin:ro $dockerImage"
+    $dockerRunCmd = "docker rm -f $containerName 2>/dev/null || true; docker run -d --name $containerName --restart unless-stopped --privileged --pid=host --user root --device /dev/fuse --device=/dev/net/tun -v /var/run/docker.sock:/var/run/docker.sock -p ${webPort}:${webPort} --net=host -e LWT_HOST_EXTERNAL_PORT=${webPort} -e LWT_HOST_INTERNAL_PORT=${webPort} -e LWT_HOST_PUBLIC_IP=${deployHost} -v linuxwebtool-data:/app/data -v /lwt:/lwt:rshared -v /var/docker:/var/docker:rshared -v /var/lib/incus:/var/lib/incus:rshared -v /usr/local/bin:/usr/local/bin:ro $dockerImage"
     Invoke-RemoteSsh $dockerRunCmd
     Write-Success "Container recreated!"
 

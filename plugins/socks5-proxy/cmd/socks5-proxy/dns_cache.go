@@ -27,6 +27,7 @@ func NormalizeDomain(domain string) string {
 // IDnsResolverStrategy defines the strategy interface for DNS resolution.
 type IDnsResolverStrategy interface {
 	Resolve(ctx context.Context, host string) ([]net.IP, error)
+	PromoteWinningIP(host string, ip net.IP) bool
 }
 
 // DnsEntryState represents the state of a cached DNS entry in the state machine.
@@ -70,10 +71,11 @@ type DnsLruCache struct {
 	accessSeq   atomic.Int64
 
 	// Metrics
-	hits      int64
-	misses    int64
-	staleHits int64
-	evictions int64
+	hits       int64
+	misses     int64
+	staleHits  int64
+	evictions  int64
+	promotions int64
 }
 
 func NewDnsLruCache(capacity int, softTtl, hardTtl, negativeTtl time.Duration) *DnsLruCache {
@@ -212,8 +214,82 @@ func (c *DnsLruCache) Len() int {
 	return int(atomic.LoadInt64(&c.size))
 }
 
-func (c *DnsLruCache) Stats() (hits, misses, staleHits, evictions int64, size int) {
-	return atomic.LoadInt64(&c.hits), atomic.LoadInt64(&c.misses), atomic.LoadInt64(&c.staleHits), atomic.LoadInt64(&c.evictions), c.Len()
+func (c *DnsLruCache) Stats() (hits, misses, staleHits, evictions, promotions int64, size int) {
+	return atomic.LoadInt64(&c.hits), atomic.LoadInt64(&c.misses), atomic.LoadInt64(&c.staleHits), atomic.LoadInt64(&c.evictions), atomic.LoadInt64(&c.promotions), c.Len()
+}
+
+// PromoteWinningIP dynamically adjusts the cached IP list so that the winning IP
+// that established TCP handshake first is moved to index 0, eliminating Happy Eyeballs
+// stagger delay for subsequent connections.
+func (c *DnsLruCache) PromoteWinningIP(host string, winningIP net.IP) bool {
+	if winningIP == nil {
+		return false
+	}
+	norm := NormalizeDomain(host)
+	value, found := c.items.Load(norm)
+	if !found {
+		return false
+	}
+	entry := value.(*DnsCacheEntry)
+	if entry.State != DnsStateValid || len(entry.IPs) <= 1 || entry.IPs[0].Equal(winningIP) {
+		return false
+	}
+
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+
+	current, exists := c.items.Load(norm)
+	if !exists {
+		return false
+	}
+	currentEntry := current.(*DnsCacheEntry)
+	if currentEntry.State != DnsStateValid || len(currentEntry.IPs) <= 1 || currentEntry.IPs[0].Equal(winningIP) {
+		return false
+	}
+
+	targetIdx := -1
+	for i, ip := range currentEntry.IPs {
+		if ip.Equal(winningIP) {
+			targetIdx = i
+			break
+		}
+	}
+	if targetIdx == -1 {
+		return false
+	}
+
+	newIPs := make([]net.IP, 0, len(currentEntry.IPs))
+	newIPs = append(newIPs, currentEntry.IPs[targetIdx])
+	for i, ip := range currentEntry.IPs {
+		if i != targetIdx {
+			newIPs = append(newIPs, ip)
+		}
+	}
+
+	updated := &DnsCacheEntry{
+		Host:          currentEntry.Host,
+		IPs:           newIPs,
+		State:         currentEntry.State,
+		CreatedAt:     currentEntry.CreatedAt,
+		SoftExpiresAt: currentEntry.SoftExpiresAt,
+		HardExpiresAt: currentEntry.HardExpiresAt,
+	}
+	updated.lastAccessNs.Store(currentEntry.lastAccessNs.Load())
+	updated.lastTouchNs.Store(currentEntry.lastTouchNs.Load())
+
+	c.items.Store(norm, updated)
+	atomic.AddInt64(&c.promotions, 1)
+	return true
+}
+
+func (c *DnsLruCache) Flush() {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	c.items.Range(func(key, _ any) bool {
+		c.items.Delete(key)
+		return true
+	})
+	atomic.StoreInt64(&c.size, 0)
 }
 
 // singleflightCall represents an active in-flight DNS query.
@@ -286,18 +362,40 @@ func (g *SingleflightGroup) DoAsync(key string, fn func() ([]net.IP, error)) boo
 type Ipv4PreferResolver struct {
 	resolver *net.Resolver
 	timeout  time.Duration
+	server   string
 }
 
 func NewIpv4PreferResolver(timeout time.Duration) *Ipv4PreferResolver {
+	return NewIpv4PreferResolverWithServer("", timeout)
+}
+
+func NewIpv4PreferResolverWithServer(server string, timeout time.Duration) *Ipv4PreferResolver {
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	return &Ipv4PreferResolver{
-		resolver: &net.Resolver{
+	server = strings.TrimSpace(server)
+	var resolver *net.Resolver
+	if server == "" {
+		resolver = &net.Resolver{
 			PreferGo: true,
-		},
-		timeout: timeout,
+		}
+	} else {
+		resolver = &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, server)
+			},
+		}
 	}
+	return &Ipv4PreferResolver{
+		resolver: resolver,
+		timeout:  timeout,
+		server:   server,
+	}
+}
+
+func (r *Ipv4PreferResolver) PromoteWinningIP(host string, ip net.IP) bool {
+	return false
 }
 
 func (r *Ipv4PreferResolver) Resolve(ctx context.Context, host string) ([]net.IP, error) {
@@ -410,6 +508,14 @@ func (r *CachedDnsResolver) Resolve(ctx context.Context, host string) ([]net.IP,
 	return ips, err
 }
 
-func (r *CachedDnsResolver) CacheStats() (hits, misses, staleHits, evictions int64, size int) {
+func (r *CachedDnsResolver) PromoteWinningIP(host string, ip net.IP) bool {
+	return r.cache.PromoteWinningIP(host, ip)
+}
+
+func (r *CachedDnsResolver) Flush() {
+	r.cache.Flush()
+}
+
+func (r *CachedDnsResolver) CacheStats() (hits, misses, staleHits, evictions, promotions int64, size int) {
 	return r.cache.Stats()
 }

@@ -76,6 +76,8 @@ LinuxWebTool.WebHost            ← ASP.NET Core 组合根 + Routes + MCP 端点
 | `LinuxArch068` | 凭据安全防御：未脱敏明文密码、真实网络地址、隧道 ID、私钥、多字符集香农熵与脱敏合规防伪门禁（结合 .githooks 提交钩子） | xUnit / .githooks/security-gate.cjs |
 | `LinuxArch069` | 微服务 Webview 控制台端口契约对齐与抗覆盖门禁（动态分配端口、防止 18001 硬编码、保留网络配置切面） | xUnit / AST & 文件扫描 |
 | `LinuxArch070` | OpenAI MCP Tunnel 长轮询弹性超时预算（>= 15s）与出站代理规范（socks5h 远程解析与全量环境注入）门禁 | xUnit / Go 源码与契约扫描 |
+| `FE-TOOLBAR-OVERFLOW-SAFETY` | 标签过滤栏防溢出安全门禁（严禁横向滚动容器包裹核心 CTA 按钮，严禁单行未折行控件超载死锁） | frontend-gate.cjs / node --test |
+| `FE-CROSS-MODULE-NAVIGATION` | 跨模块导航适配器与路径/聚焦解耦门禁（文件/目录解构、聚焦提取、事务 Nonce 与多环境分发） | frontend-gate.cjs / node --test |
 
 
 ## 约定要点

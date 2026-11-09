@@ -3,7 +3,25 @@ namespace LinuxWebTool.Contracts.Features.Plugins.Contracts;
 public enum PluginProfile
 {
     Resident = 0,
-    OneShot = 1
+    OneShot = 1,
+    Serverless = 2,
+    Wasm = 3
+}
+
+public enum PluginLifecycle
+{
+    Interpreted = 0,    // 纯解释型脚本 (Python, Node, Bash, Ps)，无需构建
+    PrebuiltBinary = 1, // 预编译分发的二进制 (直接运行 ELF/PE/Wasm)
+    SourceCompiled = 2  // 源码编译型，必须声明 build 契约节点
+}
+
+public enum InterfaceProtocol
+{
+    Http = 0,           // HTTP / REST 端点
+    UnixSocket = 1,     // Unix Domain Socket (UDS) 零端口高吞吐通信
+    StdioJsonRpc = 2,   // 标准输入输出 JSON-RPC 2.0 管道 (MCP / LSP 风格)
+    WasmAbi = 3,        // WebAssembly 内存导出符号
+    CliArgs = 4         // POSIX 命令行参数
 }
 
 public enum PluginRuntime
@@ -14,7 +32,8 @@ public enum PluginRuntime
     Bash = 3,
     PowerShell = 4,
     Native = 5,
-    Go = 6
+    Go = 6,
+    Wasm = 7
 }
 
 public enum PluginState
@@ -27,7 +46,9 @@ public enum PluginState
     Degraded = 5,
     Disabled = 6,
     MissingRuntime = 7,
-    MissingDependencies = 8
+    MissingDependencies = 8,
+    Probing = 9,
+    Draining = 10
 }
 
 public sealed record PluginNetworkConfig
@@ -96,12 +117,33 @@ public sealed record PluginDependencyConfig
 {
     public required string Id { get; init; }
     public required string Name { get; init; }
+    public string Scope { get; init; } = "container";
+    public string Kind { get; init; } = "binary";
+    public string? InstallDocumentationUrl { get; init; }
+    public string ProbeStatus { get; init; } = "Unknown";
     public bool Required { get; init; }
     public bool Recommended { get; init; } = true;
     public string Description { get; init; } = "";
     public PluginDependencyProbeConfig? Probe { get; init; }
     public IReadOnlyDictionary<string, string>? InstallGuide { get; init; }
     public bool IsInstalled { get; init; }
+}
+
+public static class PluginDependencyScopeRules
+{
+    public static string Normalize(string? scope) => scope?.Trim().ToLowerInvariant() switch
+    {
+        null or "" => "container",
+        "container" => "container",
+        "host" => "host",
+        "external" => "external",
+        _ => "unknown"
+    };
+
+    public static bool ShouldProbeInCurrentProcess(string? scope) => Normalize(scope) == "container";
+
+    public static bool BlocksPluginReadiness(string? scope, bool required, bool isInstalled) =>
+        Normalize(scope) == "container" && required && !isInstalled;
 }
 
 [System.Text.Json.Serialization.JsonConverter(typeof(PluginDependenciesJsonConverter))]
@@ -144,6 +186,23 @@ public sealed record PluginManifest
     public IReadOnlyList<PluginDependencyConfig>? OptionalDependencies { get; init; }
     public IReadOnlyDictionary<string, string>? InstallGuide { get; init; }
 
+    // Schema v3.1 通用多维架构核心字段
+    public PluginArchetype? Archetype { get; init; }
+    public PluginLayoutSpec? Layout { get; init; }
+    public PluginBuildSpec? Build { get; init; }
+    public PluginInterfaceSpec? Interface { get; init; }
+    public PluginResourceSpec? Resources { get; init; }
+    public PluginProbeSpec? Probes { get; init; }
+    public IReadOnlyList<string> Permissions { get; init; } = [];
+    public System.Text.Json.JsonElement? ConfigSchema { get; init; }
+    public PluginEventsSpec? Events { get; init; }
+
+    public PluginLifecycle GetEffectiveLifecycle() =>
+        Archetype?.Lifecycle ?? (Profile == PluginProfile.Wasm ? PluginLifecycle.SourceCompiled : (Runtime == PluginRuntime.Go ? PluginLifecycle.SourceCompiled : PluginLifecycle.Interpreted));
+
+    public InterfaceProtocol GetEffectiveProtocol() =>
+        Interface?.Protocol ?? Archetype?.Protocol ?? (Profile == PluginProfile.Wasm ? InterfaceProtocol.WasmAbi : InterfaceProtocol.Http);
+
     public IReadOnlyList<PluginDependencyConfig> GetUnifiedDependencies()
     {
         if (OptionalDependencies != null && OptionalDependencies.Count > 0)
@@ -176,6 +235,8 @@ public sealed record PluginInstanceDto
     public string Id => Manifest.Id;
     public string Name => Manifest.Name;
     public PluginProfile Profile => Manifest.Profile;
+    public PluginLifecycle Lifecycle => Manifest.GetEffectiveLifecycle();
+    public InterfaceProtocol Protocol => Manifest.GetEffectiveProtocol();
     public PluginRuntime Runtime => Manifest.Runtime;
     public bool IsEnabled => Manifest.IsEnabled;
     public PluginState State { get; init; } = PluginState.Stopped;
@@ -207,44 +268,4 @@ public sealed record PluginInstanceDto
     public IReadOnlyList<PluginCustomAction> CustomActions => Manifest.CustomActions;
     public PluginUiConfig? Ui => Manifest.Ui;
     public IReadOnlyList<PluginDependencyConfig> Dependencies { get; init; } = [];
-}
-
-public sealed record PluginAuthDecision
-{
-    public bool IsAllowed { get; init; }
-    public int StatusCode { get; init; } = 200;
-    public string? IdentityName { get; init; }
-    public string? AuthType { get; init; }
-    public string? FailureReason { get; init; }
-    public string? ChallengeHeader { get; init; }
-
-    public static PluginAuthDecision Allowed(string identityName, string authType) =>
-        new() { IsAllowed = true, StatusCode = 200, IdentityName = identityName, AuthType = authType };
-
-    public static PluginAuthDecision Denied(int statusCode, string reason, string? challenge = null) =>
-        new() { IsAllowed = false, StatusCode = statusCode, FailureReason = reason, ChallengeHeader = challenge };
-}
-
-public sealed record PluginPortCheckResult
-{
-    public int Port { get; init; }
-    public bool IsAvailable { get; init; }
-    public string? OccupiedBy { get; init; }
-    public int RecommendedPort { get; init; }
-    public string Message { get; init; } = string.Empty;
-}
-
-public sealed record PluginPortSwitchRequest
-{
-    public int NewPort { get; init; }
-    public bool RestartIfRunning { get; init; } = true;
-}
-
-public sealed record PluginPortSwitchResult
-{
-    public bool Success { get; init; }
-    public int PreviousPort { get; init; }
-    public int NewPort { get; init; }
-    public bool WasRestarted { get; init; }
-    public string Message { get; init; } = string.Empty;
 }

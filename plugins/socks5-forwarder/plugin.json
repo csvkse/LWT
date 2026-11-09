@@ -1,14 +1,36 @@
 {
-  "manifestVersion": 1,
+  "manifestVersion": 3,
   "id": "socks5-forwarder",
   "name": "SOCKS5 客户端边缘中继网关",
   "category": "Network",
   "version": "1.0.0",
   "description": "多端口、多节点 SOCKS5 over WSS 伪装中继网关，为局域网设备提供免客户端加密出海与访问控制",
   "icon": "🌐",
-  "profile": "resident",
-  "runtime": "go",
+  "profile": "Resident",
+  "runtime": "Go",
   "entrypoint": "cmd/socks5-forwarder/main.go",
+  "dependencies": [
+    {
+      "id": "go",
+      "name": "Go 编译与运行时",
+      "scope": "container",
+      "kind": "runner",
+      "required": false,
+      "recommended": true,
+      "description": "从源码编译或执行 Go 插件所需的工具链",
+      "probe": {
+        "command": "go",
+        "args": [
+          "version"
+        ]
+      },
+      "installGuide": {
+        "alpine": "apk add --no-cache go",
+        "debian": "apt update && apt install -y golang-go",
+        "windows": "winget install GoLang.Go"
+      }
+    }
+  ],
   "arguments": [
     "-config",
     "{stateDir}/config.json",
@@ -31,5 +53,79 @@
     "entry": "web",
     "title": "SOCKS5 中继网关控制台",
     "icon": "🌐"
-  }
+  },
+  "archetype": {
+    "profile": "Resident",
+    "lifecycle": "SourceCompiled",
+    "protocol": "Http",
+    "language": "go"
+  },
+  "layout": {
+    "sourceEntry": "cmd/socks5-forwarder/main.go",
+    "targetArtifact": "socks5-forwarder",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "build": {
+    "toolchain": "go",
+    "command": "CGO_ENABLED=0 go build -ldflags \"-s -w\" -o socks5-forwarder ./cmd/socks5-forwarder",
+    "fallbackCommand": "go build -o socks5-forwarder ./cmd/socks5-forwarder",
+    "artifacts": [
+      "socks5-forwarder"
+    ],
+    "watch": [
+      "cmd/**/*.go",
+      "internal/**/*.go"
+    ],
+    "autoCompileOnSave": true,
+    "timeoutSeconds": 120,
+    "cleanTargets": [
+      "socks5-forwarder"
+    ]
+  },
+  "interface": {
+    "protocol": "Http",
+    "endpoint": "http://127.0.0.1:{port}",
+    "healthEndpoint": "/health",
+    "services": {
+      "forwarder-service": {
+        "description": "SOCKS5 流量多路转发服务",
+        "operations": [
+          "status",
+          "routes"
+        ]
+      }
+    }
+  },
+  "resources": {
+    "limits": {
+      "cpu": "500m",
+      "memory": "256Mi",
+      "pids": 50
+    },
+    "requests": {
+      "cpu": "100m",
+      "memory": "64Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "SocketCheck",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "SocketCheck",
+      "timeoutSeconds": 5
+    }
+  },
+  "events": {
+    "publishes": [
+      "forwarder.traffic.routed"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "network:listen",
+    "network:egress"
+  ]
 }

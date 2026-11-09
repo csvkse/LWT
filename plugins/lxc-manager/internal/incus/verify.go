@@ -52,7 +52,7 @@ func (c Client) VerifyCreated(ctx context.Context, spec InstanceSpec, jobID stri
 	if c.HTTP == nil || spec.validate() != nil || !jobIDPattern.MatchString(jobID) {
 		return false, errors.New("invalid verification request")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.Endpoint, "/")+"/1.0/instances/"+spec.Name, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiURL("/1.0/instances/"+spec.Name, nil), nil)
 	if err != nil {
 		return false, err
 	}
@@ -81,5 +81,28 @@ func (c Client) VerifyCreated(ctx context.Context, spec InstanceSpec, jobID stri
 	config := m.Config
 	root := m.Devices["root"]
 	nic := m.Devices["eth0"]
-	return m.Name == spec.Name && m.Type == "container" && config["user.lwt.job"] == jobID && config["security.privileged"] == "false" && config["security.nesting"] == "false" && config["limits.cpu"] == fmt.Sprint(spec.CPU) && config["limits.memory"] == fmt.Sprintf("%dMiB", spec.MemoryMiB) && config["volatile.base_image"] == spec.ImageFingerprint && root["type"] == "disk" && root["path"] == "/" && root["pool"] == spec.StoragePool && root["size"] == fmt.Sprintf("%dGiB", spec.DiskGiB) && nic["type"] == "nic" && nic["network"] == spec.Network, nil
+
+	nicOK := false
+	if strings.HasPrefix(spec.Network, "macvlan:") {
+		parent := strings.TrimPrefix(spec.Network, "macvlan:")
+		nicOK = (nic["type"] == "nic" && nic["nictype"] == "macvlan" && nic["parent"] == parent)
+	} else if strings.HasPrefix(spec.Network, "bridged:") {
+		parent := strings.TrimPrefix(spec.Network, "bridged:")
+		nicOK = (nic["type"] == "nic" && nic["nictype"] == "bridged" && nic["parent"] == parent)
+	} else {
+		nicOK = (nic["type"] == "nic" && (nic["network"] == spec.Network || (nic["network"] == "" && spec.Network == "")))
+	}
+
+	return m.Name == spec.Name && m.Type == "container" &&
+		config["user.lwt.job"] == jobID &&
+		config["security.privileged"] == "false" &&
+		config["security.nesting"] == "false" &&
+		config["limits.cpu"] == fmt.Sprint(spec.CPU) &&
+		config["limits.memory"] == fmt.Sprintf("%dMiB", spec.MemoryMiB) &&
+		config["volatile.base_image"] == spec.ImageFingerprint &&
+		root["type"] == "disk" &&
+		root["path"] == "/" &&
+		root["pool"] == spec.StoragePool &&
+		root["size"] == fmt.Sprintf("%dGiB", spec.DiskGiB) &&
+		nicOK, nil
 }

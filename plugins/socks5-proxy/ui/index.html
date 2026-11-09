@@ -311,6 +311,56 @@
       background: var(--accent);
       color: #000;
     }
+    .dns-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.75rem;
+      margin-top: 10px;
+      margin-bottom: 12px;
+    }
+    .dns-table th, .dns-table td {
+      border: 1px solid var(--border);
+      padding: 6px 10px;
+      text-align: left;
+    }
+    .dns-table th {
+      background: #18181b;
+      color: #a1a1aa;
+      font-weight: 500;
+    }
+    .dns-table td {
+      background: #09090b;
+      font-family: monospace;
+    }
+    .btn-sm {
+      padding: 3px 8px;
+      font-size: 0.7rem;
+      border-radius: 4px;
+    }
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #f87171;
+    }
+    .btn-danger:hover {
+      background: #ef4444;
+      color: #fff;
+    }
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: #e4e4e7;
+      cursor: pointer;
+      user-select: none;
+    }
+    .checkbox-label input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -446,6 +496,101 @@
     <div class="status-msg" id="status-msg"></div>
   </div>
 
+  <!-- 维度四：智能 DNS 聚合分流与 IP 优选 (DNS & IP Acceleration) -->
+  <div class="section-card" style="border-color: rgba(6, 182, 212, 0.4);">
+    <div class="section-title">
+      <span>⚡ 智能 DNS 聚合分流与 IP 优选 (DNS & IP Acceleration)</span>
+      <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border-color: rgba(16, 185, 129, 0.3);">
+        🚀 RFC 8305 胜者置顶加速
+      </span>
+    </div>
+
+    <div style="background: rgba(6, 182, 212, 0.08); border: 1px solid rgba(6, 182, 212, 0.25); border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 0.75rem; color: #a5f3fc; line-height: 1.6;">
+      <div>• <b>首屏加载加速</b>：解决访问 Bilibili、腾讯视频等复杂微前端站点时 30+ 子域名冷启动延迟与 CDN 调度失真。</div>
+      <div>• <b>胜者置顶反馈 (Winning IP Promotion)</b>：将 Happy Eyeballs TCP 建连胜出的最快优质 IP 动态置顶到队首，免去 120ms 阶梯试错惩罚。</div>
+      <div>• <b>多上游并发竞速 (Parallel Racing)</b>：聚合国内权威高速 DNS，首个有效响应胜出并及时取消其余在途查询。</div>
+    </div>
+
+    <!-- 策略开关 -->
+    <div style="display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 14px; background: #18181b; padding: 10px 14px; border-radius: 6px; border: 1px solid var(--border);">
+      <label class="checkbox-label">
+        <input type="checkbox" id="toggle-winning-ip" checked />
+        <span><b>启用胜者 IP 置顶反馈 (Winning IP Promotion)</b> <span style="color: var(--text-muted); font-size: 0.75rem;">(推荐开启，建连胜者置顶)</span></span>
+      </label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="toggle-parallel-racing" checked />
+        <span><b>启用多上游并发竞速 (Parallel Racing)</b> <span style="color: var(--text-muted); font-size: 0.75rem;">(极速返回最快 DNS 响应)</span></span>
+      </label>
+    </div>
+
+    <!-- 基础上游 DNS 聚合池 -->
+    <div class="form-group">
+      <label>全局基础上游 DNS 聚合池 (逗号分隔，留空则使用容器系统 DNS):</label>
+      <div style="display: flex; gap: 8px;">
+        <input type="text" id="input-dns-upstreams" placeholder="例如: 223.5.5.5:53, 119.29.29.29:53 或留空" style="flex: 1;" />
+        <button type="button" class="btn btn-secondary" onclick="applyDnsUpstreamPreset('ali-tx')">🇨🇳 阿里+腾讯</button>
+        <button type="button" class="btn btn-secondary" onclick="applyDnsUpstreamPreset('clear')">清空 (系统默认)</button>
+      </div>
+      <div class="tip">当未命中任何域名分流规则时，由该聚合池内的上游 DNS 并发竞速解析。</div>
+    </div>
+
+    <!-- 域名分流加速规则表 -->
+    <div class="form-group" style="margin-bottom: 6px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
+        <label style="margin-bottom: 0;">域名分流加速规则表 (最长后缀优先匹配):</label>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="applyDomesticVideoPreset()" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);">
+          ⚡ 一键载入国内主流视频/富媒体预设 (Bilibili/Hdslb/QQ/Youku/iQiyi)
+        </button>
+      </div>
+      <table class="dns-table" id="dns-rules-table">
+        <thead>
+          <tr>
+            <th style="width: 25%;">域名后缀 (Suffix)</th>
+            <th style="width: 45%;">目标 DNS 服务器 (Servers, 逗号分隔)</th>
+            <th style="width: 15%;">软/硬 TTL</th>
+            <th style="width: 15%;">操作</th>
+          </tr>
+        </thead>
+        <tbody id="dns-rules-tbody">
+          <!-- 动态渲染 -->
+        </tbody>
+      </table>
+
+      <!-- 添加新规则 -->
+      <div style="display: grid; grid-template-columns: 2fr 3fr 1.5fr auto; gap: 8px; align-items: center; background: #18181b; padding: 8px; border-radius: 6px; border: 1px dashed var(--border);">
+        <input type="text" id="new-rule-suffix" placeholder="后缀，如 bilibili.com 或 *" style="padding: 6px 8px; font-size: 0.75rem;" />
+        <input type="text" id="new-rule-servers" placeholder="上游，如 223.5.5.5:53, 119.29.29.29:53" style="padding: 6px 8px; font-size: 0.75rem;" />
+        <input type="text" id="new-rule-ttl" placeholder="5m,15m" value="5m,15m" style="padding: 6px 8px; font-size: 0.75rem;" />
+        <button type="button" class="btn btn-primary btn-sm" onclick="addNewDnsRule()" style="white-space: nowrap;">➕ 添加规则</button>
+      </div>
+    </div>
+
+    <!-- 实时加速统计看板 -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 14px; margin-bottom: 14px;">
+      <div style="background: #18181b; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;">
+        <div style="font-size: 0.7rem; color: var(--text-muted);">DNS 缓存命中</div>
+        <div id="dns-stat-hits" style="font-size: 1.1rem; font-weight: 600; color: #34d399;">0</div>
+      </div>
+      <div style="background: #18181b; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;">
+        <div style="font-size: 0.7rem; color: var(--text-muted);">胜者置顶加速频次</div>
+        <div id="dns-stat-promotions" style="font-size: 1.1rem; font-weight: 600; color: #38bdf8;">0</div>
+      </div>
+      <div style="background: #18181b; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;">
+        <div style="font-size: 0.7rem; color: var(--text-muted);">软过期异步预刷新</div>
+        <div id="dns-stat-stale" style="font-size: 1.1rem; font-weight: 600; color: #fbbf24;">0</div>
+      </div>
+      <div style="background: #18181b; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;">
+        <div style="font-size: 0.7rem; color: var(--text-muted);">活跃规则总数</div>
+        <div id="dns-stat-rules" style="font-size: 1.1rem; font-weight: 600; color: #a78bfa;">0</div>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btn-save-dns" onclick="saveAcl()">💾 保存全部策略并重启生效</button>
+      <button class="btn btn-secondary" onclick="clearDnsRules()">清空分流规则</button>
+    </div>
+  </div>
+
   <!-- HTTP/TLS 伪装隧道与跨网穿透 (Ingress Camouflage Tunnel) -->
   <div class="section-card" style="border-color: rgba(168, 85, 247, 0.4);">
     <div class="section-title" style="color: #c084fc;">
@@ -518,6 +663,111 @@
     let activePreset = 'all';
     let currentAuthMode = 'none';
     let currentHost = '';
+    let currentDnsRules = [];
+
+    const DOMESTIC_VIDEO_RULES = [
+      { suffix: "bilibili.com", servers: ["223.5.5.5:53", "119.29.29.29:53"], softTtl: "5m", hardTtl: "15m" },
+      { suffix: "hdslb.com", servers: ["223.5.5.5:53", "119.29.29.29:53"], softTtl: "5m", hardTtl: "15m" },
+      { suffix: "bilivideo.com", servers: ["223.5.5.5:53", "119.29.29.29:53"], softTtl: "5m", hardTtl: "15m" },
+      { suffix: "bilivideo.cn", servers: ["223.5.5.5:53", "119.29.29.29:53"], softTtl: "5m", hardTtl: "15m" },
+      { suffix: "qq.com", servers: ["119.29.29.29:53", "223.5.5.5:53"], softTtl: "5m", hardTtl: "15m" },
+      { suffix: "youku.com", servers: ["223.5.5.5:53", "119.29.29.29:53"], softTtl: "5m", hardTtl: "15m" },
+      { suffix: "iqiyi.com", servers: ["223.5.5.5:53", "119.29.29.29:53"], softTtl: "5m", hardTtl: "15m" }
+    ];
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/[&<>'"]/g, tag => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        "'": '&#39;',
+        '"': '&quot;'
+      }[tag] || tag));
+    }
+
+    function renderDnsRulesTable() {
+      const tbody = document.getElementById('dns-rules-tbody');
+      if (!tbody) return;
+      tbody.innerHTML = '';
+      if (!currentDnsRules || currentDnsRules.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 12px;">暂无分流规则，点击上方预设按钮可一键载入国内主流视频规则包</td></tr>';
+        const ruleCountEl = document.getElementById('dns-stat-rules');
+        if (ruleCountEl) ruleCountEl.textContent = '0';
+        return;
+      }
+      currentDnsRules.forEach((rule, idx) => {
+        const tr = document.createElement('tr');
+        const serversText = Array.isArray(rule.servers) ? rule.servers.join(', ') : (rule.server || '');
+        const ttlText = (rule.softTtl || '3m') + ' / ' + (rule.hardTtl || '10m');
+        tr.innerHTML = `
+          <td style="color: #38bdf8; font-weight: 500;">${escapeHtml(rule.suffix)}</td>
+          <td>${escapeHtml(serversText)}</td>
+          <td style="color: var(--text-muted);">${escapeHtml(ttlText)}</td>
+          <td><button type="button" class="btn btn-danger btn-sm" onclick="removeDnsRule(${idx})">🗑️ 删除</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+      const ruleCountEl = document.getElementById('dns-stat-rules');
+      if (ruleCountEl) ruleCountEl.textContent = String(currentDnsRules.length);
+    }
+
+    function removeDnsRule(index) {
+      if (index >= 0 && index < currentDnsRules.length) {
+        currentDnsRules.splice(index, 1);
+        renderDnsRulesTable();
+      }
+    }
+
+    function addNewDnsRule() {
+      const suffix = document.getElementById('new-rule-suffix').value.trim();
+      const serversRaw = document.getElementById('new-rule-servers').value.trim();
+      const ttlRaw = document.getElementById('new-rule-ttl').value.trim();
+      if (!suffix) {
+        setStatus('请输入合法的域名后缀 (如 bilibili.com)', false);
+        return;
+      }
+      if (!serversRaw) {
+        setStatus('请输入至少一个上游 DNS 服务器 (如 223.5.5.5:53)', false);
+        return;
+      }
+      const servers = serversRaw.split(',').map(s => s.trim()).filter(Boolean);
+      let softTtl = '5m';
+      let hardTtl = '15m';
+      if (ttlRaw) {
+        const parts = ttlRaw.split(/[,/]/).map(s => s.trim()).filter(Boolean);
+        if (parts.length >= 1) softTtl = parts[0];
+        if (parts.length >= 2) hardTtl = parts[1];
+      }
+      currentDnsRules.push({ suffix, servers, softTtl, hardTtl });
+      document.getElementById('new-rule-suffix').value = '';
+      document.getElementById('new-rule-servers').value = '';
+      renderDnsRulesTable();
+      setStatus(`已添加分流规则: ${suffix}`, true);
+    }
+
+    function applyDomesticVideoPreset() {
+      currentDnsRules = JSON.parse(JSON.stringify(DOMESTIC_VIDEO_RULES));
+      document.getElementById('input-dns-upstreams').value = '223.5.5.5:53, 119.29.29.29:53';
+      document.getElementById('toggle-winning-ip').checked = true;
+      document.getElementById('toggle-parallel-racing').checked = true;
+      renderDnsRulesTable();
+      setStatus('⚡ 已载入国内主流视频/富媒体推荐规则包，点击保存并重启即可生效！', true);
+    }
+
+    function clearDnsRules() {
+      currentDnsRules = [];
+      renderDnsRulesTable();
+      setStatus('分流规则列表已清空', true);
+    }
+
+    function applyDnsUpstreamPreset(preset) {
+      if (preset === 'ali-tx') {
+        document.getElementById('input-dns-upstreams').value = '223.5.5.5:53, 119.29.29.29:53';
+      } else {
+        document.getElementById('input-dns-upstreams').value = '';
+      }
+    }
 
     function setStatus(msg, ok) {
       const el = document.getElementById('status-msg');
@@ -840,8 +1090,23 @@ LWT-Camouflage = socks5, ${host}, ${hostPort}, ${authPart ? authPart : ''}ws=tru
             if (args[i] === '--password' && args[i+1]) {
               document.getElementById('input-password').value = args[i+1];
             }
+            if (args[i] === '--dns-upstreams' && args[i+1]) {
+              document.getElementById('input-dns-upstreams').value = args[i+1];
+            }
+            if (args[i] === '--dns-rules' && args[i+1]) {
+              try {
+                currentDnsRules = JSON.parse(args[i+1]);
+              } catch (_) {}
+            }
+            if (args[i] === '--enable-winning-ip-promote' && args[i+1]) {
+              document.getElementById('toggle-winning-ip').checked = (args[i+1] === 'true');
+            }
+            if (args[i] === '--enable-parallel-racing' && args[i+1]) {
+              document.getElementById('toggle-parallel-racing').checked = (args[i+1] === 'true');
+            }
           }
         }
+        renderDnsRulesTable();
         if (!hasPresetArg) {
           applyPreset('all');
         }
@@ -880,6 +1145,11 @@ LWT-Camouflage = socks5, ${host}, ${hostPort}, ${authPart ? authPart : ''}ws=tru
           return;
         }
 
+        const dnsUpstreams = document.getElementById('input-dns-upstreams')?.value.trim() || '';
+        const dnsRulesStr = currentDnsRules.length > 0 ? JSON.stringify(currentDnsRules) : '';
+        const enableWinningIp = document.getElementById('toggle-winning-ip')?.checked ? 'true' : 'false';
+        const enableRacing = document.getElementById('toggle-parallel-racing')?.checked ? 'true' : 'false';
+
         const newArgs = [
           '--listen', '0.0.0.0:{port}',
           '--auth-mode', authMode,
@@ -888,7 +1158,11 @@ LWT-Camouflage = socks5, ${host}, ${hostPort}, ${authPart ? authPart : ''}ws=tru
           '--acl-preset', preset,
           '--allowed-subnets', subnets,
           '--allowed-domains', domains,
-          '--allowed-clients', clients
+          '--allowed-clients', clients,
+          '--dns-upstreams', dnsUpstreams,
+          '--dns-rules', dnsRulesStr,
+          '--enable-winning-ip-promote', enableWinningIp,
+          '--enable-parallel-racing', enableRacing
         ];
 
         const existingNetwork = currentManifest?.network || {

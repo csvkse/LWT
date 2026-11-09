@@ -27,6 +27,8 @@ docs_secret/
 /plugins/socks5-proxy/socks5-proxy.exe
 /plugins/socks5-forwarder/socks5-forwarder
 /plugins/socks5-forwarder/socks5-forwarder.exe
+/plugins/lxc-manager/lxc-manager
+/plugins/lxc-manager/lxc-manager.exe
 dist/
 *.zip
 __pycache__/

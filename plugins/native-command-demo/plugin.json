@@ -1,16 +1,74 @@
 {
-  "manifestVersion": 1,
+  "manifestVersion": 3,
   "id": "native-command-demo",
   "name": "原生命令扩展演示",
   "category": "System",
   "version": "1.0.0",
   "description": "免解释器原生可执行文件与系统命令直接调用执行演示",
   "icon": "⚡",
-  "profile": "oneshot",
-  "runtime": "native",
+  "profile": "OneShot",
+  "runtime": "Native",
   "entrypoint": "uname",
   "source": "system",
+  "dependencies": [],
   "customActions": [
-    { "action": "info", "label": "系统信息", "icon": "💻" }
+    {
+      "action": "info",
+      "label": "系统信息",
+      "icon": "💻"
+    }
+  ],
+  "archetype": {
+    "profile": "OneShot",
+    "lifecycle": "PrebuiltBinary",
+    "protocol": "CliArgs",
+    "language": "native"
+  },
+  "interface": {
+    "protocol": "CliArgs",
+    "services": {
+      "native-cmd": {
+        "description": "原生系统指令安全包装器",
+        "operations": [
+          "status"
+        ]
+      }
+    }
+  },
+  "layout": {
+    "sourceEntry": "/bin/ls",
+    "targetArtifact": "/bin/ls",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "resources": {
+    "limits": {
+      "cpu": "100m",
+      "memory": "32Mi",
+      "pids": 10
+    },
+    "requests": {
+      "cpu": "50m",
+      "memory": "16Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "ExecCheck",
+      "timeoutSeconds": 2
+    },
+    "readiness": {
+      "type": "ExecCheck",
+      "timeoutSeconds": 2
+    }
+  },
+  "events": {
+    "publishes": [
+      "native.command.completed"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "process:execute"
   ]
 }

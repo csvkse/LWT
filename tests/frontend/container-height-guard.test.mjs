@@ -121,3 +121,33 @@ test('CONTAINER-GUARD-05: 生产全站代码健康度校验：所有前端模板
     `生产环境应无违规列表容器，但检测到: ${JSON.stringify(prodViolations, null, 2)}`
   );
 });
+
+test('CONTAINER-GUARD-06: 全局样式表与长列表视口必须严格声明 scrollbar-gutter: stable 锁定轨道，防止横向跳动', () => {
+  const cssPath = path.resolve('src/LinuxWebTool.WebHost/wwwroot/app/style.css');
+  assert.ok(fs.existsSync(cssPath), 'style.css 必须存在');
+  const cssContent = fs.readFileSync(cssPath, 'utf8');
+
+  assert.ok(
+    cssContent.includes('scrollbar-gutter: stable'),
+    'style.css 必须声明 scrollbar-gutter: stable 锁定滚动条槽位'
+  );
+  assert.ok(
+    cssContent.includes('overflow-y: scroll'),
+    'style.css 必须声明 html 容器 overflow-y: scroll 作为向下兼容兜底'
+  );
+  assert.match(
+    cssContent,
+    /\.list-viewport\s*\{[^}]*scrollbar-gutter:\s*stable/s,
+    '.list-viewport 必须声明 scrollbar-gutter: stable 防止局部列表跳动'
+  );
+});
+
+test('CONTAINER-GUARD-07: PluginsView 加载占位必须具备视口保底高度 min-h-[45vh] 杜绝视口断崖塌缩', () => {
+  const pluginsViewPath = path.resolve('src/LinuxWebTool.WebHost/wwwroot/app/views/PluginsView.js');
+  const content = fs.readFileSync(pluginsViewPath, 'utf8');
+
+  assert.ok(
+    content.includes('min-h-[45vh]'),
+    'PluginsView 加载骨架/占位面板必须包含 min-h-[45vh] 视口保底高度'
+  );
+});

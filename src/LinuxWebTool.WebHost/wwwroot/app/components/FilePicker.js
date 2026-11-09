@@ -5,7 +5,7 @@ import { toast } from '../store/toast.js';
 import { buildFileBreadcrumbs, inferExcludeRuleOptions } from '../utils/filePaths.js';
 
 // 文件/文件夹选择器弹窗：浏览服务器目录并返回所选路径。
-// mode='file' 可选中文件；mode='folder' 可选当前目录；mode='exclude' 连续点选排除规则。复用 /api/Files 列表。
+// mode='file' 可选中文件；mode='folder' 可选当前目录；mode='any' 可选文件或文件夹；mode='exclude' 连续点选排除规则。复用 /api/Files 列表。
 export default defineComponent({
   name: 'FilePicker',
   props: {
@@ -14,10 +14,14 @@ export default defineComponent({
     startPath: { type: String, default: '/' },
     basePath: { type: String, default: '' },
     title: { type: String, default: '' },
+    target: { type: String, default: 'container' }, // 'container' | 'host'
+    allowTargetSwitch: { type: Boolean, default: true },
   },
   emits: ['select', 'close', 'select-exclude'],
   setup(props, { emit }) {
     const currentPath = ref(props.startPath || '/');
+    const currentTarget = ref(props.target || 'container');
+    const isPrivilegedContainer = ref(false);
     const entries = ref([]);
     const loading = ref(false);
     const error = ref('');
@@ -26,11 +30,14 @@ export default defineComponent({
     const virtualRoot = ref(false);
     const excludeRuleModal = ref(null); // { entry, info, selectedPattern }
 
-    async function load(target = currentPath.value) {
+    async function load(targetPath = currentPath.value) {
       loading.value = true;
       error.value = '';
       try {
-        const result = await http(API.files.list, { method: 'GET', params: { path: target } });
+        const result = await http(API.files.list, {
+          method: 'GET',
+          params: { path: targetPath, target: currentTarget.value }
+        });
         if (result.ok && result.data && Array.isArray(result.data.entries)) {
           entries.value = result.data.entries;
           currentPath.value = result.data.path;
@@ -47,8 +54,16 @@ export default defineComponent({
       }
     }
 
+    async function switchTarget(t) {
+      if (currentTarget.value === t) return;
+      currentTarget.value = t;
+      currentPath.value = '/';
+      await load('/');
+    }
+
     watch(() => props.show, (val) => {
       if (val) {
+        currentTarget.value = props.target || 'container';
         currentPath.value = props.startPath || '/';
         load(currentPath.value);
       }
@@ -58,6 +73,12 @@ export default defineComponent({
       if (val && props.show) {
         currentPath.value = val;
         load(val);
+      }
+    });
+
+    watch(() => props.target, (val) => {
+      if (val) {
+        currentTarget.value = val;
       }
     });
 
@@ -84,7 +105,7 @@ export default defineComponent({
     }
 
     function pickDir(entry) {
-      emit('select', entry.path);
+      emit('select', entry.path, currentTarget.value);
       selectedFile.value = '';
       currentPath.value = props.startPath;
     }
@@ -110,14 +131,14 @@ export default defineComponent({
       if (loading.value || error.value || (virtualRoot.value && !selectedFile.value)) return;
       if (props.mode === 'file') {
         if (!selectedFile.value) return toast.error('请选择一个文件');
-        emit('select', selectedFile.value);
+        emit('select', selectedFile.value, currentTarget.value);
         return;
       }
       if (props.mode === 'any') {
         if (selectedFile.value) {
-          emit('select', selectedFile.value);
+          emit('select', selectedFile.value, currentTarget.value);
         } else {
-          emit('select', currentPath.value);
+          emit('select', currentPath.value, currentTarget.value);
         }
         return;
       }
@@ -125,7 +146,7 @@ export default defineComponent({
         close();
         return;
       }
-      emit('select', currentPath.value);
+      emit('select', currentPath.value, currentTarget.value);
     }
 
     function close() {
@@ -150,12 +171,20 @@ export default defineComponent({
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
     }
 
-    onMounted(() => {
+    onMounted(async () => {
+      try {
+        const envRes = await http(API.services.environment, { method: 'GET' }).catch(() => null);
+        if (envRes && envRes.ok && envRes.data) {
+          isPrivilegedContainer.value = envRes.data.isPrivilegedContainer === true;
+        }
+      } catch {}
+
       if (props.show) load();
     });
 
     return {
-      currentPath, entries, loading, error, selectedFile, breadcrumbs, virtualRoot,
+      currentPath, currentTarget, isPrivilegedContainer, switchTarget,
+      entries, loading, error, selectedFile, breadcrumbs, virtualRoot,
       excludeRuleModal,
       load, goPath, goUp, openEntry, confirmSelect, close, pickFile, pickDir,
       openExcludeMenu, confirmAddExclude, formatBytes, formatTime,
@@ -168,7 +197,31 @@ export default defineComponent({
           <h3 class="font-display text-base text-neon-soft shrink-0">
             {{ title || (mode === 'file' ? '选择文件' : mode === 'any' ? '选择文件 / 文件夹' : mode === 'exclude' ? '点选目录/文件添加排除规则' : '选择文件夹') }}
           </h3>
-          <span class="text-xs text-slate-500 ml-2 truncate min-w-0 flex-1" :title="currentPath">{{ currentPath }}</span>
+
+          <!-- 仅在特权容器环境中显示目标环境切换 -->
+          <div v-if="allowTargetSwitch && isPrivilegedContainer" class="flex items-center bg-slate-900 border border-slate-700/60 rounded p-0.5 text-xs ml-2">
+            <button 
+              type="button"
+              class="px-2 py-0.5 rounded transition-colors flex items-center gap-1 font-medium"
+              :class="currentTarget === 'container' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'"
+              @click="switchTarget('container')"
+            >
+              <span>📦 容器</span>
+            </button>
+            <button 
+              type="button"
+              class="px-2 py-0.5 rounded transition-colors flex items-center gap-1 font-medium"
+              :class="currentTarget === 'host' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'text-slate-400 hover:text-slate-200'"
+              @click="switchTarget('host')"
+            >
+              <span>🖥️ 宿主</span>
+            </button>
+          </div>
+
+          <span class="text-xs text-slate-500 ml-2 truncate min-w-0 flex-1" :title="currentPath">
+            <span v-if="currentTarget === 'host'" class="text-amber-400 font-mono mr-1">[宿主]</span>
+            {{ currentPath }}
+          </span>
           <button class="btn btn-xs ml-auto shrink-0" @click="close()">✕</button>
         </div>
 
@@ -209,6 +262,7 @@ export default defineComponent({
                   <div class="flex items-center gap-1.5 min-w-0">
                     <span class="shrink-0">{{ entry.isDirectory ? '📁' : '📄' }}</span>
                     <span class="font-mono text-xs truncate" :class="entry.isDirectory ? 'text-cyan-300/80' : 'text-slate-300'">{{ entry.name }}</span>
+                    <span v-if="entry.isSymlink" class="badge !border-slate-600/40 text-slate-400 !text-[0.6rem] !py-0 !px-1 shrink-0">🔗</span>
                   </div>
                 </td>
                 <td class="text-xs text-slate-500 whitespace-nowrap">{{ entry.isDirectory ? '—' : formatBytes(entry.size) }}</td>
@@ -231,7 +285,9 @@ export default defineComponent({
         </div>
 
         <div class="flex items-center justify-end gap-2 mt-4">
-          <span v-if="(mode === 'file' || mode === 'any') && selectedFile" class="text-xs text-emerald-300 truncate min-w-0 flex-1 mr-2" :title="selectedFile">{{ selectedFile }}</span>
+          <span v-if="(mode === 'file' || mode === 'any') && selectedFile" class="text-xs text-emerald-300 truncate min-w-0 flex-1 mr-2" :title="selectedFile">
+            <span v-if="currentTarget === 'host'" class="text-amber-400 font-mono mr-1">[宿主]</span>{{ selectedFile }}
+          </span>
           <span v-else-if="mode === 'exclude'" class="text-xs text-slate-400 truncate min-w-0 flex-1 mr-2">可连续点击行右侧「＋ 排除」添加多条规则</span>
           <button class="btn shrink-0" @click="close()">{{ mode === 'exclude' ? '完成' : '取消' }}</button>
           <button v-if="mode !== 'exclude'" class="btn btn-primary shrink-0"
@@ -261,14 +317,15 @@ export default defineComponent({
                    :class="{ 'border-cyan-400 bg-cyan-950/20': excludeRuleModal.selectedPattern === opt.pattern }">
               <input type="radio" name="exclude_rule_option" :value="opt.pattern" v-model="excludeRuleModal.selectedPattern" class="mt-0.5" />
               <div class="min-w-0 flex-1">
-                <div class="font-mono text-xs text-neon-soft font-semibold">{{ opt.pattern }}</div>
+                <div class="font-mono text-xs text-cyan-300 font-medium break-all">{{ opt.pattern }}</div>
                 <div class="text-[11px] text-slate-400 mt-0.5">{{ opt.description }}</div>
               </div>
             </label>
           </div>
           <div class="flex justify-end gap-2">
             <button class="btn btn-xs" @click="excludeRuleModal = null">取消</button>
-            <button class="btn btn-xs btn-primary bg-rose-600/80 hover:bg-rose-500 border-rose-400 text-white" @click="confirmAddExclude()">
+            <button class="btn btn-xs btn-primary" :disabled="!excludeRuleModal.selectedPattern"
+                    @click="confirmAddExclude()">
               确认添加
             </button>
           </div>

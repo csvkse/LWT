@@ -27,6 +27,10 @@
  *  FE-PLUGIN-FILTER-FSM 插件中心策略模式多维过滤、有限状态机与暗黑搜索框契约行为门禁
  *  FE-PLUGIN-FILE-TREE 插件代码编辑文件树适配器与折叠状态机行为门禁（树状展开/折叠、Folders-First 排序与祖先自动聚焦）
  *  FE-PLUGIN-GATEWAY-FALLBACK 插件网关与页面 URL 必须通过 PluginUrlResolver 解析，禁止组件裸读 gatewayUrl 造成坏死
+ *  FE-NO-HARDCODED-NETWORK-MOCK 插件与组件生产视图中禁止硬编码静态私网 IP 与假数据，确保运行时元数据由后端 API 动态驱动
+ *  FE-TOOLBAR-OVERFLOW-SAFETY 禁止在带横向滚动的 overflow-x-auto 容器内直接放置核心 CTA 按钮，且禁止单行不可折行工具栏控件超载死锁
+ *  FE-SCROLLBAR-STABILITY CSS 核心样式必须声明 scrollbar-gutter: stable 与 overflow-y: scroll 锁定视口槽位，根治长列表加载横向跳动
+ *  FE-CROSS-MODULE-NAVIGATION 跨模块导航适配器与路径/聚焦解耦门禁（文件/目录解构、聚焦提取、事务 Nonce 与多环境分发）
  *
  * 基线：frontend-gate-baseline.json 冻结存量债务，只允许删除条目，不允许新增。
  */
@@ -248,6 +252,18 @@ for (const file of files) {
     }
   }
 
+  if (file.endsWith('.css')) {
+    // FE-SCROLLBAR-STABILITY: 全局样式必须具备 scrollbar-gutter: stable 与 overflow-y: scroll，杜绝视口宽度突变跳动
+    if (path.basename(file) === 'style.css') {
+      if (!content.includes('scrollbar-gutter: stable')) {
+        add('FE-SCROLLBAR-STABILITY', file, 'style.css 必须声明 scrollbar-gutter: stable 锁定滚动条槽位，杜绝长列表加载横向抖动');
+      }
+      if (!content.includes('overflow-y: scroll')) {
+        add('FE-SCROLLBAR-STABILITY', file, 'style.css 必须声明 html 容器 overflow-y: scroll 作为向下兼容兜底');
+      }
+    }
+  }
+
   if (file.endsWith('.js')) {
     // FE-API-OWNERSHIP
     if (!rel.endsWith('config.js') && /["'`]\/api\//.test(content)) {
@@ -442,6 +458,35 @@ for (const file of files) {
         }
       }
 
+      // FE-TOOLBAR-OVERFLOW-SAFETY：工具栏与容器防溢出安全门禁
+      // 1. 核心行动入口（btn-primary，新建/导入/创建/添加）严禁直接置于 overflow-x-auto 的横向截断容器内
+      const overflowAutoBlocks = tpl.matchAll(/<([a-z0-9-]+)\b[^>]*?class\s*=\s*["']([^"']*?\boverflow-x-auto\b[^"']*)["'][^>]*>([\s\S]*?)<\/\1>/gi);
+      for (const [, , , innerHtml] of overflowAutoBlocks) {
+        if (/\bbtn-primary\b/.test(innerHtml) && /\b(?:新建|创建|导入|添加|保存|提交)\b/.test(innerHtml)) {
+          add(
+            'FE-TOOLBAR-OVERFLOW-SAFETY',
+            file,
+            '在声明了 "overflow-x-auto" 的横向滚动容器内检测到核心 CTA 按钮（btn-primary）。关键操作按钮严禁置于横向溢出容器内，必须提升至稳定层级，防止被滚动截断吞没'
+          );
+        }
+      }
+
+      // 2. 检查单行 flex 容器元素超载与 shrink-0 死锁（无 flex-wrap 且存在固定宽控件与 shrink-0 超载）
+      const flexBlocks = tpl.matchAll(/<div\b[^>]*?class\s*=\s*["']([^"']*?\bflex\b[^"']*?\b(?:flex-nowrap|xl:flex-row)\b[^"']*)["'][^>]*>([\s\S]*?)<\/div>/gi);
+      for (const [, cls, innerHtml] of flexBlocks) {
+        if (!/\bflex-wrap\b/.test(cls)) {
+          const fixedWidthControls = (innerHtml.match(/\bw-(?:24|28|32|36|40|48)\b/g) || []).length;
+          const shrinkZeroButtons = (innerHtml.match(/\bshrink-0\b/g) || []).length;
+          if (fixedWidthControls >= 4 && shrinkZeroButtons >= 4) {
+            add(
+              'FE-TOOLBAR-OVERFLOW-SAFETY',
+              file,
+              `检测到单行工具栏潜在的宽度超载死锁（${fixedWidthControls} 个固定宽控件 + ${shrinkZeroButtons} 个 shrink-0 子项处于单行不可折行容器内），极易在主流屏幕下溢出截断，请采用双层语义解耦或声明 flex-wrap`
+            );
+          }
+        }
+      }
+
       // FE-CONTAINER-HEIGHT-LIMIT：前端列表容器显示门禁（禁止无界无限长度列表，必须有逻辑高度限制或分页切片）
       const forMatches = tpl.matchAll(/<([a-z0-9-]+)\b([^>]*?v-for\s*=\s*["']([^"']+)["'][^>]*)>/gi);
       for (const match of forMatches) {
@@ -620,6 +665,26 @@ for (const file of files) {
   }
 }
 
+// FE-NO-HARDCODED-NETWORK-MOCK：禁止在生产视图代码中硬编码私网 IP 或测试伪数据（如 10.0.3.15），所有网络运行时元数据必须由后端 API 动态驱动
+const FORBIDDEN_MOCK_IPS = [
+  /10\.0\.3\.15/,
+  /192\.168\.1\.100/
+];
+const lxcUiDir = path.resolve(__dirname, '../../../../plugins/lxc-manager/ui');
+if (fs.existsSync(lxcUiDir)) {
+  for (const entry of fs.readdirSync(lxcUiDir)) {
+    if (/\.(js|html)$/.test(entry)) {
+      const filePath = path.join(lxcUiDir, entry);
+      const content = fs.readFileSync(filePath, 'utf8');
+      for (const pattern of FORBIDDEN_MOCK_IPS) {
+        if (pattern.test(content)) {
+          add('FE-NO-HARDCODED-NETWORK-MOCK', filePath, `检测到硬编码测试私网伪数据 ${pattern}，必须由后端 Discovery 动态提供`);
+        }
+      }
+    }
+  }
+}
+
 // 基线比对
 const baseline = readBaseline();
 const baselineSet = new Set();
@@ -733,4 +798,26 @@ if (urlResolverResult.error || urlResolverResult.status !== 0) {
   process.exit(1);
 }
 console.log('✅ FE-PLUGIN-URL-RESOLVER：插件多维 URL 解析器与策略仲裁门禁通过');
+
+const toolbarTests = path.resolve(__dirname, '../../../tests/frontend/toolbar-overflow-and-responsive.test.mjs');
+const toolbarResult = spawnSync(process.execPath, ['--experimental-vm-modules', '--test', toolbarTests], {
+  encoding: 'utf8', timeout: 30000, windowsHide: true,
+});
+if (toolbarResult.error || toolbarResult.status !== 0) {
+  console.error('[FE-TOOLBAR-OVERFLOW-SAFETY] 标签过滤栏防溢出与响应式行为门禁失败');
+  console.error(toolbarResult.stdout || toolbarResult.stderr || toolbarResult.error?.message);
+  process.exit(1);
+}
+console.log('✅ FE-TOOLBAR-OVERFLOW-SAFETY：标签过滤栏防溢出与响应式行为门禁通过');
+const navTests = path.resolve(__dirname, '../../../tests/frontend/cross-module-navigation.test.mjs');
+const navResult = spawnSync(process.execPath, ['--experimental-vm-modules', '--test', navTests], {
+  encoding: 'utf8', timeout: 30000, windowsHide: true,
+});
+if (navResult.error || navResult.status !== 0) {
+  console.error('[FE-CROSS-MODULE-NAVIGATION] 跨模块导航适配器与路径/聚焦解耦门禁失败');
+  console.error(navResult.stdout || navResult.stderr || navResult.error?.message);
+  process.exit(1);
+}
+console.log('✅ FE-CROSS-MODULE-NAVIGATION：跨模块导航适配器与路径/聚焦解耦门禁通过');
+
 console.log('✅ 前端架构门禁通过');

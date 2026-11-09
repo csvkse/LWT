@@ -24,6 +24,10 @@ public sealed partial class PluginManager : IPluginManager, IHostedService
     private readonly PluginPortManager _portManager = new();
     private readonly ResidentExecutionStrategy _residentStrategy = new();
     private readonly OneShotExecutionStrategy _oneShotStrategy = new();
+    private readonly ServerlessExecutionStrategy _serverlessStrategy = new();
+    private readonly WasmMicroFunctionStrategy _wasmStrategy = new();
+    private readonly LinuxWebTool.Infrastructure.Features.Plugins.Build.PluginBuildManager _buildManager = new();
+    private readonly LinuxWebTool.Infrastructure.Features.Plugins.Broker.PluginBroker _broker = new();
 
     public event Action? OnPluginStateOrManifestChanged;
 
@@ -64,6 +68,7 @@ public sealed partial class PluginManager : IPluginManager, IHostedService
         RegisterAdapter(new PowerShellRuntimeAdapter());
         RegisterAdapter(new NativeRuntimeAdapter());
         RegisterAdapter(new GoRuntimeAdapter());
+        RegisterAdapter(new WasmRuntimeAdapter());
 
         EnsureDirectoryExists();
         EnsureDefaultPluginsCreated();
@@ -141,7 +146,9 @@ public sealed partial class PluginManager : IPluginManager, IHostedService
         if (!PluginSecurityGuard.IsValidPluginId(id)) return (false, "非法插件 ID");
 
         var dir = Path.Combine(_pluginsRoot, id);
-        var manifestPath = Path.Combine(dir, "plugin.json");
+        var effectiveDir = Supervisor.PluginRevisionManager.ResolveEffectiveDirectory(dir);
+        var manifestPath = Path.Combine(effectiveDir, "plugin.json");
+        if (!File.Exists(manifestPath)) manifestPath = Path.Combine(dir, "plugin.json");
         if (!File.Exists(manifestPath)) return (false, "插件清单不存在");
 
         var json = await File.ReadAllTextAsync(manifestPath, ct);
@@ -164,7 +171,7 @@ public sealed partial class PluginManager : IPluginManager, IHostedService
             try { File.Delete(manualStopFlag); } catch { }
         }
 
-        var startResult = await strategy.StartAsync(manifest, dir, sm, _portManager, ringBuffer, _adapters, ct);
+        var startResult = await strategy.StartAsync(manifest, effectiveDir, sm, _portManager, ringBuffer, _adapters, ct);
         if (startResult.Success)
         {
             NotifyPluginStateOrManifestChanged();
@@ -179,7 +186,9 @@ public sealed partial class PluginManager : IPluginManager, IHostedService
         if (!PluginSecurityGuard.IsValidPluginId(id)) return false;
 
         var dir = Path.Combine(_pluginsRoot, id);
-        var manifestPath = Path.Combine(dir, "plugin.json");
+        var effectiveDir = Supervisor.PluginRevisionManager.ResolveEffectiveDirectory(dir);
+        var manifestPath = Path.Combine(effectiveDir, "plugin.json");
+        if (!File.Exists(manifestPath)) manifestPath = Path.Combine(dir, "plugin.json");
         if (!File.Exists(manifestPath)) return false;
 
         var json = await File.ReadAllTextAsync(manifestPath, ct);
@@ -189,7 +198,7 @@ public sealed partial class PluginManager : IPluginManager, IHostedService
         var sm = GetOrCreateStateMachine(manifest);
         var strategy = GetStrategy(manifest.Profile);
 
-        var stopped = await strategy.StopAsync(manifest, dir, sm, _portManager, ct);
+        var stopped = await strategy.StopAsync(manifest, effectiveDir, sm, _portManager, ct);
         if (stopped)
         {
             NotifyPluginStateOrManifestChanged();
@@ -274,6 +283,12 @@ public sealed partial class PluginManager : IPluginManager, IHostedService
             await File.WriteAllTextAsync(entryPath, request.InitialCode, ct);
         }
 
+        try
+        {
+            Supervisor.PluginRevisionManager.CreateRevision(dir, finalManifest.Version ?? "1.0.0", manifestJson);
+        }
+        catch { }
+
         NotifyPluginStateOrManifestChanged();
         return BuildInstanceDto(finalManifest, dir);
     }
@@ -337,7 +352,13 @@ public sealed partial class PluginManager : IPluginManager, IHostedService
     }
 
     private IExecutionProfileStrategy GetStrategy(PluginProfile profile) =>
-        profile == PluginProfile.Resident ? _residentStrategy : _oneShotStrategy;
+        profile switch
+        {
+            PluginProfile.Resident => _residentStrategy,
+            PluginProfile.Serverless => _serverlessStrategy,
+            PluginProfile.Wasm => _wasmStrategy,
+            _ => _oneShotStrategy
+        };
 
     private PluginStateMachine GetOrCreateStateMachine(PluginManifest manifest)
     {
@@ -365,10 +386,13 @@ public sealed partial class PluginManager : IPluginManager, IHostedService
         string? missingDepMsg = null;
         foreach (var dep in rawDeps)
         {
+            var scope = PluginDependencyScopeRules.Normalize(dep.Scope);
+            var isLocalProbe = PluginDependencyScopeRules.ShouldProbeInCurrentProcess(scope);
             var cmd = !string.IsNullOrWhiteSpace(dep.Probe?.Command) ? dep.Probe.Command : dep.Id;
-            var isInstalled = CheckBinaryAvailable(cmd, dep.Probe?.Args);
-            evaluatedDeps.Add(dep with { IsInstalled = isInstalled });
-            if (dep.Required && !isInstalled && missingDepMsg == null)
+            var isInstalled = isLocalProbe && CheckBinaryAvailable(cmd, dep.Probe?.Args);
+            var probeStatus = isLocalProbe ? (isInstalled ? "Installed" : "Missing") : scope == "host" ? "Unknown" : "Unsupported";
+            evaluatedDeps.Add(dep with { IsInstalled = isInstalled, ProbeStatus = probeStatus });
+            if (PluginDependencyScopeRules.BlocksPluginReadiness(scope, dep.Required, isInstalled) && missingDepMsg == null)
             {
                 missingDepMsg = $"缺少必要二进制依赖: {dep.Name}";
             }
@@ -389,8 +413,18 @@ public sealed partial class PluginManager : IPluginManager, IHostedService
 
         var portAlloc = _portManager.GetAllocation(manifest.Id);
         int? allocatedPort = portAlloc?.Port ?? _portManager.GetPort(manifest.Id);
-        int? pid = manifest.Profile == PluginProfile.Resident ? _residentStrategy.GetProcessId(manifest.Id) : null;
-        string? internalSecret = manifest.Profile == PluginProfile.Resident ? _residentStrategy.GetInternalSecret(manifest.Id) : null;
+        int? pid = manifest.Profile switch
+        {
+            PluginProfile.Resident => _residentStrategy.GetProcessId(manifest.Id),
+            PluginProfile.Serverless => _serverlessStrategy.GetProcessId(manifest.Id),
+            _ => null
+        };
+        string? internalSecret = manifest.Profile switch
+        {
+            PluginProfile.Resident => _residentStrategy.GetInternalSecret(manifest.Id),
+            PluginProfile.Serverless => _serverlessStrategy.GetProcessId(manifest.Id) != null ? _residentStrategy.GetInternalSecret(manifest.Id) : null,
+            _ => null
+        };
 
         string? accessUrl = null;
         if (manifest.Network?.Mode == "path")
@@ -553,5 +587,21 @@ public sealed partial class PluginManager : IPluginManager, IHostedService
                 ? $"端口已成功切换至 {newPort}，微服务已热重载运行。"
                 : $"端口已成功保存为 {newPort}。"
         };
+    }
+
+    public ValueTask<IReadOnlyList<string>> ListRevisionsAsync(string id, CancellationToken ct = default)
+    {
+        if (!PluginSecurityGuard.IsValidPluginId(id)) return ValueTask.FromResult<IReadOnlyList<string>>([]);
+        var dir = Path.Combine(_pluginsRoot, id);
+        return ValueTask.FromResult(Supervisor.PluginRevisionManager.ListRevisions(dir));
+    }
+
+    public ValueTask<bool> SwitchRevisionAliasAsync(string id, string alias, string revisionName, CancellationToken ct = default)
+    {
+        if (!PluginSecurityGuard.IsValidPluginId(id)) return ValueTask.FromResult(false);
+        var dir = Path.Combine(_pluginsRoot, id);
+        if (!Directory.Exists(dir)) return ValueTask.FromResult(false);
+        Supervisor.PluginRevisionManager.SetAlias(dir, alias, revisionName);
+        return ValueTask.FromResult(true);
     }
 }

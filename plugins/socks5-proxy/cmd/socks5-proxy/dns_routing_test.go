@@ -80,12 +80,12 @@ func TestDNSRoutingLongestSuffixAndIndependentCaches(t *testing.T) {
 		t.Fatalf("unexpected calls: first=%d second=%d default=%d", firstCalls.Load(), secondCalls.Load(), atomic.LoadInt64(&base.callCount))
 	}
 	stats, ok := resolver.(interface {
-		CacheStats() (int64, int64, int64, int64, int)
+		CacheStats() (int64, int64, int64, int64, int64, int)
 	})
 	if !ok {
 		t.Fatal("routing resolver lost cache statistics")
 	}
-	_, _, _, _, size := stats.CacheStats()
+	_, _, _, _, _, size := stats.CacheStats()
 	if size != 2 {
 		t.Fatalf("aggregate cache size = %d, want 2", size)
 	}

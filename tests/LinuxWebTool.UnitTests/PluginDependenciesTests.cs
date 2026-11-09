@@ -128,4 +128,33 @@ public class PluginDependenciesTests
         Assert.Single(manifest.Dependencies.Items);
         Assert.Equal("node-ecosystem", manifest.Dependencies.Items[0].Id);
     }
+
+    [Fact]
+    public void PluginDependencyScope_DefaultsToContainerAndRoundTripsHostScope()
+    {
+        var legacy = JsonSerializer.Deserialize<PluginDependencies>("""
+        [{"id":"node","name":"Node.js"}]
+        """);
+        Assert.NotNull(legacy);
+        Assert.Equal("container", legacy.Items[0].Scope);
+        Assert.True(PluginDependencyScopeRules.ShouldProbeInCurrentProcess(legacy.Items[0].Scope));
+
+        var host = JsonSerializer.Deserialize<PluginDependencies>("""
+        [{"id":"incus","name":"Incus service","scope":"host","kind":"service","installDocumentationUrl":"https://linuxcontainers.org/incus/docs/main/installing/"}]
+        """);
+        Assert.NotNull(host);
+        Assert.Equal("host", host.Items[0].Scope);
+        Assert.Equal("service", host.Items[0].Kind);
+        Assert.Equal("https://linuxcontainers.org/incus/docs/main/installing/", host.Items[0].InstallDocumentationUrl);
+        Assert.False(PluginDependencyScopeRules.ShouldProbeInCurrentProcess(host.Items[0].Scope));
+        Assert.False(PluginDependencyScopeRules.BlocksPluginReadiness(host.Items[0].Scope, required: true, isInstalled: false));
+        Assert.True(PluginDependencyScopeRules.BlocksPluginReadiness("container", required: true, isInstalled: false));
+        Assert.Equal("unknown", PluginDependencyScopeRules.Normalize("unexpected"));
+
+        var roundTrip = JsonSerializer.Deserialize<PluginDependencies>(JsonSerializer.Serialize(host));
+        Assert.NotNull(roundTrip);
+        Assert.Equal("host", roundTrip.Items[0].Scope);
+        Assert.Equal("service", roundTrip.Items[0].Kind);
+        Assert.Equal("https://linuxcontainers.org/incus/docs/main/installing/", roundTrip.Items[0].InstallDocumentationUrl);
+    }
 }

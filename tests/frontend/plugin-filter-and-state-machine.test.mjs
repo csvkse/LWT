@@ -5,6 +5,8 @@ import { test } from 'node:test';
 
 import {
   ProfileFilterStrategy,
+  LifecycleFilterStrategy,
+  ProtocolFilterStrategy,
   CategoryFilterStrategy,
   KeywordFilterStrategy,
   StateFilterStrategy,
@@ -26,6 +28,8 @@ const mockPlugins = [
     name: 'PowerShell 系统资源监控守护',
     profile: 0, // resident
     runtime: 4, // powershell
+    lifecycle: 0, // interpreted
+    protocol: 0, // http
     state: PLUGIN_STATE.STOPPED,
     manifest: {
       category: 'Ops',
@@ -38,6 +42,8 @@ const mockPlugins = [
     name: '.NET 极速微服务',
     profile: 0, // resident
     runtime: 2, // dotnet
+    lifecycle: 2, // source_compiled
+    protocol: 0, // http
     state: PLUGIN_STATE.RUNNING,
     manifest: {
       category: 'Backend',
@@ -50,6 +56,8 @@ const mockPlugins = [
     name: 'ChatGPT 渠道网关微服务',
     profile: 0, // resident
     runtime: 1, // python
+    lifecycle: 0, // interpreted
+    protocol: 0, // http
     state: PLUGIN_STATE.MISSING_RUNTIME,
     isMissingRuntime: true,
     missingRuntimeMessage: '缺少运行环境或依赖',
@@ -64,6 +72,8 @@ const mockPlugins = [
     name: '快速清理临时文件',
     profile: 1, // oneshot
     runtime: 3, // bash
+    lifecycle: 0, // interpreted
+    protocol: 4, // cli
     state: PLUGIN_STATE.STOPPED,
     manifest: {
       category: 'Ops',
@@ -71,9 +81,37 @@ const mockPlugins = [
       enabled: true,
     },
   },
+  {
+    id: 'demo-serverless-api',
+    name: '按需报表生成服务',
+    profile: 2, // serverless
+    runtime: 0, // node
+    lifecycle: 0, // interpreted
+    protocol: 0, // http
+    state: PLUGIN_STATE.STOPPED,
+    manifest: {
+      category: 'Backend',
+      description: '按需冷启动并闲置 5 分钟缩容至零的 Serverless 微服务',
+      enabled: true,
+    },
+  },
+  {
+    id: 'demo-wasm-calc',
+    name: 'Wasm 极速加密微函数',
+    profile: 3, // wasm
+    runtime: 7, // wasm
+    lifecycle: 2, // source_compiled
+    protocol: 3, // wasm_abi
+    state: PLUGIN_STATE.STOPPED,
+    manifest: {
+      category: 'Security',
+      description: '基于 WebAssembly 内存沙箱的极速无解释器加密微函数',
+      enabled: true,
+    },
+  },
 ];
 
-test('PLUGIN-STRATEGY-01: ProfileFilterStrategy 正确区分常驻服务与一次性脚本', () => {
+test('PLUGIN-STRATEGY-01: ProfileFilterStrategy 正确区分常驻服务、一次性脚本、按需 FaaS 与 Wasm 微函数', () => {
   const strategy = new ProfileFilterStrategy();
   assert.equal(strategy.apply(mockPlugins[0], { profile: 'all' }), true);
   assert.equal(strategy.apply(mockPlugins[0], { profile: 'resident' }), true);
@@ -81,6 +119,31 @@ test('PLUGIN-STRATEGY-01: ProfileFilterStrategy 正确区分常驻服务与一�
 
   assert.equal(strategy.apply(mockPlugins[3], { profile: 'resident' }), false);
   assert.equal(strategy.apply(mockPlugins[3], { profile: 'oneshot' }), true);
+
+  assert.equal(strategy.apply(mockPlugins[4], { profile: 'serverless' }), true);
+  assert.equal(strategy.apply(mockPlugins[4], { profile: 'resident' }), false);
+
+  assert.equal(strategy.apply(mockPlugins[5], { profile: 'wasm' }), true);
+  assert.equal(strategy.apply(mockPlugins[5], { profile: 'oneshot' }), false);
+
+  // 验证正交三大计算范式 (service, function, task)
+  assert.equal(strategy.apply(mockPlugins[0], { archetype: 'service' }), true);
+  assert.equal(strategy.apply(mockPlugins[3], { archetype: 'task' }), true);
+  assert.equal(strategy.apply(mockPlugins[4], { archetype: 'function' }), true); // Serverless
+  assert.equal(strategy.apply(mockPlugins[5], { archetype: 'function' }), true); // Wasm
+  assert.equal(strategy.apply(mockPlugins[0], { archetype: 'function' }), false);
+
+  // 验证生命周期策略与协议策略
+  const lifeStrategy = new LifecycleFilterStrategy();
+  assert.equal(lifeStrategy.apply(mockPlugins[0], { lifecycle: 'interpreted' }), true);
+  assert.equal(lifeStrategy.apply(mockPlugins[1], { lifecycle: 'source_compiled' }), true);
+  assert.equal(lifeStrategy.apply(mockPlugins[0], { lifecycle: 'source_compiled' }), false);
+
+  const protoStrategy = new ProtocolFilterStrategy();
+  assert.equal(protoStrategy.apply(mockPlugins[0], { protocol: 'http' }), true);
+  assert.equal(protoStrategy.apply(mockPlugins[5], { protocol: 'wasm_abi' }), true);
+  assert.equal(protoStrategy.apply(mockPlugins[3], { protocol: 'cli' }), true);
+  assert.equal(protoStrategy.apply(mockPlugins[0], { protocol: 'wasm_abi' }), false);
 });
 
 test('PLUGIN-STRATEGY-02: CategoryFilterStrategy 正确按业务分类过滤', () => {

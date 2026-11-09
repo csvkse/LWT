@@ -1,15 +1,16 @@
 {
-  "manifestVersion": 1,
+  "manifestVersion": 3,
   "id": "native-managed",
   "name": "原生受控常驻微服务",
   "category": "Native",
   "version": "1.0.0",
   "description": "原生常驻程序并启用 HTTP 管理协议接口 (handshake / health / invoke / shutdown)。",
   "icon": "🕹️",
-  "profile": "resident",
-  "runtime": "native",
+  "profile": "Resident",
+  "runtime": "Native",
   "source": "package",
   "entrypoint": "bin/service",
+  "dependencies": [],
   "network": {
     "mode": "path",
     "portEnv": "PORT",
@@ -17,5 +18,63 @@
   },
   "supervision": {
     "autoRestart": true
-  }
+  },
+  "archetype": {
+    "profile": "Resident",
+    "lifecycle": "PrebuiltBinary",
+    "protocol": "Http",
+    "language": "native"
+  },
+  "interface": {
+    "protocol": "Http",
+    "endpoint": "http://127.0.0.1:{port}",
+    "healthEndpoint": "/health",
+    "services": {
+      "native-managed-svc": {
+        "description": "原生受控常驻微服务",
+        "operations": [
+          "status",
+          "health"
+        ]
+      }
+    }
+  },
+  "layout": {
+    "sourceEntry": "bin/native-service",
+    "targetArtifact": "bin/native-service",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "resources": {
+    "limits": {
+      "cpu": "500m",
+      "memory": "256Mi",
+      "pids": 50
+    },
+    "requests": {
+      "cpu": "100m",
+      "memory": "64Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    }
+  },
+  "events": {
+    "publishes": [
+      "native.managed.started"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "network:listen"
+  ]
 }

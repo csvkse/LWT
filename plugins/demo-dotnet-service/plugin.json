@@ -1,0 +1,122 @@
+{
+  "manifestVersion": 3,
+  "id": "demo-dotnet-service",
+  "name": ".NET 极速微服务",
+  "category": "Backend",
+  "version": "1.0.0",
+  "description": "基于 C# 顶级语句的极速 HTTP 微服务示例",
+  "icon": "🔷",
+  "profile": "Resident",
+  "runtime": "DotNet",
+  "entrypoint": "Program.cs",
+  "network": {
+    "mode": "path",
+    "port": 18003,
+    "portEnv": "PORT",
+    "pathPrefix": "/plugins/demo-dotnet-service"
+  },
+  "dependencies": [
+    {
+      "id": "dotnet-sdk",
+      "name": ".NET 10 SDK",
+      "scope": "container",
+      "kind": "runner",
+      "required": true,
+      "recommended": true,
+      "description": "编译与运行 .NET 10 原生微服务所需的运行时 SDK",
+      "probe": {
+        "command": "dotnet",
+        "args": [
+          "--version"
+        ]
+      },
+      "installGuide": {
+        "alpine": "apk add --no-cache dotnet10-sdk",
+        "debian": "apt update && apt install -y dotnet-sdk-10.0",
+        "rhel": "dnf install -y dotnet-sdk-10.0",
+        "windows": "winget install Microsoft.DotNet.SDK.10"
+      }
+    }
+  ],
+  "supervision": {
+    "autoRestart": true
+  },
+  "archetype": {
+    "profile": "Resident",
+    "lifecycle": "SourceCompiled",
+    "protocol": "Http",
+    "language": "csharp"
+  },
+  "layout": {
+    "sourceEntry": "Program.cs",
+    "targetArtifact": "bin/publish/demo-dotnet-service.dll",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "build": {
+    "toolchain": "dotnet",
+    "command": "dotnet publish -c Release -o bin/publish",
+    "fallbackCommand": "dotnet build -c Release -o bin/publish",
+    "artifacts": [
+      "bin/publish/demo-dotnet-service.dll"
+    ],
+    "watch": [
+      "Program.cs",
+      "*.csproj"
+    ],
+    "autoCompileOnSave": true,
+    "timeoutSeconds": 120,
+    "cleanTargets": [
+      "bin/",
+      "obj/"
+    ]
+  },
+  "interface": {
+    "protocol": "Http",
+    "endpoint": "http://127.0.0.1:{port}",
+    "healthEndpoint": "/health",
+    "services": {
+      "dotnet-service": {
+        "description": ".NET 10 现代微服务 API",
+        "operations": [
+          "status",
+          "hello",
+          "metrics"
+        ]
+      }
+    }
+  },
+  "resources": {
+    "limits": {
+      "cpu": "500m",
+      "memory": "256Mi",
+      "pids": 50
+    },
+    "requests": {
+      "cpu": "100m",
+      "memory": "64Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 5
+    }
+  },
+  "events": {
+    "publishes": [
+      "dotnet.service.started"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "network:listen",
+    "storage:readwrite"
+  ]
+}

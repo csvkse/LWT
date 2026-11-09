@@ -42,9 +42,6 @@ public static class PluginStandardEnvBuilder
         }
         catch { }
 
-        // 历史平滑自愈迁移：若旧版路径下有数据文件，自动自愈同步至持久卷
-        MigrateLegacyPluginData(manifest.Id, pluginDir, volumeDir, stateDir);
-
         var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             // 维度 2: 存储隔离与持久卷
@@ -60,6 +57,16 @@ public static class PluginStandardEnvBuilder
             ["BIND_IP"] = "127.0.0.1",
             ["BIND_ADDRESS"] = "127.0.0.1"
         };
+
+        if (manifest.Layout != null)
+        {
+            if (!string.IsNullOrWhiteSpace(manifest.Layout.SourceEntry))
+                dict["LWT_SOURCE_ENTRY"] = manifest.Layout.SourceEntry;
+            if (!string.IsNullOrWhiteSpace(manifest.Layout.TargetArtifact))
+                dict["LWT_TARGET_ARTIFACT"] = manifest.Layout.TargetArtifact;
+            dict["LWT_STORAGE_DIR"] = Path.Combine(pluginDir, manifest.Layout.StorageDir);
+            dict["LWT_RUNTIME_DIR"] = Path.Combine(pluginDir, manifest.Layout.RuntimeDir);
+        }
 
         // 维度 1: 宿主网络与反代拓扑元数据 (双端口模型)
         var hostInternalPort = Environment.GetEnvironmentVariable("LWT_HOST_INTERNAL_PORT");
@@ -122,65 +129,5 @@ public static class PluginStandardEnvBuilder
         }
 
         return dict;
-    }
-
-    private static void MigrateLegacyPluginData(string pluginId, string pluginDir, string volumeDir, string stateDir)
-    {
-        try
-        {
-            // 0. 迁移过渡路径 /data/volumes/{pluginId}
-            var pluginsParent = Path.GetDirectoryName(pluginDir) ?? "";
-            if (Path.GetFileName(pluginsParent).Equals("plugins", StringComparison.OrdinalIgnoreCase))
-            {
-                var dataRoot = Path.GetDirectoryName(pluginsParent) ?? pluginsParent;
-                var oldVolumeDir = Path.Combine(dataRoot, "volumes", pluginId);
-                if (Directory.Exists(oldVolumeDir) && !string.Equals(oldVolumeDir, volumeDir, StringComparison.OrdinalIgnoreCase))
-                {
-                    foreach (var file in Directory.GetFiles(oldVolumeDir, "*", SearchOption.AllDirectories))
-                    {
-                        var rel = Path.GetRelativePath(oldVolumeDir, file);
-                        var dest = Path.Combine(volumeDir, rel);
-                        if (!File.Exists(dest))
-                        {
-                            var destDir = Path.GetDirectoryName(dest);
-                            if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
-                            File.Copy(file, dest, overwrite: false);
-                        }
-                    }
-                }
-            }
-
-            // 1. 迁移旧版 pluginDir/data 下的全部持久化文件
-            var legacyDataDir = Path.Combine(pluginDir, "data");
-            if (Directory.Exists(legacyDataDir) && !string.Equals(legacyDataDir, stateDir, StringComparison.OrdinalIgnoreCase))
-            {
-                foreach (var file in Directory.GetFiles(legacyDataDir, "*", SearchOption.AllDirectories))
-                {
-                    var rel = Path.GetRelativePath(legacyDataDir, file);
-                    var dest = Path.Combine(stateDir, rel);
-                    if (!File.Exists(dest))
-                    {
-                        var destDir = Path.GetDirectoryName(dest);
-                        if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
-                        File.Copy(file, dest, overwrite: false);
-                    }
-                }
-            }
-
-            // 2. 迁移旧版 pluginDir 根目录下的 kv.db 和 data.db
-            foreach (var dbName in new[] { "kv.db", "data.db" })
-            {
-                var legacyDb = Path.Combine(pluginDir, dbName);
-                var destDb = Path.Combine(volumeDir, dbName);
-                if (File.Exists(legacyDb) && !File.Exists(destDb))
-                {
-                    File.Copy(legacyDb, destDb, overwrite: false);
-                }
-            }
-        }
-        catch
-        {
-            // 自愈迁移非致命，静默跳过保护宿主主流程
-        }
     }
 }

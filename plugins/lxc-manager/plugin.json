@@ -1,16 +1,131 @@
 {
-  "manifestVersion": 1,
+  "manifestVersion": 3,
   "id": "lxc-manager",
   "name": "LXC 容器管理",
   "category": "System",
   "version": "0.1.0",
-  "description": "Incus 系统容器管理插件（开发中，当前提供只读能力与资源发现）",
+  "description": "Incus 系统容器管理插件（支持物理宿主与沙箱双模自适应驱动、配额准入预检与 Web PTY 终端）",
   "icon": "📦",
-  "profile": "resident",
+  "profile": "Resident",
   "runtime": "native",
   "source": "package",
   "entrypoint": "lxc-manager",
-  "network": { "mode": "path", "portEnv": "PORT", "pathPrefix": "/plugins/lxc-manager", "authMode": "inherit" },
-  "supervision": { "autoRestart": true },
-  "ui": { "entry": "ui/index.html", "title": "LXC 容器管理", "icon": "📦" }
+  "dependencies": [
+    {
+      "id": "incus-service",
+      "name": "Incus 宿主服务与受管网络",
+      "scope": "host",
+      "kind": "service",
+      "required": false,
+      "recommended": true,
+      "description": "需要宿主轻量级 Incus daemon (v6.0+)、受管网桥 incusbr0 及 Docker 防火墙放行，提供物理内核级系统容器隔离。",
+      "installDocumentationUrl": "https://linuxcontainers.org/incus/docs/main/installing/",
+      "probe": {
+        "command": "incus",
+        "args": [
+          "version"
+        ]
+      },
+      "installGuide": {
+        "debian": "DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends -t bookworm-backports incus-base incus-client dnsmasq-base && systemctl enable --now incus.socket incus.service && incus admin init --minimal && iptables -I FORWARD 1 -i incusbr0 -j ACCEPT && iptables -I FORWARD 1 -o incusbr0 -j ACCEPT",
+        "alpine": "apk add incus incus-client && rc-update add incusd default && rc-service incusd start && incus admin init --minimal",
+        "arch": "pacman -Sy --noconfirm incus && systemctl enable --now incus.socket && incus admin init --minimal"
+      }
+    }
+  ],
+  "network": {
+    "mode": "path",
+    "portEnv": "PORT",
+    "pathPrefix": "/plugins/lxc-manager",
+    "authMode": "inherit"
+  },
+  "supervision": {
+    "autoRestart": true
+  },
+  "ui": {
+    "entry": "ui/index.html",
+    "title": "LXC 容器管理",
+    "icon": "📦"
+  },
+  "archetype": {
+    "profile": "Resident",
+    "lifecycle": "SourceCompiled",
+    "protocol": "Http",
+    "language": "go"
+  },
+  "layout": {
+    "sourceEntry": "cmd/lxc-manager/main.go",
+    "targetArtifact": "lxc-manager",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "build": {
+    "toolchain": "go",
+    "command": "CGO_ENABLED=0 go build -ldflags \"-s -w\" -o lxc-manager ./cmd/lxc-manager",
+    "fallbackCommand": "go build -o lxc-manager ./cmd/lxc-manager",
+    "artifacts": [
+      "lxc-manager"
+    ],
+    "watch": [
+      "cmd/**/*.go",
+      "internal/**/*.go"
+    ],
+    "autoCompileOnSave": true,
+    "timeoutSeconds": 120,
+    "cleanTargets": [
+      "lxc-manager"
+    ]
+  },
+  "interface": {
+    "protocol": "Http",
+    "endpoint": "http://127.0.0.1:{port}",
+    "healthEndpoint": "/health",
+    "services": {
+      "lxc-api": {
+        "description": "LXC/Incus 容器管理 API",
+        "operations": [
+          "instances",
+          "status",
+          "networks",
+          "storage"
+        ]
+      }
+    }
+  },
+  "resources": {
+    "limits": {
+      "cpu": "1000m",
+      "memory": "512Mi",
+      "pids": 100
+    },
+    "requests": {
+      "cpu": "200m",
+      "memory": "128Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 5
+    }
+  },
+  "events": {
+    "publishes": [
+      "lxc.instance.state_changed"
+    ],
+    "subscribes": [
+      "system.cgroup.limit_update"
+    ]
+  },
+  "permissions": [
+    "network:listen",
+    "storage:readwrite",
+    "socket:incus"
+  ]
 }

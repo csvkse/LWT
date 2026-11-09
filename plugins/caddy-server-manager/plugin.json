@@ -1,36 +1,154 @@
 {
-  "manifestVersion": 1,
+  "manifestVersion": 3,
   "id": "caddy-server-manager",
   "name": "Caddy 现代 Web 服务器",
   "category": "Web",
   "version": "1.0.0",
   "description": "基于 Node.js 原生驱动的 Caddy 服务生命周期控制、Admin API 探测与 Caddyfile 语法预检热重载",
   "icon": "🌐",
-  "profile": "oneshot",
-  "runtime": "node",
+  "profile": "OneShot",
+  "runtime": "Node",
   "entrypoint": "hooks/status.js",
   "network": {
     "mode": "port",
     "port": 2019
   },
-  "dependencies": {
-    "runners": ["node"],
-    "binaries": ["caddy"]
-  },
-  "installGuide": {
-    "debian": "apt update && apt install -y nodejs caddy",
-    "rhel": "dnf install -y nodejs caddy",
-    "alpine": "apk add --no-cache nodejs caddy",
-    "windows": "winget install OpenJS.NodeJS.LTS ; winget install CaddyServer.Caddy"
-  },
+  "dependencies": [
+    {
+      "id": "node",
+      "name": "Node.js 运行时",
+      "scope": "container",
+      "kind": "runner",
+      "required": true,
+      "recommended": true,
+      "description": "执行 Caddy 插件脚本所需的 Node.js 环境",
+      "probe": {
+        "command": "node",
+        "args": [
+          "--version"
+        ]
+      },
+      "installGuide": {
+        "debian": "apt update && apt install -y nodejs",
+        "rhel": "dnf install -y nodejs",
+        "alpine": "apk add --no-cache nodejs",
+        "windows": "winget install OpenJS.NodeJS.LTS"
+      }
+    },
+    {
+      "id": "caddy",
+      "name": "Caddy Web 服务器",
+      "scope": "container",
+      "kind": "binary",
+      "required": true,
+      "recommended": true,
+      "description": "核心 Web 服务器与反向代理程序",
+      "probe": {
+        "command": "caddy",
+        "args": [
+          "version"
+        ]
+      },
+      "installGuide": {
+        "debian": "apt update && apt install -y caddy",
+        "rhel": "dnf install -y caddy",
+        "alpine": "apk add --no-cache caddy",
+        "windows": "winget install CaddyServer.Caddy"
+      }
+    }
+  ],
   "customActions": [
-    { "action": "status", "label": "服务状态", "icon": "🔍" },
-    { "action": "start", "label": "启动服务", "icon": "▶️" },
-    { "action": "stop", "label": "停止服务", "icon": "⏹️" },
-    { "action": "restart", "label": "平滑重启", "icon": "🔄" }
+    {
+      "action": "status",
+      "label": "服务状态",
+      "icon": "🔍"
+    },
+    {
+      "action": "start",
+      "label": "启动服务",
+      "icon": "▶️"
+    },
+    {
+      "action": "stop",
+      "label": "停止服务",
+      "icon": "⏹️"
+    },
+    {
+      "action": "restart",
+      "label": "平滑重启",
+      "icon": "🔄"
+    }
   ],
   "configForm": [
-    { "field": "caddyfile_path", "label": "Caddyfile 路径", "type": "text", "defaultValue": "/etc/caddy/Caddyfile", "required": true },
-    { "field": "admin_api_endpoint", "label": "Admin API 端点", "type": "text", "defaultValue": "http://127.0.0.1:2019", "required": false }
+    {
+      "field": "caddyfile_path",
+      "label": "Caddyfile 路径",
+      "type": "text",
+      "defaultValue": "/etc/caddy/Caddyfile",
+      "required": true
+    },
+    {
+      "field": "admin_api_endpoint",
+      "label": "Admin API 端点",
+      "type": "text",
+      "defaultValue": "http://127.0.0.1:2019",
+      "required": false
+    }
+  ],
+  "archetype": {
+    "profile": "OneShot",
+    "lifecycle": "Interpreted",
+    "protocol": "CliArgs",
+    "language": "javascript"
+  },
+  "interface": {
+    "protocol": "CliArgs",
+    "services": {
+      "caddy-server-ops": {
+        "description": "Caddy 现代 Web 运维脚本控制器",
+        "operations": [
+          "status",
+          "start",
+          "stop",
+          "restart"
+        ]
+      }
+    }
+  },
+  "layout": {
+    "sourceEntry": "hooks/status.js",
+    "targetArtifact": "hooks/status.js",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "resources": {
+    "limits": {
+      "cpu": "300m",
+      "memory": "128Mi",
+      "pids": 20
+    },
+    "requests": {
+      "cpu": "50m",
+      "memory": "32Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "ExecCheck",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "ExecCheck",
+      "timeoutSeconds": 3
+    }
+  },
+  "events": {
+    "publishes": [
+      "caddy.server.reloaded"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "process:execute"
   ]
 }

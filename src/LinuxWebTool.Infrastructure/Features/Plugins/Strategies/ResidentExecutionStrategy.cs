@@ -166,11 +166,9 @@ public sealed class ResidentExecutionStrategy : IExecutionProfileStrategy
             psi.Arguments = spec.Arguments;
         }
 
-        foreach (var (k, v) in spec.EnvironmentVariables)
-        {
-            psi.EnvironmentVariables[k] = v;
-        }
-        psi.EnvironmentVariables["LWT_INTERNAL_SECRET"] = secret;
+        var explicitKeys = manifest.Environment?.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        PluginEnvironmentSanitizer.ApplySafeEnvironment(psi, spec.EnvironmentVariables, explicitKeys);
+        psi.Environment["LWT_INTERNAL_SECRET"] = secret;
 
         try
         {
@@ -198,6 +196,7 @@ public sealed class ResidentExecutionStrategy : IExecutionProfileStrategy
                 _internalSecrets.TryRemove(manifest.Id, out _);
                 try { if (File.Exists(pidFile)) File.Delete(pidFile); } catch { }
                 ringBuffer.Append($"[{DateTime.Now:HH:mm:ss}] [SYSTEM] 进程已退出，退出码: {exitCode}");
+                PluginCgroupManager.CleanupCgroup(manifest.Id);
                 stateMachine.RecordExit(exitCode, runId);
             };
 
@@ -219,11 +218,33 @@ public sealed class ResidentExecutionStrategy : IExecutionProfileStrategy
             proc.BeginErrorReadLine();
 
             _processes[manifest.Id] = proc;
-            stateMachine.NotifyRunning(runId, readiness: "Ready");
+            PluginCgroupManager.ConfigureCgroup(manifest.Id, manifest);
+            PluginCgroupManager.AssignProcess(manifest.Id, proc.Id);
+
             var portSuffix = portResult?.WasAvoided == true
                 ? $"{allocatedPort} [自动避让原端口 {manifest.Network?.Port}]"
                 : (allocatedPort?.ToString() ?? "无");
             ringBuffer.Append($"[{DateTime.Now:HH:mm:ss}] [SYSTEM] 插件微服务启动成功 (PID: {proc.Id}, 端口: {portSuffix})");
+
+            if (allocatedPort.HasValue)
+            {
+                // 异步启动主动探针，完成就绪探测后再推进为 Ready
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await PluginReadinessProber.ProbeAsync(proc, manifest, allocatedPort.Value, stateMachine, ringBuffer, runId, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        ringBuffer.Append($"[{DateTime.Now:HH:mm:ss}] [ERROR] 就绪探测任务异常: {ex.Message}");
+                    }
+                });
+            }
+            else
+            {
+                stateMachine.NotifyRunning(runId, readiness: "Ready");
+            }
 
             return ValueTask.FromResult((true, (string?)null));
         }
@@ -235,14 +256,15 @@ public sealed class ResidentExecutionStrategy : IExecutionProfileStrategy
         }
     }
 
-    public ValueTask<bool> StopAsync(
+    public async ValueTask<bool> StopAsync(
         PluginManifest manifest,
         string pluginDir,
         PluginStateMachine stateMachine,
         PluginPortManager portManager,
         CancellationToken ct)
     {
-        stateMachine.NotifyStopped();
+        stateMachine.NotifyDraining();
+        PluginCgroupManager.CleanupCgroup(manifest.Id);
         portManager.ReleasePort(manifest.Id);
         _internalSecrets.TryRemove(manifest.Id, out _);
 
@@ -255,7 +277,31 @@ public sealed class ResidentExecutionStrategy : IExecutionProfileStrategy
             {
                 if (!proc.HasExited)
                 {
-                    proc.Kill(entireProcessTree: true);
+                    // 1. 尝试优雅平滑停机排空 (Graceful Draining)
+                    try
+                    {
+                        if (OperatingSystem.IsLinux())
+                        {
+                            using var killProc = Process.Start("kill", $"-15 {proc.Id}");
+                            killProc?.WaitForExit(500);
+                        }
+                        else
+                        {
+                            proc.CloseMainWindow();
+                        }
+
+                        using var drainCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                        await proc.WaitForExitAsync(drainCts.Token).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // 优雅排空超时或不支持，强制 Kill
+                    }
+
+                    if (!proc.HasExited)
+                    {
+                        proc.Kill(entireProcessTree: true);
+                    }
                 }
                 proc.Dispose();
             }
@@ -265,7 +311,8 @@ public sealed class ResidentExecutionStrategy : IExecutionProfileStrategy
             }
         }
 
-        return ValueTask.FromResult(true);
+        stateMachine.NotifyStopped();
+        return true;
     }
 
     public async ValueTask<PluginActionResult> ExecuteActionAsync(

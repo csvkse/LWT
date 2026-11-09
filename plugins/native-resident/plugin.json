@@ -1,17 +1,79 @@
 {
-  "manifestVersion": 1,
+  "manifestVersion": 3,
   "id": "native-resident",
   "name": "原生常驻守护服务",
   "category": "Native",
   "version": "1.0.0",
   "description": "基于原生已编译可执行文件的常驻后台守护服务，直接以操作系统子进程托管，无需运行时环境。",
   "icon": "⚙️",
-  "profile": "resident",
-  "runtime": "native",
+  "profile": "Resident",
+  "runtime": "Native",
   "source": "package",
   "entrypoint": "bin/daemon",
-  "arguments": ["--mode=resident", "--interval=10"],
+  "dependencies": [],
+  "arguments": [
+    "--mode=resident",
+    "--interval=10"
+  ],
   "supervision": {
     "autoRestart": true
-  }
+  },
+  "archetype": {
+    "profile": "Resident",
+    "lifecycle": "PrebuiltBinary",
+    "protocol": "Http",
+    "language": "native"
+  },
+  "interface": {
+    "protocol": "Http",
+    "endpoint": "http://127.0.0.1:{port}",
+    "healthEndpoint": "/health",
+    "services": {
+      "native-resident-svc": {
+        "description": "原生常驻守护微服务",
+        "operations": [
+          "status",
+          "metrics"
+        ]
+      }
+    }
+  },
+  "layout": {
+    "sourceEntry": "bin/resident-app",
+    "targetArtifact": "bin/resident-app",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "resources": {
+    "limits": {
+      "cpu": "500m",
+      "memory": "256Mi",
+      "pids": 50
+    },
+    "requests": {
+      "cpu": "100m",
+      "memory": "64Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    }
+  },
+  "events": {
+    "publishes": [
+      "native.resident.started"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "network:listen"
+  ]
 }

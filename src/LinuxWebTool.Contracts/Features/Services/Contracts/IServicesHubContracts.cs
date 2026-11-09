@@ -36,6 +36,12 @@ public interface IDockerEngineAdapter
     Task<ServiceActionResult> ExecuteContainerActionAsync(DockerContainerActionRequest request, CancellationToken cancellationToken = default);
     Task<string> GetContainerLogsAsync(DockerLogsRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<DockerImageSummary>> ListImagesAsync(CancellationToken cancellationToken = default);
+    Task<DockerPruneResult> PruneAsync(DockerPruneRequest request, CancellationToken cancellationToken = default);
+    Task<DockerDiskUsageSummary?> GetDiskUsageAsync(CancellationToken cancellationToken = default);
+    Task<DockerContainerExecResult> ExecuteCommandAsync(string containerId, DockerContainerExecRequest request, CancellationToken cancellationToken = default);
+    Task<DockerContainerInspect?> InspectContainerAsync(string containerId, CancellationToken cancellationToken = default);
+    Task<Stream?> GetArchiveAsync(string containerId, string path, CancellationToken cancellationToken = default);
+    Task<bool> PutArchiveAsync(string containerId, string path, Stream tarStream, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

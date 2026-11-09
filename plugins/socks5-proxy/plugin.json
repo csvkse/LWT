@@ -1,12 +1,12 @@
 {
-  "manifestVersion": 1,
+  "manifestVersion": 3,
   "id": "socks5-proxy",
   "name": "SOCKS5 安全代理微服务",
   "category": "Network",
   "version": "1.0.0",
   "description": "基于 Go 原生运行引擎的极速高并发 SOCKS5 代理服务，支持 RFC 1928 / RFC 1929 规范与身份认证",
   "icon": "🧦",
-  "profile": "resident",
+  "profile": "Resident",
   "runtime": "go",
   "entrypoint": "cmd/socks5-proxy/main.go",
   "arguments": [
@@ -27,7 +27,15 @@
     "--allowed-domains",
     "*",
     "--allowed-clients",
-    "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128"
+    "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128",
+    "--dns-upstreams",
+    "",
+    "--dns-rules",
+    "",
+    "--enable-winning-ip-promote",
+    "true",
+    "--enable-parallel-racing",
+    "true"
   ],
   "configForm": [
     {
@@ -144,5 +152,80 @@
     "entry": "ui/index.html",
     "title": "SOCKS5 代理控制台",
     "icon": "🧦"
-  }
+  },
+  "archetype": {
+    "profile": "Resident",
+    "lifecycle": "SourceCompiled",
+    "protocol": "Http",
+    "language": "go"
+  },
+  "layout": {
+    "sourceEntry": "cmd/socks5-proxy/main.go",
+    "targetArtifact": "socks5-proxy",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "build": {
+    "toolchain": "go",
+    "command": "CGO_ENABLED=0 go build -ldflags \"-s -w\" -o socks5-proxy ./cmd/socks5-proxy",
+    "fallbackCommand": "go build -o socks5-proxy ./cmd/socks5-proxy",
+    "artifacts": [
+      "socks5-proxy"
+    ],
+    "watch": [
+      "cmd/**/*.go",
+      "internal/**/*.go"
+    ],
+    "autoCompileOnSave": true,
+    "timeoutSeconds": 120,
+    "cleanTargets": [
+      "socks5-proxy"
+    ]
+  },
+  "interface": {
+    "protocol": "Http",
+    "endpoint": "http://127.0.0.1:{port}",
+    "healthEndpoint": "/health",
+    "services": {
+      "socks5-service": {
+        "description": "SOCKS5 代理网关控制服务",
+        "operations": [
+          "status",
+          "stats",
+          "reload"
+        ]
+      }
+    }
+  },
+  "resources": {
+    "limits": {
+      "cpu": "500m",
+      "memory": "256Mi",
+      "pids": 50
+    },
+    "requests": {
+      "cpu": "100m",
+      "memory": "64Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "SocketCheck",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "SocketCheck",
+      "timeoutSeconds": 5
+    }
+  },
+  "events": {
+    "publishes": [
+      "proxy.connection.opened"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "network:listen",
+    "network:egress"
+  ]
 }

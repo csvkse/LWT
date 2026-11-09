@@ -1,3 +1,4 @@
+using LinuxWebTool.Contracts.Features.Services.Contracts;
 using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
 using LinuxWebTool.Infrastructure.Shared.Support;
 using LinuxWebTool.WebHost.Composition;
@@ -9,7 +10,7 @@ namespace LinuxWebTool.WebHost.Features.Terminal.Routes;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class TerminalController(IPtySessionManager pty, TerminalDependencyService dependencies) : MinimalApi.ControllerBase
+public class TerminalController(IPtySessionManager pty, TerminalDependencyService dependencies, IDockerEngineAdapter? dockerAdapter = null) : MinimalApi.ControllerBase
 {
     [HttpGet("Support")]
     public IResult Support() => Results.Json(dependencies.Detect(), AppJsonSerializerContext.Default.TerminalCapabilities);
@@ -38,9 +39,30 @@ public class TerminalController(IPtySessionManager pty, TerminalDependencyServic
     [HttpPost("Sessions")]
     public async Task<IResult> CreateSession([FromBody] TerminalSessionCreateRequest request)
     {
-        var isHost = string.Equals(request.Target, "host", StringComparison.OrdinalIgnoreCase);
-        var cwd = isHost ? "/root" : Directory.GetCurrentDirectory();
-        if (request.WorkingDirectory is not null)
+        var targetStr = request.Target?.Trim() ?? "container";
+        var isHost = string.Equals(targetStr, "host", StringComparison.OrdinalIgnoreCase);
+        var isDocker = targetStr.StartsWith("docker:", StringComparison.OrdinalIgnoreCase);
+
+        var resolvedTarget = targetStr;
+        var cwd = isHost ? "/root" : (isDocker ? "/" : Directory.GetCurrentDirectory());
+
+        if (isDocker && dockerAdapter != null)
+        {
+            var rawId = targetStr["docker:".Length..].Trim();
+            var inspect = await dockerAdapter.InspectContainerAsync(rawId, HttpContext.RequestAborted);
+            if (inspect == null)
+            {
+                return NotFound(new MessageResponse($"容器 [{rawId}] 不存在"));
+            }
+            if (!inspect.Running || inspect.Pid <= 0)
+            {
+                return BadRequest(new MessageResponse($"容器 [{inspect.Name}] 未处于运行状态，无法打开交互终端"));
+            }
+            resolvedTarget = $"docker:{inspect.Id}:{inspect.Pid}";
+            cwd = !string.IsNullOrWhiteSpace(request.WorkingDirectory) ? request.WorkingDirectory.Trim() :
+                  (!string.IsNullOrWhiteSpace(inspect.WorkingDir) ? inspect.WorkingDir : "/");
+        }
+        else if (request.WorkingDirectory is not null)
         {
             var requested = request.WorkingDirectory;
             if (string.IsNullOrWhiteSpace(requested) || requested.Length > 4096 || requested.Any(char.IsControl)
@@ -72,7 +94,7 @@ public class TerminalController(IPtySessionManager pty, TerminalDependencyServic
         }
 
         var apiKey = HttpContext.Items["CurrentApiKey"] as ApiKeyEntity;
-        if (!string.IsNullOrWhiteSpace(apiKey?.AllowedPaths))
+        if (!string.IsNullOrWhiteSpace(apiKey?.AllowedPaths) && !isDocker)
         {
             if (request.WorkingDirectory is null)
             {
@@ -96,7 +118,7 @@ public class TerminalController(IPtySessionManager pty, TerminalDependencyServic
             WorkingDirectory: cwd,
             Columns: request.Columns > 0 ? request.Columns : 80,
             Rows: request.Rows > 0 ? request.Rows : 24,
-            Target: request.Target ?? "container");
+            Target: resolvedTarget);
 
         try
         {

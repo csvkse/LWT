@@ -1,0 +1,103 @@
+{
+  "manifestVersion": 3,
+  "id": "demo-py-api",
+  "name": "Python 数据分析守护微服务",
+  "category": "Data",
+  "version": "1.0.0",
+  "description": "后台周期性采集并汇总分析系统负载与指标的常驻 Python 服务",
+  "icon": "🐍",
+  "profile": "Resident",
+  "runtime": "Python",
+  "entrypoint": "main.py",
+  "network": {
+    "mode": "path",
+    "port": 18002,
+    "portEnv": "PORT",
+    "pathPrefix": "/plugins/demo-py-api"
+  },
+  "dependencies": [
+    {
+      "id": "python",
+      "name": "Python 3 运行时",
+      "scope": "container",
+      "kind": "runner",
+      "required": true,
+      "recommended": true,
+      "description": "运行 Python 数据分析守护微服务所需的环境",
+      "probe": {
+        "command": "python3",
+        "args": [
+          "--version"
+        ]
+      },
+      "installGuide": {
+        "alpine": "apk add --no-cache python3",
+        "debian": "apt update && apt install -y python3",
+        "rhel": "dnf install -y python3",
+        "windows": "winget install Python.Python.3.12"
+      }
+    }
+  ],
+  "supervision": {
+    "autoRestart": true
+  },
+  "archetype": {
+    "profile": "Resident",
+    "lifecycle": "Interpreted",
+    "protocol": "Http",
+    "language": "python"
+  },
+  "layout": {
+    "sourceEntry": "main.py",
+    "targetArtifact": "main.py",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "interface": {
+    "protocol": "Http",
+    "endpoint": "http://127.0.0.1:{port}",
+    "healthEndpoint": "/health",
+    "services": {
+      "py-api": {
+        "description": "Python 轻量异步微服务 API",
+        "operations": [
+          "status",
+          "ping",
+          "echo"
+        ]
+      }
+    }
+  },
+  "resources": {
+    "limits": {
+      "cpu": "500m",
+      "memory": "256Mi",
+      "pids": 30
+    },
+    "requests": {
+      "cpu": "100m",
+      "memory": "64Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    }
+  },
+  "events": {
+    "publishes": [
+      "py.api.pong"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "network:listen"
+  ]
+}

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var ErrConflict = errors.New("idempotency key reused with different payload")
@@ -52,6 +53,10 @@ func (s *Store) AcquireAdmission(key string) (bool, error) {
 	created, err := writeExclusive(path, key)
 	if err != nil || created {
 		return created, err
+	}
+	if info, statErr := os.Stat(path); statErr == nil && time.Since(info.ModTime()) > 5*time.Second {
+		_ = os.Remove(path)
+		return writeExclusive(path, key)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -42,10 +42,7 @@ public sealed class NativeProcessRunner : INativeProcessRunner
             psi.ArgumentList.Add(arg);
         }
 
-        foreach (var (k, v) in spec.EnvironmentVariables)
-        {
-            psi.Environment[k] = v;
-        }
+        PluginEnvironmentSanitizer.ApplySafeEnvironment(psi, spec.EnvironmentVariables);
 
         if (File.Exists(spec.ExecutablePath))
         {

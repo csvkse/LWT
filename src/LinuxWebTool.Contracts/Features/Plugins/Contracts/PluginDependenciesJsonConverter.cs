@@ -77,6 +77,9 @@ public sealed class PluginDependenciesJsonConverter : JsonConverter<PluginDepend
         string? name = null;
         bool required = false;
         bool recommended = true;
+        string scope = "container";
+        string kind = "binary";
+        string? installDocumentationUrl = null;
         string description = "";
         PluginDependencyProbeConfig? probe = null;
         Dictionary<string, string>? installGuide = null;
@@ -103,6 +106,18 @@ public sealed class PluginDependenciesJsonConverter : JsonConverter<PluginDepend
             {
                 recommended = reader.GetBoolean();
             }
+            else if (string.Equals(prop, "scope", StringComparison.OrdinalIgnoreCase))
+            {
+                scope = reader.GetString() ?? "container";
+            }
+            else if (string.Equals(prop, "kind", StringComparison.OrdinalIgnoreCase))
+            {
+                kind = reader.GetString() ?? "binary";
+            }
+            else if (string.Equals(prop, "installDocumentationUrl", StringComparison.OrdinalIgnoreCase))
+            {
+                installDocumentationUrl = reader.GetString();
+            }
             else if (string.Equals(prop, "description", StringComparison.OrdinalIgnoreCase))
             {
                 description = reader.GetString() ?? "";
@@ -126,6 +141,9 @@ public sealed class PluginDependenciesJsonConverter : JsonConverter<PluginDepend
         {
             Id = id,
             Name = name ?? id,
+            Scope = scope,
+            Kind = kind,
+            InstallDocumentationUrl = installDocumentationUrl,
             Required = required,
             Recommended = recommended,
             Description = description,
@@ -211,6 +229,10 @@ public sealed class PluginDependenciesJsonConverter : JsonConverter<PluginDepend
                 writer.WriteStartObject();
                 writer.WriteString("id", item.Id);
                 writer.WriteString("name", item.Name);
+                writer.WriteString("scope", item.Scope);
+                writer.WriteString("kind", item.Kind);
+                if (!string.IsNullOrWhiteSpace(item.InstallDocumentationUrl))
+                    writer.WriteString("installDocumentationUrl", item.InstallDocumentationUrl);
                 writer.WriteBoolean("required", item.Required);
                 writer.WriteBoolean("recommended", item.Recommended);
                 writer.WriteString("description", item.Description);

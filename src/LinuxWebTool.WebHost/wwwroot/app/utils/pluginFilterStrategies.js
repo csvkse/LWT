@@ -9,15 +9,54 @@
 
 export class ProfileFilterStrategy {
   apply(plugin, context) {
-    if (!context || !context.profile || context.profile === 'all') {
+    const key = (context?.archetype && context.archetype !== 'all') ? context.archetype : context?.profile;
+    if (!key || key === 'all') {
       return true;
     }
-    if (context.profile === 'resident') {
+    const normalized = String(key).toLowerCase();
+    if (normalized === 'resident' || normalized === 'service') {
       return plugin.profile === 0;
     }
-    if (context.profile === 'oneshot') {
+    if (normalized === 'oneshot' || normalized === 'task') {
       return plugin.profile === 1;
     }
+    if (normalized === 'function') {
+      return plugin.profile === 2 || plugin.profile === 3;
+    }
+    if (normalized === 'serverless') {
+      return plugin.profile === 2;
+    }
+    if (normalized === 'wasm') {
+      return plugin.profile === 3;
+    }
+    return true;
+  }
+}
+
+export class LifecycleFilterStrategy {
+  apply(plugin, context) {
+    if (!context || !context.lifecycle || context.lifecycle === 'all') {
+      return true;
+    }
+    const val = String(context.lifecycle).toLowerCase();
+    if (val === 'interpreted' || val === '0') return plugin.lifecycle === 0;
+    if (val === 'prebuilt' || val === 'prebuiltbinary' || val === '1') return plugin.lifecycle === 1;
+    if (val === 'sourcecompiled' || val === 'source_compiled' || val === '2') return plugin.lifecycle === 2;
+    return true;
+  }
+}
+
+export class ProtocolFilterStrategy {
+  apply(plugin, context) {
+    if (!context || !context.protocol || context.protocol === 'all') {
+      return true;
+    }
+    const val = String(context.protocol).toLowerCase();
+    if (val === 'http' || val === '0') return plugin.protocol === 0;
+    if (val === 'unixsocket' || val === 'unix_socket' || val === '1') return plugin.protocol === 1;
+    if (val === 'stdio' || val === 'stdiojsonrpc' || val === '2') return plugin.protocol === 2;
+    if (val === 'wasmabi' || val === 'wasm_abi' || val === '3') return plugin.protocol === 3;
+    if (val === 'cli' || val === 'cliargs' || val === '4') return plugin.protocol === 4;
     return true;
   }
 }
@@ -42,8 +81,8 @@ export class StateFilterStrategy {
         return plugin.state === 2;
       case 'ready':
       case 'standby':
-        // 脚本轻量扩展在启用且非异常/缺少依赖时为就绪待命状态
-        if (plugin.profile === 1) {
+        // 脚本轻量扩展、Serverless 及 Wasm 在启用且非异常/缺少依赖时为待命/就绪状态
+        if (plugin.profile === 1 || plugin.profile === 2 || plugin.profile === 3) {
           const isDegradedOrMissing = plugin.state === 3 || plugin.state === 4 || plugin.state === 5 ||
             plugin.state === 7 || plugin.state === 8 || Boolean(plugin.isMissingRuntime || plugin.isMissingDependencies);
           return plugin.state !== 6 && plugin.manifest?.enabled !== false && !isDegradedOrMissing;
@@ -105,6 +144,8 @@ export class CompositePluginFilter {
   constructor(strategies) {
     this.strategies = strategies || [
       new ProfileFilterStrategy(),
+      new LifecycleFilterStrategy(),
+      new ProtocolFilterStrategy(),
       new CategoryFilterStrategy(),
       new KeywordFilterStrategy(),
       new StateFilterStrategy(),
@@ -172,8 +213,8 @@ const defaultCompositeFilter = new CompositePluginFilter();
 /**
  * 统一快捷过滤函数（纯函数，零副作用，默认启动状态置顶）
  */
-export function filterPlugins(plugins, { profile = 'all', category = 'all', keyword = '', state = 'all' } = {}) {
-  const filtered = defaultCompositeFilter.filter(plugins, { profile, category, keyword, state });
+export function filterPlugins(plugins, { profile = 'all', archetype = 'all', lifecycle = 'all', protocol = 'all', category = 'all', keyword = '', state = 'all' } = {}) {
+  const filtered = defaultCompositeFilter.filter(plugins, { profile, archetype, lifecycle, protocol, category, keyword, state });
   return sortPluginsByState(filtered);
 }
 

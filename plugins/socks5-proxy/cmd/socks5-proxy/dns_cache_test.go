@@ -25,6 +25,10 @@ func (m *mockResolver) Resolve(ctx context.Context, host string) ([]net.IP, erro
 	return m.resultIPs, m.resultErr
 }
 
+func (m *mockResolver) PromoteWinningIP(host string, ip net.IP) bool {
+	return false
+}
+
 func TestNormalizeDomain(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -76,7 +80,7 @@ func TestDnsLruCache_HitAndEviction(t *testing.T) {
 		t.Errorf("expected host3.com to be in cache")
 	}
 
-	hits, misses, staleHits, evictions, size := cache.Stats()
+	hits, misses, staleHits, evictions, _, size := cache.Stats()
 	if hits < 1 || misses < 1 || evictions != 1 || size != 2 || staleHits != 0 {
 		t.Errorf("unexpected stats: hits=%d, misses=%d, staleHits=%d, evictions=%d, size=%d", hits, misses, staleHits, evictions, size)
 	}
@@ -161,7 +165,7 @@ func TestCachedDnsResolver_SingleflightDeduplication(t *testing.T) {
 		t.Fatalf("expected exactly 1 underlying DNS query due to singleflight, got %d", calls)
 	}
 
-	hits, _, _, _, size := resolver.CacheStats()
+	hits, _, _, _, _, size := resolver.CacheStats()
 	if size != 1 {
 		t.Errorf("expected cache size 1, got %d", size)
 	}

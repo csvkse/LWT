@@ -1,0 +1,166 @@
+{
+  "manifestVersion": 3,
+  "id": "demo-nativeaot-wasm",
+  "name": "C# NativeAOT-LLVM 极速微函数",
+  "category": "Wasm",
+  "version": "1.0.0",
+  "description": "基于 NativeAOT-LLVM / bflat 无解释器纯静态编译的纳秒级 WebAssembly 微函数",
+  "icon": "⚡",
+  "profile": "Wasm",
+  "runtime": "Wasm",
+  "entrypoint": "demo-nativeaot-wasm.wasm",
+  "archetype": {
+    "profile": "Wasm",
+    "lifecycle": "SourceCompiled",
+    "protocol": "WasmAbi",
+    "language": "csharp"
+  },
+  "layout": {
+    "sourceEntry": "Program.cs",
+    "targetArtifact": "demo-nativeaot-wasm.wasm",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "build": {
+    "toolchain": "bflat",
+    "command": "bflat build --arch wasm --os wasi Program.cs -o demo-nativeaot-wasm.wasm",
+    "fallbackCommand": "dotnet publish -c Release /p:TargetArchitecture=wasm",
+    "artifacts": [
+      "demo-nativeaot-wasm.wasm"
+    ],
+    "watch": [
+      "Program.cs"
+    ],
+    "autoCompileOnSave": true,
+    "timeoutSeconds": 60,
+    "cleanTargets": [
+      "demo-nativeaot-wasm.wasm"
+    ]
+  },
+  "interface": {
+    "protocol": "WasmAbi",
+    "services": {
+      "calculator": {
+        "description": "C# NativeAOT 极速微函数算力",
+        "operations": [
+          "fib",
+          "calc",
+          "echo",
+          "info"
+        ]
+      }
+    }
+  },
+  "customActions": [
+    {
+      "action": "fib",
+      "label": "斐波那契计算 (fib)",
+      "description": "纳秒级无解释器静态递归计算",
+      "input": {
+        "type": "text",
+        "label": "参数 N",
+        "placeholder": "如: 25",
+        "defaultValue": "25"
+      }
+    },
+    {
+      "action": "calc",
+      "label": "算式解析 (calc)",
+      "description": "高速表达式语法分析求值",
+      "input": {
+        "type": "text",
+        "label": "数学算式",
+        "placeholder": "如: 100 * 25 + 50",
+        "defaultValue": "100 * 25 + 50"
+      }
+    },
+    {
+      "action": "echo",
+      "label": "文本回显 (echo)",
+      "description": "沙箱内存安全字符串透传",
+      "input": {
+        "type": "text",
+        "label": "回显字符串",
+        "placeholder": "Hello Wasm",
+        "defaultValue": "Hello NativeAOT Wasm"
+      }
+    },
+    {
+      "action": "info",
+      "label": "环境信息 (info)",
+      "description": "查看 WASI 架构与无解释器运行特征"
+    }
+  ],
+  "dependencies": [
+    {
+      "id": "wasmtime",
+      "name": "Wasmtime / WasmEdge 运行时",
+      "scope": "container",
+      "kind": "runner",
+      "required": false,
+      "recommended": true,
+      "description": "高性能 WebAssembly 沙箱执行引擎",
+      "probe": {
+        "command": "wasmtime",
+        "args": [
+          "--version"
+        ]
+      },
+      "installGuide": {
+        "alpine": "apk add --no-cache wasmtime",
+        "debian": "curl https://wasmtime.dev/install.sh -sSf | bash",
+        "windows": "winget install BytecodeAlliance.Wasmtime"
+      }
+    },
+    {
+      "id": "bflat",
+      "name": "bflat NativeAOT-LLVM 编译器",
+      "scope": "container",
+      "kind": "toolchain",
+      "required": false,
+      "recommended": false,
+      "description": "用于在线将 C# 源码 Native AOT 编译为极小体积 Wasm 的工具链",
+      "probe": {
+        "command": "bflat",
+        "args": [
+          "--version"
+        ]
+      },
+      "installGuide": {
+        "alpine": "curl -sSL https://github.com/bflattened/bflat/releases/latest/download/bflat-x64-linux.tar.gz | tar -xz -C /usr/local/bin",
+        "debian": "curl -sSL https://github.com/bflattened/bflat/releases/latest/download/bflat-x64-linux.tar.gz | tar -xz -C /usr/local/bin",
+        "windows": "winget install bflattened.bflat"
+      }
+    }
+  ],
+  "resources": {
+    "limits": {
+      "cpu": "200m",
+      "memory": "64Mi",
+      "pids": 1
+    },
+    "requests": {
+      "cpu": "50m",
+      "memory": "16Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "WasmModuleCheck",
+      "timeoutSeconds": 2
+    },
+    "readiness": {
+      "type": "WasmModuleCheck",
+      "timeoutSeconds": 2
+    }
+  },
+  "events": {
+    "publishes": [
+      "wasm.fib.computed"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "wasm:execute"
+  ]
+}

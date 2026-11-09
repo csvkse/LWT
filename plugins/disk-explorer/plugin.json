@@ -1,0 +1,92 @@
+{
+  "manifestVersion": 3,
+  "id": "disk-explorer",
+  "name": "磁盘空间透视镜",
+  "category": "System",
+  "version": "1.0.0",
+  "description": "基于 Go 高并发并发引擎的系统与宿主文件夹占用极速分析插件（支持特权穿透识别与多维树图可视化）",
+  "icon": "💾",
+  "profile": "Resident",
+  "runtime": "native",
+  "entrypoint": "disk-explorer",
+  "arguments": [
+    "serve",
+    "--port",
+    "{port}",
+    "--state-dir",
+    "{stateDir}"
+  ],
+  "dependencies": [],
+  "network": {
+    "mode": "path",
+    "portEnv": "PORT",
+    "pathPrefix": "/plugins/disk-explorer",
+    "authMode": "inherit"
+  },
+  "supervision": {
+    "autoRestart": true,
+    "flappingThresholdSec": 10,
+    "maxCrashRetries": 3
+  },
+  "ui": {
+    "entry": "ui/index.html",
+    "title": "磁盘空间透视镜",
+    "icon": "💾"
+  },
+  "archetype": {
+    "profile": "Resident",
+    "lifecycle": "SourceCompiled",
+    "protocol": "Http",
+    "language": "go"
+  },
+  "layout": {
+    "sourceEntry": "cmd/disk-explorer/main.go",
+    "targetArtifact": "disk-explorer",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "build": {
+    "toolchain": "go",
+    "command": "CGO_ENABLED=0 go build -ldflags \"-s -w\" -o disk-explorer ./cmd/disk-explorer",
+    "fallbackCommand": "go build -o disk-explorer ./cmd/disk-explorer",
+    "artifacts": [
+      "disk-explorer"
+    ],
+    "watch": [
+      "cmd/**/*.go",
+      "internal/**/*.go"
+    ],
+    "autoCompileOnSave": true,
+    "timeoutSeconds": 120,
+    "cleanTargets": [
+      "disk-explorer"
+    ]
+  },
+  "interface": {
+    "protocol": "Http",
+    "endpoint": "http://127.0.0.1:{port}",
+    "healthEndpoint": "/health",
+    "services": {
+      "disk-scan-api": {
+        "description": "极速磁盘空间与文件夹占用分析服务",
+        "operations": [
+          "capabilities",
+          "scans",
+          "tree",
+          "abort"
+        ]
+      }
+    }
+  },
+  "resources": {
+    "limits": {
+      "cpu": "1000m",
+      "memory": "256Mi",
+      "pids": 50
+    },
+    "requests": {
+      "cpu": "100m",
+      "memory": "32Mi"
+    }
+  }
+}

@@ -119,6 +119,7 @@ public sealed class OneShotExecutionStrategy : IExecutionProfileStrategy
                 WorkingDirectory = pluginDir,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                RedirectStandardInput = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
@@ -149,10 +150,8 @@ public sealed class OneShotExecutionStrategy : IExecutionProfileStrategy
             }
 
             psi.ArgumentList.Add(envPrefix + "\n" + normalized);
-            foreach (var (k, v) in env)
-            {
-                psi.EnvironmentVariables[k] = v;
-            }
+            var explicitKeys = manifest.Environment?.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            PluginEnvironmentSanitizer.ApplySafeEnvironment(psi, env, explicitKeys);
         }
         else
         {
@@ -169,6 +168,7 @@ public sealed class OneShotExecutionStrategy : IExecutionProfileStrategy
                 WorkingDirectory = spec.WorkingDirectory,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                RedirectStandardInput = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
@@ -193,10 +193,8 @@ public sealed class OneShotExecutionStrategy : IExecutionProfileStrategy
                 }
             }
 
-            foreach (var (k, v) in spec.EnvironmentVariables)
-            {
-                psi.EnvironmentVariables[k] = v;
-            }
+            var explicitKeys = manifest.Environment?.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            PluginEnvironmentSanitizer.ApplySafeEnvironment(psi, spec.EnvironmentVariables, explicitKeys);
         }
 
         try
@@ -210,6 +208,22 @@ public sealed class OneShotExecutionStrategy : IExecutionProfileStrategy
                     Message = "启动进程失败，未能创建进程实例"
                 };
             }
+
+            // 1. 接入 cgroup v2 内核资源硬隔离
+            PluginCgroupManager.ConfigureCgroup(manifest.Id, manifest);
+            PluginCgroupManager.AssignProcess(manifest.Id, p.Id);
+
+            // 2. STDIO JSON-RPC 管道透传: 将参数注入标准输入以支持 Watchdog 模式
+            if (!string.IsNullOrEmpty(request.Param))
+            {
+                try
+                {
+                    await p.StandardInput.WriteLineAsync(request.Param).ConfigureAwait(false);
+                    await p.StandardInput.FlushAsync().ConfigureAwait(false);
+                }
+                catch { }
+            }
+            try { p.StandardInput.Close(); } catch { }
 
             var stdoutTask = p.StandardOutput.ReadToEndAsync(ct);
             var stderrTask = p.StandardError.ReadToEndAsync(ct);

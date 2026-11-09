@@ -66,8 +66,8 @@ public record SmbSupportResponse(bool Supported, string Message);
 public record ResourceHistoryResponse(IEnumerable<StatusSnapshotPoint> System, IEnumerable<DiskSnapshotPoint> Disks, IEnumerable<NetSnapshotPoint> Networks, IEnumerable<ProcessSnapshotPoint> Processes);
 public record PresetItemResponse(Guid Id, string Name, string Container, string? VideoCodec, int? VideoQuality, string? AudioCodec, string? AudioBitrate, string? ExtraArgs, string? Description, bool IsBuiltin, DateTime CreateTime);
 public record WatchRuleItemResponse(Guid Id, string Name, string WatchPath, string? FilePatterns, Guid? PresetId, int OutputMode, bool Recursive, int Mode, int PollSeconds, bool Enabled, bool UseHardwareAccel, string? HardwareBackend, DateTime? LastScanTime);
-public record FileEntryResponse(string Name, string Path, bool IsDirectory, long Size, DateTime Modified, string Extension, bool IsTextual);
-public record FileListResponse(string Path, string? Parent, string Name, bool IsRoot, List<FileEntryResponse> Entries, bool IsVirtualRoot = false);
+public record FileEntryResponse(string Name, string Path, bool IsDirectory, long Size, DateTime Modified, string Extension, bool IsTextual, bool IsSymlink = false);
+public record FileListResponse(string Path, string? Parent, string Name, bool IsRoot, List<FileEntryResponse> Entries, bool IsVirtualRoot = false, string Target = "container");
 public record ScheduleItemResponse(Guid Id, string Name, Guid CommandId, string CommandName, string CommandText, int ScriptType, string CronExpression, bool Enabled, Guid? GroupId, string? GroupName, bool IsPinned, int SortOrder, int? TimeoutSeconds, string? Arguments, DateTime? LastRunTime, DateTime? NextRunTime, DateTime CreateTime, DateTime UpdateTime, int TargetHostMode = 0, string? TargetHostId = null, string? TargetHostIds = null, int FailurePolicy = 0, int TargetBizType = 0, string? WorkflowId = null, string ExecutionTarget = "container");
 public record LogFileItemResponse(string Name, long LengthBytes, DateTime LastWriteTime);
 

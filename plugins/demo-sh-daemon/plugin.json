@@ -1,0 +1,98 @@
+{
+  "manifestVersion": 3,
+  "id": "demo-sh-daemon",
+  "name": "Shell 轮询状态采集守护",
+  "category": "Ops",
+  "version": "1.0.0",
+  "description": "Shell 编写的后台健康巡检与状态指标定时采样守护进程",
+  "icon": "🐚",
+  "profile": "Resident",
+  "runtime": "Bash",
+  "entrypoint": "daemon.sh",
+  "network": {
+    "mode": "none"
+  },
+  "dependencies": [
+    {
+      "id": "bash",
+      "name": "Bash 解释器",
+      "scope": "container",
+      "kind": "runner",
+      "required": true,
+      "recommended": true,
+      "description": "运行 Shell 定时守护进程所必需的环境",
+      "probe": {
+        "command": "bash",
+        "args": [
+          "--version"
+        ]
+      },
+      "installGuide": {
+        "alpine": "apk add --no-cache bash",
+        "debian": "apt update && apt install -y bash",
+        "windows": "winget install Git.Git"
+      }
+    }
+  ],
+  "supervision": {
+    "autoRestart": true
+  },
+  "archetype": {
+    "profile": "Resident",
+    "lifecycle": "Interpreted",
+    "protocol": "Http",
+    "language": "bash"
+  },
+  "layout": {
+    "sourceEntry": "daemon.sh",
+    "targetArtifact": "daemon.sh",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "interface": {
+    "protocol": "Http",
+    "endpoint": "http://127.0.0.1:{port}",
+    "healthEndpoint": "/health",
+    "services": {
+      "sh-daemon": {
+        "description": "Bash 进程与系统资源常驻监控",
+        "operations": [
+          "status",
+          "report"
+        ]
+      }
+    }
+  },
+  "resources": {
+    "limits": {
+      "cpu": "200m",
+      "memory": "64Mi",
+      "pids": 20
+    },
+    "requests": {
+      "cpu": "50m",
+      "memory": "16Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    }
+  },
+  "events": {
+    "publishes": [
+      "sh.daemon.tick"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "system:process_read"
+  ]
+}

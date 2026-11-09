@@ -1,23 +1,94 @@
 {
-  "manifestVersion": 1,
+  "manifestVersion": 3,
   "id": "sample-healthcheck",
   "name": "系统健康守护扩展",
   "category": "Monitoring",
   "version": "1.0.0",
   "description": "基于脚本扩展的轻量系统健康自检守护服务示例",
   "icon": "🩺",
-  "profile": "oneshot",
-  "runtime": "bash",
+  "profile": "OneShot",
+  "runtime": "Bash",
   "entrypoint": "hooks/status.sh",
-  "dependencies": {
-    "runners": ["bash"]
-  },
-  "installGuide": {
-    "debian": "apt update && apt install -y bash",
-    "alpine": "apk add --no-cache bash",
-    "windows": "winget install Git.Git"
-  },
+  "dependencies": [
+    {
+      "id": "bash",
+      "name": "Bash 解释器",
+      "scope": "container",
+      "kind": "runner",
+      "required": true,
+      "recommended": true,
+      "description": "执行健康巡检 Shell 脚本所需的环境",
+      "probe": {
+        "command": "bash",
+        "args": [
+          "--version"
+        ]
+      },
+      "installGuide": {
+        "debian": "apt update && apt install -y bash",
+        "alpine": "apk add --no-cache bash",
+        "windows": "winget install Git.Git"
+      }
+    }
+  ],
   "customActions": [
-    { "action": "status", "label": "检查系统健康", "icon": "🩺" }
+    {
+      "action": "status",
+      "label": "检查系统健康",
+      "icon": "🩺"
+    }
+  ],
+  "archetype": {
+    "profile": "OneShot",
+    "lifecycle": "Interpreted",
+    "protocol": "CliArgs",
+    "language": "bash"
+  },
+  "interface": {
+    "protocol": "CliArgs",
+    "services": {
+      "healthcheck": {
+        "description": "宿主环境健康检测探针",
+        "operations": [
+          "check"
+        ]
+      }
+    }
+  },
+  "layout": {
+    "sourceEntry": "hooks/check.sh",
+    "targetArtifact": "hooks/check.sh",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "resources": {
+    "limits": {
+      "cpu": "200m",
+      "memory": "64Mi",
+      "pids": 20
+    },
+    "requests": {
+      "cpu": "50m",
+      "memory": "16Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "ExecCheck",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "ExecCheck",
+      "timeoutSeconds": 3
+    }
+  },
+  "events": {
+    "publishes": [
+      "system.health.checked"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "system:metrics_read"
   ]
 }

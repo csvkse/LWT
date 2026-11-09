@@ -130,7 +130,9 @@ func (s *Server) handleHTTPConnect(bConn net.Conn, req *http.Request) error {
 	if s.acl != nil {
 		s.acl.RecordTargetResult(true)
 	}
-	_ = winningIP
+	if winningIP != nil {
+		s.promoteWinningIP(targetHost, winningIP)
+	}
 
 	// Respond 200 Connection Established to client
 	if _, err := bConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
@@ -267,7 +269,10 @@ func (s *Server) dialHTTPForwardTarget(ctx context.Context, network, addr string
 			return nil, err
 		}
 	}
-	conn, _, err := s.dialHTTPForwardRoute(ctx, route)
+	conn, winningIP, err := s.dialHTTPForwardRoute(ctx, route)
+	if winningIP != nil {
+		s.promoteWinningIP(host, winningIP)
+	}
 	return conn, err
 }
 

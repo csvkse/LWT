@@ -293,6 +293,7 @@ public sealed class UnifiedExecutionEngine(
         var pipelineContext = new Dictionary<string, object?>();
         bool abortPipeline = false;
         int globalStepOrder = 0;
+        var completedSteps = new Stack<(WorkflowStep Step, ExecutionTarget Target)>();
 
         foreach (var stage in definition?.Stages ?? Enumerable.Empty<WorkflowStage>())
         {
@@ -369,6 +370,15 @@ public sealed class UnifiedExecutionEngine(
                 var stageResults = await Task.WhenAll(tasks);
                 results.AddRange(stageResults.OrderBy(r => r.StepOrder));
 
+                foreach (var (step, res) in (stage.Steps ?? Enumerable.Empty<WorkflowStep>()).Zip(stageResults))
+                {
+                    if (res.Status == ExecutionStatus.Success && step.CompensationStep != null)
+                    {
+                        var effTarget = !string.IsNullOrWhiteSpace(step.TargetHostId) ? ExecutionTarget.Remote(step.TargetHostId) : defaultTarget;
+                        completedSteps.Push((step, effTarget));
+                    }
+                }
+
                 if (stageResults.Any(r => r.Status == ExecutionStatus.Failure || r.Status == ExecutionStatus.Paused))
                 {
                     abortPipeline = true;
@@ -438,10 +448,47 @@ public sealed class UnifiedExecutionEngine(
                     var stepRes = await ExecuteWorkflowStepAsync(step, stepTarget, triggerBy, batchId, globalStepOrder, workflowId, pipelineContext, cancellationToken);
                     results.Add(stepRes);
 
+                    if (stepRes.Status == ExecutionStatus.Success && step.CompensationStep != null)
+                    {
+                        completedSteps.Push((step, stepTarget));
+                    }
+
                     if (stepRes.Status == ExecutionStatus.Failure || stepRes.Status == ExecutionStatus.Paused)
                     {
                         abortPipeline = true;
                     }
+                }
+            }
+        }
+
+        // 逆向 Saga 补偿机制 (Reverse Saga Compensation Pipeline)
+        if (abortPipeline && completedSteps.Count > 0)
+        {
+            logger.LogWarning("工作流 {WorkflowId} 触发故障熔断，启动逆向 Saga 补偿事务 (总计 {Count} 个待补偿步骤)...", workflowId, completedSteps.Count);
+            while (completedSteps.TryPop(out var item))
+            {
+                if (item.Step.CompensationStep == null) continue;
+
+                var compStep = item.Step.CompensationStep with
+                {
+                    Name = string.IsNullOrWhiteSpace(item.Step.CompensationStep.Name)
+                        ? $"[Saga 补偿] {item.Step.Name}"
+                        : item.Step.CompensationStep.Name
+                };
+
+                var compOrder = Interlocked.Increment(ref globalStepOrder);
+                var compTarget = !string.IsNullOrWhiteSpace(compStep.TargetHostId)
+                    ? ExecutionTarget.Remote(compStep.TargetHostId)
+                    : item.Target;
+
+                try
+                {
+                    var compRes = await ExecuteWorkflowStepAsync(compStep, compTarget, triggerBy, batchId, compOrder, workflowId, pipelineContext, cancellationToken);
+                    results.Add(compRes);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "执行 Saga 补偿步骤失败: {StepName}", compStep.Name);
                 }
             }
         }

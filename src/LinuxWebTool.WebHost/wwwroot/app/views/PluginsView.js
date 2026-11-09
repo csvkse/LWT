@@ -14,6 +14,7 @@ import PluginKvDrawer from '../components/plugins/PluginKvDrawer.js';
 import PluginCreateModal from '../components/plugins/PluginCreateModal.js';
 import PluginInstallGuideModal from '../components/plugins/PluginInstallGuideModal.js';
 import PluginPortSwitchModal from '../components/plugins/PluginPortSwitchModal.js';
+import PluginInvokeDrawer from '../components/plugins/PluginInvokeDrawer.js';
 
 export default defineComponent({
   name: 'PluginsView',
@@ -28,18 +29,21 @@ export default defineComponent({
     PluginCreateModal,
     PluginInstallGuideModal,
     PluginPortSwitchModal,
+    PluginInvokeDrawer,
   },
   setup() {
     const plugins = ref([]);
     const loading = ref(false);
-    const profileTab = ref('all'); // 'all' | 'resident' | 'oneshot'
+    const profileTab = ref('all'); // 'all' | 'service' | 'function' | 'task'
     const categoryFilter = ref('all');
     const stateFilter = ref('all'); // 'all' | 'running' | 'degraded' | 'missing' | 'stopped'
+    const lifecycleFilter = ref('all'); // 'all' | 'interpreted' | 'precompiled' | 'sourcecompiled'
+    const protocolFilter = ref('all'); // 'all' | 'http' | 'uds' | 'wasmabi' | 'cli'
     const searchKeyword = ref('');
     const isSafeMode = ref(false);
     const safeModeMessage = ref('');
 
-    // 模态弹窗状态
+    // 模态弹窗与抽屉状态
     const showCreateModal = ref(false);
     const showImportModal = ref(false);
     const showActionModal = ref(false);
@@ -49,24 +53,27 @@ export default defineComponent({
     const showKvDrawer = ref(false);
     const showGuideModal = ref(false);
     const showPortSwitchModal = ref(false);
+    const showInvokeDrawer = ref(false);
     const selectedGuidePlugin = ref(null);
+    const selectedInvokePlugin = ref(null);
     const envInfo = ref({});
 
     const activePlugin = ref(null);
     const activeActionDef = ref(null);
 
-    // 统计指标
+    // 三大正交计算工作负载统计指标 (MECE 架构)
     const stats = computed(() => {
       const list = plugins.value;
       const total = list.length;
-      const resident = list.filter((p) => p.profile === 0).length;
-      const oneshot = list.filter((p) => p.profile === 1).length;
-      const running = list.filter((p) => p.profile === 0 && p.state === 2).length;
+      const service = list.filter((p) => p.profile === 0).length;
+      const task = list.filter((p) => p.profile === 1).length;
+      const func = list.filter((p) => p.profile === 2 || p.profile === 3).length;
+      const running = list.filter((p) => (p.profile === 0 || p.profile === 2) && p.state === 2).length;
       const degraded = list.filter((p) => p.state === 3 || p.state === 4 || p.state === 5).length;
-      return { total, resident, oneshot, running, degraded };
+      return { total, service, task, function: func, running, degraded };
     });
 
-    // 分类清单
+    // 业务分类清单
     const categories = computed(() => {
       const set = new Set();
       for (const p of plugins.value) {
@@ -77,20 +84,21 @@ export default defineComponent({
       return Array.from(set);
     });
 
-    // 列表筛选（采用策略模式解耦 Profile、Category、Keyword、State 多维过滤）
+    // 多维策略过滤（正交支持 Profile 工作负载、Lifecycle 生命周期、Protocol 通讯协议、Category 领域分类、State 运行状态与全文检索）
     const filteredPlugins = computed(() => {
       return filterPlugins(plugins.value, {
         profile: profileTab.value,
         category: categoryFilter.value,
         keyword: searchKeyword.value,
         state: stateFilter.value,
+        lifecycle: lifecycleFilter.value,
+        protocol: protocolFilter.value,
       });
     });
 
     async function loadPlugins() {
       loading.value = true;
       try {
-        // 全量拉取插件事实源，保证统计指标与分类集合的准确性，过滤完全交由前端策略引擎
         const res = await http(API.plugins.list('all', ''), { method: 'GET' });
         if (res.ok && Array.isArray(res.data)) {
           plugins.value = res.data;
@@ -108,6 +116,8 @@ export default defineComponent({
       profileTab.value = 'all';
       categoryFilter.value = 'all';
       stateFilter.value = 'all';
+      lifecycleFilter.value = 'all';
+      protocolFilter.value = 'all';
       searchKeyword.value = '';
     }
 
@@ -117,12 +127,12 @@ export default defineComponent({
     }
 
     function filterByRunning() {
-      profileTab.value = 'all';
+      profileTab.value = 'service';
       stateFilter.value = 'running';
     }
 
-    function filterByOneshot() {
-      profileTab.value = 'oneshot';
+    function filterByTask() {
+      profileTab.value = 'task';
       stateFilter.value = 'all';
     }
 
@@ -243,6 +253,11 @@ export default defineComponent({
       showPortSwitchModal.value = true;
     }
 
+    function openInvokeDrawer(p) {
+      selectedInvokePlugin.value = p;
+      showInvokeDrawer.value = true;
+    }
+
     async function handlePortSwitched() {
       await loadPlugins();
     }
@@ -254,7 +269,6 @@ export default defineComponent({
           envInfo.value = res.data;
         }
       } catch {
-        // 环境信息非关键依赖，异常时静默降级
         envInfo.value = {};
       }
     }
@@ -282,6 +296,9 @@ export default defineComponent({
       loading,
       profileTab,
       categoryFilter,
+      stateFilter,
+      lifecycleFilter,
+      protocolFilter,
       searchKeyword,
       isSafeMode,
       safeModeMessage,
@@ -294,17 +311,18 @@ export default defineComponent({
       showKvDrawer,
       showGuideModal,
       showPortSwitchModal,
+      showInvokeDrawer,
       selectedGuidePlugin,
+      selectedInvokePlugin,
       envInfo,
       activePlugin,
       activeActionDef,
       stats,
       categories,
       filteredPlugins,
-      stateFilter,
       filterByTotal,
       filterByRunning,
-      filterByOneshot,
+      filterByTask,
       filterByDegraded,
       resetFilters,
       loadPlugins,
@@ -320,12 +338,13 @@ export default defineComponent({
       openKv,
       openInstallGuide,
       openPortSwitch,
+      openInvokeDrawer,
       handlePortSwitched,
     };
   },
   template: `
     <div class="space-y-4">
-      <!-- 纯净/安全模式运维通告 (Safe Mode Alert Banner) -->
+      <!-- 纯净/安全模式通告 -->
       <div
         v-if="isSafeMode"
         class="panel p-3 border-l-4 border-l-amber-500 bg-amber-950/30 border border-amber-500/30 rounded-lg flex items-start justify-between gap-3 text-xs"
@@ -335,7 +354,7 @@ export default defineComponent({
           <div>
             <div class="font-bold text-amber-300">系统已进入纯净安全模式 (Safe Mode)</div>
             <div class="text-slate-300 mt-0.5">
-              {{ safeModeMessage || '已通过环境变量 (LWT_SAFE_MODE / LWT_PLUGINS_SAFE_MODE) 禁用微服务开机自启与崩溃自愈，便于排查隔离故障插件。' }}
+              {{ safeModeMessage || '已通过环境变量 (LWT_SAFE_MODE / LWT_PLUGINS_SAFE_MODE) 禁用微服务开机自启与崩溃自愈。' }}
             </div>
           </div>
         </div>
@@ -344,7 +363,7 @@ export default defineComponent({
         </span>
       </div>
 
-      <!-- 顶部统计全景卡片（支持点击快捷过滤） -->
+      <!-- 顶部三大正交工作负载统计全景卡片 -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div
           class="panel p-3 border-l-4 border-l-cyan-500 flex items-center justify-between cursor-pointer hover:border-cyan-400/60 transition-all select-none"
@@ -360,128 +379,94 @@ export default defineComponent({
 
         <div
           class="panel p-3 border-l-4 border-l-amber-500 flex items-center justify-between cursor-pointer hover:border-amber-400/60 transition-all select-none"
-          title="点击快速筛选运行中的微服务"
+          title="点击展示常驻微服务与守护"
           @click="filterByRunning()"
         >
           <div>
             <div class="text-[11px] text-slate-400 font-medium">常驻微服务 (运行中)</div>
             <div class="text-xl font-bold text-amber-300 mt-0.5">
-              {{ stats.running }} / <span class="text-slate-400 text-sm">{{ stats.resident }}</span>
+              {{ stats.running }} / <span class="text-slate-400 text-sm">{{ stats.service }}</span>
             </div>
           </div>
-          <span class="text-2xl text-amber-400">⚡</span>
+          <span class="text-2xl text-amber-400">🌐</span>
+        </div>
+
+        <div
+          class="panel p-3 border-l-4 border-l-purple-500 flex items-center justify-between cursor-pointer hover:border-purple-400/60 transition-all select-none"
+          title="点击展示弹性微函数与计算"
+          @click="profileTab = 'function'"
+        >
+          <div>
+            <div class="text-[11px] text-slate-400 font-medium">弹性微函数 (FaaS+Wasm)</div>
+            <div class="text-xl font-bold text-purple-300 mt-0.5">{{ stats.function }}</div>
+          </div>
+          <span class="text-2xl text-purple-400">⚡</span>
         </div>
 
         <div
           class="panel p-3 border-l-4 border-l-sky-500 flex items-center justify-between cursor-pointer hover:border-sky-400/60 transition-all select-none"
-          title="点击展示轻量脚本扩展"
-          @click="filterByOneshot()"
+          title="点击展示运维指令与单次任务"
+          @click="filterByTask()"
         >
           <div>
-            <div class="text-[11px] text-slate-400 font-medium">轻量脚本扩展</div>
-            <div class="text-xl font-bold text-sky-300 mt-0.5">{{ stats.oneshot }}</div>
+            <div class="text-[11px] text-slate-400 font-medium">运维指令与任务</div>
+            <div class="text-xl font-bold text-sky-300 mt-0.5">{{ stats.task }}</div>
           </div>
-          <span class="text-2xl text-sky-400">🔌</span>
-        </div>
-
-        <div
-          class="panel p-3 border-l-4 border-l-red-500 flex items-center justify-between cursor-pointer hover:border-red-400/60 transition-all select-none"
-          title="点击快速定位降级与异常插件"
-          @click="filterByDegraded()"
-        >
-          <div>
-            <div class="text-[11px] text-slate-400 font-medium">异常 / 降级服务</div>
-            <div class="text-xl font-bold text-red-400 mt-0.5">{{ stats.degraded }}</div>
-          </div>
-          <span class="text-2xl text-red-400">⚠️</span>
+          <span class="text-2xl text-sky-400">🛠️</span>
         </div>
       </div>
 
-      <!-- 核心控制区：导航标签页 + 检索与操作工具栏 (响应式流式通栏排版，彻底杜绝孤岛与断行) -->
-      <div class="panel p-3 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3">
-        <!-- 标签导航切换 -->
-        <div class="flex items-center gap-1 w-full xl:w-auto overflow-x-auto bg-slate-900/80 p-1 rounded-lg border border-cyber-line/50 shrink-0">
-          <button
-            type="button"
-            class="px-3 py-1.5 rounded text-xs font-medium transition-colors shrink-0 whitespace-nowrap"
-            :class="profileTab === 'all' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'"
-            @click="profileTab = 'all'"
-          >
-            🧩 全部插件 ({{ stats.total }})
-          </button>
-          <button
-            type="button"
-            class="px-3 py-1.5 rounded text-xs font-medium transition-colors shrink-0 whitespace-nowrap"
-            :class="profileTab === 'resident' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'text-slate-400 hover:text-slate-200'"
-            @click="profileTab = 'resident'"
-          >
-            ⚡ 常驻微服务与守护 ({{ stats.resident }})
-          </button>
-          <button
-            type="button"
-            class="px-3 py-1.5 rounded text-xs font-medium transition-colors shrink-0 whitespace-nowrap"
-            :class="profileTab === 'oneshot' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40' : 'text-slate-400 hover:text-slate-200'"
-            @click="profileTab = 'oneshot'"
-          >
-            🔌 脚本轻量扩展 ({{ stats.oneshot }})
-          </button>
-        </div>
-
-        <!-- 检索与工具栏按钮 (成组横向单行排版，禁止内部折行断层) -->
-        <div class="flex items-center gap-2 w-full xl:w-auto justify-between xl:justify-end overflow-x-auto min-w-0 flex-nowrap shrink-0 py-0.5">
-          <!-- 筛选与搜索组合区 -->
-          <div class="flex items-center gap-2 shrink-0 flex-nowrap">
-            <!-- 运行状态快捷过滤 -->
-            <select
-              v-model="stateFilter"
-              class="input select-compact text-xs py-1.5 px-2 bg-slate-900/90 border border-cyber-line/80 text-slate-200 focus:border-cyan-400 rounded-md shrink-0 w-28 sm:w-32"
-              title="按插件当前运行状态过滤"
+      <!-- 核心控制区：双层语义解耦控制台 (第 1 层：工作负载 Tabs 与全局操作；第 2 层：检索与多维切面过滤) -->
+      <div class="panel p-3 flex flex-col gap-3">
+        <!-- 第 1 层：三大正交工作负载范式 Tabs + 全局管理核心动作组 -->
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+          <!-- 标签导航切换：三大正交工作负载范式 (支持小屏横向平滑滑动，隐藏滚动条) -->
+          <div class="flex items-center gap-1 overflow-x-auto no-scrollbar bg-slate-900/80 p-1 rounded-lg border border-cyber-line/50 shrink-0">
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded text-xs font-medium transition-colors shrink-0 whitespace-nowrap"
+              :class="profileTab === 'all' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'"
+              @click="profileTab = 'all'"
             >
-              <option value="all">全部状态</option>
-              <option value="running">🟢 运行中</option>
-              <option value="ready">⚡ 待命/就绪</option>
-              <option value="stopped">⏹️ 已停止</option>
-              <option value="disabled">🚫 已禁用</option>
-              <option value="degraded">⚠️ 异常/降级</option>
-              <option value="missing">🧩 缺少依赖</option>
-            </select>
-
-            <!-- 分类筛选 -->
-            <select
-              v-if="categories.length > 0"
-              v-model="categoryFilter"
-              class="input select-compact text-xs py-1.5 px-2 bg-slate-900/90 border border-cyber-line/80 text-slate-200 focus:border-cyan-400 rounded-md shrink-0 w-24 sm:w-28"
+              🧩 全部 ({{ stats.total }})
+            </button>
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded text-xs font-medium transition-colors shrink-0 whitespace-nowrap"
+              :class="profileTab === 'service' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'text-slate-400 hover:text-slate-200'"
+              @click="profileTab = 'service'"
             >
-              <option value="all">全部分类</option>
-              <option v-for="cat in categories" :key="cat" :value="cat">
-                {{ cat }}
-              </option>
-            </select>
-
-            <!-- 搜索框：暗黑科技底色、发光边框、放大镜图标与一键清空 (✕) -->
-            <div class="relative flex items-center shrink-0 w-36 sm:w-44 md:w-52">
-              <span class="absolute left-2.5 text-slate-500 pointer-events-none text-xs">🔍</span>
-              <input
-                v-model="searchKeyword"
-                type="text"
-                class="input text-xs py-1.5 pl-7 pr-7 w-full bg-slate-900/90 border border-cyber-line/80 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/30 text-slate-100 placeholder:text-slate-500 rounded-md transition-all"
-                placeholder="搜索插件名称/ID..."
-                @keydown.esc="searchKeyword = ''"
-              />
-              <button
-                v-if="searchKeyword"
-                type="button"
-                class="absolute right-2 text-slate-400 hover:text-slate-200 text-xs p-0.5 rounded transition-colors"
-                title="清空搜索"
-                @click="searchKeyword = ''"
-              >
-                ✕
-              </button>
-            </div>
+              🌐 常驻微服务与网关 ({{ stats.service }})
+            </button>
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded text-xs font-medium transition-colors shrink-0 whitespace-nowrap"
+              :class="profileTab === 'function' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40' : 'text-slate-400 hover:text-slate-200'"
+              @click="profileTab = 'function'"
+            >
+              ⚡ 弹性微函数与计算 ({{ stats.function }})
+            </button>
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded text-xs font-medium transition-colors shrink-0 whitespace-nowrap"
+              :class="profileTab === 'task' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40' : 'text-slate-400 hover:text-slate-200'"
+              @click="profileTab = 'task'"
+            >
+              🛠️ 运维指令与单次任务 ({{ stats.task }})
+            </button>
           </div>
 
-          <!-- 导入与新建与刷新 -->
-          <div class="flex items-center gap-1.5 shrink-0 flex-nowrap">
+          <!-- 全局操作动作组：透明互调、导入、新建与刷新 (永远显式外露于顶层右侧，杜绝任何截断隐患) -->
+          <div class="flex items-center gap-1.5 shrink-0 justify-end flex-wrap">
+            <button
+              type="button"
+              class="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5 shrink-0 whitespace-nowrap text-cyan-300"
+              title="打开微服务与微函数透明反射互调网关"
+              @click="openInvokeDrawer(null)"
+            >
+              <span>📡</span>
+              <span class="hidden sm:inline">透明互调</span>
+            </button>
             <button
               type="button"
               class="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5 shrink-0 whitespace-nowrap"
@@ -508,12 +493,108 @@ export default defineComponent({
             </button>
           </div>
         </div>
+
+        <!-- 第 2 层：全文检索与多维切面过滤工具栏 (搜索框全宽自适应拉伸，过滤组紧凑对齐) -->
+        <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2.5 pt-2 border-t border-cyber-line/30">
+          <!-- 全文检索输入框 (flex-1 弹性填补剩余空间，告别原本拥挤狭窄的固定宽度) -->
+          <div class="relative flex-1 min-w-[180px] max-w-xl">
+            <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none text-xs">🔍</span>
+            <input
+              v-model="searchKeyword"
+              type="text"
+              class="input text-xs py-1.5 pl-7 pr-7 w-full bg-slate-900/90 border border-cyber-line/80 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/30 text-slate-100 placeholder:text-slate-500 rounded-md transition-all"
+              placeholder="搜索插件名称、描述、ID 或分类领域..."
+              @keydown.esc="searchKeyword = ''"
+            />
+            <button
+              v-if="searchKeyword"
+              type="button"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs p-0.5 rounded transition-colors"
+              title="清空搜索"
+              @click="searchKeyword = ''"
+            >
+              ✕
+            </button>
+          </div>
+
+          <!-- 多维切面过滤下拉选择组 (生命周期、协议、状态、分类) + 重置按钮 -->
+          <div class="flex items-center gap-2 flex-wrap shrink-0">
+            <!-- 生命周期切面 -->
+            <select
+              v-model="lifecycleFilter"
+              class="input select-compact text-xs py-1.5 px-2 bg-slate-900/90 border border-cyber-line/80 text-slate-200 focus:border-cyan-400 rounded-md shrink-0 w-24 sm:w-28"
+              title="按生命周期（解释型/预编译/源码构建）过滤"
+            >
+              <option value="all">全生命周期</option>
+              <option value="interpreted">⚡ 解释执行</option>
+              <option value="precompiled">📦 预编译模块</option>
+              <option value="sourcecompiled">🔨 源码构建</option>
+            </select>
+
+            <!-- 协议切面 -->
+            <select
+              v-model="protocolFilter"
+              class="input select-compact text-xs py-1.5 px-2 bg-slate-900/90 border border-cyber-line/80 text-slate-200 focus:border-cyan-400 rounded-md shrink-0 w-24 sm:w-28"
+              title="按通讯协议过滤"
+            >
+              <option value="all">全通讯协议</option>
+              <option value="http">🌐 HTTP</option>
+              <option value="uds">🔌 UDS</option>
+              <option value="wasmabi">⚡ WasmAbi</option>
+              <option value="cli">💻 CLI</option>
+            </select>
+
+            <!-- 运行状态过滤 -->
+            <select
+              v-model="stateFilter"
+              class="input select-compact text-xs py-1.5 px-2 bg-slate-900/90 border border-cyber-line/80 text-slate-200 focus:border-cyan-400 rounded-md shrink-0 w-24 sm:w-28"
+              title="按插件当前运行状态过滤"
+            >
+              <option value="all">全部状态</option>
+              <option value="running">🟢 运行中</option>
+              <option value="ready">⚡ 待命/就绪</option>
+              <option value="stopped">⏹️ 已停止</option>
+              <option value="disabled">🚫 已禁用</option>
+              <option value="degraded">⚠️ 异常/降级</option>
+              <option value="missing">🧩 缺少依赖</option>
+            </select>
+
+            <!-- 领域分类筛选 -->
+            <select
+              v-if="categories.length > 0"
+              v-model="categoryFilter"
+              class="input select-compact text-xs py-1.5 px-2 bg-slate-900/90 border border-cyber-line/80 text-slate-200 focus:border-cyan-400 rounded-md shrink-0 w-24 sm:w-28"
+              title="按领域分类筛选"
+            >
+              <option value="all">全部分类</option>
+              <option v-for="cat in categories" :key="cat" :value="cat">
+                {{ cat }}
+              </option>
+            </select>
+
+            <!-- 一键重置全部过滤条件按钮 (仅在存在活跃筛选时高亮显示) -->
+            <button
+              v-if="profileTab !== 'all' || lifecycleFilter !== 'all' || protocolFilter !== 'all' || stateFilter !== 'all' || categoryFilter !== 'all' || searchKeyword"
+              type="button"
+              class="btn-ghost text-xs py-1 px-2 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-950/40 rounded flex items-center gap-1 transition-colors shrink-0"
+              title="重置所有筛选条件"
+              @click="resetFilters()"
+            >
+              <span>↺</span>
+              <span class="hidden sm:inline">重置</span>
+            </button>
+          </div>
+        </div>
       </div>
 
-      <!-- 插件卡片网格列表 -->
-      <div v-if="loading && plugins.length === 0" class="panel py-16 text-center text-slate-400 text-xs">
-        <div class="animate-spin text-2xl mb-2">⏳</div>
-        <div>加载插件中枢清单中...</div>
+      <!-- 插件卡片网格列表 (加载占位具备视口保底高度与呼吸灯动画，杜绝布局高度断崖抖动) -->
+      <div v-if="loading && plugins.length === 0" class="panel min-h-[45vh] flex flex-col items-center justify-center text-slate-400 text-xs space-y-3">
+        <div class="relative flex items-center justify-center">
+          <div class="w-12 h-12 rounded-full border-2 border-cyan-500/20 border-t-cyan-400 animate-spin"></div>
+          <div class="absolute text-lg animate-pulse">🧩</div>
+        </div>
+        <div class="text-slate-300 font-medium tracking-wide">加载插件中枢清单中...</div>
+        <div class="text-slate-500 text-[11px]">正在探活微服务与解析拓扑网络...</div>
       </div>
 
       <div v-else-if="filteredPlugins.length === 0" class="panel py-16 text-center text-slate-400 text-xs space-y-3">
@@ -549,6 +630,7 @@ export default defineComponent({
           @kv="openKv(p)"
           @install-guide="openInstallGuide(p)"
           @switch-port="openPortSwitch(p)"
+          @invoke="openInvokeDrawer(p)"
         />
       </div>
 
@@ -610,6 +692,13 @@ export default defineComponent({
         :show="showCreateModal"
         @close="showCreateModal = false"
         @created="loadPlugins()"
+      />
+
+      <!-- 微服务与微函数动态发现与透明调用抽屉 -->
+      <PluginInvokeDrawer
+        :show="showInvokeDrawer"
+        :plugin="selectedInvokePlugin"
+        @close="showInvokeDrawer = false"
       />
     </div>
   `,

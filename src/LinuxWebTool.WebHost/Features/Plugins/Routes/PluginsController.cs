@@ -402,4 +402,73 @@ public class PluginsController(IPluginManager pluginManager) : MinimalApi.Contro
         var ok = await pluginManager.DeleteKvAsync(id, key, ct);
         return ok ? Ok(new MessageResponse("删除 KV 成功")) : BadRequest(new MessageResponse("删除 KV 失败"));
     }
+
+    [HttpPost("{id}/Events/Publish")]
+    [AllowAnonymous]
+    public async Task<IResult> PublishEvent(
+        string id,
+        [FromBody] PluginEventPublishRequest request,
+        [FromServices] LinuxWebTool.Infrastructure.Features.Plugins.Supervisor.PluginEventBus eventBus,
+        CancellationToken ct)
+    {
+        if (!IsStorageAuthorized(id)) return Unauthorized(new MessageResponse("未授权访问插件事件总线"));
+        if (string.IsNullOrWhiteSpace(request.EventType)) return BadRequest(new MessageResponse("EventType 不能为空"));
+
+        await eventBus.PublishAsync(id, request.EventType, request.Payload, ct);
+        return Ok(new MessageResponse("事件发布成功"));
+    }
+
+    [HttpGet("{id}/Events/Poll")]
+    [AllowAnonymous]
+    public async Task<IResult> PollEvents(
+        string id,
+        [FromQuery] string? eventType,
+        [FromQuery] int limit,
+        [FromServices] LinuxWebTool.Infrastructure.Features.Plugins.Supervisor.PluginEventBus eventBus,
+        CancellationToken ct)
+    {
+        if (!IsStorageAuthorized(id)) return Unauthorized(new MessageResponse("未授权访问插件事件总线"));
+        var events = await eventBus.PollEventsAsync(id, eventType, limit <= 0 ? 50 : limit, ct);
+        return Ok(events);
+    }
+
+    [HttpGet("{id}/Revisions")]
+    public async Task<IResult> ListRevisions(string id, CancellationToken ct)
+    {
+        var revisions = await pluginManager.ListRevisionsAsync(id, ct);
+        return Ok(revisions);
+    }
+
+    [HttpPost("{id}/Revisions/Alias")]
+    public async Task<IResult> SwitchRevisionAlias(
+        string id,
+        [FromBody] PluginRevisionAliasRequest request,
+        CancellationToken ct)
+    {
+        var ok = await pluginManager.SwitchRevisionAliasAsync(id, request.Alias, request.RevisionName, ct);
+        return ok ? Ok(new MessageResponse("别名切换成功")) : BadRequest(new MessageResponse("别名切换失败"));
+    }
+
+    [HttpGet("Discovery")]
+    public async Task<IResult> DiscoverServices(CancellationToken ct)
+    {
+        var services = await pluginManager.DiscoverServicesAsync(ct);
+        return Ok(services);
+    }
+
+    [HttpPost("Invoke")]
+    public async Task<IResult> InvokeService(
+        [FromBody] PluginInvokeRequest request,
+        CancellationToken ct)
+    {
+        var response = await pluginManager.InvokeServiceAsync(request, ct);
+        return Ok(response);
+    }
+
+    [HttpPost("{id}/Build")]
+    public async Task<IResult> BuildPlugin(string id, CancellationToken ct)
+    {
+        var result = await pluginManager.BuildPluginAsync(id, ct);
+        return Ok(result);
+    }
 }

@@ -1,538 +1,95 @@
-using System.Text;
-using System.IO.Compression;
-using Directory = System.IO.Directory;
-using LinuxWebTool.Application.Features.Security.Policies;
-using LinuxWebTool.Contracts.Features.Security.Contracts;
-using LinuxWebTool.Infrastructure.Features.Security.Adapters;
-using LinuxWebTool.Infrastructure.Shared.Persistence.Entities;
-using LinuxWebTool.Infrastructure.Shared.Support;
+using LinuxWebTool.WebHost.Features.Files.Adapters;
+using LinuxWebTool.WebHost.Features.Files.Factories;
+
 namespace LinuxWebTool.WebHost.Features.Files.Routes;
 
 /// <summary>
-/// 文件管理器：浏览系统文件夹 / 文件，常见文本文件的查看 / 编辑与增删改查。
-/// 支持本机绝对路径；破坏性操作守卫系统根目录与程序数据目录。
-/// 与「任意指令执行」同属管理员威胁模型，页面不暴露公网即可。
+/// 文件管理器 API 控制器：
+/// 浏览、查看、编辑、新建、重命名、删除、上传、打包下载文件与目录。
+/// 支持多目标源调度：📦 当前环境（container）与 🖥️ 宿主主机（host，通过特权容器 nsenter 穿透）。
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class FilesController(
-    DataPaths dataPaths,
-    IOperationLogger operationLogger,
-    MountStateMachineService mountHealth,
-    SmbDirectoryReader smbDirectoryReader,
-    SmbMountStore smbMountStore,
-    ISecurityPolicyEngine policyEngine) : MinimalApi.ControllerBase
+public class FilesController(FileSystemAdapterFactory adapterFactory) : MinimalApi.ControllerBase
 {
-    /// <summary>文本查看 / 编辑上限（2MB），超限提示下载而不是误读大文件。</summary>
-    private const long MaxTextBytes = 2 * 1024 * 1024;
-    private ApiKeyEntity? CurrentApiKey => HttpContext?.Items["CurrentApiKey"] as ApiKeyEntity;
-
-    private async ValueTask<(bool Allowed, string? Error)> CheckFileAccessAsync(string normalizedPath, bool isWrite)
+    private IFileSystemTargetAdapter ResolveAdapter(string? target)
     {
-        var apiKey = CurrentApiKey;
-        if (apiKey is null) return (true, null);
-
-        if (!PathScopeGuard.IsAllowed(normalizedPath, apiKey.AllowedPaths, out var scopeErr))
+        if (!string.IsNullOrWhiteSpace(target))
         {
-            return (false, scopeErr);
+            HttpContext.Items["FilesTarget"] = target;
         }
-
-        var evalCtx = new SecurityEvaluationContext(
-            ApiKeyId: apiKey.Id,
-            ApiKeyName: apiKey.Name,
-            Domain: SecurityTargetDomain.LocalFile,
-            ActionVerb: isWrite ? "Write" : "Read",
-            TargetResource: "localhost",
-            RawCommandOrPath: normalizedPath,
-            ClientIp: HttpContext.GetClientIp());
-
-        var decision = await policyEngine.EvaluateAsync(evalCtx);
-        if (!decision.IsAllowed)
-        {
-            return (false, decision.DeniedReason ?? "安全策略拦截此文件操作");
-        }
-
-        return (true, null);
+        return adapterFactory.GetAdapter(target);
     }
 
     // ---------- 目录列表 ----------
 
-    /// <summary>列出目录内容。path 必须是存在的目录。</summary>
+    /// <summary>列出目录内容。支持通过 target=container|host 切换执行环境目标。</summary>
     [HttpGet]
-    public async Task<IResult> List([FromQuery] string path)
+    public async Task<IResult> List([FromQuery] string path, [FromQuery] string target = "container")
     {
-        if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
-
-        var apiKey = CurrentApiKey;
-        if (!string.IsNullOrWhiteSpace(apiKey?.AllowedPaths))
-        {
-            if (normalized == "/")
-            {
-                var roots = PathScopeGuard.GetAllowedRoots(apiKey.AllowedPaths);
-                var rootEntries = roots.Select(r => new FileEntryResponse(
-                    Name: Name(r),
-                    Path: r,
-                    IsDirectory: true,
-                    Size: 0,
-                    Modified: Directory.Exists(r) ? Directory.GetLastWriteTime(r) : DateTime.UtcNow,
-                    Extension: "",
-                    IsTextual: false
-                )).ToList();
-                return Ok(new FileListResponse("/", null, "工作空间", true, rootEntries, true));
-            }
-
-            var (allowed, failureReason) = await CheckFileAccessAsync(normalized, isWrite: false);
-            if (!allowed)
-            {
-                return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(failureReason ?? "无权限访问该路径"));
-            }
-        }
-        var smbRoot = OperatingSystem.IsLinux() ? mountHealth.GetSmbMountRoot(normalized) : null;
-        // The first request can arrive before the scheduler has registered startup configurations.
-        if (OperatingSystem.IsLinux() && smbRoot is null)
-            smbRoot = (await smbMountStore.GetAllAsync()).Select(m => MountOperationCoordinator.NormalizePath(m.LocalPath))
-                .Where(root => normalized == root || normalized.StartsWith(root == "/" ? "/" : root + "/", StringComparison.Ordinal))
-                .OrderByDescending(root => root.Length).FirstOrDefault();
-        if (smbRoot is not null)
-        {
-            var result = await smbDirectoryReader.ReadAsync(smbRoot, normalized, HttpContext.TraceIdentifier, HttpContext.RequestAborted);
-            if (!result.Success)
-            {
-                mountHealth.RequestImmediateCheck(normalized);
-                return StatusCode(result.Busy ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status504GatewayTimeout,
-                    new MessageResponse(result.Error ?? "SMB 目录读取失败"));
-            }
-            var smbEntries = result.Entries.OrderByDescending(e => e.IsDirectory).ThenBy(e => e.Name, StringComparer.Ordinal)
-                .Select(e => Entry(normalized, e.Name, e.IsDirectory, e.Size, e.Modified)).ToList();
-            return Ok(new FileListResponse(normalized, Parent(normalized), Name(normalized), normalized == "/", smbEntries));
-        }
-        if (OperatingSystem.IsWindows() && normalized == "/")
-        {
-            var roots = DriveInfo.GetDrives().Where(drive => Directory.Exists(drive.Name))
-                .Select(drive => new FileEntryResponse(drive.Name.Replace('\\', '/'), drive.Name.Replace('\\', '/'), true, 0, DateTime.MinValue, "", false)).ToList();
-            return Ok(new FileListResponse("/", null, "磁盘", true, roots, true));
-        }
-        if (!Directory.Exists(normalized))
-        {
-            mountHealth.RequestImmediateCheck(normalized);
-            return NotFound(new MessageResponse($"路径不存在或不是目录：{normalized}"));
-        }
-
-        List<FileEntryResponse> entries;
-        try
-        {
-            entries = BuildEntries(normalized);
-        }
-        catch (UnauthorizedAccessException)
-        {
-            mountHealth.RequestImmediateCheck(normalized);
-            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse($"无权限读取该目录：{normalized}"));
-        }
-        catch (IOException ex)
-        {
-            mountHealth.RequestImmediateCheck(normalized);
-            return StatusCode(StatusCodes.Status500InternalServerError, new MessageResponse($"读取目录失败：{ex.Message}"));
-        }
-
-        return Ok(new FileListResponse(normalized, Parent(normalized), Name(normalized), normalized == "/", entries));
+        var adapter = ResolveAdapter(target);
+        return await adapter.ListAsync(path, HttpContext, HttpContext.RequestAborted);
     }
-
-    private static List<FileEntryResponse> BuildEntries(string normalized)
-    {
-        var entries = new List<FileEntryResponse>();
-        foreach (var dir in Directory.EnumerateDirectories(normalized).OrderBy(d => d, StringComparer.Ordinal))
-        {
-            var name = Name(dir);
-            entries.Add(Entry(normalized, name, isDirectory: true, size: null, modified: System.IO.File.GetLastWriteTime(dir)));
-        }
-        foreach (var file in Directory.EnumerateFiles(normalized).OrderBy(f => f, StringComparer.Ordinal))
-        {
-            var name = Name(file);
-            entries.Add(Entry(normalized, name, isDirectory: false, size: new System.IO.FileInfo(file).Length, modified: System.IO.File.GetLastWriteTime(file)));
-        }
-        return entries;
-    }
-
-    private static FileEntryResponse Entry(string dir, string name, bool isDirectory, long? size, DateTime modified) => new(
-        name, Join(dir, name), isDirectory, isDirectory ? 0 : size ?? 0, modified,
-        isDirectory ? string.Empty : Path.GetExtension(name), !isDirectory && IsTextExtension(name));
-
-    private static string Join(string dir, string name) => FileBrowserPath.Join(dir, name);
 
     // ---------- 文本读取 / 写入 ----------
 
-    /// <summary>读取文本文件内容（二进制 / 超限拒绝）。</summary>
+    /// <summary>读取文本文件内容（二进制/超限拒绝）。</summary>
     [HttpGet("Content")]
-    public async Task<IResult> ReadContent([FromQuery] string path)
+    public async Task<IResult> ReadContent([FromQuery] string path, [FromQuery] string target = "container")
     {
-        if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
-        var (allowed, scopeErr) = await CheckFileAccessAsync(normalized, isWrite: false);
-        if (!allowed)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
-        }
-        if (!System.IO.File.Exists(normalized))
-        {
-            return NotFound(new MessageResponse($"文件不存在：{normalized}"));
-        }
-
-        var info = new System.IO.FileInfo(normalized);
-        if (info.Length > MaxTextBytes)
-        {
-            return BadRequest(new ReadFileErrorResponse($"文件超过 {MaxTextBytes / 1024 / 1024}MB，无法以文本查看，请直接用系统工具处理", true, false));
-        }
-
-        // 二进制探测：前 8KB 内出现 NUL 字节即以二进制处理。
-        using (var fs = new System.IO.FileStream(normalized, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-        {
-            var buffer = new byte[Math.Min((int)info.Length, 8192)];
-            var read = await fs.ReadAsync(buffer);
-            if (buffer.Take(read).Contains((byte)0))
-            {
-                return BadRequest(new ReadFileErrorResponse("二进制文件，无法以文本查看", false, true));
-            }
-        }
-
-        var content = await System.IO.File.ReadAllTextAsync(normalized, Encoding.UTF8);
-        return Ok(new FileContentResponse(normalized, info.Name, info.Length, content));
+        var adapter = ResolveAdapter(target);
+        return await adapter.ReadContentAsync(path, HttpContext, HttpContext.RequestAborted);
     }
 
     /// <summary>写文本文件（新建或覆盖）。父目录必须存在。</summary>
     [HttpPost("Content")]
     public async Task<IResult> WriteContent([FromBody] SaveTextRequest request)
     {
-        if (!TryNormalize(request.Path, out var normalized, out var failure)) return failure!;
-        var (allowed, scopeErr) = await CheckFileAccessAsync(normalized, isWrite: true);
-        if (!allowed)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
-        }
-        if (IsProtected(normalized))
-        {
-            return BadRequest(new MessageResponse("程序数据目录禁止写入"));
-        }
-        var parent = Path.GetDirectoryName(normalized);
-        if (string.IsNullOrEmpty(parent) || !Directory.Exists(parent))
-        {
-            return BadRequest(new MessageResponse("目标目录不存在，请先创建目录"));
-        }
-        if (Encoding.UTF8.GetByteCount(request.Content ?? string.Empty) > MaxTextBytes)
-        {
-            return BadRequest(new MessageResponse("内容超过大小限制"));
-        }
-
-        await System.IO.File.WriteAllTextAsync(normalized, request.Content ?? string.Empty, new UTF8Encoding(false));
-        await operationLogger.LogAsync("写文本文件", "文件管理", Name(normalized), parent, clientIp: HttpContext.GetClientIp());
-        return Ok(new MessageResponse("已保存"));
+        var adapter = ResolveAdapter(request.Target);
+        return await adapter.WriteContentAsync(request.Path, request.Content, HttpContext, HttpContext.RequestAborted);
     }
 
-    // ---------- 目录 / 文件操作 ----------
+    // ---------- 增删改 ----------
 
-    /// <summary>新建目录（可多级）。</summary>
+    /// <summary>创建文件夹。支持通过 target 切换目标环境。</summary>
     [HttpPost("Mkdir")]
     public async Task<IResult> Mkdir([FromBody] PathRequest request)
     {
-        if (!TryNormalize(request.Path, out var normalized, out var failure)) return failure!;
-        var (allowed, scopeErr) = await CheckFileAccessAsync(normalized, isWrite: true);
-        if (!allowed)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
-        }
-        if (IsProtected(normalized))
-        {
-            return BadRequest(new MessageResponse("程序数据目录禁止写入"));
-        }
-        if (Directory.Exists(normalized) || System.IO.File.Exists(normalized))
-        {
-            return BadRequest(new MessageResponse("同名文件或目录已存在"));
-        }
-
-        try
-        {
-            Directory.CreateDirectory(normalized);
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new MessageResponse($"创建目录失败：{ex.Message}"));
-        }
-        await operationLogger.LogAsync("新建文件夹", "文件管理", Name(normalized), Parent(normalized), clientIp: HttpContext.GetClientIp());
-        return Ok(new CreateFileResponse("已创建", normalized));
+        var adapter = ResolveAdapter(request.Target);
+        return await adapter.MkdirAsync(request.Path, HttpContext, HttpContext.RequestAborted);
     }
 
-    /// <summary>重命名 / 移动文件或目录。</summary>
+    /// <summary>重命名或移动文件 / 目录。不能移动到已存在的路径。</summary>
     [HttpPost("Rename")]
     public async Task<IResult> Rename([FromBody] RenameRequest request)
     {
-        if (!TryNormalize(request.From, out var from, out var failure)) return failure!;
-        if (!TryNormalize(request.To, out var to, out failure)) return failure!;
-        var (allowedFrom, scopeErrFrom) = await CheckFileAccessAsync(from, isWrite: true);
-        if (!allowedFrom)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErrFrom!));
-        }
-        var (allowedTo, scopeErrTo) = await CheckFileAccessAsync(to, isWrite: true);
-        if (!allowedTo)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErrTo!));
-        }
-        if (FileBrowserPath.IsRoot(from) || FileBrowserPath.IsRoot(to))
-        {
-            return BadRequest(new MessageResponse("不能对根目录进行操作"));
-        }
-        if (IsProtected(from) || IsProtected(to))
-        {
-            return BadRequest(new MessageResponse("程序数据目录禁止重命名 / 移动"));
-        }
-
-        if (System.IO.File.Exists(from))
-        {
-            if (System.IO.File.Exists(to)) return BadRequest(new MessageResponse("目标已存在同名文件"));
-            System.IO.File.Move(from, to);
-        }
-        else if (Directory.Exists(from))
-        {
-            if (Directory.Exists(to)) return BadRequest(new MessageResponse("目标已存在同名目录"));
-            Directory.Move(from, to);
-        }
-        else
-        {
-            return NotFound(new MessageResponse("源路径不存在"));
-        }
-        await operationLogger.LogAsync("重命名", "文件管理", Name(from), $"{from} → {to}", clientIp: HttpContext.GetClientIp());
-        return Ok(new RenameFileResponse("已重命名", to));
+        var adapter = ResolveAdapter(request.Target);
+        return await adapter.RenameAsync(request.From, request.To, HttpContext, HttpContext.RequestAborted);
     }
 
-    /// <summary>删除文件或目录（目录递归需 recursive=true）。</summary>
+    /// <summary>删除文件或目录（目录递归需 recursive=true）。受保护核心目录禁止删除。</summary>
     [HttpDelete]
-    public async Task<IResult> Delete([FromQuery] string path, [FromQuery] bool recursive = false)
+    public async Task<IResult> Delete([FromQuery] string path, [FromQuery] bool recursive = false, [FromQuery] string target = "container")
     {
-        if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
-        var (allowed, scopeErr) = await CheckFileAccessAsync(normalized, isWrite: true);
-        if (!allowed)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
-        }
-        if (FileBrowserPath.IsRoot(normalized))
-        {
-            return BadRequest(new MessageResponse("不能删除根目录"));
-        }
-        if (IsProtected(normalized))
-        {
-            return BadRequest(new MessageResponse("程序数据目录禁止删除"));
-        }
-
-        if (System.IO.File.Exists(normalized))
-        {
-            System.IO.File.Delete(normalized);
-        }
-        else if (Directory.Exists(normalized))
-        {
-            if (!recursive && Directory.EnumerateFileSystemEntries(normalized).Any())
-            {
-                return BadRequest(new DeleteFileErrorResponse("目录非空，确认后使用递归删除", true));
-            }
-            Directory.Delete(normalized, recursive);
-        }
-        else
-        {
-            return NotFound(new MessageResponse("路径不存在"));
-        }
-        await operationLogger.LogAsync("删除", "文件管理", Name(normalized), Parent(normalized), success: true, clientIp: HttpContext.GetClientIp());
-        return Ok(new MessageResponse("已删除"));
+        var adapter = ResolveAdapter(target);
+        return await adapter.DeleteAsync(path, recursive, HttpContext, HttpContext.RequestAborted);
     }
 
     /// <summary>上传文件到目录（一次一个）。重名自动加序号。</summary>
     [HttpPost("Upload")]
-    public async Task<IResult> Upload([FromQuery] string path, IFormFile? file)
+    public async Task<IResult> Upload([FromQuery] string path, IFormFile? file, [FromQuery] string target = "container")
     {
-        if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
-        var (allowed, scopeErr) = await CheckFileAccessAsync(normalized, isWrite: true);
-        if (!allowed)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
-        }
-        if (!Directory.Exists(normalized))
-        {
-            return BadRequest(new MessageResponse($"目录不存在：{normalized}"));
-        }
-        if (IsProtected(normalized)) return BadRequest(new MessageResponse("程序数据目录禁止上传"));
-        if (file is null || file.Length == 0)
-        {
-            return BadRequest(new MessageResponse("未选择文件"));
-        }
-
-        var fileName = Path.GetFileName(file.FileName);
-        if (string.IsNullOrWhiteSpace(fileName))
-        {
-            return BadRequest(new MessageResponse("文件名无效"));
-        }
-
-        var target = UniquePath(normalized, fileName);
-        await using (var stream = System.IO.File.Create(target))
-        {
-            await file.CopyToAsync(stream);
-        }
-        await operationLogger.LogAsync("上传文件", "文件管理", fileName, normalized, clientIp: HttpContext.GetClientIp());
-        return Ok(new UploadFileResponse("已上传", target));
+        var adapter = ResolveAdapter(target);
+        return await adapter.UploadAsync(path, file, HttpContext, HttpContext.RequestAborted);
     }
-
-    // ---------- 校验与工具 ----------
 
     /// <summary>下载文件或将文件夹打包为 zip 下载。</summary>
     [HttpGet("Download")]
-    public async Task<IResult> Download([FromQuery] string path)
+    public async Task<IResult> Download([FromQuery] string path, [FromQuery] string target = "container")
     {
-        if (!TryNormalize(path, out var normalized, out var failure)) return failure!;
-        var (allowed, scopeErr) = await CheckFileAccessAsync(normalized, isWrite: false);
-        if (!allowed)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new MessageResponse(scopeErr!));
-        }
-        if (FileBrowserPath.IsRoot(normalized))
-        {
-            return BadRequest(new MessageResponse("不能下载根目录"));
-        }
-        if (IsProtected(normalized))
-        {
-            return BadRequest(new MessageResponse("程序数据目录禁止下载"));
-        }
-
-        if (System.IO.File.Exists(normalized))
-        {
-            var fileName = Path.GetFileName(normalized);
-            await operationLogger.LogAsync("下载文件", "文件管理", fileName, Parent(normalized), clientIp: HttpContext.GetClientIp());
-            return PhysicalFile(normalized, "application/octet-stream", fileName);
-        }
-
-        if (Directory.Exists(normalized))
-        {
-            var folderName = Name(normalized);
-            if (string.IsNullOrWhiteSpace(folderName)) folderName = "folder";
-            var downloadName = $"{folderName}.zip";
-
-            var tempZipPath = Path.Combine(Path.GetTempPath(), $"lwt_dl_{Guid.NewGuid():N}.zip");
-            try
-            {
-                BuildDirectoryZip(normalized, tempZipPath);
-            }
-            catch (Exception ex)
-            {
-                try { if (System.IO.File.Exists(tempZipPath)) System.IO.File.Delete(tempZipPath); } catch { /* ignore */ }
-                return BadRequest(new MessageResponse($"打包文件夹失败：{ex.Message}"));
-            }
-
-            await operationLogger.LogAsync("打包下载文件夹", "文件管理", folderName, Parent(normalized), clientIp: HttpContext.GetClientIp());
-            var stream = new FileStream(tempZipPath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.DeleteOnClose);
-            return File(stream, "application/zip", downloadName);
-        }
-
-        return NotFound(new MessageResponse($"路径不存在：{normalized}"));
-    }
-
-    private static void BuildDirectoryZip(string rootPath, string zipFilePath)
-    {
-        const int maxFiles = 20000;
-        const long maxTotalBytes = 2L * 1024 * 1024 * 1024; // 2GB
-
-        int fileCount = 0;
-        long totalBytes = 0;
-
-        using var archive = ZipFile.Open(zipFilePath, ZipArchiveMode.Create, Encoding.UTF8);
-        var rootDir = new DirectoryInfo(rootPath);
-
-        void AddDirectory(DirectoryInfo currentDir, string relativePath)
-        {
-            if ((currentDir.Attributes & FileAttributes.ReparsePoint) != 0) return;
-
-            foreach (var subDir in currentDir.EnumerateDirectories())
-            {
-                if ((subDir.Attributes & FileAttributes.ReparsePoint) != 0) continue;
-                var nextRel = string.IsNullOrEmpty(relativePath) ? subDir.Name : $"{relativePath}/{subDir.Name}";
-                archive.CreateEntry($"{nextRel}/");
-                AddDirectory(subDir, nextRel);
-            }
-
-            foreach (var file in currentDir.EnumerateFiles())
-            {
-                if ((file.Attributes & FileAttributes.ReparsePoint) != 0) continue;
-                if (++fileCount > maxFiles)
-                    throw new InvalidOperationException($"文件夹内文件数量过多（超过 {maxFiles} 个），建议使用命令行打包");
-
-                totalBytes += file.Length;
-                if (totalBytes > maxTotalBytes)
-                    throw new InvalidOperationException($"文件夹总大小超过安全上限（{maxTotalBytes / 1024 / 1024 / 1024}GB），建议使用系统工具传输");
-
-                var entryName = string.IsNullOrEmpty(relativePath) ? file.Name : $"{relativePath}/{file.Name}";
-                var entry = archive.CreateEntry(entryName, CompressionLevel.Fastest);
-                entry.LastWriteTime = file.LastWriteTime;
-
-                using var fs = file.Open(FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                using var entryStream = entry.Open();
-                fs.CopyTo(entryStream);
-            }
-        }
-
-        AddDirectory(rootDir, "");
-    }
-
-    private bool IsProtected(string normalized)
-    {
-        var dataRoot = FileBrowserPath.Normalize(dataPaths.Root);
-        return FileBrowserPath.IsRoot(normalized) || FileBrowserPath.IsWithin(normalized, dataRoot)
-            || FileBrowserPath.IsWithin(dataRoot, normalized) || FileBrowserPath.HasReparsePoint(normalized);
-    }
-
-    private static string UniquePath(string dir, string fileName)
-    {
-        var target = Join(dir, fileName);
-        if (!System.IO.File.Exists(target) && !Directory.Exists(target))
-        {
-            return target;
-        }
-        var stem = Path.GetFileNameWithoutExtension(fileName);
-        var ext = Path.GetExtension(fileName);
-        for (var i = 1; i <= 999; i++)
-        {
-            target = Join(dir, $"{stem}({i}){ext}");
-            if (!System.IO.File.Exists(target) && !Directory.Exists(target))
-            {
-                return target;
-            }
-        }
-        throw new IOException("重名文件过多，无法生成唯一文件名");
-    }
-
-    private bool TryNormalize(string input, out string path, out IResult? failure)
-    {
-        try { path = FileBrowserPath.Normalize(input); failure = null; return true; }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        { path = ""; failure = BadRequest(new MessageResponse(ex.Message)); return false; }
-    }
-
-    /// <summary>取上一级路径；根目录返回 null。/a/b → /a；/a → /。</summary>
-    private static string? Parent(string normalized) => FileBrowserPath.Parent(normalized);
-
-    private static string Name(string normalized) => FileBrowserPath.Name(normalized);
-
-    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".txt", ".md", ".json", ".js", ".mjs", ".cjs", ".ts", ".py", ".sh", ".bash", ".zsh",
-        ".yml", ".yaml", ".xml", ".html", ".htm", ".css", ".csv", ".conf", ".ini", ".toml",
-        ".log", ".env", ".properties", ".cs", ".rs", ".c", ".h", ".cpp", ".hpp", ".java", ".go",
-        ".sql", ".bat", ".ps1", ".vim", ".gitignore", ".dockerignore", ".editorconfig", ".csproj",
-        ".sln", ".slnx", ".cs", ".css", ".scss",
-    };
-
-    private static bool IsTextExtension(string name)
-    {
-        var ext = System.IO.Path.GetExtension(name);
-        if (TextExtensions.Contains(ext))
-        {
-            return true;
-        }
-        // 无扩展名且非特殊隐藏文件（如 LICENSE、README、Dockerfile）按文本处理。
-        return ext.Length == 0 && !name.StartsWith(".", StringComparison.Ordinal);
+        var adapter = ResolveAdapter(target);
+        return await adapter.DownloadAsync(path, HttpContext, HttpContext.RequestAborted);
     }
 
     // ---------- 请求模型 ----------
@@ -540,17 +97,20 @@ public class FilesController(
     public sealed record PathRequest
     {
         public required string Path { get; init; }
+        public string Target { get; init; } = "container";
     }
 
     public sealed record SaveTextRequest
     {
         public required string Path { get; init; }
         public string? Content { get; init; }
+        public string Target { get; init; } = "container";
     }
 
     public sealed record RenameRequest
     {
         public required string From { get; init; }
         public required string To { get; init; }
+        public string Target { get; init; } = "container";
     }
 }

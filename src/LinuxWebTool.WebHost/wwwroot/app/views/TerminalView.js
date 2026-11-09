@@ -91,7 +91,16 @@ export default defineComponent({
     const requestedDirectory = () => typeof route.query.cwd === 'string' ? route.query.cwd : undefined;
     const directoryRequest = () => typeof route.query.open === 'string' ? route.query.open : requestedDirectory();
     const requestedExec = () => typeof route.query.exec === 'string' ? route.query.exec : undefined;
-    const requestedTarget = () => typeof route.query.target === 'string' ? route.query.target : 'container';
+    const requestedTarget = () => typeof route.query.target === 'string' && route.query.target ? route.query.target : (typeof route.query.mode === 'string' && route.query.mode ? route.query.mode : 'container');
+    const requestedName = () => typeof route.query.name === 'string' ? route.query.name : '';
+    function formatTabTitle(target, name, index) {
+      if (target === 'host') return `[宿主] 终端 ${index}`;
+      if (target?.startsWith('docker:')) {
+        const cName = name || target.slice(7, 19);
+        return `[容器: ${cName}] 终端`;
+      }
+      return `终端 ${index}`;
+    }
     const initialTabId = 'tab-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     const isFullscreen = ref(false);
     const terminalHost = ref(null);
@@ -99,7 +108,7 @@ export default defineComponent({
     const tabs = ref([
       {
         id: initialTabId,
-        title: requestedTarget() === 'host' ? '[宿主] 终端 1' : '终端 1',
+        title: formatTabTitle(requestedTarget(), requestedName(), 1),
         target: requestedTarget(),
         initialCommand: requestedExec(),
         sessionId: '',
@@ -490,14 +499,13 @@ export default defineComponent({
       mountTab(tabId);
     }
 
-    function addTab(workingDirectory, target = 'container', initialCommand = null) {
+    function addTab(workingDirectory, target = 'container', initialCommand = null, name = '') {
       const nextNum = tabs.value.length + 1;
       const newId = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      const isHost = target === 'host';
       tabs.value.push({
         id: newId,
-        title: isHost ? `[宿主] 终端 ${nextNum}` : `终端 ${nextNum}`,
-        target: isHost ? 'host' : 'container',
+        title: formatTabTitle(target, name, nextNum),
+        target: target || 'container',
         initialCommand,
         sessionId: '',
         isConnected: false,
@@ -651,7 +659,8 @@ export default defineComponent({
       if (saved.length) {
         const initial = tabs.value[0];
         const restored = saved.find(tab => tab.directoryRequest === directoryRequest());
-        const restoreOnly = requestedDirectory() === undefined || restored;
+        const hasExplicitIntent = requestedDirectory() !== undefined || typeof route.query.open === 'string' || (requestedTarget() && requestedTarget() !== 'container');
+        const restoreOnly = !hasExplicitIntent && (saved.length > 0);
         if (!restoreOnly) initial.title = '终端 ' + (saved.length + 1);
         tabs.value = restoreOnly ? saved : [...saved, initial];
         activeTabId.value = restoreOnly ? (restored || saved[0]).id : initial.id;
@@ -664,9 +673,9 @@ export default defineComponent({
 
     watch(() => [route.query.cwd, route.query.open, route.query.exec, route.query.target], () => {
       if (requestedExec() !== undefined) {
-        addTab(requestedDirectory(), requestedTarget(), requestedExec());
-      } else if (requestedDirectory() !== undefined) {
-        addTab(requestedDirectory(), requestedTarget());
+        addTab(requestedDirectory(), requestedTarget(), requestedExec(), requestedName());
+      } else if (requestedDirectory() !== undefined || typeof route.query.open === 'string' || requestedTarget()?.startsWith('docker:') || requestedTarget() === 'host') {
+        addTab(requestedDirectory(), requestedTarget(), null, requestedName());
       }
     });
 
@@ -733,6 +742,7 @@ export default defineComponent({
             ></span>
             <span>{{ tab.title }}</span>
             <span v-if="tab.target === 'host'" class="text-[9px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono border border-amber-500/30">宿主</span>
+            <span v-else-if="tab.target?.startsWith('docker:')" class="text-[9px] px-1 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-mono border border-cyan-500/30">Docker</span>
             <span
               v-if="tabs.length > 1"
               class="ml-1 text-slate-500 hover:text-rose-400 text-sm font-bold leading-none"

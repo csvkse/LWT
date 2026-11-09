@@ -32,6 +32,11 @@ public interface IPluginManager
     ValueTask<PluginPortCheckResult> CheckPortAsync(string id, int port, CancellationToken ct = default);
     ValueTask<PluginPortSwitchResult> SwitchPortAsync(string id, int newPort, bool restartIfRunning = true, CancellationToken ct = default);
     ValueTask<PluginActionResult> ExecuteActionAsync(PluginActionRequest request, CancellationToken ct = default);
+    ValueTask<IReadOnlyList<string>> ListRevisionsAsync(string id, CancellationToken ct = default);
+    ValueTask<bool> SwitchRevisionAliasAsync(string id, string alias, string revisionName, CancellationToken ct = default);
+    ValueTask<IReadOnlyList<ServiceDescriptorDto>> DiscoverServicesAsync(CancellationToken ct = default);
+    ValueTask<PluginInvokeResponse> InvokeServiceAsync(PluginInvokeRequest request, CancellationToken ct = default);
+    ValueTask<PluginBuildResult> BuildPluginAsync(string id, CancellationToken ct = default);
     string? GetInternalSecret(string id);
     event Action? OnPluginStateOrManifestChanged;
 }

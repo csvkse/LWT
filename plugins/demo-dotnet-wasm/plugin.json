@@ -1,0 +1,105 @@
+{
+  "manifestVersion": 3,
+  "id": "demo-dotnet-wasm",
+  "name": "C# WASI 极速微函数",
+  "category": "Wasm",
+  "version": "1.0.0",
+  "description": "基于 .NET 10 wasi-wasm 编译的原生 WebAssembly 无状态计算微函数",
+  "icon": "⚡",
+  "profile": "Wasm",
+  "runtime": "Wasm",
+  "entrypoint": "demo-dotnet-wasm.wasm",
+  "dependencies": [
+    {
+      "id": "wasmtime",
+      "name": "Wasmtime / WasmEdge 运行时",
+      "scope": "container",
+      "kind": "runner",
+      "required": false,
+      "recommended": true,
+      "description": "高性能 WebAssembly 沙箱执行引擎",
+      "probe": {
+        "command": "wasmtime",
+        "args": [
+          "--version"
+        ]
+      },
+      "installGuide": {
+        "alpine": "apk add --no-cache wasmtime",
+        "debian": "curl https://wasmtime.dev/install.sh -sSf | bash",
+        "windows": "winget install BytecodeAlliance.Wasmtime"
+      }
+    }
+  ],
+  "archetype": {
+    "profile": "Wasm",
+    "lifecycle": "SourceCompiled",
+    "protocol": "WasmAbi",
+    "language": "csharp"
+  },
+  "layout": {
+    "sourceEntry": "Program.cs",
+    "targetArtifact": "demo-dotnet-wasm.wasm",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "build": {
+    "toolchain": "dotnet",
+    "command": "dotnet publish -c Release /p:TargetArchitecture=wasm",
+    "artifacts": [
+      "demo-dotnet-wasm.wasm"
+    ],
+    "watch": [
+      "Program.cs"
+    ],
+    "autoCompileOnSave": true,
+    "timeoutSeconds": 120,
+    "cleanTargets": [
+      "demo-dotnet-wasm.wasm"
+    ]
+  },
+  "interface": {
+    "protocol": "WasmAbi",
+    "services": {
+      "dotnet-wasm": {
+        "description": "C# WASI 算力服务",
+        "operations": [
+          "fib",
+          "calc",
+          "echo",
+          "info"
+        ]
+      }
+    }
+  },
+  "resources": {
+    "limits": {
+      "cpu": "200m",
+      "memory": "64Mi",
+      "pids": 1
+    },
+    "requests": {
+      "cpu": "50m",
+      "memory": "16Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "WasmModuleCheck",
+      "timeoutSeconds": 2
+    },
+    "readiness": {
+      "type": "WasmModuleCheck",
+      "timeoutSeconds": 2
+    }
+  },
+  "events": {
+    "publishes": [
+      "wasm.dotnet.computed"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "wasm:execute"
+  ]
+}

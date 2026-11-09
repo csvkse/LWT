@@ -1,0 +1,105 @@
+{
+  "manifestVersion": 3,
+  "id": "demo-wasm-function",
+  "name": "Wasm 极速微函数示例",
+  "category": "Wasm",
+  "version": "1.0.0",
+  "description": "基于 WebAssembly 沙箱安全运行时的纳米级函数执行示例",
+  "icon": "⚡",
+  "profile": "Wasm",
+  "runtime": "Wasm",
+  "entrypoint": "main.wasm",
+  "dependencies": [
+    {
+      "id": "wasmtime",
+      "name": "Wasmtime / WasmEdge 运行时",
+      "scope": "container",
+      "kind": "runner",
+      "required": false,
+      "recommended": true,
+      "description": "高性能 WebAssembly 沙箱执行引擎",
+      "probe": {
+        "command": "wasmtime",
+        "args": [
+          "--version"
+        ]
+      },
+      "installGuide": {
+        "alpine": "apk add --no-cache wasmtime",
+        "debian": "curl https://wasmtime.dev/install.sh -sSf | bash",
+        "windows": "winget install BytecodeAlliance.Wasmtime"
+      }
+    }
+  ],
+  "archetype": {
+    "profile": "Wasm",
+    "lifecycle": "SourceCompiled",
+    "protocol": "WasmAbi",
+    "language": "wat"
+  },
+  "layout": {
+    "sourceEntry": "function.wat",
+    "targetArtifact": "main.wasm",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "build": {
+    "toolchain": "wat2wasm",
+    "command": "wat2wasm function.wat -o main.wasm",
+    "artifacts": [
+      "main.wasm"
+    ],
+    "watch": [
+      "function.wat"
+    ],
+    "autoCompileOnSave": true,
+    "timeoutSeconds": 30,
+    "cleanTargets": [
+      "main.wasm"
+    ]
+  },
+  "interface": {
+    "protocol": "WasmAbi",
+    "services": {
+      "wasm-calc": {
+        "description": "WAT WebAssembly 极速计算函数",
+        "operations": [
+          "fib",
+          "calc",
+          "echo",
+          "info"
+        ]
+      }
+    }
+  },
+  "resources": {
+    "limits": {
+      "cpu": "200m",
+      "memory": "64Mi",
+      "pids": 1
+    },
+    "requests": {
+      "cpu": "50m",
+      "memory": "16Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "WasmModuleCheck",
+      "timeoutSeconds": 2
+    },
+    "readiness": {
+      "type": "WasmModuleCheck",
+      "timeoutSeconds": 2
+    }
+  },
+  "events": {
+    "publishes": [
+      "wasm.function.executed"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "wasm:execute"
+  ]
+}

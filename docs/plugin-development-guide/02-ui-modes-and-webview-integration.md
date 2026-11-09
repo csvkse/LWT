@@ -1,19 +1,19 @@
 # 02. UI 模式、Webview 集成与 URL 策略仲裁
 
-> **目标**：明确插件在 LWT 平台中的三大 UI 渲染形态、Webview 沙箱通信协议，以及前端 URL 策略仲裁器（`PluginUrlResolver`）的设计模式，彻底杜绝坏死按钮、协议语义错配与静默失败。
+> **目标**：明确插件在 LWT 平台（Schema v3.1）中的三大 UI 渲染形态、Webview 沙箱通信协议，以及前端 URL 策略仲裁器（`PluginUrlResolver`）的设计模式，彻底杜绝坏死按钮、协议语义错配、视口无限膨胀与静默失败。
 
 ---
 
-## 1. 插件三大 UI 模式 (Three UI Modes)
+## 1. 插件三大 UI 模式 (Three UI Modes in Schema v3.1)
 
-LWT 平台支持无缝接入不同技术栈与复杂度各异的插件界面，通过 `plugin.json` 中的 `ui` 与 `network` 配置实现三种正交解耦的 UI 形态：
+LWT 平台支持无缝接入不同技术栈与复杂度各异的插件界面，通过 `plugin.json` 中的 `layout`、`interface` 与 `network` 配置实现三种正交解耦的 UI 形态：
 
 ```mermaid
 graph TD
-    subgraph "UI 模式形态决策树"
-        A["检查 plugin.manifest.ui"] -->|无 ui 或 ui.hasWebview=false| M1["模式 1: 纯后台 / 无界面 (none)"]
-        A -->|hasWebview=true 且 entry 为相对路径| M2["模式 2: 原生托管 Webview (custom/static)"]
-        A -->|hasWebview=true 且 entry='web'| M3["模式 3: 独立反代 Web 服务 (web)"]
+    subgraph "UI 模式形态决策树 (Schema v3.1)"
+        A["检查 plugin.manifest.layout / interface"] -->|无 layout 或 displayMode='none'| M1["模式 1: 纯后台 / 无界面 (none)"]
+        A -->|entry 为相对文件路径 或 webviewBundle 存在| M2["模式 2: 原生托管 Webview (custom/static)"]
+        A -->|entry='web' 或 displayMode='external-tab' 且有 network.ingress| M3["模式 3: 独立反代 Web 服务 (web)"]
     end
 
     M1 --> O1["卡片仅展示: 状态控制、日志、终端、编辑"]
@@ -21,36 +21,54 @@ graph TD
     M3 --> O3["宿主反代网关 /plugins/{id}/ 直连微服务 Web 端口<br/>全功能 Web 仪表盘 (如 Caddy, Grafana, Portainer)"]
 ```
 
-### 模式 1：纯后台 / 无界面 (`none`)
+### 模式 1：纯后台 / 无界面 (`displayMode: "none"`)
 - **适用场景**：后台网络服务（如未配置管理界面的纯 SOCKS5 代理）、系统守护进程、定时自动化脚本。
 - **卡片呈现**：卡片上只保留通用运维按钮（启动、停止、重启、环境检测、日志、代码编辑、卸载），不渲染任何多余的打开按钮。
+- **Schema v3.1 声明**：
+  ```json
+  "layout": {
+    "displayMode": "none",
+    "hasWebview": false
+  }
+  ```
 
 ### 模式 2：原生托管 Webview (`custom` / 静态单页)
-- **适用场景**：绝大多数轻量、富交互的管理面板（如 `mcp-bridge` 控制台、`socks5-proxy` 三维配置面板）。
-- **配置声明**：
+- **适用场景**：绝大多数轻量、富交互的管理面板（如 `disk-explorer` 磁盘目录探针、`mcp-bridge` 控制台、`socks5-proxy` 三维配置面板）。
+- **Schema v3.1 声明**：
   ```json
-  "ui": {
+  "layout": {
+    "displayMode": "fullscreen-dialog",
     "hasWebview": true,
-    "entry": "ui/index.html"
+    "entry": "ui/index.html",
+    "dimensions": {
+      "defaultWidth": "1100px",
+      "defaultHeight": "820px",
+      "resizable": true
+    }
   }
   ```
 - **工作机制**：
   - 插件在 `ui/` 目录下放置原生 HTML/JS/CSS 静态单页。
   - 宿主后端自动通过专用资产端点托管：`/api/Plugins/{id}/Assets/{filePath}`。
   - 宿主卡片渲染蓝紫色高亮主按钮：`🖥️ 打开 Webview 扩展视图`。
-  - 点击弹出全屏/自适应模态框，通过沙箱 iframe 呈现，无需为插件额外开启独立的 Web 端口。
+  - 点击弹出自适应模态框（支持 `fullscreen-dialog`, `standard-modal`, `drawer-right`），通过沙箱 iframe 呈现，无需为插件额外开启独立的 Web 端口。
 
-### 模式 3：独立反代 Web 服务 (`web`)
+### 模式 3：独立反代 Web 服务 (`displayMode: "external-tab"` / `entry: "web"`)
 - **适用场景**：微服务自身内嵌了完整的 HTTP Web 服务器（例如基于 Node.js Express、Go Gin、.NET WebHost 或 Caddy Admin 驱动的完整 Web 应用）。
-- **配置声明**：
+- **Schema v3.1 声明**：
   ```json
   "network": {
     "mode": "path",
     "port": 18000,
-    "path": "/plugins/my-web-app/",
-    "supportHttp": true
+    "supportHttp": true,
+    "ingress": {
+      "path": "/plugins/my-web-app/",
+      "scope": "standard",
+      "stripPrefix": true
+    }
   },
-  "ui": {
+  "layout": {
+    "displayMode": "external-tab",
     "hasWebview": true,
     "entry": "web"
   }
@@ -103,10 +121,17 @@ sequenceDiagram
 import { API } from '../config.js';
 
 export const PluginUrlResolver = {
-  // 1. 严格判断是否具有 Webview 面板
+  // 1. 严格判断是否具有 Webview 面板 (兼容 Schema v3.1 layout 与历史 ui 字段)
   hasWebview(plugin) {
-    if (!plugin?.manifest?.ui) return false;
-    return Boolean(plugin.manifest.ui.hasWebview || plugin.manifest.ui.entry || plugin.manifest.ui.entryFile);
+    if (!plugin?.manifest) return false;
+    const layout = plugin.manifest.layout;
+    if (layout) {
+      if (layout.displayMode === 'none') return false;
+      return Boolean(layout.hasWebview || layout.entry || layout.entryFile);
+    }
+    const ui = plugin.manifest.ui;
+    if (!ui) return false;
+    return Boolean(ui.hasWebview || ui.entry || ui.entryFile);
   },
 
   // 2. 策略仲裁：是否应在卡片上显示独立的 HTTP 接口/外链按钮
@@ -114,7 +139,9 @@ export const PluginUrlResolver = {
   hasIndependentHttpGateway(plugin) {
     if (!plugin || plugin.type !== 'resident') return false;
     const supportHttp = Boolean(plugin.manifest?.network?.supportHttp);
-    const hasPathGateway = plugin.manifest?.network?.mode === 'path' || Boolean(plugin.gatewayUrl);
+    const hasPathGateway = plugin.manifest?.network?.mode === 'path' || 
+                           Boolean(plugin.manifest?.network?.ingress?.path) || 
+                           Boolean(plugin.gatewayUrl);
     const hasWebview = this.hasWebview(plugin);
 
     if (hasWebview) {
@@ -138,7 +165,9 @@ export const PluginUrlResolver = {
   getWebviewUrl(plugin, token = '') {
     if (!plugin) return '';
     let url = '';
-    const rawEntry = plugin.manifest?.ui?.entry || plugin.manifest?.ui?.entryFile;
+    const rawEntry = plugin.manifest?.layout?.entry || 
+                     plugin.manifest?.ui?.entry || 
+                     plugin.manifest?.ui?.entryFile;
     if (rawEntry && rawEntry !== 'web') {
       const cleanEntry = rawEntry.replace(/^\/+/, '').replace(/^ui\//, '');
       url = API.plugins.asset(plugin.id, cleanEntry);
@@ -207,9 +236,47 @@ export const PluginUrlResolver = {
    }, '*');
    ```
 
+### 4.3 双向事件通信总线 (PostMessage RPC)
+插件前端可向宿主发送事件以请求特定权限或触发宿主系统行为：
+```javascript
+// 子页面 -> 宿主
+window.parent.postMessage({
+  type: 'LWT_PLUGIN_EVENT',
+  action: 'NOTIFY', // 'NOTIFY' | 'NAVIGATE' | 'REFRESH_CONTAINER' | 'TERMINAL_EXEC'
+  payload: {
+    level: 'success',
+    message: '磁盘分析完成，总计扫描 1.08 GB'
+  }
+}, window.location.origin);
+```
+
 ---
 
-## 5. 前端纯原生 ESM 开发与暗黑主题规范
+## 5. 前端样式与视口容器门禁规范 (`FE-CONTAINER-HEIGHT-LIMIT`)
+
+### 5.1 视口边界防御门禁
+在前端质量体系中，插件 UI 与主应用卡片必须遵循 `FE-CONTAINER-HEIGHT-LIMIT` 门禁规范：
+- **禁止无限垂直外溢**：插件 Webview 的根元素必须声明 `height: 100vh; overflow: hidden;`，内部滚动容器使用 `flex: 1; overflow-y: auto;`。
+- **CSS Flex 盒子约束**：禁止在外部卡片或弹窗容器中使用无限制的 `min-height` 导致视口破损。
+- **CSS 变量标准映射**：插件静态 UI 建议使用与主控台一致的极客暗黑主题变量：
+
+```css
+:root {
+  --bg-primary: #0a0e17;
+  --bg-card: rgba(15, 23, 42, 0.85);
+  --border-cyber: rgba(56, 189, 248, 0.25);
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --accent-cyan: #38bdf8;
+  --accent-blue: #3b82f6;
+  --accent-emerald: #10b981;
+  --accent-rose: #f43f5e;
+}
+```
+
+---
+
+## 6. 前端纯原生 ESM 开发与零打包准则
 
 为了保持插件轻量与极致加载速度，插件 `ui/` 下的前端界面**强制遵循零构建纯原生 ESM 规范**：
 
@@ -219,3 +286,4 @@ export const PluginUrlResolver = {
    ```javascript
    export const API_BASE = `${typeof window !== 'undefined' ? window.location.origin : ''}/api`;
    ```
+4. **SSE / 流式输出自动重连**：若插件 UI 监听后端长连接（如 `disk-explorer` 的 `/scan/events`），必须设计客户端平滑断线重连（退避时长 1s -> 2s -> 5s），并在页面 `unload` 时显式调用 `eventSource.close()` 防止服务端连接泄露。

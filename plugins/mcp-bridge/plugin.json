@@ -1,12 +1,12 @@
 {
-  "manifestVersion": 1,
+  "manifestVersion": 3,
   "id": "mcp-bridge",
   "name": "MCP 智能安全网关桥接服务",
   "category": "AI",
   "version": "1.0.0",
   "description": "Go 高性能单进程 OpenAI Secure MCP Tunnel 与第三方 MCP 工具纳管网关",
   "icon": "🌉",
-  "profile": "resident",
+  "profile": "Resident",
   "runtime": "native",
   "entrypoint": "mcp-bridge",
   "arguments": [
@@ -38,7 +38,9 @@
       "description": "用于执行 GitHub、Filesystem 等基于 JavaScript/TypeScript 开发的标准 MCP 服务",
       "probe": {
         "command": "npx",
-        "args": ["--version"]
+        "args": [
+          "--version"
+        ]
       },
       "installGuide": {
         "alpine": "apk add --no-cache nodejs npm",
@@ -55,7 +57,9 @@
       "description": "用于极速冷启动 Fetch 等基于 Python 生态开发的高性能 MCP 服务",
       "probe": {
         "command": "uvx",
-        "args": ["--version"]
+        "args": [
+          "--version"
+        ]
       },
       "installGuide": {
         "alpine": "apk add --no-cache python3 py3-pip && pip install --no-cache-dir uv --break-system-packages",
@@ -64,5 +68,86 @@
         "windows": "winget install astral-sh.uv"
       }
     }
+  ],
+  "archetype": {
+    "profile": "Resident",
+    "lifecycle": "SourceCompiled",
+    "protocol": "Http",
+    "language": "go"
+  },
+  "layout": {
+    "sourceEntry": "cmd/mcp-bridge/main.go",
+    "targetArtifact": "mcp-bridge",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "build": {
+    "toolchain": "go",
+    "command": "CGO_ENABLED=0 go build -ldflags \"-s -w\" -o mcp-bridge ./cmd/mcp-bridge",
+    "fallbackCommand": "go build -o mcp-bridge ./cmd/mcp-bridge",
+    "artifacts": [
+      "mcp-bridge"
+    ],
+    "watch": [
+      "cmd/**/*.go",
+      "internal/**/*.go"
+    ],
+    "autoCompileOnSave": true,
+    "timeoutSeconds": 120,
+    "cleanTargets": [
+      "mcp-bridge"
+    ]
+  },
+  "interface": {
+    "protocol": "Http",
+    "endpoint": "http://127.0.0.1:{port}",
+    "healthEndpoint": "/health",
+    "services": {
+      "mcp-gateway": {
+        "description": "MCP 智能安全网关中继服务",
+        "operations": [
+          "inspect",
+          "tunnel",
+          "status",
+          "metrics"
+        ]
+      }
+    }
+  },
+  "resources": {
+    "limits": {
+      "cpu": "1000m",
+      "memory": "512Mi",
+      "pids": 100
+    },
+    "requests": {
+      "cpu": "200m",
+      "memory": "128Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 5
+    }
+  },
+  "events": {
+    "publishes": [
+      "mcp.tunnel.connected",
+      "mcp.security.alert"
+    ],
+    "subscribes": [
+      "system.maintenance"
+    ]
+  },
+  "permissions": [
+    "network:listen",
+    "storage:readwrite"
   ]
 }

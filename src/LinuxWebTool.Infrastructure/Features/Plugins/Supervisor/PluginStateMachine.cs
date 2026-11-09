@@ -46,16 +46,39 @@ public sealed class PluginStateMachine
         }
     }
 
-    public void NotifyRunning(long runId = 0, string readiness = "Unsupported")
+    public void NotifyProbing(long runId = 0)
     {
         lock (_lock)
         {
             if (runId != 0 && runId != CurrentRunId) return;
             if (State == PluginState.Starting)
             {
+                State = PluginState.Probing;
+                Readiness = "Probing";
+            }
+        }
+    }
+
+    public void NotifyRunning(long runId = 0, string readiness = "Unsupported")
+    {
+        lock (_lock)
+        {
+            if (runId != 0 && runId != CurrentRunId) return;
+            if (State is PluginState.Starting or PluginState.Probing)
+            {
                 State = PluginState.Running;
                 Readiness = readiness;
             }
+        }
+    }
+
+    public void NotifyDraining(long runId = 0)
+    {
+        lock (_lock)
+        {
+            if (runId != 0 && runId != CurrentRunId) return;
+            State = PluginState.Draining;
+            Readiness = "Draining";
         }
     }
 

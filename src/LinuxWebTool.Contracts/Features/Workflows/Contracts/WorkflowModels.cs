@@ -17,7 +17,8 @@ public sealed record WorkflowStep(
     [property: JsonPropertyName("targetHostId")] string? TargetHostId = null,
     [property: JsonPropertyName("timeoutSeconds")] int? TimeoutSeconds = 30,
     [property: JsonPropertyName("failurePolicy")] string? FailurePolicy = null,
-    [property: JsonPropertyName("parameters")] Dictionary<string, string>? Parameters = null);
+    [property: JsonPropertyName("parameters")] Dictionary<string, string>? Parameters = null,
+    [property: JsonPropertyName("compensationStep")] WorkflowStep? CompensationStep = null);
 
 /// <summary>工作流阶段定义。</summary>
 public sealed record WorkflowStage(

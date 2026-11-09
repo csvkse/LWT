@@ -15,6 +15,8 @@ export const PLUGIN_STATE = {
   DISABLED: 6,
   MISSING_RUNTIME: 7,
   MISSING_DEPENDENCIES: 8,
+  PROBING: 9,
+  DRAINING: 10,
 };
 
 export const RUNTIME_MAP = {
@@ -25,6 +27,7 @@ export const RUNTIME_MAP = {
   4: { label: 'PowerShell', icon: '💻', color: 'text-blue-400 border-blue-500/30 bg-blue-500/10' },
   5: { label: 'Native', icon: '⚙️', color: 'text-slate-300 border-slate-500/30 bg-slate-500/10' },
   6: { label: 'Go', icon: '🐹', color: 'text-cyan-400 border-cyan-500/30 bg-cyan-500/10' },
+  7: { label: 'Wasm', icon: '⚡', color: 'text-fuchsia-400 border-fuchsia-500/30 bg-fuchsia-500/10' },
 };
 
 export const STATE_META_MAP = {
@@ -37,6 +40,8 @@ export const STATE_META_MAP = {
   6: { label: '已禁用', color: 'bg-slate-700 text-slate-400', isAnimated: false },
   7: { label: '缺少环境', color: 'bg-amber-500/20 text-amber-300 border border-amber-500/40', isAnimated: false },
   8: { label: '缺少依赖', color: 'bg-rose-500/20 text-rose-300 border border-rose-500/40', isAnimated: false },
+  9: { label: '探测中', color: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 animate-pulse', isAnimated: true },
+  10: { label: '排空中', color: 'bg-orange-500/20 text-orange-300 border border-orange-500/40 animate-pulse', isAnimated: true },
 };
 
 export class PluginStateMachine {
@@ -49,8 +54,8 @@ export class PluginStateMachine {
     if (plugin.isMissingDependencies || plugin.state === PLUGIN_STATE.MISSING_DEPENDENCIES) return false;
     if (plugin.manifest?.enabled === false) return false;
 
-    // 常驻微服务：已停止、崩溃、重试退避、降级状态下允许启动
-    if (plugin.profile === 0) {
+    // 常驻微服务与 Serverless：已停止、崩溃、重试退避、降级状态下允许启动
+    if (plugin.profile === 0 || plugin.profile === 2) {
       return (
         plugin.state === PLUGIN_STATE.STOPPED ||
         plugin.state === PLUGIN_STATE.CRASHED ||
@@ -59,7 +64,7 @@ export class PluginStateMachine {
       );
     }
 
-    // 一次性脚本：只要未禁用且依赖完整，均可执行启动/触发
+    // 一次性脚本与 Wasm 微函数：只要未禁用且依赖完整，均可执行启动/触发
     return true;
   }
 
@@ -69,10 +74,11 @@ export class PluginStateMachine {
    */
   static canStop(plugin) {
     if (!plugin) return false;
-    if (plugin.profile !== 0) return false; // 仅常驻微服务具有长期运行和停止概念
+    if (plugin.profile !== 0 && plugin.profile !== 2) return false; // 仅常驻微服务与 Serverless 具有运行和停止/休眠概念
     return (
       plugin.state === PLUGIN_STATE.RUNNING ||
       plugin.state === PLUGIN_STATE.STARTING ||
+      plugin.state === PLUGIN_STATE.PROBING ||
       plugin.state === PLUGIN_STATE.CRASHED ||
       plugin.state === PLUGIN_STATE.BACKOFF ||
       plugin.state === PLUGIN_STATE.DEGRADED
@@ -84,10 +90,10 @@ export class PluginStateMachine {
    */
   static canRestart(plugin) {
     if (!plugin) return false;
-    if (plugin.profile !== 0) return false;
+    if (plugin.profile !== 0 && plugin.profile !== 2) return false;
     if (plugin.isMissingRuntime || plugin.state === PLUGIN_STATE.MISSING_RUNTIME) return false;
     if (plugin.isMissingDependencies || plugin.state === PLUGIN_STATE.MISSING_DEPENDENCIES) return false;
-    return plugin.state === PLUGIN_STATE.RUNNING || plugin.state === PLUGIN_STATE.STARTING;
+    return plugin.state === PLUGIN_STATE.RUNNING || plugin.state === PLUGIN_STATE.STARTING || plugin.state === PLUGIN_STATE.PROBING;
   }
 
   /**

@@ -80,6 +80,12 @@ public static class ServiceCollectionExtensions
         builder.Services.AddSingleton<SmbDirectoryReader>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<MountStateMachineService>());
 
+        // 文件管理器多目标源适配器与工厂
+        builder.Services.AddSingleton<LinuxWebTool.WebHost.Features.Files.Adapters.ContainerFileSystemAdapter>();
+        builder.Services.AddSingleton<LinuxWebTool.WebHost.Features.Files.Adapters.HostPiercingFileSystemAdapter>();
+        builder.Services.AddSingleton<LinuxWebTool.WebHost.Features.Files.Adapters.DockerContainerFileSystemAdapter>();
+        builder.Services.AddSingleton<LinuxWebTool.WebHost.Features.Files.Factories.FileSystemAdapterFactory>();
+
         // FFmpeg 转码：预设 / 队列执行 / 监听自动转码
         TranscodePresetSeeder.Seed(dbFactory); // 内置预设播种（表为空时）
         builder.Services.AddSingleton<TranscodePresetStore>();
@@ -114,6 +120,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<LinuxWebTool.Infrastructure.Features.Plugins.PluginManager>());
         builder.Services.AddHostedService(sp =>
             sp.GetRequiredService<LinuxWebTool.Infrastructure.Features.Plugins.PluginManager>());
+        builder.Services.AddSingleton<LinuxWebTool.Infrastructure.Features.Plugins.Supervisor.PluginEventBus>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<LinuxWebTool.Infrastructure.Features.Plugins.Supervisor.PluginEventBus>());
         builder.Services.AddSingleton<LinuxWebTool.WebHost.Features.Plugins.Auth.PluginAuthGatewayEvaluator>();
         builder.Services.AddSingleton<LinuxWebTool.WebHost.Features.Plugins.Ingress.IIngressRoutingTable, LinuxWebTool.WebHost.Features.Plugins.Ingress.ReactiveIngressRoutingTable>();
         builder.Services.AddHostedService<LinuxWebTool.WebHost.Features.Plugins.Ingress.IngressRoutingSyncService>();

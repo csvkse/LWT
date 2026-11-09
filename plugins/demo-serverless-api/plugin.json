@@ -1,0 +1,103 @@
+{
+  "manifestVersion": 3,
+  "id": "demo-serverless-api",
+  "name": "Serverless 动态函数示例",
+  "category": "FaaS",
+  "version": "1.0.0",
+  "description": "基于按需启动冷热调度微函数的 Serverless 极速执行示例",
+  "icon": "🚀",
+  "profile": "Serverless",
+  "runtime": "Node",
+  "entrypoint": "index.js",
+  "archetype": {
+    "profile": "Serverless",
+    "lifecycle": "Interpreted",
+    "protocol": "Http",
+    "language": "javascript"
+  },
+  "layout": {
+    "sourceEntry": "index.js",
+    "targetArtifact": "index.js",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "interface": {
+    "protocol": "Http",
+    "endpoint": "http://127.0.0.1:{port}",
+    "healthEndpoint": "/health",
+    "services": {
+      "serverless-api": {
+        "description": "Node.js Serverless 动态弹性计算服务",
+        "operations": [
+          "status",
+          "compute",
+          "echo"
+        ]
+      }
+    }
+  },
+  "network": {
+    "mode": "path",
+    "portEnv": "PORT",
+    "pathPrefix": "/plugins/demo-serverless-api"
+  },
+  "dependencies": [
+    {
+      "id": "node",
+      "name": "Node.js 运行时",
+      "scope": "container",
+      "kind": "runner",
+      "required": true,
+      "recommended": true,
+      "description": "执行 Serverless 极速微函数所需的 Node.js 环境",
+      "probe": {
+        "command": "node",
+        "args": [
+          "--version"
+        ]
+      },
+      "installGuide": {
+        "alpine": "apk add --no-cache nodejs",
+        "debian": "apt update && apt install -y nodejs",
+        "windows": "winget install OpenJS.NodeJS.LTS"
+      }
+    }
+  ],
+  "serverless": {
+    "scaleToZero": true,
+    "idleTimeoutSeconds": 60,
+    "maxConcurrency": 10
+  },
+  "resources": {
+    "limits": {
+      "cpu": "500m",
+      "memory": "128Mi",
+      "pids": 30
+    },
+    "requests": {
+      "cpu": "100m",
+      "memory": "32Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "HttpCheck",
+      "url": "http://127.0.0.1:{port}/health",
+      "timeoutSeconds": 3
+    }
+  },
+  "events": {
+    "publishes": [
+      "serverless.function.invoked"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "network:listen"
+  ]
+}

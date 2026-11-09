@@ -5,6 +5,9 @@ import {
   DISTRO_TABS,
   RUNTIME_NAMES,
   buildAggregatedCommand,
+  getDependencyScope,
+  preferredInstallTarget,
+  resolveInstallDistro,
 } from './pluginCommandBuilder.js';
 
 export default defineComponent({
@@ -17,7 +20,7 @@ export default defineComponent({
   emits: ['close'],
   setup(props, { emit }) {
     const router = useRouter();
-    const selectedDistro = ref('alpine');
+    const selectedDistro = ref('');
     const selectedDeps = ref(new Set());
     const includeCoreRuntime = ref(false);
     const editedCommand = ref('');
@@ -31,6 +34,7 @@ export default defineComponent({
     const isPrivilegedContainer = computed(() => {
       return props.env?.isPrivilegedContainer === true;
     });
+    const hostTargetNotice = computed(() => `宿主依赖只会安装到宿主，不会自动让容器内插件连接宿主服务。${props.env?.hostDistroKey ? `已检测宿主发行版：${props.env.hostDistroKey}。` : '未能确认宿主发行版；请先手动选择，避免运行错误的包管理命令。'}安装 Incus 后还需单独配置经过审查的 socket 或 TLS API 连接。${isPrivilegedContainer.value ? '' : '当前部署没有宿主执行通道，可复制命令后在目标宿主人工审查并执行。'}`);
 
     const dependencyList = computed(() => {
       const deps = props.plugin?.dependencies || props.plugin?.manifest?.dependencies;
@@ -45,7 +49,8 @@ export default defineComponent({
         dependencyList.value,
         selectedDistro.value,
         selectedDeps.value,
-        includeCoreRuntime.value
+        includeCoreRuntime.value,
+        selectedTarget.value
       );
     }
 
@@ -82,6 +87,10 @@ export default defineComponent({
           set.add(dep.id);
         }
       }
+      selectedTarget.value = preferredInstallTarget(
+        dependencyList.value.filter((dep) => set.has(dep.id))
+      );
+      selectedDistro.value = resolveInstallDistro(selectedTarget.value, props.env);
       selectedDeps.value = set;
       includeCoreRuntime.value = props.plugin?.isMissingRuntime === true;
       updateAggregatedCommand();
@@ -91,19 +100,26 @@ export default defineComponent({
       () => [props.show, props.plugin],
       ([show, p]) => {
         if (show && p) {
-          selectedDistro.value = 'alpine';
           selectedTarget.value = 'container';
           resetCommand();
         }
       },
       { immediate: true }
     );
+    watch(selectedTarget, (scope) => {
+      selectedDistro.value = resolveInstallDistro(scope, props.env);
+      updateAggregatedCommand();
+    });
 
     function closeModal() {
       emit('close');
     }
 
     function runInTerminal() {
+      if (selectedTarget.value === 'host' && !isPrivilegedContainer.value) {
+        toast.error('当前部署没有可用的宿主执行通道；请复制命令后在目标宿主上人工审查并执行');
+        return;
+      }
       if (!editedCommand.value || !editedCommand.value.trim()) {
         toast.info('安装命令为空');
         return;
@@ -142,11 +158,13 @@ export default defineComponent({
       DISTRO_TABS,
       runtimeName,
       isPrivilegedContainer,
+      hostTargetNotice,
       selectedDistro,
       selectedDeps,
       includeCoreRuntime,
       editedCommand,
       selectedTarget,
+      getDependencyScope,
       dependencyList,
       isDepSelected,
       toggleDep,
@@ -279,6 +297,8 @@ export default defineComponent({
                 <div class="text-[11px] text-slate-400 leading-relaxed font-mono">
                   {{ dep.description }}
                 </div>
+                <div class="text-[10px] text-amber-300 font-mono">目标：{{ getDependencyScope(dep) === 'host' ? '宿主环境' : getDependencyScope(dep) === 'container' ? '当前容器' : '未支持/未知环境' }} · {{ dep.probeStatus === 'Installed' ? '已检测' : dep.probeStatus === 'Missing' ? '未安装' : dep.probeStatus === 'Unsupported' ? '不支持自动探测' : '尚未验证' }}</div>
+                <a v-if="dep.installDocumentationUrl" :href="dep.installDocumentationUrl" target="_blank" rel="noopener noreferrer" class="text-[10px] text-cyan-300 underline">查看安装说明</a>
                 <div
                   v-if="dep.installGuide && dep.installGuide[selectedDistro]"
                   class="text-[10px] text-cyan-400 font-mono bg-black/40 px-2 py-0.5 rounded truncate"
@@ -300,7 +320,7 @@ export default defineComponent({
           <div class="flex items-center gap-4 mt-0.5">
             <label class="flex items-center gap-1.5 cursor-pointer text-slate-300 text-xs">
               <input type="radio" v-model="selectedTarget" value="container" class="accent-cyan-400" />
-              <span>📦 当前容器 (推荐)</span>
+              <span>📦 当前容器</span>
             </label>
             <label class="flex items-center gap-1.5 cursor-pointer text-slate-300 text-xs">
               <input type="radio" v-model="selectedTarget" value="host" class="accent-cyan-400" />
@@ -310,14 +330,9 @@ export default defineComponent({
         </div>
 
         <!-- 跨宿主安全风险告警守卫 -->
-        <div v-if="isPrivilegedContainer && selectedTarget === 'host'" class="p-2.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs space-y-1">
-          <div class="font-semibold flex items-center gap-1">
-            <span>⚠️</span>
-            <span>运行环境隔离提示</span>
-          </div>
-          <div class="text-[11px] text-amber-200/90 leading-relaxed">
-            当前插件由 LinuxWebTool 容器内部进程调度。若仅在宿主系统上安装依赖，容器内部仍将因文件系统与命名空间隔离而无法识别该解释器。建议安装至「当前容器」；若确需宿主环境，请确保容器挂载了对应二进制目录。
-          </div>
+        <div v-if="selectedTarget === 'host'" class="p-2.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs space-y-1">
+          <div class="font-semibold">⚠️ 运行环境隔离提示</div>
+          <div class="text-[11px] text-amber-200/90 leading-relaxed">{{ hostTargetNotice }}</div>
         </div>
 
         <!-- 区域 4：聚合安装命令编辑区 -->
@@ -360,6 +375,7 @@ export default defineComponent({
               type="button"
               class="btn btn-sm btn-primary flex items-center gap-1.5"
               @click="runInTerminal()"
+              :disabled="!editedCommand.trim()"
               title="跳转至 Web 终端自动建立会话并执行"
             >
               <span>💻 在终端中执行</span>

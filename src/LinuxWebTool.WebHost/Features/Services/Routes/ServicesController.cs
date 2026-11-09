@@ -96,6 +96,34 @@ public class ServicesController(
         var images = await dockerAdapter.ListImagesAsync(cancellationToken);
         return Ok(images);
     }
+
+    [HttpGet("Docker/DiskUsage")]
+    public async Task<IResult> GetDockerDiskUsage(CancellationToken cancellationToken)
+    {
+        var usage = await dockerAdapter.GetDiskUsageAsync(cancellationToken);
+        return usage != null ? Ok(usage) : BadRequest(new ServiceActionResult { Success = false, Message = "获取 Docker 磁盘占用失败" });
+    }
+
+    [HttpPost("Docker/Prune")]
+    public async Task<IResult> PruneDocker([FromBody] DockerPruneRequest request, CancellationToken cancellationToken)
+    {
+        var result = await dockerAdapter.PruneAsync(request, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("Docker/Containers/{containerId}/Exec")]
+    public async Task<IResult> ExecuteContainerCommand(string containerId, [FromBody] DockerContainerExecRequest request, CancellationToken cancellationToken)
+    {
+        var result = await dockerAdapter.ExecuteCommandAsync(containerId, request, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpGet("Docker/Containers/{containerId}/Inspect")]
+    public async Task<IResult> InspectContainer(string containerId, CancellationToken cancellationToken)
+    {
+        var inspect = await dockerAdapter.InspectContainerAsync(containerId, cancellationToken);
+        return inspect != null ? Ok(inspect) : NotFound(new MessageResponse($"容器 [{containerId}] 不存在"));
+    }
     #endregion
 
     #region Config

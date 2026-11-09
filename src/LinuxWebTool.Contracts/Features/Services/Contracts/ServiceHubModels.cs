@@ -22,6 +22,12 @@ public sealed record ServiceEnvironmentInfo
     public bool IsPrivilegedContainer { get; init; }
 
     /// <summary>
+    /// Host Linux distribution detected through a verified host namespace path.
+    /// Null means the host distribution could not be established safely.
+    /// </summary>
+    public string? HostDistroKey { get; init; }
+
+    /// <summary>
     /// 是否可使用 systemctl（本地原生或特权 nsenter 穿透）。
     /// </summary>
     public bool HasSystemd { get; init; }

@@ -47,6 +47,9 @@ export default defineComponent({
       } else if (rt === 4) {
         form.value.entrypoint = 'run.ps1';
         form.value.codeTemplate = 'Write-Output "Hello from PowerShell plugin!"\n';
+      } else if (rt === 7) {
+        form.value.entrypoint = 'main.wasm';
+        form.value.codeTemplate = ';; WebAssembly module placeholder\n';
       }
     }
 
@@ -178,6 +181,8 @@ export default defineComponent({
               <select v-model.number="form.profile" class="input-base text-xs w-full mt-1">
                 <option :value="0">⚡ 常驻微服务与守护 (Resident)</option>
                 <option :value="1">🔌 脚本轻量扩展 (OneShot)</option>
+                <option :value="2">🚀 动态按需微服务 (Serverless FaaS)</option>
+                <option :value="3">⚡ WebAssembly 微函数 (Wasm)</option>
               </select>
             </div>
             <div>
@@ -189,6 +194,7 @@ export default defineComponent({
                 <option :value="3">🐚 Bash</option>
                 <option :value="4">💻 PowerShell</option>
                 <option :value="2">⚡ .NET AOT</option>
+                <option :value="7">⚡ WebAssembly (Wasm)</option>
               </select>
             </div>
           </div>
@@ -213,9 +219,9 @@ export default defineComponent({
             </div>
           </div>
 
-          <!-- 常驻模式高级选项 -->
-          <div v-if="form.profile === 0" class="p-2.5 rounded bg-slate-900 border border-cyber-line/50 space-y-2">
-            <div class="font-semibold text-slate-300">常驻守护选项:</div>
+          <!-- 常驻与 Serverless 模式高级选项 -->
+          <div v-if="form.profile === 0 || form.profile === 2" class="p-2.5 rounded bg-slate-900 border border-cyber-line/50 space-y-2">
+            <div class="font-semibold text-slate-300">{{ form.profile === 2 ? '按需微服务 (Serverless) 选项:' : '常驻守护选项:' }}</div>
             <div class="grid grid-cols-2 gap-2">
               <label class="flex items-center gap-1.5 cursor-pointer">
                 <input v-model="form.supportHttp" type="checkbox" class="rounded text-cyan-500" />

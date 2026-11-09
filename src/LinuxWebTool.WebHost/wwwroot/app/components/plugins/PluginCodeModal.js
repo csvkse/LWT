@@ -4,12 +4,14 @@ import { API } from '../../config.js';
 import { toast } from '../../store/toast.js';
 import PluginBinaryFileCard from './PluginBinaryFileCard.js';
 import PluginFileTree from './PluginFileTree.js';
+import PluginDebugConsole from './PluginDebugConsole.js';
 
 export default defineComponent({
   name: 'PluginCodeModal',
   components: {
     PluginBinaryFileCard,
     PluginFileTree,
+    PluginDebugConsole,
   },
   props: {
     show: {
@@ -25,6 +27,7 @@ export default defineComponent({
   setup(props, { emit }) {
     const loading = ref(false);
     const saving = ref(false);
+    const building = ref(false);
     const debugging = ref(false);
     const uploading = ref(false);
     const deleting = ref(false);
@@ -42,22 +45,17 @@ export default defineComponent({
 
     function formatSize(bytes) {
       if (!bytes || bytes <= 0) return '0 B';
-      const k = 1024;
       const sizes = ['B', 'KB', 'MB', 'GB'];
-      const i = Math.floor(Math.log(bytes) / Math.log(k));
-      return (bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 1) + ' ' + sizes[i];
+      const i = Math.floor(Math.log(bytes) / Math.log(1024));
+      return (bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + ' ' + sizes[i];
     }
 
-    watch(
-      () => [props.show, props.plugin],
-      async ([show, p]) => {
-        if (show && p) {
-          debugResult.value = null;
-          await loadCode();
-        }
-      },
-      { immediate: true }
-    );
+    watch(() => [props.show, props.plugin], async ([show, p]) => {
+      if (show && p) {
+        debugResult.value = null;
+        await loadCode();
+      }
+    }, { immediate: true });
 
     async function loadCode(targetFile = null) {
       if (!props.plugin) return;
@@ -86,14 +84,15 @@ export default defineComponent({
       try {
         const res = await http(API.plugins.code(props.plugin.id), {
           method: 'POST',
-          body: {
-            file: activeFile.value,
-            content: codeContent.value,
-          },
+          body: { file: activeFile.value, content: codeContent.value },
         });
         if (res.ok) {
           toast.success(`保存成功（已创建 .bak 快照）`);
           emit('saved');
+          const buildSpec = props.plugin.manifest?.build;
+          if (buildSpec && (buildSpec.strategy === 'SourceCompiled' || buildSpec.buildCommand) && buildSpec.autoCompileOnSave !== false) {
+            await handleBuild();
+          }
         } else {
           toast.error(res.message || '保存代码失败');
         }
@@ -126,6 +125,36 @@ export default defineComponent({
         toast.error('调试运行异常: ' + err.message);
       } finally {
         debugging.value = false;
+      }
+    }
+
+    async function handleBuild() {
+      if (!props.plugin) return;
+      building.value = true;
+      debugResult.value = null;
+      try {
+        const res = await http(API.plugins.build(props.plugin.id), { method: 'POST' });
+        if (res.ok && res.data) {
+          debugResult.value = {
+            exitCode: res.data.exitCode,
+            output: res.data.output || (res.data.success ? '构建成功' : ''),
+            error: res.data.error || res.data.errorMessage || '',
+            elapsedMs: res.data.elapsedMs || res.data.durationMs || 0,
+          };
+          if (res.data.success) {
+            toast.success(`构建成功！耗时: ${Math.round(res.data.elapsedMs || res.data.durationMs || 0)}ms`);
+            await loadCode();
+            emit('saved');
+          } else {
+            toast.error(res.data.errorMessage || '构建失败，请查看控制台输出');
+          }
+        } else {
+          toast.error(res.message || '构建执行失败');
+        }
+      } catch (err) {
+        toast.error('构建异常: ' + err.message);
+      } finally {
+        building.value = false;
       }
     }
 
@@ -188,22 +217,10 @@ export default defineComponent({
       }
     }
 
-    function stripAnsi(text) {
-      if (!text) return '';
-      return String(text)
-        .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)/g, '')
-        .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
-        .replace(/\]133;[A-Za-z0-9;=._-]*/g, '')
-        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-        .trim();
-    }
-
-    const cleanDebugOutput = computed(() => stripAnsi(debugResult.value?.output || ''));
-    const cleanDebugError = computed(() => stripAnsi(debugResult.value?.error || ''));
-
     return {
       loading,
       saving,
+      building,
       debugging,
       uploading,
       deleting,
@@ -216,12 +233,11 @@ export default defineComponent({
       formatSize,
       debugInput,
       debugResult,
-      cleanDebugOutput,
-      cleanDebugError,
       replaceInputRef,
       newFileInputRef,
       loadCode,
       handleSave,
+      handleBuild,
       handleDebug,
       handleDownloadFile,
       handleFileSelected,
@@ -250,10 +266,19 @@ export default defineComponent({
 
           <div class="flex items-center gap-2 shrink-0">
             <button
+              type="button"
+              class="btn-secondary text-xs px-3 py-1 flex items-center gap-1.5 text-amber-300 border-amber-500/40 hover:bg-amber-500/10"
+              :disabled="building || saving || loading || debugging || uploading"
+              @click="handleBuild()"
+            >
+              <span>🔨</span>
+              <span>{{ building ? '构建中...' : '编译构建' }}</span>
+            </button>
+            <button
               v-if="!isBinary"
               type="button"
               class="btn-secondary text-xs px-3 py-1 flex items-center gap-1.5"
-              :disabled="saving || loading || debugging || uploading || !activeFile"
+              :disabled="building || saving || loading || debugging || uploading || !activeFile"
               @click="handleDebug()"
             >
               <span>🐞</span>
@@ -358,28 +383,14 @@ export default defineComponent({
               ></textarea>
             </div>
 
-            <!-- 调试输出控制台 (若有调试结果或调试中) -->
-            <div v-if="!isBinary && (debugResult || debugging)" class="h-44 border-t border-cyber-line/60 bg-slate-950 flex flex-col shrink-0">
-              <div class="px-3 py-1 bg-slate-900 border-b border-cyber-line/40 text-xs flex items-center justify-between text-slate-300">
-                <span class="font-semibold flex items-center gap-1.5">
-                  <span>📟 调试控制台输出</span>
-                  <span v-if="debugResult" class="text-[11px] font-mono text-slate-400">
-                    退出码: {{ debugResult.exitCode }} | 耗时: {{ debugResult.durationMs }}ms
-                  </span>
-                </span>
-                <button type="button" class="btn-ghost text-[11px] p-0.5 text-slate-400 hover:text-slate-200" @click="debugResult = null">
-                  清除
-                </button>
-              </div>
-              <div class="flex-1 p-2.5 overflow-y-auto font-mono text-xs space-y-1">
-                <div v-if="debugging" class="text-amber-400 animate-pulse">调试运行中...</div>
-                <div v-if="cleanDebugOutput" class="text-slate-300 whitespace-pre-wrap">{{ cleanDebugOutput }}</div>
-                <div v-if="cleanDebugError" class="text-red-400 whitespace-pre-wrap">{{ cleanDebugError }}</div>
-                <div v-if="!debugging && !cleanDebugOutput && !cleanDebugError" class="text-slate-500 italic">
-                  （无标准输出或错误信息）
-                </div>
-              </div>
-            </div>
+            <!-- 调试输出控制台 (若有调试结果或调试/构建中) -->
+            <PluginDebugConsole
+              v-if="!isBinary && (debugResult || debugging || building)"
+              :result="debugResult"
+              :loading="debugging || building"
+              :loading-text="building ? '正在编译构建中...' : '正在调试运行中...'"
+              @clear="debugResult = null"
+            />
           </div>
         </div>
       </div>

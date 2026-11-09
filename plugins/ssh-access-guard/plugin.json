@@ -1,13 +1,13 @@
 {
-  "manifestVersion": 1,
+  "manifestVersion": 3,
   "id": "ssh-access-guard",
   "name": "SSH 访问安全守卫",
   "category": "Security",
   "version": "1.0.0",
   "description": "实时监控 SSH 成功与失败登录轨迹，支持恶意 IP/网段一键封禁与解封",
   "icon": "🛡️",
-  "profile": "oneshot",
-  "runtime": "bash",
+  "profile": "OneShot",
+  "runtime": "Bash",
   "target": "host",
   "entrypoint": "hooks/records.sh",
   "ui": {
@@ -15,22 +15,166 @@
     "title": "SSH 安全审计看板",
     "icon": "🛡️"
   },
-  "dependencies": {
-    "runners": ["bash"],
-    "binaries": ["ss", "who"]
-  },
-  "installGuide": {
-    "debian": "apt update && apt install -y util-linux coreutils iproute2",
-    "rhel": "dnf install -y util-linux coreutils iproute",
-    "alpine": "apk add --no-cache util-linux coreutils iproute2",
-    "windows": "winget install Git.Git"
-  },
+  "dependencies": [
+    {
+      "id": "bash",
+      "name": "Bash 解释器",
+      "scope": "container",
+      "kind": "runner",
+      "required": true,
+      "recommended": true,
+      "description": "执行 SSH 审计脚本所需的 Bash 环境",
+      "probe": {
+        "command": "bash",
+        "args": [
+          "--version"
+        ]
+      },
+      "installGuide": {
+        "debian": "apt update && apt install -y bash",
+        "rhel": "dnf install -y bash",
+        "alpine": "apk add --no-cache bash",
+        "windows": "winget install Git.Git"
+      }
+    },
+    {
+      "id": "iproute2-ss",
+      "name": "ss 网络连接诊断工具",
+      "scope": "container",
+      "kind": "binary",
+      "required": true,
+      "recommended": true,
+      "description": "用于实时抓取 SSH 监听与活跃 TCP 连接",
+      "probe": {
+        "command": "ss",
+        "args": [
+          "-v"
+        ]
+      },
+      "installGuide": {
+        "debian": "apt update && apt install -y iproute2",
+        "rhel": "dnf install -y iproute",
+        "alpine": "apk add --no-cache iproute2"
+      }
+    },
+    {
+      "id": "coreutils-who",
+      "name": "who 登录会话工具",
+      "scope": "container",
+      "kind": "binary",
+      "required": true,
+      "recommended": true,
+      "description": "读取当前登录会话记录",
+      "probe": {
+        "command": "who",
+        "args": [
+          "--version"
+        ]
+      },
+      "installGuide": {
+        "debian": "apt update && apt install -y coreutils",
+        "rhel": "dnf install -y coreutils",
+        "alpine": "apk add --no-cache coreutils"
+      }
+    }
+  ],
   "customActions": [
-    { "action": "status", "label": "守卫状态", "icon": "⚙️", "requireParam": false },
-    { "action": "records", "label": "登录审计记录", "icon": "📋", "requireParam": false },
-    { "action": "failed", "label": "爆破探测", "icon": "⚠️", "requireParam": false },
-    { "action": "banned_list", "label": "封禁名单列表", "icon": "🚫", "requireParam": false },
-    { "action": "ban_ip", "label": "一键封禁", "icon": "🚫", "requireParam": true, "paramPlaceholder": "请输入恶意 IP 地址" },
-    { "action": "unban_ip", "label": "解封 IP", "icon": "🔓", "requireParam": true, "paramPlaceholder": "输入要解封的 IP" }
+    {
+      "action": "status",
+      "label": "守卫状态",
+      "icon": "⚙️",
+      "requireParam": false
+    },
+    {
+      "action": "records",
+      "label": "登录审计记录",
+      "icon": "📋",
+      "requireParam": false
+    },
+    {
+      "action": "failed",
+      "label": "爆破探测",
+      "icon": "⚠️",
+      "requireParam": false
+    },
+    {
+      "action": "banned_list",
+      "label": "封禁名单列表",
+      "icon": "🚫",
+      "requireParam": false
+    },
+    {
+      "action": "ban_ip",
+      "label": "一键封禁",
+      "icon": "🚫",
+      "requireParam": true,
+      "paramPlaceholder": "请输入恶意 IP 地址"
+    },
+    {
+      "action": "unban_ip",
+      "label": "解封 IP",
+      "icon": "🔓",
+      "requireParam": true,
+      "paramPlaceholder": "输入要解封的 IP"
+    }
+  ],
+  "archetype": {
+    "profile": "OneShot",
+    "lifecycle": "Interpreted",
+    "protocol": "CliArgs",
+    "language": "bash"
+  },
+  "interface": {
+    "protocol": "CliArgs",
+    "services": {
+      "ssh-guard": {
+        "description": "SSH 访问审计守卫",
+        "operations": [
+          "status",
+          "records",
+          "failed",
+          "banned_list",
+          "ban_ip",
+          "unban_ip"
+        ]
+      }
+    }
+  },
+  "layout": {
+    "sourceEntry": "hooks/records.sh",
+    "targetArtifact": "hooks/records.sh",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "resources": {
+    "limits": {
+      "cpu": "200m",
+      "memory": "64Mi",
+      "pids": 20
+    },
+    "requests": {
+      "cpu": "50m",
+      "memory": "16Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "ExecCheck",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "ExecCheck",
+      "timeoutSeconds": 3
+    }
+  },
+  "events": {
+    "publishes": [
+      "ssh.ip.banned",
+      "ssh.ip.unbanned"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "file:auth_log_read"
   ]
 }

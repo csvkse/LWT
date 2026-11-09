@@ -39,6 +39,24 @@ CREATE TABLE IF NOT EXISTS command_group (
   SortOrder INTEGER,
   CreateTime TEXT
 );
+CREATE TABLE IF NOT EXISTS plugin_event_outbox (
+  Id TEXT PRIMARY KEY COLLATE NOCASE,
+  AggregateId TEXT COLLATE NOCASE,
+  EventType TEXT NOT NULL,
+  Payload TEXT,
+  Status TEXT NOT NULL DEFAULT 'Pending',
+  RetryCount INTEGER NOT NULL DEFAULT 0,
+  CreatedAt TEXT NOT NULL,
+  PublishedAt TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_status ON plugin_event_outbox(Status, CreatedAt);
+CREATE TABLE IF NOT EXISTS plugin_event_inbox (
+  ConsumerId TEXT NOT NULL COLLATE NOCASE,
+  EventId TEXT NOT NULL COLLATE NOCASE,
+  Status TEXT NOT NULL DEFAULT 'Processed',
+  ProcessedAt TEXT NOT NULL,
+  PRIMARY KEY (ConsumerId, EventId)
+);
 CREATE TABLE IF NOT EXISTS execution_record (
   Id TEXT PRIMARY KEY COLLATE NOCASE,
   Source INTEGER,
