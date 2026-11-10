@@ -2720,5 +2720,31 @@ public class ArchitectureTests
         Assert.Contains("CLS", docContent);
         Assert.Contains("100vw", docContent);
     }
+
+    [Fact]
+    public void LinuxArch082_DeployScriptDiskHygieneAndQuotaGuard()
+    {
+        // 1. 验证远程部署脚本 scripts/deploy-remote.ps1 存在
+        var deployScript = Path.Combine(RepoRoot, "scripts", "deploy-remote.ps1");
+        Assert.True(File.Exists(deployScript), "scripts/deploy-remote.ps1 必须存在");
+        var scriptContent = File.ReadAllText(deployScript);
+
+        // 2. 验证包含构建前根分区空间安全探测与熔断机制
+        Assert.Contains("df -P /", scriptContent);
+        Assert.Contains("builder prune", scriptContent);
+
+        // 3. 验证包含构建后悬空镜像清理与构建缓存配额收敛指令
+        Assert.Contains("image prune -f", scriptContent);
+        Assert.Contains("keep-storage", scriptContent);
+
+        // 4. 验证调研排障与全链路治理架构方案文档落地
+        var solutionDoc = ResolveDocPath("fast-deploy-disk-surge-investigation-and-solution-plan.md");
+        Assert.True(File.Exists(solutionDoc), "docs/fast-deploy-disk-surge-investigation-and-solution-plan.md 必须存在");
+        var docContent = File.ReadAllText(solutionDoc);
+        Assert.Contains("BuildKit", docContent);
+        Assert.Contains("keep-storage", docContent);
+        Assert.Contains("Dangling", docContent);
+        Assert.Contains("daemon.json", docContent);
+    }
 }
 

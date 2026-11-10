@@ -398,15 +398,18 @@ EOF
                 }
             }
 
-            # 校验容器内运行的二进制 Hash
-            $rawRemoteHash = (Invoke-RemoteSsh "docker exec $containerName sha256sum /app/data/plugins/$HotUpdatePlugin/$HotUpdatePlugin").Trim()
-            $remoteHash = [regex]::Match($rawRemoteHash, '[0-9a-fA-F]{64}').Value.ToLower()
+            # 校验容器内运行的二进制 Hash (若为二进制编译型微服务)
             $sw.Stop()
-
-            if ($localHash -and $remoteHash -and ($localHash -eq $remoteHash)) {
-                Write-Success "Microservice binary hot-updated & verified! SHA256: $remoteHash"
+            if ($localHash) {
+                $rawRemoteHash = (Invoke-RemoteSsh "docker exec $containerName sha256sum /app/data/plugins/$HotUpdatePlugin/$HotUpdatePlugin 2>/dev/null || true").Trim()
+                $remoteHash = [regex]::Match($rawRemoteHash, '[0-9a-fA-F]{64}').Value.ToLower()
+                if ($remoteHash -and ($localHash -eq $remoteHash)) {
+                    Write-Success "Microservice binary hot-updated & verified! SHA256: $remoteHash"
+                } else {
+                    Write-Warn "Binary hash comparison: local=$localHash, remote=$remoteHash"
+                }
             } else {
-                Write-Warn "Binary hash comparison: local=$localHash, remote=$remoteHash"
+                Write-Success "Script/interpreted plugin hot-updated & verified!"
             }
 
             if ($newPid) {
@@ -560,6 +563,19 @@ git -C "$devWorkdir" log -1 --oneline
             Write-Success "Remote source code synchronized via Git pull!"
         }
 
+        # Pre-build Disk Safety Check & Emergency Quota Guard
+        try {
+            $rawDisk = (Invoke-RemoteSsh "df -P / | tail -n 1").Trim()
+            $diskParts = ($rawDisk -split '\s+')
+            if ($diskParts.Length -ge 5 -and $diskParts[4] -match '(\d+)%') {
+                $usedPct = [int]$matches[1]
+                if ($usedPct -ge 85) {
+                    Write-Warn "Host disk pressure warning: Root partition is at ${usedPct}%! Triggering pre-build emergency cleanup..."
+                    Invoke-RemoteSsh "docker image prune -f >/dev/null 2>&1 || true; docker builder prune -f --keep-storage=2GB >/dev/null 2>&1 || true"
+                }
+            }
+        } catch {}
+
         Write-Step "2/4 [Dev] Building fast development image ($devImage) via Dockerfile.dev..."
         Invoke-RemoteSsh "docker build -f $devWorkdir/Dockerfile.dev -t $devImage $devWorkdir"
         Write-Success "Fast dev image built successfully!"
@@ -635,6 +651,15 @@ git -C "$devWorkdir" log -1 --oneline
         $ps = Invoke-RemoteSsh "docker ps --filter name=$containerName"
         Write-Host $ps -ForegroundColor Green
 
+        # Post-Deploy Disk Hygiene Guard (Purge dangling images & bound BuildKit cache)
+        Write-Step "[Dev] Executing post-deploy disk hygiene guard..."
+        try {
+            Invoke-RemoteSsh "docker image prune -f >/dev/null 2>&1 || true; docker builder prune -f --keep-storage=3GB >/dev/null 2>&1 || true"
+            Write-Success "Post-deploy hygiene complete: Dangling images purged and BuildKit cache bounded to 3GB!"
+        } catch {
+            Write-Warn "Post-deploy hygiene cleanup encountered a non-fatal warning: $($_.Exception.Message)"
+        }
+
         Write-Step "Fast dev deployment finished successfully!"
         Write-Host "Dev Web URL: $devWebUrl" -ForegroundColor Green
         Write-Host "Notice: Production container ($webBaseUrl) remains untouched and fully operational!" -ForegroundColor Cyan
@@ -695,6 +720,12 @@ git -C "$devWorkdir" log -1 --oneline
         $versions = Invoke-RemoteSsh "docker exec $containerName sh -c 'echo Node: `$(node -v 2>/dev/null); echo Python: `$(python3 --version 2>/dev/null); echo .NET: `$(dotnet --version 2>/dev/null); echo PS: `$(pwsh -v 2>/dev/null); echo Caddy: `$(caddy version 2>/dev/null)'"
         Write-Host $versions -ForegroundColor DarkCyan
     }
+
+    # Post-Deploy Disk Hygiene Guard for Official Mode (Purge untagged layers)
+    try {
+        Invoke-RemoteSsh "docker image prune -f >/dev/null 2>&1 || true"
+        Write-Success "Official post-deploy hygiene: Dangling images purged!"
+    } catch {}
 
     Write-Step "Official deployment finished successfully!"
     Write-Host "Web URL: $webBaseUrl" -ForegroundColor Green

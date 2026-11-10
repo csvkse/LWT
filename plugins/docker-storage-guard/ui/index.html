@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Docker 存储守护与自愈卫士</title>
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: #111827;
+      --border: #1e293b;
+      --border-glow: #06b6d4;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --cyan: #06b6d4;
+      --cyan-dim: rgba(6, 182, 212, 0.15);
+      --red: #f43f5e;
+      --red-dim: rgba(244, 63, 94, 0.15);
+      --green: #10b981;
+      --green-dim: rgba(16, 185, 129, 0.15);
+      --amber: #f59e0b;
+      --amber-dim: rgba(245, 158, 11, 0.15);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      padding: 18px;
+      font-size: 13px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .title-box { display: flex; align-items: center; gap: 10px; }
+    .title { font-size: 16px; font-weight: 600; color: #fff; display: flex; align-items: center; gap: 8px; }
+    .badge {
+      display: inline-block;
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      border: 1px solid var(--cyan);
+      color: var(--cyan);
+      background: var(--cyan-dim);
+      font-family: monospace;
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .btn {
+      background: #1e293b;
+      color: #e2e8f0;
+      border: 1px solid #334155;
+      padding: 7px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover { border-color: var(--cyan); color: #fff; }
+    .btn-primary { background: #0891b2; border-color: #06b6d4; color: #fff; }
+    .btn-primary:hover { background: #06b6d4; box-shadow: 0 0 12px rgba(6, 182, 212, 0.4); }
+    .btn-warning { background: var(--amber-dim); border-color: var(--amber); color: #fbbf24; }
+    .btn-warning:hover { background: var(--amber); color: #000; }
+    .btn-danger { background: var(--red-dim); border-color: var(--red); color: #fda4af; }
+    .btn-danger:hover { background: var(--red); color: #fff; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    .stat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      position: relative;
+      overflow: hidden;
+    }
+    .stat-label { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; }
+    .stat-val { font-size: 22px; font-weight: 700; font-family: monospace; margin-bottom: 8px; }
+    .stat-sub { font-size: 11px; color: var(--text-muted); }
+    .progress-bar {
+      height: 6px;
+      background: #1e293b;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--cyan);
+      transition: width 0.4s ease;
+    }
+    .progress-fill.warning { background: var(--amber); }
+    .progress-fill.danger { background: var(--red); }
+
+    .action-panel {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 18px;
+    }
+    .panel-title { font-size: 13px; font-weight: 600; color: #e2e8f0; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .button-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .terminal-container {
+      background: #050811;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .terminal-header {
+      background: #0f172a;
+      padding: 8px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .terminal-output {
+      padding: 14px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #a5f3fc;
+      max-height: 380px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #1e293b;
+      color: #fff;
+      padding: 10px 16px;
+      border-radius: 6px;
+      border: 1px solid var(--cyan);
+      font-size: 12px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+      display: none;
+      z-index: 1000;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="title-box">
+      <div class="title">🐳 Docker 存储守护与自愈卫士</div>
+      <span class="badge">v1.0.0</span>
+      <span class="badge" id="host-target-badge">Host Piercing Mode</span>
+    </div>
+    <div class="header-actions">
+      <button class="btn" onclick="runAction('status', '审计存储状态')">🔄 刷新状态</button>
+      <button class="btn btn-primary" onclick="runAction('optimize', '执行一键安全优化')">⚡ 一键安全优化</button>
+    </div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">根分区使用率 (Root Partition)</div>
+      <div class="stat-val" id="stat-disk-pct">--%</div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="disk-progress" style="width: 0%"></div>
+      </div>
+      <div class="stat-sub" id="stat-disk-avail">可用空间: 计算中...</div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-label">虚悬镜像 (<none> Dangling)</div>
+      <div class="stat-val" id="stat-dangling">--</div>
+      <div class="stat-sub" id="stat-dangling-sub">无标签中间废弃镜像</div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-label">BuildKit 构建缓存配额</div>
+      <div class="stat-val" id="stat-cache-status" style="color: var(--cyan)">受控 (3GB)</div>
+      <div class="stat-sub">LRU 热点编译层保留</div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-label">宿主机 Daemon GC 守护</div>
+      <div class="stat-val" id="stat-daemon-gc">--</div>
+      <div class="stat-sub" id="stat-daemon-sub">/etc/docker/daemon.json</div>
+    </div>
+  </div>
+
+  <div class="action-panel">
+    <div class="panel-title">🛠️ 快捷空间维护与规则加固指令</div>
+    <div class="button-group">
+      <button class="btn btn-primary" onclick="runAction('optimize', '一键安全优化 (清虚悬 + 控缓存)')">⚡ 一键安全优化 (推荐)</button>
+      <button class="btn" onclick="runAction('setup_daemon_gc', '配置宿主机 BuildKit GC 守护规则')">⚙️ 配置宿主机 BuildKit GC</button>
+      <button class="btn" onclick="runAction('prune_dangling', '清理无标签虚悬镜像')">🧹 清理虚悬镜像</button>
+      <button class="btn" onclick="runAction('prune_buildcache', '收敛构建缓存至 3GB')">📦 收敛构建缓存 (3GB)</button>
+      <button class="btn btn-danger" onclick="confirmPruneAll()">⚠️ 全量系统修剪 (Prune All)</button>
+    </div>
+  </div>
+
+  <div class="terminal-container">
+    <div class="terminal-header">
+      <span>🖥️ 任务执行与实时诊断控制台</span>
+      <button class="btn" style="padding: 2px 8px; font-size: 11px;" onclick="clearTerminal()">清空日志</button>
+    </div>
+    <div class="terminal-output" id="terminal-out">等待操作指令... 点击上方【一键安全优化】或【刷新状态】启动。</div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const PLUGIN_ID = 'docker-storage-guard';
+
+    function logToTerminal(text) {
+      const term = document.getElementById('terminal-out');
+      const time = new Date().toLocaleTimeString();
+      term.innerText = `[${time}]\n${text}\n\n` + term.innerText;
+    }
+
+    function clearTerminal() {
+      document.getElementById('terminal-out').innerText = '日志已清空。';
+    }
+
+    function showToast(msg, isError = false) {
+      const t = document.getElementById('toast');
+      t.innerText = msg;
+      t.style.borderColor = isError ? 'var(--red)' : 'var(--cyan)';
+      t.style.display = 'block';
+      setTimeout(() => { t.style.display = 'none'; }, 2600);
+    }
+
+    async function callPluginAction(action) {
+      const token = localStorage.getItem('token') || localStorage.getItem('lwt_token') || sessionStorage.getItem('token') || '';
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      const payload = {
+        pluginId: PLUGIN_ID,
+        action: action,
+        target: 'host'
+      };
+
+      try {
+        const res = await fetch('/api/Plugins/Action', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(payload)
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok) {
+          return json || { status: 'failed', message: `HTTP ${res.status}` };
+        }
+        return json;
+      } catch (e) {
+        return { status: 'failed', message: e.message || '网络通信异常' };
+      }
+    }
+
+    async function runAction(action, label) {
+      showToast(`正在执行: ${label}...`);
+      const buttons = document.querySelectorAll('.btn');
+      buttons.forEach(b => b.disabled = true);
+
+      try {
+        const res = await callPluginAction(action);
+        const output = res?.data?.output || res?.output || res?.message || JSON.stringify(res, null, 2);
+        logToTerminal(output);
+
+        if (res?.status === 'succeeded' || res?.success || res?.status === 'success') {
+          showToast(`${label} 执行完成！`);
+          parseAndUpdateStats(output);
+        } else {
+          showToast(`${label} 失败: ${res?.message || '未知错误'}`, true);
+        }
+      } catch (err) {
+        showToast(`异常: ${err.message}`, true);
+        logToTerminal(`ERROR: ${err.message}`);
+      } finally {
+        buttons.forEach(b => b.disabled = false);
+      }
+    }
+
+    function confirmPruneAll() {
+      if (confirm('确定要执行【全量系统修剪】吗？\n将清除所有未被引用的停止容器、网络与悬空镜像。')) {
+        runAction('prune_all', '全量系统修剪');
+      }
+    }
+
+    function parseAndUpdateStats(output) {
+      if (!output) return;
+
+      // 提取 JSON 块
+      const jsonMatch = output.match(/__JSON_START__\s*([\s\S]*?)\s*__JSON_END__/);
+      if (jsonMatch && jsonMatch[1]) {
+        try {
+          const d = JSON.parse(jsonMatch[1]);
+          if (d.rootDiskPct != null) {
+            const pctEl = document.getElementById('stat-disk-pct');
+            pctEl.innerText = `${d.rootDiskPct}%`;
+            const fill = document.getElementById('disk-progress');
+            fill.style.width = `${d.rootDiskPct}%`;
+            fill.className = 'progress-fill' + (d.rootDiskPct >= 85 ? ' danger' : (d.rootDiskPct >= 75 ? ' warning' : ''));
+          }
+          if (d.rootDiskAvailKb != null) {
+            const gb = (d.rootDiskAvailKb / 1024 / 1024).toFixed(2);
+            document.getElementById('stat-disk-avail').innerText = `可用空间: ${gb} GB`;
+          }
+          if (d.danglingCount != null) {
+            const danEl = document.getElementById('stat-dangling');
+            danEl.innerText = d.danglingCount;
+            danEl.style.color = d.danglingCount > 0 ? 'var(--amber)' : 'var(--green)';
+          }
+          if (d.daemonGcConfigured != null) {
+            const gcEl = document.getElementById('stat-daemon-gc');
+            gcEl.innerText = d.daemonGcConfigured ? '已激活守护' : '未配置';
+            gcEl.style.color = d.daemonGcConfigured ? 'var(--green)' : 'var(--red)';
+          }
+          return;
+        } catch (e) {}
+      }
+
+      // 正则兜底解析
+      const dfMatch = output.match(/Used\s+(\d+)%,\s+Available\s+([\d.]+)\s+GB/i);
+      if (dfMatch) {
+        document.getElementById('stat-disk-pct').innerText = `${dfMatch[1]}%`;
+        document.getElementById('disk-progress').style.width = `${dfMatch[1]}%`;
+        document.getElementById('stat-disk-avail').innerText = `可用空间: ${dfMatch[2]} GB`;
+      }
+      const danMatch = output.match(/Dangling Images Count.*?:\s*(\d+)/i);
+      if (danMatch) {
+        const c = parseInt(danMatch[1], 10);
+        const danEl = document.getElementById('stat-dangling');
+        danEl.innerText = c;
+        danEl.style.color = c > 0 ? 'var(--amber)' : 'var(--green)';
+      }
+    }
+
+    // 页面加载完成后自动触发初次状态审计
+    window.addEventListener('DOMContentLoaded', () => {
+      runAction('status', '初始化存储审计');
+    });
+  </script>
+</body>
+</html>

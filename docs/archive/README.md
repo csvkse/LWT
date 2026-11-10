@@ -543,4 +543,4 @@
 
 ---
 
-> *本索引由 `scripts/docs-archiver.cjs` 自动生成，双重视图构建时间：2026-11-08*。
+> *本索引由 `scripts/docs-archiver.cjs` 自动生成，双重视图构建时间：2026-11-10*。

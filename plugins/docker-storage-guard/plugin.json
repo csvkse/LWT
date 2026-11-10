@@ -1,0 +1,160 @@
+{
+  "manifestVersion": 3,
+  "id": "docker-storage-guard",
+  "name": "Docker 存储守护与自愈卫士",
+  "category": "System",
+  "version": "1.0.0",
+  "description": "一键审计与优化 Docker 存储、极速清理虚悬镜像与无界构建缓存，支持一键配置宿主机 BuildKit 自动垃圾回收 (GC) 守护规则",
+  "icon": "🐳",
+  "profile": "OneShot",
+  "runtime": "Bash",
+  "target": "host",
+  "entrypoint": "hooks/status.sh",
+  "ui": {
+    "entry": "ui/index.html",
+    "title": "Docker 空间守护看板",
+    "icon": "🐳"
+  },
+  "dependencies": [
+    {
+      "id": "bash",
+      "name": "Bash 解释器",
+      "scope": "container",
+      "kind": "runner",
+      "required": true,
+      "recommended": true,
+      "description": "执行空间自愈脚本所需的 Bash 环境",
+      "probe": {
+        "command": "bash",
+        "args": [
+          "--version"
+        ]
+      },
+      "installGuide": {
+        "debian": "apt update && apt install -y bash",
+        "alpine": "apk add --no-cache bash",
+        "rhel": "dnf install -y bash",
+        "windows": "winget install Git.Git"
+      }
+    },
+    {
+      "id": "docker",
+      "name": "Docker 容器引擎客户端",
+      "scope": "container",
+      "kind": "binary",
+      "required": true,
+      "recommended": true,
+      "description": "用于连接 Docker Daemon 收集指标与调度空间清理",
+      "probe": {
+        "command": "docker",
+        "args": [
+          "version"
+        ]
+      },
+      "installGuide": {
+        "debian": "apt update && apt install -y docker.io",
+        "alpine": "apk add --no-cache docker-cli",
+        "rhel": "dnf install -y docker",
+        "windows": "winget install Docker.DockerDesktop"
+      }
+    }
+  ],
+  "customActions": [
+    {
+      "action": "status",
+      "label": "存储状态审计",
+      "icon": "📊",
+      "requireParam": false
+    },
+    {
+      "action": "optimize",
+      "label": "一键安全优化",
+      "icon": "⚡",
+      "requireParam": false
+    },
+    {
+      "action": "setup_daemon_gc",
+      "label": "配置宿主机 BuildKit GC",
+      "icon": "⚙️",
+      "requireParam": false
+    },
+    {
+      "action": "prune_dangling",
+      "label": "清理虚悬镜像",
+      "icon": "🧹",
+      "requireParam": false
+    },
+    {
+      "action": "prune_buildcache",
+      "label": "收敛构建缓存 (保留3G)",
+      "icon": "📦",
+      "requireParam": false
+    },
+    {
+      "action": "prune_all",
+      "label": "全量系统清理",
+      "icon": "⚠️",
+      "requireParam": false
+    }
+  ],
+  "archetype": {
+    "profile": "OneShot",
+    "lifecycle": "Interpreted",
+    "protocol": "CliArgs",
+    "language": "bash"
+  },
+  "interface": {
+    "protocol": "CliArgs",
+    "services": {
+      "storage-guard": {
+        "description": "Docker 存储空间自愈与配额守护服务",
+        "operations": [
+          "status",
+          "optimize",
+          "setup_daemon_gc",
+          "prune_dangling",
+          "prune_buildcache",
+          "prune_all"
+        ]
+      }
+    }
+  },
+  "layout": {
+    "sourceEntry": "hooks/status.sh",
+    "targetArtifact": "hooks/status.sh",
+    "storageDir": "storage",
+    "runtimeDir": "run"
+  },
+  "resources": {
+    "limits": {
+      "cpu": "500m",
+      "memory": "256Mi",
+      "pids": 30
+    },
+    "requests": {
+      "cpu": "50m",
+      "memory": "32Mi"
+    }
+  },
+  "probes": {
+    "liveness": {
+      "type": "ExecCheck",
+      "timeoutSeconds": 3
+    },
+    "readiness": {
+      "type": "ExecCheck",
+      "timeoutSeconds": 3
+    }
+  },
+  "events": {
+    "publishes": [
+      "docker.storage.optimized",
+      "docker.gc.configured"
+    ],
+    "subscribes": []
+  },
+  "permissions": [
+    "process:execute",
+    "system:metrics_read"
+  ]
+}
