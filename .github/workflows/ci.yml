@@ -28,7 +28,7 @@ concurrency:
 jobs:
   build-test:
     name: Build & Gates
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -88,9 +88,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # AMD64 (原生 ubuntu-latest) - 包含全量 Intel + Mesa 驱动与 NVENC 透传支持
+          # AMD64 (原生 ubuntu-24.04) - 包含全量 Intel + Mesa 驱动与 NVENC 透传支持
           - arch: amd64
-            os: ubuntu-latest
+            os: ubuntu-24.04
             platform: linux/amd64
           # ARM64 (原生 ARM64 物理机 ubuntu-24.04-arm，零 QEMU 模拟) - 包含 Mesa 驱动与 NVENC 透传支持
           - arch: arm64
@@ -174,7 +174,7 @@ jobs:
 
   manifest:
     name: Publish Multi-Arch Manifests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: docker-build
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     permissions:
