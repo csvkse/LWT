@@ -149,9 +149,79 @@ public class ServicesController(
     }
 
     [HttpPost("Config/Samba")]
-    public async Task<IResult> UpdateSambaConfig([FromBody] IReadOnlyList<SambaShareItem> shares, CancellationToken cancellationToken)
+    public async Task<IResult> UpdateSambaConfig([FromBody] SaveSambaConfigRequest request, CancellationToken cancellationToken)
     {
-        var res = await configAdapter.UpdateSambaSharesAsync(shares, cancellationToken);
+        var res = await configAdapter.SaveSambaConfigAsync(request, cancellationToken);
+        return res.Success ? Ok(res) : BadRequest(res);
+    }
+
+    [HttpGet("Config/Samba/Shares/{shareName}")]
+    public async Task<IResult> GetSambaShare(string shareName, CancellationToken cancellationToken)
+    {
+        var share = await configAdapter.GetSambaShareAsync(shareName, cancellationToken);
+        return share != null ? Ok(share) : NotFound(new MessageResponse($"未找到共享 [{shareName}]"));
+    }
+
+    [HttpPost("Config/Samba/Shares")]
+    public async Task<IResult> CreateSambaShare([FromBody] SaveSingleSambaShareRequest request, CancellationToken cancellationToken)
+    {
+        var res = await configAdapter.CreateSambaShareAsync(request, cancellationToken);
+        return res.Success ? Ok(res) : BadRequest(res);
+    }
+
+    [HttpPut("Config/Samba/Shares/{shareName}")]
+    public async Task<IResult> UpdateSambaShare(string shareName, [FromBody] SaveSingleSambaShareRequest request, CancellationToken cancellationToken)
+    {
+        var res = await configAdapter.UpdateSambaShareAsync(shareName, request, cancellationToken);
+        return res.Success ? Ok(res) : BadRequest(res);
+    }
+
+    [HttpDelete("Config/Samba/Shares/{shareName}")]
+    public async Task<IResult> DeleteSambaShare(string shareName, CancellationToken cancellationToken)
+    {
+        var res = await configAdapter.DeleteSambaShareAsync(shareName, cancellationToken);
+        return res.Success ? Ok(res) : BadRequest(res);
+    }
+
+    [HttpGet("Config/Samba/Sessions")]
+    public async Task<IResult> GetSambaSessions(CancellationToken cancellationToken)
+    {
+        var sessions = await configAdapter.GetSambaSessionsAsync(cancellationToken);
+        return Ok(sessions);
+    }
+
+    [HttpGet("Config/Samba/Users")]
+    public async Task<IResult> ListSambaUsers(CancellationToken cancellationToken)
+    {
+        var users = await configAdapter.ListSambaUsersAsync(cancellationToken);
+        return Ok(users);
+    }
+
+    [HttpPost("Config/Samba/Users")]
+    public async Task<IResult> CreateSambaUser([FromBody] CreateSambaUserRequest request, CancellationToken cancellationToken)
+    {
+        var res = await configAdapter.CreateSambaUserAsync(request, cancellationToken);
+        return res.Success ? Ok(res) : BadRequest(res);
+    }
+
+    [HttpPut("Config/Samba/Users/Password")]
+    public async Task<IResult> UpdateSambaUserPassword([FromBody] UpdateSambaUserPasswordRequest request, CancellationToken cancellationToken)
+    {
+        var res = await configAdapter.UpdateSambaUserPasswordAsync(request, cancellationToken);
+        return res.Success ? Ok(res) : BadRequest(res);
+    }
+
+    [HttpDelete("Config/Samba/Users/{username}")]
+    public async Task<IResult> DeleteSambaUser(string username, CancellationToken cancellationToken)
+    {
+        var res = await configAdapter.DeleteSambaUserAsync(username, cancellationToken);
+        return res.Success ? Ok(res) : BadRequest(res);
+    }
+
+    [HttpPost("Config/Samba/Install")]
+    public async Task<IResult> InstallSambaOnHost(CancellationToken cancellationToken)
+    {
+        var res = await configAdapter.InstallSambaOnHostAsync(cancellationToken);
         return res.Success ? Ok(res) : BadRequest(res);
     }
 

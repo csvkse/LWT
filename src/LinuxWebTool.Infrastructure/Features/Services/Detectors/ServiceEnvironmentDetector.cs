@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using LinuxWebTool.Contracts.Features.Services.Contracts;
 using LinuxWebTool.Contracts.Features.Shell.Contracts;
+using LinuxWebTool.Infrastructure.Shared.Support;
 using Microsoft.Extensions.Logging;
 
 namespace LinuxWebTool.Infrastructure.Features.Services.Detectors;
@@ -187,19 +188,22 @@ public sealed class ServiceEnvironmentDetector : IServiceEnvironmentDetector
             }
         }
 
+        string ResolveHostPath(string p) =>
+            isLinux && HostPathResolver.CanPierceHost() ? HostPathResolver.ResolvePhysicalPath(p) : p;
+
         // 3. OpenSSH 服务探测
-        var hasSshd = isLinux && (File.Exists("/etc/ssh/sshd_config") || File.Exists("/usr/sbin/sshd"));
+        var hasSshd = isLinux && (File.Exists(ResolveHostPath("/etc/ssh/sshd_config")) || File.Exists(ResolveHostPath("/usr/sbin/sshd")));
 
         // 4. Samba 服务探测
-        var hasSamba = isLinux && (File.Exists("/etc/samba/smb.conf") || File.Exists("/usr/sbin/smbd"));
+        var hasSamba = isLinux && (File.Exists(ResolveHostPath("/etc/samba/smb.conf")) || File.Exists(ResolveHostPath("/usr/sbin/smbd")));
 
         // 5. 网络栈管理模式
         string? networkStack = null;
         if (isLinux)
         {
-            if (Directory.Exists("/etc/netplan")) networkStack = "Netplan";
-            else if (File.Exists("/usr/bin/nmcli")) networkStack = "NetworkManager";
-            else if (Directory.Exists("/run/systemd/netif")) networkStack = "systemd-networkd";
+            if (Directory.Exists(ResolveHostPath("/etc/netplan"))) networkStack = "Netplan";
+            else if (File.Exists(ResolveHostPath("/usr/bin/nmcli"))) networkStack = "NetworkManager";
+            else if (Directory.Exists(ResolveHostPath("/run/systemd/netif"))) networkStack = "systemd-networkd";
             else networkStack = "Linux-Native (iproute2)";
         }
         else if (isWindows)
@@ -211,10 +215,10 @@ public sealed class ServiceEnvironmentDetector : IServiceEnvironmentDetector
         string? firewallType = null;
         if (isLinux)
         {
-            if (File.Exists("/usr/sbin/ufw")) firewallType = "ufw";
-            else if (File.Exists("/usr/bin/firewall-cmd")) firewallType = "firewalld";
-            else if (File.Exists("/usr/sbin/nft")) firewallType = "nftables";
-            else if (File.Exists("/usr/sbin/iptables")) firewallType = "iptables";
+            if (File.Exists(ResolveHostPath("/usr/sbin/ufw"))) firewallType = "ufw";
+            else if (File.Exists(ResolveHostPath("/usr/bin/firewall-cmd"))) firewallType = "firewalld";
+            else if (File.Exists(ResolveHostPath("/usr/sbin/nft"))) firewallType = "nftables";
+            else if (File.Exists(ResolveHostPath("/usr/sbin/iptables"))) firewallType = "iptables";
             else firewallType = "none";
         }
         else if (isWindows)

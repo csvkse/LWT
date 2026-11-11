@@ -2746,5 +2746,109 @@ public class ArchitectureTests
         Assert.Contains("Dangling", docContent);
         Assert.Contains("daemon.json", docContent);
     }
-}
 
+    [Fact]
+    public void LinuxArch083_SambaHostPiercingAndCredentialGovernance()
+    {
+        // 1. 验证 SystemServiceConfigAdapter 包含宿主穿透与 Samba 全生命周期治理
+        var adapterDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure", "Features", "Services", "Adapters", "Config");
+        var adapterFiles = Directory.GetFiles(adapterDir, "SystemServiceConfigAdapter*.cs");
+        Assert.NotEmpty(adapterFiles);
+        var adapterContent = string.Join("\n", adapterFiles.Select(File.ReadAllText));
+
+        Assert.Contains("HostPathResolver", adapterContent);
+        Assert.Contains("CanPierceHost", adapterContent);
+        Assert.Contains("Target = \"host\"", adapterContent);
+        Assert.Contains("DefaultSambaGlobalTemplate", adapterContent);
+        Assert.Contains("ListSambaUsersAsync", adapterContent);
+        Assert.Contains("CreateSambaUserAsync", adapterContent);
+        Assert.Contains("UpdateSambaUserPasswordAsync", adapterContent);
+        Assert.Contains("DeleteSambaUserAsync", adapterContent);
+        Assert.Contains("InstallSambaOnHostAsync", adapterContent);
+        Assert.Contains("pdbedit", adapterContent);
+        Assert.Contains("smbpasswd", adapterContent);
+
+        // 2. 验证 Contracts 层包含完整的 Samba 用户模型与接口定义
+        var contractsFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.Contracts", "Features", "Services", "Contracts", "IServicesHubContracts.cs");
+        var contractsContent = File.ReadAllText(contractsFile);
+        Assert.Contains("ListSambaUsersAsync", contractsContent);
+        Assert.Contains("CreateSambaUserAsync", contractsContent);
+        Assert.Contains("InstallSambaOnHostAsync", contractsContent);
+
+        var modelsFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.Contracts", "Features", "Services", "Contracts", "SystemServiceConfigModels.cs");
+        var modelsContent = File.ReadAllText(modelsFile);
+        Assert.Contains("SambaUserItem", modelsContent);
+        Assert.Contains("CreateSambaUserRequest", modelsContent);
+        Assert.Contains("SaveSambaConfigRequest", modelsContent);
+
+        // 3. 验证 Native AOT 序列化上下文已注册 Samba 凭据模型
+        var contextFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Composition", "AppJsonSerializerContext.cs");
+        var contextContent = File.ReadAllText(contextFile);
+        Assert.Contains("typeof(SambaUserItem)", contextContent);
+        Assert.Contains("typeof(CreateSambaUserRequest)", contextContent);
+        Assert.Contains("typeof(SaveSambaConfigRequest)", contextContent);
+
+        // 4. 验证调研排障与穿透治理架构方案文档落地
+        var solutionDoc = ResolveDocPath("samba-host-service-penetration-and-credential-governance-plan.md");
+        Assert.True(File.Exists(solutionDoc), "docs/samba-host-service-penetration-and-credential-governance-plan.md 必须存在");
+        var docContent = File.ReadAllText(solutionDoc);
+        Assert.Contains("HostPathResolver", docContent);
+        Assert.Contains("smbpasswd", docContent);
+        Assert.Contains("pdbedit", docContent);
+        Assert.Contains("Cold-Start", docContent);
+    }
+
+    [Fact]
+    public void LinuxArch084_SambaAdvancedShareCrudAndAuditGovernance()
+    {
+        // 1. 验证 SystemServiceConfigAdapter 分部类包含单条共享 CRUD、路径安全拦截、回收站与会话审计
+        var adapterDir = Path.Combine(RepoRoot, "src", "LinuxWebTool.Infrastructure", "Features", "Services", "Adapters", "Config");
+        var adapterFiles = Directory.GetFiles(adapterDir, "SystemServiceConfigAdapter*.cs");
+        var adapterContent = string.Join("\n", adapterFiles.Select(File.ReadAllText));
+
+        Assert.Contains("ValidateSharePathSafety", adapterContent);
+        Assert.Contains("GetSambaShareAsync", adapterContent);
+        Assert.Contains("CreateSambaShareAsync", adapterContent);
+        Assert.Contains("UpdateSambaShareAsync", adapterContent);
+        Assert.Contains("DeleteSambaShareAsync", adapterContent);
+        Assert.Contains("GetSambaSessionsAsync", adapterContent);
+        Assert.Contains("smbstatus", adapterContent);
+        Assert.Contains("recycle", adapterContent);
+
+        // 2. 验证 Contracts 层包含完整的单条共享模型与审计契约
+        var contractsFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.Contracts", "Features", "Services", "Contracts", "IServicesHubContracts.cs");
+        var contractsContent = File.ReadAllText(contractsFile);
+        Assert.Contains("CreateSambaShareAsync", contractsContent);
+        Assert.Contains("UpdateSambaShareAsync", contractsContent);
+        Assert.Contains("DeleteSambaShareAsync", contractsContent);
+        Assert.Contains("GetSambaSessionsAsync", contractsContent);
+
+        var modelsFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.Contracts", "Features", "Services", "Contracts", "SystemServiceConfigModels.cs");
+        var modelsContent = File.ReadAllText(modelsFile);
+        Assert.Contains("SaveSingleSambaShareRequest", modelsContent);
+        Assert.Contains("SambaSessionItem", modelsContent);
+        Assert.Contains("Browseable", modelsContent);
+        Assert.Contains("WriteList", modelsContent);
+        Assert.Contains("EnableRecycleBin", modelsContent);
+
+        // 3. 验证 WebHost 层路由端点与 Native AOT 序列化注册
+        var routesFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Features", "Services", "Routes", "ServicesController.cs");
+        var routesContent = File.ReadAllText(routesFile);
+        Assert.Contains("Config/Samba/Shares/{shareName}", routesContent);
+        Assert.Contains("Config/Samba/Sessions", routesContent);
+
+        var contextFile = Path.Combine(RepoRoot, "src", "LinuxWebTool.WebHost", "Composition", "AppJsonSerializerContext.cs");
+        var contextContent = File.ReadAllText(contextFile);
+        Assert.Contains("typeof(SaveSingleSambaShareRequest)", contextContent);
+        Assert.Contains("typeof(SambaSessionItem)", contextContent);
+
+        // 4. 验证调研排障与高级共享 CRUD 治理方案文档落地
+        var solutionDoc = ResolveDocPath("samba-share-advanced-crud-and-audit-governance-plan.md");
+        Assert.True(File.Exists(solutionDoc), "docs/samba-share-advanced-crud-and-audit-governance-plan.md 必须存在");
+        var docContent = File.ReadAllText(solutionDoc);
+        Assert.Contains("smbstatus", docContent);
+        Assert.Contains("ValidateSharePathSafety", docContent);
+        Assert.Contains("recycle", docContent);
+    }
+
+}

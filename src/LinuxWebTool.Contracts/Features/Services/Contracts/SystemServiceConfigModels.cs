@@ -36,8 +36,89 @@ public sealed record SambaShareItem
     public required string Path { get; init; }
     public bool ReadOnly { get; init; }
     public bool GuestOk { get; init; }
+    public bool Browseable { get; init; } = true;
     public string? ValidUsers { get; init; }
+    public string? WriteList { get; init; }
+    public string? ReadList { get; init; }
+    public bool EnableRecycleBin { get; init; }
+    public bool EnableAppleFruit { get; init; }
+    public string? ForceUser { get; init; }
     public string? Comment { get; init; }
+
+    // 宿主机物理挂载点探测状态
+    public bool DirectoryExists { get; init; } = true;
+    public long? FreeSpaceBytes { get; init; }
+    public long? TotalSpaceBytes { get; init; }
+}
+
+/// <summary>
+/// 新增/保存单个 Samba 共享请求。
+/// </summary>
+public sealed record SaveSingleSambaShareRequest
+{
+    public required string Name { get; init; }
+    public required string Path { get; init; }
+    public bool ReadOnly { get; init; }
+    public bool GuestOk { get; init; }
+    public bool Browseable { get; init; } = true;
+    public string? ValidUsers { get; init; }
+    public string? WriteList { get; init; }
+    public string? ReadList { get; init; }
+    public bool EnableRecycleBin { get; init; }
+    public bool EnableAppleFruit { get; init; }
+    public string? ForceUser { get; init; }
+    public string? Comment { get; init; }
+}
+
+/// <summary>
+/// Samba 在线客户端连接与会话状态项。
+/// </summary>
+public sealed record SambaSessionItem
+{
+    public int Pid { get; init; }
+    public required string Username { get; init; }
+    public string? Machine { get; init; }
+    public string? ClientIp { get; init; }
+    public string? ProtocolVersion { get; init; }
+    public string? ShareName { get; init; }
+    public string? ConnectedAt { get; init; }
+}
+
+/// <summary>
+/// Samba 访问用户定义。
+/// </summary>
+public sealed record SambaUserItem
+{
+    public required string Username { get; init; }
+    public bool HasPassword { get; init; }
+    public string? Comment { get; init; }
+}
+
+/// <summary>
+/// 创建 Samba 用户请求。
+/// </summary>
+public sealed record CreateSambaUserRequest
+{
+    public required string Username { get; init; }
+    public required string Password { get; init; }
+}
+
+/// <summary>
+/// 更新 Samba 用户密码请求。
+/// </summary>
+public sealed record UpdateSambaUserPasswordRequest
+{
+    public required string Username { get; init; }
+    public required string Password { get; init; }
+}
+
+/// <summary>
+/// 保存 Samba 全局与共享配置请求。
+/// </summary>
+public sealed record SaveSambaConfigRequest
+{
+    public string? Workgroup { get; init; }
+    public IReadOnlyList<SambaShareItem> Shares { get; init; } = [];
 }
 
 /// <summary>
@@ -47,9 +128,12 @@ public sealed record SambaServiceConfig
 {
     public bool IsInstalled { get; init; }
     public bool IsRunning { get; init; }
+    public bool IsHostPierced { get; init; }
     public string? Workgroup { get; init; }
     public string? ConfigFilePath { get; init; }
     public IReadOnlyList<SambaShareItem> Shares { get; init; } = [];
+    public IReadOnlyList<SambaUserItem> Users { get; init; } = [];
+    public IReadOnlyList<SambaSessionItem> Sessions { get; init; } = [];
 }
 
 /// <summary>

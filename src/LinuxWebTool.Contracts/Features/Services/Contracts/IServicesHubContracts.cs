@@ -53,7 +53,18 @@ public interface ISystemServiceConfigAdapter
     Task<ServiceActionResult> UpdateSshConfigAsync(UpdateSshConfigRequest request, CancellationToken cancellationToken = default);
 
     Task<SambaServiceConfig> GetSambaConfigAsync(CancellationToken cancellationToken = default);
+    Task<SambaShareItem?> GetSambaShareAsync(string shareName, CancellationToken cancellationToken = default);
+    Task<ServiceActionResult> CreateSambaShareAsync(SaveSingleSambaShareRequest request, CancellationToken cancellationToken = default);
+    Task<ServiceActionResult> UpdateSambaShareAsync(string shareName, SaveSingleSambaShareRequest request, CancellationToken cancellationToken = default);
+    Task<ServiceActionResult> DeleteSambaShareAsync(string shareName, CancellationToken cancellationToken = default);
     Task<ServiceActionResult> UpdateSambaSharesAsync(IReadOnlyList<SambaShareItem> shares, CancellationToken cancellationToken = default);
+    Task<ServiceActionResult> SaveSambaConfigAsync(SaveSambaConfigRequest request, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SambaUserItem>> ListSambaUsersAsync(CancellationToken cancellationToken = default);
+    Task<ServiceActionResult> CreateSambaUserAsync(CreateSambaUserRequest request, CancellationToken cancellationToken = default);
+    Task<ServiceActionResult> UpdateSambaUserPasswordAsync(UpdateSambaUserPasswordRequest request, CancellationToken cancellationToken = default);
+    Task<ServiceActionResult> DeleteSambaUserAsync(string username, CancellationToken cancellationToken = default);
+    Task<ServiceActionResult> InstallSambaOnHostAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SambaSessionItem>> GetSambaSessionsAsync(CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<NetworkInterfaceDetail>> GetNetworkInterfacesAsync(CancellationToken cancellationToken = default);
     Task<DnsResolverConfig> GetDnsConfigAsync(CancellationToken cancellationToken = default);

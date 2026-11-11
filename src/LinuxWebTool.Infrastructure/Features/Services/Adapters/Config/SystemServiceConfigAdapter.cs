@@ -5,30 +5,62 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using LinuxWebTool.Contracts.Features.Services.Contracts;
 using LinuxWebTool.Contracts.Features.Shell.Contracts;
+using LinuxWebTool.Infrastructure.Shared.Support;
 using Microsoft.Extensions.Logging;
 
 namespace LinuxWebTool.Infrastructure.Features.Services.Adapters.Config;
 
 /// <summary>
 /// 系统级服务配置适配器实现（SSH、Samba、网络网卡、DNS、防火墙）。
-/// 包含事务性历史配置备份与语法安全校验机制。
+/// 支持宿主 PID 1 穿透（nsenter / /proc/1/root）、冷启动默认模板自愈与全生命周期安全凭据管理。
 /// </summary>
-public sealed class SystemServiceConfigAdapter : ISystemServiceConfigAdapter
+public sealed partial class SystemServiceConfigAdapter : ISystemServiceConfigAdapter
 {
     private readonly IShellExecutor _shellExecutor;
+    private readonly IServiceEnvironmentDetector _envDetector;
     private readonly ILogger<SystemServiceConfigAdapter> _logger;
 
-    public SystemServiceConfigAdapter(IShellExecutor shellExecutor, ILogger<SystemServiceConfigAdapter> logger)
+    public SystemServiceConfigAdapter(
+        IShellExecutor shellExecutor,
+        ILogger<SystemServiceConfigAdapter> logger)
+        : this(shellExecutor, null, logger)
+    {
+    }
+
+    public SystemServiceConfigAdapter(
+        IShellExecutor shellExecutor,
+        IServiceEnvironmentDetector? envDetector,
+        ILogger<SystemServiceConfigAdapter> logger)
     {
         _shellExecutor = shellExecutor;
+        _envDetector = envDetector ?? new Detectors.ServiceEnvironmentDetector(shellExecutor, Microsoft.Extensions.Logging.Abstractions.NullLogger<Detectors.ServiceEnvironmentDetector>.Instance);
         _logger = logger;
+    }
+
+    private static string ResolveHostPath(string virtualPath)
+    {
+        if (OperatingSystem.IsLinux() && HostPathResolver.CanPierceHost())
+        {
+            return HostPathResolver.ResolvePhysicalPath(virtualPath);
+        }
+        return virtualPath;
+    }
+
+    private Task<ShellResult> ExecuteHostCommandAsync(string commandText, int timeoutSeconds = 10, CancellationToken cancellationToken = default)
+    {
+        return _shellExecutor.ExecuteAsync(new ShellRequest
+        {
+            CommandText = commandText,
+            Target = "host",
+            TimeoutSeconds = timeoutSeconds
+        }, cancellationToken);
     }
 
     #region 1. OpenSSH 服务端配置
     public async Task<SshServiceConfig> GetSshConfigAsync(CancellationToken cancellationToken = default)
     {
-        const string configPath = "/etc/ssh/sshd_config";
-        var isInstalled = File.Exists(configPath) || File.Exists("/usr/sbin/sshd");
+        var configPath = ResolveHostPath("/etc/ssh/sshd_config");
+        var isInstalled = File.Exists(configPath) || File.Exists(ResolveHostPath("/usr/sbin/sshd"));
         var isRunning = false;
         var port = 22;
         var permitRootLogin = "prohibit-password";
@@ -38,8 +70,8 @@ public sealed class SystemServiceConfigAdapter : ISystemServiceConfigAdapter
 
         if (OperatingSystem.IsLinux())
         {
-            // 检查运行状态
-            var statRes = await _shellExecutor.ExecuteAsync(new ShellRequest { CommandText = "systemctl is-active sshd || systemctl is-active ssh", TimeoutSeconds = 3 }, cancellationToken);
+            // 检查宿主运行状态
+            var statRes = await ExecuteHostCommandAsync("systemctl is-active sshd || systemctl is-active ssh", 3, cancellationToken);
             isRunning = statRes.StandardOutput.Trim() == "active";
 
             if (File.Exists(configPath))
@@ -69,7 +101,7 @@ public sealed class SystemServiceConfigAdapter : ISystemServiceConfigAdapter
             }
 
             // 读取 root 或当前用户的 authorized_keys
-            var authKeyPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "authorized_keys");
+            var authKeyPath = ResolveHostPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "authorized_keys"));
             if (File.Exists(authKeyPath))
             {
                 try
@@ -89,7 +121,7 @@ public sealed class SystemServiceConfigAdapter : ISystemServiceConfigAdapter
             PermitRootLogin = permitRootLogin,
             PasswordAuthentication = passwordAuth,
             PubkeyAuthentication = pubkeyAuth,
-            ConfigFilePath = configPath,
+            ConfigFilePath = "/etc/ssh/sshd_config",
             AuthorizedKeys = authorizedKeys
         };
     }
@@ -107,10 +139,10 @@ public sealed class SystemServiceConfigAdapter : ISystemServiceConfigAdapter
             return new ServiceActionResult { Success = false, Message = "Windows 环境下不支持直接修改 Linux sshd_config" };
         }
 
-        const string configPath = "/etc/ssh/sshd_config";
+        var configPath = ResolveHostPath("/etc/ssh/sshd_config");
         if (!File.Exists(configPath))
         {
-            return new ServiceActionResult { Success = false, Message = $"未找到 SSH 配置文件: {configPath}" };
+            return new ServiceActionResult { Success = false, Message = $"未找到 SSH 配置文件: /etc/ssh/sshd_config" };
         }
 
         try
@@ -147,22 +179,19 @@ public sealed class SystemServiceConfigAdapter : ISystemServiceConfigAdapter
             if (!pubAuthSet) updatedLines.Add($"PubkeyAuthentication {(request.PubkeyAuthentication ? "yes" : "no")}");
 
             // 2. 事务性预校验：写入临时文件并执行 sshd -t -f candidate.conf
-            var tempPath = Path.GetTempFileName();
-            await File.WriteAllLinesAsync(tempPath, updatedLines, cancellationToken);
+            var candidateHostVirtual = $"/tmp/sshd_config.candidate.{Guid.NewGuid():N}";
+            var candidatePhysical = ResolveHostPath(candidateHostVirtual);
+            await File.WriteAllLinesAsync(candidatePhysical, updatedLines, cancellationToken);
 
-            var testRes = await _shellExecutor.ExecuteAsync(new ShellRequest
-            {
-                CommandText = $"sshd -t -f '{tempPath}'",
-                TimeoutSeconds = 5
-            }, cancellationToken);
+            var testRes = await ExecuteHostCommandAsync($"sshd -t -f '{candidateHostVirtual}' 2>&1", 5, cancellationToken);
+            try { File.Delete(candidatePhysical); } catch { }
 
-            if (testRes.ExitCode != 0)
+            if (testRes.ExitCode != 0 && testRes.ExitCode != 127)
             {
-                try { File.Delete(tempPath); } catch { }
                 return new ServiceActionResult
                 {
                     Success = false,
-                    Message = $"SSH 语法预校验失败，已拒绝写入以防止失联: {testRes.ErrorOutput}"
+                    Message = $"SSH 语法预校验失败，已拒绝写入以防止失联: {testRes.StandardOutput}"
                 };
             }
 
@@ -171,20 +200,19 @@ public sealed class SystemServiceConfigAdapter : ISystemServiceConfigAdapter
             File.Copy(configPath, backupPath, overwrite: true);
 
             // 4. 原子覆盖
-            File.Copy(tempPath, configPath, overwrite: true);
-            try { File.Delete(tempPath); } catch { }
+            await File.WriteAllLinesAsync(configPath, updatedLines, cancellationToken);
 
             // 5. 更新 authorized_keys
             if (request.AuthorizedKeys != null)
             {
-                var sshDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh");
-                Directory.CreateDirectory(sshDir);
+                var sshDir = ResolveHostPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh"));
+                if (!Directory.Exists(sshDir)) Directory.CreateDirectory(sshDir);
                 var authKeyPath = Path.Combine(sshDir, "authorized_keys");
                 await File.WriteAllLinesAsync(authKeyPath, request.AuthorizedKeys, cancellationToken);
             }
 
             // 6. 热重载 SSH 服务
-            await _shellExecutor.ExecuteAsync(new ShellRequest { CommandText = "systemctl reload sshd || systemctl reload ssh", TimeoutSeconds = 5 }, cancellationToken);
+            await ExecuteHostCommandAsync("systemctl reload sshd || systemctl reload ssh", 5, cancellationToken);
 
             return new ServiceActionResult { Success = true, Message = "SSH 配置更新成功并已平滑重载" };
         }
@@ -192,169 +220,6 @@ public sealed class SystemServiceConfigAdapter : ISystemServiceConfigAdapter
         {
             _logger.LogError(ex, "Failed to update SSH config");
             return new ServiceActionResult { Success = false, Message = $"保存失败: {ex.Message}" };
-        }
-    }
-    #endregion
-
-    #region 2. Samba 服务端配置
-    public async Task<SambaServiceConfig> GetSambaConfigAsync(CancellationToken cancellationToken = default)
-    {
-        const string configPath = "/etc/samba/smb.conf";
-        var isInstalled = File.Exists(configPath) || File.Exists("/usr/sbin/smbd");
-        var isRunning = false;
-        var workgroup = "WORKGROUP";
-        var shares = new List<SambaShareItem>();
-
-        if (OperatingSystem.IsLinux())
-        {
-            var statRes = await _shellExecutor.ExecuteAsync(new ShellRequest { CommandText = "systemctl is-active smbd", TimeoutSeconds = 3 }, cancellationToken);
-            isRunning = statRes.StandardOutput.Trim() == "active";
-
-            if (File.Exists(configPath))
-            {
-                try
-                {
-                    var lines = await File.ReadAllLinesAsync(configPath, cancellationToken);
-                    string? currentSection = null;
-                    var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-                    void FlushSection()
-                    {
-                        if (currentSection != null && !currentSection.Equals("global", StringComparison.OrdinalIgnoreCase) && !currentSection.Equals("homes", StringComparison.OrdinalIgnoreCase) && !currentSection.Equals("printers", StringComparison.OrdinalIgnoreCase))
-                        {
-                            shares.Add(new SambaShareItem
-                            {
-                                Name = currentSection,
-                                Path = props.GetValueOrDefault("path", ""),
-                                ReadOnly = props.GetValueOrDefault("read only", "yes").Equals("yes", StringComparison.OrdinalIgnoreCase),
-                                GuestOk = props.GetValueOrDefault("guest ok", "no").Equals("yes", StringComparison.OrdinalIgnoreCase),
-                                ValidUsers = props.GetValueOrDefault("valid users"),
-                                Comment = props.GetValueOrDefault("comment")
-                            });
-                        }
-                        props.Clear();
-                    }
-
-                    foreach (var rawLine in lines)
-                    {
-                        var line = rawLine.Trim();
-                        if (line.StartsWith('#') || line.StartsWith(';') || string.IsNullOrWhiteSpace(line)) continue;
-
-                        if (line.StartsWith('[') && line.EndsWith(']'))
-                        {
-                            FlushSection();
-                            currentSection = line[1..^1].Trim();
-                            continue;
-                        }
-
-                        var parts = line.Split('=', 2);
-                        if (parts.Length == 2)
-                        {
-                            var k = parts[0].Trim();
-                            var v = parts[1].Trim();
-                            props[k] = v;
-                            if (currentSection != null && currentSection.Equals("global", StringComparison.OrdinalIgnoreCase) && k.Equals("workgroup", StringComparison.OrdinalIgnoreCase))
-                            {
-                                workgroup = v;
-                            }
-                        }
-                    }
-                    FlushSection();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to parse smb.conf");
-                }
-            }
-        }
-
-        return new SambaServiceConfig
-        {
-            IsInstalled = isInstalled,
-            IsRunning = isRunning,
-            Workgroup = workgroup,
-            ConfigFilePath = configPath,
-            Shares = shares
-        };
-    }
-
-    public async Task<ServiceActionResult> UpdateSambaSharesAsync(IReadOnlyList<SambaShareItem> shares, CancellationToken cancellationToken = default)
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return new ServiceActionResult { Success = false, Message = "Windows 环境下不支持直接修改 Linux smb.conf" };
-        }
-
-        const string configPath = "/etc/samba/smb.conf";
-        if (!File.Exists(configPath))
-        {
-            return new ServiceActionResult { Success = false, Message = $"未找到 Samba 配置文件: {configPath}" };
-        }
-
-        try
-        {
-            // 提取 [global] 部分保留，重新生成各个 [share]
-            var lines = await File.ReadAllLinesAsync(configPath, cancellationToken);
-            var globalLines = new List<string>();
-            var inGlobal = true;
-
-            foreach (var l in lines)
-            {
-                var t = l.Trim();
-                if (t.StartsWith('[') && t.EndsWith(']'))
-                {
-                    var sec = t[1..^1].Trim();
-                    if (!sec.Equals("global", StringComparison.OrdinalIgnoreCase))
-                    {
-                        inGlobal = false;
-                    }
-                }
-                if (inGlobal) globalLines.Add(l);
-            }
-
-            var sb = new StringBuilder();
-            foreach (var gl in globalLines) sb.AppendLine(gl);
-
-            foreach (var share in shares)
-            {
-                if (string.IsNullOrWhiteSpace(share.Name) || string.IsNullOrWhiteSpace(share.Path)) continue;
-                sb.AppendLine();
-                sb.AppendLine($"[{share.Name.Trim()}]");
-                sb.AppendLine($"   path = {share.Path.Trim()}");
-                sb.AppendLine($"   read only = {(share.ReadOnly ? "yes" : "no")}");
-                sb.AppendLine($"   guest ok = {(share.GuestOk ? "yes" : "no")}");
-                if (!string.IsNullOrWhiteSpace(share.ValidUsers)) sb.AppendLine($"   valid users = {share.ValidUsers.Trim()}");
-                if (!string.IsNullOrWhiteSpace(share.Comment)) sb.AppendLine($"   comment = {share.Comment.Trim()}");
-                sb.AppendLine("   create mask = 0775");
-                sb.AppendLine("   directory mask = 0775");
-            }
-
-            var tempPath = Path.GetTempFileName();
-            await File.WriteAllTextAsync(tempPath, sb.ToString(), cancellationToken);
-
-            // testparm 语法检测
-            var testRes = await _shellExecutor.ExecuteAsync(new ShellRequest { CommandText = $"testparm -s '{tempPath}' 2>&1", TimeoutSeconds = 5 }, cancellationToken);
-            if (testRes.ExitCode != 0 && !testRes.StandardOutput.Contains("Loaded services file OK"))
-            {
-                try { File.Delete(tempPath); } catch { }
-                return new ServiceActionResult { Success = false, Message = $"Samba 语法校验失败: {testRes.StandardOutput}" };
-            }
-
-            // 备份原文件并覆盖
-            var backupPath = $"{configPath}.bak.{DateTime.UtcNow:yyyyMMdd_HHmmss}";
-            File.Copy(configPath, backupPath, overwrite: true);
-            File.Copy(tempPath, configPath, overwrite: true);
-            try { File.Delete(tempPath); } catch { }
-
-            // 重启 smbd
-            await _shellExecutor.ExecuteAsync(new ShellRequest { CommandText = "systemctl restart smbd", TimeoutSeconds = 6 }, cancellationToken);
-
-            return new ServiceActionResult { Success = true, Message = "Samba 共享配置更新成功并已重载服务" };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update Samba config");
-            return new ServiceActionResult { Success = false, Message = $"更新失败: {ex.Message}" };
         }
     }
     #endregion
@@ -468,12 +333,13 @@ public sealed class SystemServiceConfigAdapter : ISystemServiceConfigAdapter
         var nameservers = new List<string>();
         var searchDomains = new List<string>();
         var sourceDesc = "/etc/resolv.conf";
+        var resolvPath = ResolveHostPath("/etc/resolv.conf");
 
-        if (OperatingSystem.IsLinux() && File.Exists("/etc/resolv.conf"))
+        if (OperatingSystem.IsLinux() && File.Exists(resolvPath))
         {
             try
             {
-                var lines = await File.ReadAllLinesAsync("/etc/resolv.conf", cancellationToken);
+                var lines = await File.ReadAllLinesAsync(resolvPath, cancellationToken);
                 foreach (var line in lines)
                 {
                     var t = line.Trim();
@@ -510,10 +376,11 @@ public sealed class SystemServiceConfigAdapter : ISystemServiceConfigAdapter
     {
         if (OperatingSystem.IsLinux())
         {
+            var ufwPath = ResolveHostPath("/usr/sbin/ufw");
             // 优先检查 UFW
-            if (File.Exists("/usr/sbin/ufw"))
+            if (File.Exists(ufwPath))
             {
-                var res = await _shellExecutor.ExecuteAsync(new ShellRequest { CommandText = "ufw status numbered", TimeoutSeconds = 4 }, cancellationToken);
+                var res = await ExecuteHostCommandAsync("ufw status numbered", 4, cancellationToken);
                 var isActive = res.StandardOutput.Contains("Status: active");
                 var rules = new List<FirewallPortRule>();
 
@@ -566,7 +433,7 @@ public sealed class SystemServiceConfigAdapter : ISystemServiceConfigAdapter
             ? $"ufw delete allow {request.Port}/{proto}"
             : $"ufw allow {request.Port}/{proto}";
 
-        var res = await _shellExecutor.ExecuteAsync(new ShellRequest { CommandText = cmd, TimeoutSeconds = 6 }, cancellationToken);
+        var res = await ExecuteHostCommandAsync(cmd, 6, cancellationToken);
         return new ServiceActionResult
         {
             Success = res.ExitCode == 0,

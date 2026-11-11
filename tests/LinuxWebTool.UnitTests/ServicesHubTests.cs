@@ -162,4 +162,82 @@ public sealed class ServicesHubTests
         Assert.NotNull(restoredRes);
         Assert.True(restoredRes.Success);
     }
+
+    [Fact]
+    public async Task SystemServiceConfigAdapter_SambaUserValidation_ValidatesInputs()
+    {
+        var executor = new MockShellExecutor();
+        var adapter = new SystemServiceConfigAdapter(executor, NullLogger<SystemServiceConfigAdapter>.Instance);
+
+        var invalidUserReq = new CreateSambaUserRequest
+        {
+            Username = "bad user name with spaces!",
+            Password = "secret-password"
+        };
+        var res = await adapter.CreateSambaUserAsync(invalidUserReq);
+        Assert.False(res.Success);
+        Assert.Contains("用户名格式不合法", res.Message);
+
+        var emptyPassReq = new CreateSambaUserRequest
+        {
+            Username = "validuser",
+            Password = ""
+        };
+        var emptyRes = await adapter.CreateSambaUserAsync(emptyPassReq);
+        Assert.False(emptyRes.Success);
+        Assert.Contains("密码不能为空", emptyRes.Message);
+    }
+
+    [Fact]
+    public void SystemServiceConfigAdapter_ValidateSharePathSafety_BlocksCriticalSystemPaths()
+    {
+        // 相对路径或空路径应拦截
+        Assert.False(SystemServiceConfigAdapter.ValidateSharePathSafety("").IsSafe);
+        Assert.False(SystemServiceConfigAdapter.ValidateSharePathSafety("relative/path").IsSafe);
+
+        // 根目录与关键系统目录应拦截
+        Assert.False(SystemServiceConfigAdapter.ValidateSharePathSafety("/").IsSafe);
+        Assert.False(SystemServiceConfigAdapter.ValidateSharePathSafety("//").IsSafe);
+        Assert.False(SystemServiceConfigAdapter.ValidateSharePathSafety("/etc").IsSafe);
+        Assert.False(SystemServiceConfigAdapter.ValidateSharePathSafety("/etc/samba").IsSafe);
+        Assert.False(SystemServiceConfigAdapter.ValidateSharePathSafety("/boot").IsSafe);
+        Assert.False(SystemServiceConfigAdapter.ValidateSharePathSafety("/sys").IsSafe);
+        Assert.False(SystemServiceConfigAdapter.ValidateSharePathSafety("/proc").IsSafe);
+        Assert.False(SystemServiceConfigAdapter.ValidateSharePathSafety("/dev").IsSafe);
+        Assert.False(SystemServiceConfigAdapter.ValidateSharePathSafety("/root").IsSafe);
+
+        // 合法存储路径应放行
+        Assert.True(SystemServiceConfigAdapter.ValidateSharePathSafety("/var/docker/mediary-data").IsSafe);
+        Assert.True(SystemServiceConfigAdapter.ValidateSharePathSafety("/mnt/nas/movies").IsSafe);
+        Assert.True(SystemServiceConfigAdapter.ValidateSharePathSafety("/data/share").IsSafe);
+        Assert.True(SystemServiceConfigAdapter.ValidateSharePathSafety("/srv/samba").IsSafe);
+        Assert.True(SystemServiceConfigAdapter.ValidateSharePathSafety("/home/user/public").IsSafe);
+    }
+
+    [Fact]
+    public async Task SystemServiceConfigAdapter_CreateSambaShare_ValidatesNameAndPath()
+    {
+        var executor = new MockShellExecutor();
+        var adapter = new SystemServiceConfigAdapter(executor, NullLogger<SystemServiceConfigAdapter>.Instance);
+
+        // 非法共享名称
+        var invalidNameReq = new SaveSingleSambaShareRequest
+        {
+            Name = "bad share*name!",
+            Path = "/var/docker/shares"
+        };
+        var res1 = await adapter.CreateSambaShareAsync(invalidNameReq);
+        Assert.False(res1.Success);
+        Assert.Contains("共享名称格式不合法", res1.Message);
+
+        // 高危系统路径
+        var dangerousPathReq = new SaveSingleSambaShareRequest
+        {
+            Name = "system_etc",
+            Path = "/etc"
+        };
+        var res2 = await adapter.CreateSambaShareAsync(dangerousPathReq);
+        Assert.False(res2.Success);
+        Assert.Contains("高危系统目录", res2.Message);
+    }
 }
